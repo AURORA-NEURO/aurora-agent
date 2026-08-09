@@ -1,0 +1,11 @@
+[package]
+name = "bioprism-sweep"
+version = "0.1.0"
+edition = "2021"
+description = "The small remainders: core specifications, ingestion, execution runtime, adaptive, registry and safety tails"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
