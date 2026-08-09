@@ -14,8 +14,8 @@ use bioprism_residue::{
 #[test]
 fn the_register_explains_the_whole_backlog_and_nothing_else() {
     let register = residue().expect("well formed");
-    assert_eq!(register.len(), 84);
-    assert_eq!(register.sections().len(), 13);
+    assert_eq!(register.len(), 57);
+    assert_eq!(register.sections().len(), 10);
 }
 
 #[test]
@@ -32,15 +32,21 @@ fn every_module_carries_at_least_one_verdict_and_every_verdict_carries_a_source(
 }
 
 #[test]
-fn twenty_six_of_the_eighty_four_still_carry_work_on_at_least_one_reading() {
+fn exactly_one_of_the_fifty_seven_still_carries_work_on_any_reading() {
+    // This fell from twenty-six to one when four crates landed, and the fall is the register doing
+    // its job rather than an embarrassment to it: twenty-five of the twenty-six left the backlog
+    // outright. The survivor is the sandbox, which no crate can build and every crate says so. If a
+    // later pass drives this to zero, check that the module really left rather than that somebody
+    // reclassified it into a bucket that never moves.
     let register = residue().expect("well formed");
     let distribution = Distribution::of(&register);
-    assert_eq!(distribution.work_remaining, 26);
-    assert_eq!(distribution.modules.total(), 84);
-    // Twenty-five by primary verdict. The twenty-sixth is a module whose section's own crate says
-    // the content was handed to a sibling and whose sibling says half of it never landed, and a
-    // reader planning work needs to see the second reading.
-    assert_eq!(distribution.modules.genuinely_uncovered, 25);
+    assert_eq!(distribution.work_remaining, 1);
+    assert_eq!(distribution.modules.total(), 57);
+    // Zero by *primary* verdict: no module's first-listed reading is that work remains. The one
+    // survivor is a second reading beside a discharge, which is exactly the case a register holding
+    // one verdict per module would have lost.
+    assert_eq!(distribution.modules.genuinely_uncovered, 0);
+    assert_eq!(distribution.verdicts.genuinely_uncovered, 1);
 }
 
 #[test]
@@ -49,13 +55,13 @@ fn the_verdict_distribution_over_modules_is_the_one_reported() {
     let counts = Distribution::of(&register).modules;
     assert_eq!(counts.process, 37);
     assert_eq!(counts.foreign_artifact, 10);
-    assert_eq!(counts.discharged_elsewhere, 12);
-    assert_eq!(counts.genuinely_uncovered, 25);
+    assert_eq!(counts.discharged_elsewhere, 10);
+    assert_eq!(counts.genuinely_uncovered, 0);
     assert_eq!(
         counts.block_level_split, 0,
         "no module's primary verdict is a split"
     );
-    assert_eq!(counts.total(), 84);
+    assert_eq!(counts.total(), 57);
 }
 
 #[test]
@@ -70,22 +76,26 @@ fn counting_recorded_judgements_rather_than_modules_gives_a_different_and_larger
 }
 
 #[test]
-fn most_of_the_register_is_transcription_rather_than_this_crates_own_reading() {
+fn every_verdict_but_one_is_now_a_crates_own_sentence_rather_than_this_registers_reading() {
+    // Thirty of a hundred and eight verdicts used to be read across from a neighbouring section or
+    // drawn from a not-implemented list, because four sections had no crate that had read them.
+    // Four crates then did. This is a fact about the backlog and not about the design: the inferred
+    // standing is still the right answer whenever a crate decides a module without naming it, and
+    // `verdict_gate.rs` still exercises it.
     let register = residue().expect("well formed");
     let distribution = Distribution::of(&register);
-    assert!(
-        distribution.transcribed > distribution.inferred_here * 2,
-        "transcribed {} vs inferred {}",
-        distribution.transcribed,
-        distribution.inferred_here
+    assert_eq!(distribution.inferred_here, 1);
+    assert_eq!(
+        distribution.transcribed + distribution.inferred_here,
+        distribution.verdicts.total()
     );
 }
 
 #[test]
-fn eleven_modules_are_contested_and_none_of_them_is_adjudicated_here() {
+fn ten_modules_are_contested_and_none_of_them_is_adjudicated_here() {
     let register = residue().expect("well formed");
     let contested = register.contested();
-    assert_eq!(contested.len(), 11);
+    assert_eq!(contested.len(), 10);
     for entry in contested {
         let positions = entry.contest().expect("contested");
         let verdicts: BTreeSet<&str> = positions.iter().map(|(_, kind)| *kind).collect();
@@ -96,7 +106,7 @@ fn eleven_modules_are_contested_and_none_of_them_is_adjudicated_here() {
 }
 
 #[test]
-fn ten_of_the_eleven_contests_are_one_argument_about_one_section() {
+fn every_contest_left_in_the_register_is_one_argument_about_one_section() {
     // `crates/atlasx` reports that the capability-metrics remainder defines nothing;
     // `bioprism-metrics` reports that it already implements the arithmetic governing all of it.
     // One section, ten modules, two readings, neither of them adjudicated.
@@ -114,22 +124,55 @@ fn ten_of_the_eleven_contests_are_one_argument_about_one_section() {
         10
     );
     assert_eq!(register.section(33).len(), 10);
+    // The eleventh contest — one crate saying the scheduling work had been handed on, the crate it
+    // was handed to saying half of it never landed — left with its module.
+    assert!(contested_sections.iter().all(|section| *section == 33));
 }
 
 #[test]
-fn the_one_remaining_contest_is_about_who_actually_landed_the_scheduling_work() {
+fn the_two_modules_a_newly_landed_crate_declined_are_transcribed_from_it() {
+    // The regeneration case worth a test of its own: these two used to be this register's reading
+    // of another crate's not-implemented list. `crates/bioethics` then read the modules and took a
+    // position, so the source moved from inferred to transcribed without the entries moving.
     let register = residue().expect("well formed");
-    let entry = register
-        .get(ModuleKey::new(35, 13).expect("in range"))
+    for index in [7u8, 19] {
+        let entry = register
+            .get(ModuleKey::new(36, index).expect("in range"))
+            .expect("registered");
+        assert_eq!(entry.primary().recorded_by().as_str(), "bioprism-bioethics");
+        assert_eq!(entry.primary().standing(), Standing::Transcribed);
+        assert!(matches!(
+            entry.primary().classification(),
+            Classification::DischargedElsewhere { .. }
+        ));
+    }
+}
+
+#[test]
+fn the_sandbox_carries_a_second_reading_and_the_red_team_programme_does_not() {
+    // Both were declined on one ground, and the asymmetry is real rather than editorial. What is
+    // left of the red-team module after the discharge is a clause the blueprint never defines, so
+    // nobody could build it from the specification. What is left of the sandbox is a control that
+    // would work if somebody built it and nobody has, so recording only the discharge would leave a
+    // reader thinking a sandbox exists.
+    let register = residue().expect("well formed");
+    let sandbox = register
+        .get(ModuleKey::new(36, 7).expect("in range"))
         .expect("registered");
-    assert!(entry.is_contested());
-    let positions = entry.contest().expect("contested");
-    assert!(positions
-        .iter()
-        .any(|(name, kind)| name == "bioprism-scale" && *kind == "discharged elsewhere"));
-    assert!(positions
-        .iter()
-        .any(|(name, kind)| name == "bioprism-factory" && *kind == "genuinely uncovered"));
+    assert!(sandbox.is_compound());
+    assert!(sandbox.has_work_remaining());
+    assert!(!sandbox.is_contested(), "both readings are one crate's");
+    assert_eq!(
+        sandbox.verdicts()[1].standing(),
+        Standing::InferredHere,
+        "the crate classified it as positioned elsewhere and did not call it work remaining"
+    );
+
+    let red_team = register
+        .get(ModuleKey::new(36, 19).expect("in range"))
+        .expect("registered");
+    assert_eq!(red_team.verdicts().len(), 1);
+    assert!(!red_team.has_work_remaining());
 }
 
 #[test]
@@ -171,7 +214,7 @@ fn the_block_level_split_is_recorded_where_the_crate_that_named_it_found_it() {
 }
 
 #[test]
-fn nineteen_modules_have_no_recorded_judgement_at_all() {
+fn no_module_is_left_without_a_recorded_judgement() {
     let register = residue().expect("well formed");
     let unread: Vec<_> = register
         .entries()
@@ -187,75 +230,87 @@ fn nineteen_modules_have_no_recorded_judgement_at_all() {
             })
         })
         .collect();
-    assert_eq!(unread.len(), 19);
-    // The other seven uncovered modules are uncovered for a *stated* reason — no sandbox, no
-    // storage backend, no executions to mine — which is a different fact from nobody having looked.
+    // Nineteen, once. Every one was in a section whose crate had not been written yet, and all
+    // nineteen left the backlog when it was. Nothing was reclassified to get here.
+    assert!(unread.is_empty());
+    // The one uncovered verdict left is uncovered for a *stated* reason, which is a different fact
+    // from nobody having looked and is why the two are separate variants.
     let distribution = Distribution::of(&register);
-    assert_eq!(distribution.verdicts.genuinely_uncovered - unread.len(), 7);
+    assert_eq!(distribution.verdicts.genuinely_uncovered, 1);
 }
 
 #[test]
-fn every_unread_module_names_the_crates_that_were_searched() {
+fn every_uncovered_verdict_states_either_a_survey_or_a_blocker() {
+    // Neither variant is assertable by omission: a survey names the crates that were read, a
+    // blocker names what stops the work. This is the honest default of the whole register and so
+    // the one verdict an author could otherwise reach for without doing any work.
     let register = residue().expect("well formed");
+    let mut seen = 0;
     for entry in register.entries() {
         for verdict in entry.verdicts() {
-            if let Classification::GenuinelyUncovered {
-                standing: UncoveredStanding::NobodyHasRead { surveyed },
-            } = verdict.classification()
-            {
-                assert!(
-                    surveyed.crates().len() >= 2,
-                    "a survey of fewer than two crates is barely a search: {}",
-                    entry.title()
-                );
+            if let Classification::GenuinelyUncovered { standing } = verdict.classification() {
+                seen += 1;
+                match standing {
+                    UncoveredStanding::NobodyHasRead { surveyed } => assert!(
+                        surveyed.crates().len() >= 2,
+                        "a survey of fewer than two crates is barely a search: {}",
+                        entry.title()
+                    ),
+                    UncoveredStanding::RealWorkNotDone { blocked_by } => assert!(
+                        blocked_by.chars().count() >= 40,
+                        "a blocker has to be a statement: {}",
+                        entry.title()
+                    ),
+                }
             }
         }
     }
+    assert_eq!(seen, 1);
 }
 
 #[test]
-fn the_unread_modules_are_exactly_the_sections_whose_crates_are_being_written_right_now() {
-    // §23, §12 and §36 have `crates/interweave`, `crates/dataops` and `crates/bioethics` in flight.
-    // Those entries are expected to be deleted, not rewritten, which is what makes the register
-    // maintainable while four siblings are moving underneath it.
+fn the_sections_that_had_nobody_have_left_the_register_rather_than_been_reclassified() {
+    // §12, §23 and §35 held twenty-two of the register's twenty-six work-remaining modules and now
+    // hold none, because `crates/dataops`, `crates/interweave` and `crates/megafactory` cited them.
+    // The distinction this asserts is the one that matters: they are *absent*, not relabelled.
     let register = residue().expect("well formed");
     let sections: BTreeSet<u8> = register
         .entries()
         .iter()
-        .filter(|entry| {
-            entry.verdicts().iter().any(|verdict| {
-                matches!(
-                    verdict.classification(),
-                    Classification::GenuinelyUncovered {
-                        standing: UncoveredStanding::NobodyHasRead { .. }
-                    }
-                )
-            })
-        })
         .map(|entry| entry.key().section())
         .collect();
-    assert_eq!(sections, BTreeSet::from([12, 23, 36]));
+    for departed in [12u8, 23, 35] {
+        assert!(
+            !sections.contains(&departed),
+            "section {departed} still has entries"
+        );
+        assert!(register.section(departed).is_empty());
+    }
 }
 
 #[test]
-fn every_module_read_across_from_a_neighbouring_section_is_marked_as_this_registers_reading() {
+fn no_module_is_explained_only_by_this_registers_own_reading() {
+    // Six modules were, until the crate owning their section was written. The one inferred verdict
+    // left sits *beside* a transcribed one on the same module, so every entry in the register is
+    // now anchored to a sentence a classifying crate wrote about that module.
     let register = residue().expect("well formed");
-    let inferred_only = register.only_inferred();
-    for entry in &inferred_only {
-        assert!(
+    assert!(register.only_inferred().is_empty());
+    let inferred: Vec<_> = register
+        .entries()
+        .iter()
+        .filter(|entry| {
             entry
                 .verdicts()
                 .iter()
-                .all(|verdict| verdict.standing() == Standing::InferredHere),
-            "{}",
-            entry.title()
-        );
-    }
-    let million_scale = inferred_only
-        .iter()
-        .filter(|entry| entry.key().section() == 35)
-        .count();
-    assert_eq!(million_scale, 6);
+                .any(|verdict| verdict.standing() == Standing::InferredHere)
+        })
+        .collect();
+    assert_eq!(inferred.len(), 1);
+    assert_eq!(
+        inferred[0].primary().standing(),
+        Standing::Transcribed,
+        "the inferred reading is the second one, never the headline"
+    );
 }
 
 #[test]
@@ -297,7 +352,8 @@ fn a_crate_naming_itself_as_the_discharger_is_the_finding_a_token_scan_cannot_se
     // The sharpest thing in the register: a crate that implemented a module's content under a
     // *different* section's id, so `tools/coverage.sh` reports the module uncovered while the
     // capability exists. Fourteen verdicts, in three sections, and every one of them is a module a
-    // contributor might otherwise pick up and build a second time.
+    // contributor might otherwise pick up and build a second time. It fell from fourteen to eleven
+    // when the three §35 modules left, which is the only way this number should ever fall.
     let register = residue().expect("well formed");
     let mut sections = BTreeSet::new();
     let mut count = 0;
@@ -315,12 +371,16 @@ fn a_crate_naming_itself_as_the_discharger_is_the_finding_a_token_scan_cannot_se
             }
         }
     }
-    assert_eq!(count, 14);
-    assert_eq!(sections, BTreeSet::from([33, 34, 35]));
+    assert_eq!(count, 11);
+    assert_eq!(sections, BTreeSet::from([33, 34]));
 }
 
 #[test]
-fn the_residue_concentrates_in_four_sections_and_none_of_them_holds_a_majority() {
+fn no_single_section_holds_a_majority_of_the_residue() {
+    // The residue is spread rather than concentrated, and stayed spread through the regeneration:
+    // three of the four sections that emptied were among the largest, and the largest remaining is
+    // still under a quarter of the total. A register dominated by one section would be a report
+    // about that section.
     let register = residue().expect("well formed");
     let report = Report::of(&register);
     let largest = report
@@ -330,7 +390,7 @@ fn the_residue_concentrates_in_four_sections_and_none_of_them_holds_a_majority()
         .copied()
         .unwrap_or_default();
     assert_eq!(largest, 13);
-    assert!(largest * 2 < register.len());
+    assert!(largest * 4 < register.len());
 }
 
 #[test]
@@ -339,7 +399,7 @@ fn a_module_leaving_the_backlog_is_a_deletion_and_touches_nothing_else() {
     let key = ModuleKey::new(11, 10).expect("in range");
     assert!(register.get(key).is_some());
     assert!(register.without(key));
-    assert_eq!(register.len(), 83);
+    assert_eq!(register.len(), 56);
     assert!(register.get(key).is_none());
     assert!(!register.without(key), "removing it twice is a no-op");
     // Nothing else moved: the remaining entries hold no cross-references to each other.

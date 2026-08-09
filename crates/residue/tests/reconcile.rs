@@ -126,8 +126,15 @@ fn reconciliation_reads_the_workspace_as_text_and_takes_no_dependency_on_the_cra
         "bioprism-ops",
         "bioprism-sweep",
         "bioprism-bioevalx",
-        "bioprism-worldfactory",
+        "bioprism-bioethics",
         "bioprism-metrics",
+        "bioprism-trace",
+        // The four crates that landed while this register was being written. Depending on any of
+        // them would have made the register unbuildable during exactly the commit that emptied
+        // three of its sections.
+        "bioprism-dataops",
+        "bioprism-interweave",
+        "bioprism-megafactory",
     ] {
         assert!(
             !manifest.contains(classified),

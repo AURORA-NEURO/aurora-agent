@@ -6,11 +6,13 @@
 //! > should implement, and the honest end state is a backlog whose residue is explained rather than
 //! > empty.
 //!
-//! That sentence has been true and unenforceable. The explanations existed — fourteen crates had
-//! read their section's remainder and written down what they found — but they lived in fourteen
-//! `lib.rs` doc comments, in prose, in whichever crate happened to be built next to them. Nothing
-//! could ask *how many of the eighty-four are process*, nothing noticed when two crates disagreed,
-//! and nothing failed when a module left the backlog and its explanation did not.
+//! That sentence has been true and unenforceable. The explanations existed — ten crates had read
+//! their section's remainder and written down what they found — but they lived in ten `lib.rs` doc
+//! comments, in prose, in whichever crate happened to be built next to them. Nothing could ask *how
+//! many of the fifty-seven are process*, nothing noticed when two crates disagreed, and nothing
+//! failed when a module left the backlog and its explanation did not. That last one is no longer
+//! hypothetical: twenty-seven modules left in a single pass, and the register said so before anybody
+//! read it.
 //!
 //! This crate is that accounting, typed.
 //!
@@ -48,8 +50,8 @@
 //! # The trap this crate is shaped around
 //!
 //! `tools/coverage.sh` counts a blueprint module as covered when its `NN.MM` token appears anywhere
-//! under `crates/` or `docs/`. A register listing eighty-four uncovered ids would mark all
-//! eighty-four covered and take the headline to 100% — a number produced entirely by the document
+//! under `crates/` or `docs/`. A register listing fifty-seven uncovered ids would mark all
+//! fifty-seven covered and take the headline to 100% — a number produced entirely by the document
 //! complaining that the number is produced that way.
 //!
 //! Two crates have already been bitten. `docs/BACKLOG.md` emptied itself on its second run, because
@@ -78,37 +80,52 @@
 //!
 //! # What the register says
 //!
-//! Eighty-four modules, a hundred and eight recorded verdicts. By primary verdict:
+//! Fifty-seven modules, eighty-one recorded verdicts. By primary verdict:
 //!
 //! ```text
 //! process                37   councils, cadence, appeals, a dashboard somebody reads
 //! foreign artifact       10   Python, TypeScript, two GitHub Actions, a workflow file, OTLP
-//! discharged elsewhere   12   the content exists, under another section's id
-//! genuinely uncovered    25   nobody has read it, or it is real work not yet done
+//! discharged elsewhere   10   the content exists, under another section's id
+//! genuinely uncovered     0   nobody has read it, or it is real work not yet done
 //! ```
 //!
-//! **Twenty-six carry work on at least one reading** — the twenty-sixth being a module one crate
-//! calls discharged and another calls half-landed. Fifty-nine are explained away, and that is the
-//! number to distrust, so the register is built so a reader can. **Seventy-eight of the hundred and
-//! eight verdicts are transcriptions** of a sentence a classifying crate wrote about the module
-//! named; the remaining thirty are this register reading a crate's text about something else, and
-//! every one is marked [`Standing::InferredHere`] so the disagreement has somewhere to land.
+//! **Exactly one module carries work on any reading**, and it is a second reading rather than a
+//! headline — see the regeneration note below before reading that zero as good news. **Eighty of
+//! the eighty-one verdicts are transcriptions** of a sentence a classifying crate wrote about the
+//! module named; the one exception is marked [`Standing::InferredHere`] and sits beside a
+//! transcription on the same module, so the disagreement has somewhere to land.
 //!
-//! Three findings a token scan cannot produce:
+//! Two findings a token scan cannot produce:
 //!
-//! **Eleven modules are contested** — two crates, two verdicts, both recorded, neither adjudicated.
-//! Ten are one argument: whether a section whose modules define no estimator is prose, or is already
-//! discharged by the crate implementing the discipline around every estimator it names. Picking a
-//! winner would delete the evidence that the workspace has two answers.
+//! **Ten modules are contested** — two crates, two verdicts, both recorded, neither adjudicated.
+//! All ten are one argument: whether a section whose modules define no estimator is prose, or is
+//! already discharged by the crate implementing the discipline around every estimator it names.
+//! Picking a winner would delete the evidence that the workspace has two answers.
 //!
-//! **Fourteen verdicts name their own author as the discharger** — a crate that built the content
+//! **Eleven verdicts name their own author as the discharger** — a crate that built the content
 //! under a different section's id, so coverage reports the module untouched while the capability
 //! exists. Every one of those is a module a contributor could otherwise pick up and build twice.
 //!
-//! **Nineteen modules have no recorded judgement at all**, and seven more are uncovered for a stated
-//! reason — no sandbox, no storage backend, no executions to mine. The nineteen are not a gap in the
-//! register; they are its most useful output, because each names the crates that were searched and
-//! found to say nothing.
+//! # The number that moved, and why it is not a victory lap
+//!
+//! This register was first written against a backlog of eighty-four modules, of which **twenty-six
+//! carried work and nineteen had no recorded judgement at all**. Four crates then landed —
+//! `dataops`, `interweave`, `megafactory`, `bioethics` — and the backlog fell to fifty-seven.
+//!
+//! The honest accounting of where twenty-five of the twenty-six went: **all of them left the
+//! backlog**, because the crate that owned their section was written and cited them. Not one was
+//! reclassified into a bucket that never moves, and
+//! `the_sections_that_had_nobody_have_left_the_register_rather_than_been_reclassified` asserts it by
+//! checking those sections are *absent* rather than relabelled.
+//!
+//! The twenty-sixth is the one to keep looking at. `crates/bioethics` read the sandboxing module and
+//! declined it as perimeter infrastructure a sibling already positioned, which is a discharge — and
+//! in the same paragraph recorded that all thirteen of its required controls need a process
+//! boundary, a network stack or a scanner, none of which exists here. The discharge is transcribed;
+//! the reading that the control therefore exists nowhere is this register's, marked as such, and
+//! kept as a second verdict. A register showing zero work remaining while the workspace has no
+//! sandbox would be the flattering answer, and `AGENTS.md` already names that failure: a missing
+//! capability that is stated is a limitation, one that is implied to exist is a lie.
 //!
 //! # This crate does not classify anything
 //!

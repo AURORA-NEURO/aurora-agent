@@ -1,4 +1,4 @@
-//! The eighty-four, transcribed.
+//! The fifty-seven, transcribed.
 //!
 //! Every module `docs/BACKLOG.md` lists, with the verdict a classifying crate reached about it and
 //! the file that verdict was written in. Nothing here is a new judgement about a module a crate
@@ -7,50 +7,57 @@
 //!
 //! # Where the judgements came from
 //!
-//! Verdicts are attributed to fourteen crates, and they arrived three ways.
+//! Eight crates classified their section's remainder explicitly, and their tables are transcribed
+//! row for row: `crates/devplat` (§11 and §19), `crates/ops` (§40), `crates/stewardship` (§14),
+//! `crates/atlashub` (§34), `crates/atlasx` (§33), `crates/sweep` (§04 and §10), `crates/bioevalx`
+//! (§26) and `crates/bioethics` (§36). `bioprism-metrics` and `bioprism-trace` supply a second
+//! reading each. Where two crates decide one module differently — `crates/atlasx` and
+//! `bioprism-metrics` on the whole of §33 — both readings are recorded and neither is adjudicated.
 //!
-//! **Seven crates had classified their section's remainder explicitly**, and their tables are
-//! transcribed row for row: `crates/devplat` (§11 and §19), `crates/ops` (§40),
-//! `crates/stewardship` (§14), `crates/atlashub` (§34), `crates/atlasx` (§33), `crates/sweep` (§04
-//! and §10) and `crates/bioevalx` (§26). Between them they decide fifty-one modules, and where two
-//! of them decide the same one differently — `crates/atlasx` and `bioprism-metrics` on the whole of
-//! §33 — both readings are recorded and neither is adjudicated.
-//!
-//! **Seven more had recorded a position without naming the module this register is explaining**,
-//! because the content lives under a different section's id or because the capability the module
-//! needs does not exist: `crates/worldfactory`, `crates/scale` and `crates/factory` between them
-//! decide all six of §35, and `crates/infra`, `crates/ops`, `bioprism-safety` and `bioprism-trace`
-//! supply the stated blockers under §12 and §36. Every one of those is marked
-//! [`Standing::InferredHere`](crate::Standing::InferredHere), so a reader may disagree with this
-//! register about them without disagreeing with those crates.
-//!
-//! **Nineteen modules had nobody at all**: §23's nine, four of §12's and six of §36's. **A survey
-//! that found nothing is still a finding, and it is recorded with the crates that were read.**
-//! Those entries name what was searched, so the next reader starts from a list rather than from
-//! scratch.
+//! **Every verdict here but one is now transcribed rather than inferred**, and that is a fact about
+//! the current backlog rather than about the design. The register once carried thirty verdicts this
+//! crate had read across from a neighbouring section or drawn from a crate's not-implemented list,
+//! because §12, §23, §35 and most of §36 had no crate that had read them. Four crates then did, and
+//! those modules left the backlog. The one survivor is recorded below.
 //!
 //! # How to regenerate this file
 //!
+//! This has now been done once, when the backlog went from eighty-four modules to fifty-seven, and
+//! the procedure held: three section functions were deleted whole, one was rewritten, and no entry
+//! outside those sections was touched.
+//!
 //! 1. Run `tools/backlog.sh` and diff `docs/BACKLOG.md` against
-//!    [`reconcile::reconcile`](crate::reconcile::reconcile).
-//! 2. For a module that has **left** the backlog — the normal case, because four crates are being
-//!    written against these sections right now — delete its entry, or call
-//!    [`Register::without`](crate::Register::without) if the caller is a script. Nothing else moves:
-//!    entries hold no cross-references to each other.
+//!    [`reconcile::reconcile`](crate::reconcile::reconcile). Trust the diff over any arithmetic
+//!    done by hand, and do not try to find the entries with a regular expression — the register is
+//!    Rust, its entries are nested constructor calls, and a section's modules are not textually
+//!    adjacent to its section number.
+//! 2. For a module that has **left** the backlog, delete its entry, or call
+//!    [`Register::without`](crate::Register::without) if the caller is a script. Nothing else
+//!    moves: entries hold no cross-references to each other. When a whole section goes, delete its
+//!    function and its `entries.extend` line together.
 //! 3. For a module that has **arrived**, read the crate that owns its section, find the sentence
 //!    that classified it, and add an entry whose anchor is a fragment of that sentence. If there is
 //!    no such sentence, the verdict is
 //!    [`GenuinelyUncovered`](crate::Classification::GenuinelyUncovered) and the survey is the list
 //!    of crates that were read while looking. It is not a placeholder and it must not be treated as
-//!    one.
-//! 4. Never write a dotted id. [`crate::citations`] fails the build if one appears.
+//!    one. **A survey that found nothing is still a finding, and it is recorded with the crates
+//!    that were read.**
+//! 4. When a crate *newly* classifies a module the register already explains, replace the source
+//!    rather than the entry: a verdict this crate inferred should become a transcription the moment
+//!    somebody writes the sentence down. That is what happened to both §36 entries.
+//! 5. Never write a dotted id. [`crate::citations`] fails the build if one appears.
+//!
+//! One consequence of step 2 worth knowing before it surprises somebody: the last entry built by a
+//! given helper takes the helper with it. The private `unread` constructor that built a
+//! nobody-has-read verdict was deleted in this pass, because leaving an unused function behind is a
+//! warning and this crate finishes at zero. Re-adding it is four lines and
+//! [`UncoveredStanding::nobody_has_read`](crate::UncoveredStanding::nobody_has_read) is still public
+//! and still tested.
 
 use crate::entry::{Entry, Register};
 use crate::error::RegisterError;
 use crate::module::ModuleKey;
-use crate::verdict::{
-    Classification, ForeignSurface, Source, UncoveredStanding, Verdict, THIS_REGISTER,
-};
+use crate::verdict::{Classification, ForeignSurface, Source, UncoveredStanding, Verdict};
 
 const STEWARDSHIP: &str = "crates/stewardship/src/lib.rs";
 const ATLASHUB: &str = "crates/atlashub/src/lib.rs";
@@ -61,18 +68,7 @@ const OPS: &str = "crates/ops/src/lib.rs";
 const SWEEP: &str = "crates/sweep/src/lib.rs";
 const TRACE: &str = "crates/trace/src/lib.rs";
 const BIOEVALX: &str = "crates/bioevalx/src/lib.rs";
-const WORLDFACTORY: &str = "crates/worldfactory/src/coverage.rs";
-const SCALE: &str = "crates/scale/src/lib.rs";
-const FACTORY: &str = "crates/factory/src/lib.rs";
-const INFRA: &str = "crates/infra/src/lib.rs";
-const SAFETY: &str = "crates/safety/src/lib.rs";
-const HERE: &str = "crates/residue/src/register.rs";
-
-/// The sentence every "nobody has read it" verdict anchors on, in this file's own documentation.
-///
-/// A survey is the one verdict whose evidence is an absence, so it cannot point at another crate's
-/// sentence. It points at this one, and the accompanying survey names where the search ran.
-const SURVEY_ANCHOR: &str = "A survey that found nothing is still a finding";
+const BIOETHICS: &str = "crates/bioethics/src/lib.rs";
 
 fn transcribed(
     krate: &str,
@@ -94,19 +90,6 @@ fn inferred(
 ) -> Result<Verdict, RegisterError> {
     let source = Source::inferred(krate, locus, needle, reasoning)?;
     Ok(Verdict::record(classification, source)?)
-}
-
-fn unread(reasoning: &str, surveyed: &[&str]) -> Result<Verdict, RegisterError> {
-    let classification = Classification::GenuinelyUncovered {
-        standing: UncoveredStanding::nobody_has_read(surveyed)?,
-    };
-    inferred(
-        THIS_REGISTER,
-        HERE,
-        SURVEY_ANCHOR,
-        reasoning,
-        classification,
-    )
 }
 
 fn entry(
@@ -135,9 +118,6 @@ pub fn residue() -> Result<Register, RegisterError> {
     entries.extend(capability_metrics()?);
     entries.extend(public_hub()?);
     entries.extend(engineering_contracts()?);
-    entries.extend(million_scale()?);
-    entries.extend(agent_interweave()?);
-    entries.extend(data_and_infrastructure()?);
     entries.extend(biology_governance()?);
     entries.extend(small_remainders()?);
     Register::new(entries)
@@ -930,447 +910,84 @@ fn engineering_contracts() -> Result<Vec<Entry>, RegisterError> {
     ])
 }
 
-/// §35, six modules, and the only section here decided entirely by crates that never name it.
+/// §36, two modules, both declined by `crates/bioethics` on one shared ground.
 ///
-/// Five of the six are read across from a neighbouring section whose modules carry the same
-/// content under different ids. Every one of those is marked as this register's inference, because
-/// `crates/worldfactory` tabulated the neighbouring section and not this one.
-fn million_scale() -> Result<Vec<Entry>, RegisterError> {
-    let mined = "it turns real model, pipeline and agent executions into decision units";
-
-    Ok(vec![
-        entry(
-            35,
-            2,
-            "Observed Data World Authoring",
-            vec![inferred(
-                "bioprism-worldfactory",
-                WORLDFACTORY,
-                "title: \"Observed Worlds from Real Data and Workflows\",",
-                "`crates/worldfactory` implements observed worlds from real data under a \
-                 neighbouring section's id and records in its own coverage table that the two \
-                 sections restate each other. It does not name this module, so the correspondence \
-                 is this register's reading of that table rather than its stated verdict.",
-                Classification::discharged_by(["bioprism-worldfactory"])?,
-            )?],
-        )?,
-        entry(
-            35,
-            3,
-            "Semi Synthetic World Construction",
-            vec![inferred(
-                "bioprism-worldfactory",
-                WORLDFACTORY,
-                "title: \"Semi-Synthetic Biological Worlds\",",
-                "Semi-synthetic construction is implemented, together with the provenance ladder \
-                 that refuses a claim naming a quantity the construction itself fixed. Recorded \
-                 under a neighbouring section's id, which is why the coverage script still reads \
-                 this one as untouched.",
-                Classification::discharged_by(["bioprism-worldfactory"])?,
-            )?],
-        )?,
-        entry(
-            35,
-            4,
-            "Mechanistic Simulation And Assay Twin Factory",
-            vec![inferred(
-                "bioprism-worldfactory",
-                WORLDFACTORY,
-                "title: \"Mechanistic and Simulated BioWorlds\",",
-                "Mechanistic and simulated worlds are implemented, and the rule that matters — a \
-                 benchmark built from a simulation cannot make a claim about biology the \
-                 simulation assumed — is a type there. The assay-twin half is `crates/oraclex`'s \
-                 disjoint calibration and test sets.",
-                Classification::discharged_by(["bioprism-worldfactory", "bioprism-oraclex"])?,
-            )?],
-        )?,
-        entry(
-            35,
-            6,
-            "Trajectory Capture And Research Workflow Mining",
-            vec![inferred(
-                "bioprism-worldfactory",
-                WORLDFACTORY,
-                mined,
-                "`crates/worldfactory` marks the neighbouring section's trajectory-mining module \
-                 unclaimed, with the reason: it turns real model, pipeline and agent executions \
-                 into decision units, and there are no real executions in this workspace to mine. \
-                 That reason applies unchanged here, so the module is uncovered for a stated cause \
-                 rather than for want of attention.",
-                Classification::GenuinelyUncovered {
-                    standing: UncoveredStanding::real_work_not_done(
-                        "there are no real model, pipeline or agent executions in this workspace \
-                         to mine, so the input the module consumes does not exist yet",
-                    )?,
-                },
-            )?],
-        )?,
-        entry(
-            35,
-            7,
-            "Biodecision Compiler And Boundary Detection",
-            vec![inferred(
-                "bioprism-worldfactory",
-                WORLDFACTORY,
-                mined,
-                "The compilation half of the same unclaimed module. `crates/worldfactory` \
-                 separately records that the neighbouring section specifies no unit boundary for \
-                 the compilation, so even with trajectories in hand there is no stated rule for \
-                 where one decision unit ends.",
-                Classification::GenuinelyUncovered {
-                    standing: UncoveredStanding::real_work_not_done(
-                        "no trajectories exist to compile, and the specification supplies no unit \
-                         boundary for deciding where one decision unit ends",
-                    )?,
-                },
-            )?],
-        )?,
-        entry(
-            35,
-            13,
-            "Distributed Execution Scheduling And Fault Tolerance",
-            vec![
-                inferred(
-                    "bioprism-scale",
-                    SCALE,
-                    "The scheduling half of 35 — jobs, workers, leases, idempotency-aware recovery",
-                    "`bioprism-scale` states that the scheduling half of this section belongs to \
-                     `bioprism-factory` and is deliberately not duplicated. That crate implements \
-                     the lease and recovery lifecycle, including the rule that lease expiry does \
-                     not imply safe retry for non-idempotent effects.",
-                    Classification::discharged_by(["bioprism-factory"])?,
-                )?,
-                inferred(
-                    "bioprism-factory",
-                    FACTORY,
-                    "no distributed lease fencing",
-                    "The crate the work was handed to disagrees about how much of it landed: it \
-                     records no backpressure model, no fair-share scheduling across tenants and no \
-                     distributed lease fencing, and says the section's million-scale concerns \
-                     beyond enqueue and recovery are absent rather than stubbed. The distributed \
-                     half of this module is therefore still work.",
-                    Classification::GenuinelyUncovered {
-                        standing: UncoveredStanding::real_work_not_done(
-                            "the lease and recovery lifecycle exists in-memory and single-process; \
-                             distributed fencing, backpressure and cross-tenant fair share are \
-                             recorded as absent",
-                        )?,
-                    },
-                )?,
-            ],
-        )?,
-    ])
-}
-
-/// §23, nine modules, and nobody has read them.
+/// This section is the register's worked example of the regeneration procedure. Five of its seven
+/// modules left the backlog when `crates/bioethics` implemented them, and the two that stayed
+/// stopped being *unread* and became *classified* in the same commit: their entries used to be this
+/// register's own reading of `bioprism-safety`'s not-implemented list, and are now transcribed from
+/// the crate that read the modules and took a position.
 ///
-/// `crates/fabric` implements eleven of the section's modules and classifies four more as prose,
-/// naming them by id. These nine are in neither list. `crates/interweave` is being written against
-/// this section right now, so the expected next state of these entries is deletion.
-fn agent_interweave() -> Result<Vec<Entry>, RegisterError> {
-    let surveyed = [
-        "bioprism-fabric",
-        "bioprism-weave",
-        "bioprism-weavelang",
-        "bioprism-choreography",
-    ];
-
-    let row = |index: u8, title: &str, reasoning: &str| {
-        entry(23, index, title, vec![unread(reasoning, &surveyed)?])
-    };
-
-    Ok(vec![
-        row(
-            24,
-            "Protocol Adapters A2A Mcp Otel And Cloudevents",
-            "No crate records a position. The nearest neighbours are the layered protocol stack in \
-             `crates/fabric` and the same refusal `crates/sweep` and `bioprism-trace` record about \
-             an OpenTelemetry adapter in another section, but neither is a judgement on this \
-             module.",
-        )?,
-        row(
-            25,
-            "Component Runtime Wasm Wit And Sandbox Composition",
-            "No crate records a position. `bioprism-safety` states that the workspace has no \
-             WebAssembly, no sandbox and no capability drop, which would block the runtime half; \
-             nobody has said whether the composition half is code.",
-        )?,
-        row(
-            27,
-            "Interweave Evaluation And Microbenchmark Generation",
-            "No crate records a position. The section's microbenchmark generation would sit \
-             between the fabric's composition algebra and the evaluation crates, and neither side \
-             has claimed it.",
-        )?,
-        row(
-            28,
-            "Orchestration Learning And Credit Assignment",
-            "No crate records a position. Credit assignment over a composition is the one §23 \
-             subject with no counterpart anywhere in the workspace, which makes it the likeliest \
-             of these nine to be real work rather than a duplicate.",
-        )?,
-        row(
-            29,
-            "Security Threat Model And Trust Boundaries",
-            "No crate records a position on the fabric's own threat model. `bioprism-safety` owns \
-             the platform threat model under a different section and states that a library of \
-             plain Rust types may model a control and may not claim one.",
-        )?,
-        row(
-            31,
-            "Governance Versioning And Conformance",
-            "No crate records a position. `bioprism-governance` owns schema evolution and \
-             `crates/fabric` owns the molecule version bump, but nobody has said whether this \
-             module is those two seen from the fabric side or a third thing.",
-        )?,
-        row(
-            33,
-            "Reference Interweave Workflows",
-            "No crate records a position. The reference programs of this section are the same kind \
-             of artifact `crates/devplat` classified as discharged by the compiler's fixture set \
-             in another section, and nobody has checked whether that reading transfers.",
-        )?,
-        row(
-            39,
-            "Weavebench Packs And Microbenchmark Taxonomy",
-            "No crate records a position. A benchmark taxonomy for the fabric would be a pack, and \
-             the pack crates cite neither this module nor this section.",
-        )?,
-        row(
-            47,
-            "Human And Organizational Participants",
-            "No crate records a position, and this is the one of the nine most likely to be \
-             process: `crates/stewardship`'s test would ask whether human participation is a \
-             predicate over an artifact or a description of what people do. Nobody has applied it.",
-        )?,
-    ])
-}
-
-/// §12, seven modules: two with a stated blocker, five with nobody.
+/// `crates/bioethics` calls the shared ground *perimeter infrastructure a sibling already
+/// positioned*. Both modules ask for controls at a boundary — a process boundary, a network stack, a
+/// scanner, an independent team — and in both cases `bioprism-safety` already states the
+/// workspace's position under a section-13 id.
 ///
-/// `crates/infra` and `bioprism-ledger` between them hold the section's caching, invalidation,
-/// quality, tiering, lifecycle, quota, index, backup and event-model modules. What is left is the
-/// deployment and topology half, and the workspace has no infrastructure at all.
-fn data_and_infrastructure() -> Result<Vec<Entry>, RegisterError> {
-    let surveyed = [
-        "bioprism-infra",
-        "bioprism-ledger",
-        "bioprism-store",
-        "bioprism-services",
-    ];
-
-    Ok(vec![
-        entry(
-            12,
-            2,
-            "Storage Architecture",
-            vec![inferred(
-                "bioprism-infra",
-                INFRA,
-                "There is no storage backend",
-                "`crates/infra` states plainly that everything it holds is in-memory and \
-                 single-process, that its lifecycle manages records about objects and never their \
-                 bytes, and that there is no storage backend. It does not classify this module; it \
-                 states the condition that stops anybody implementing it here.",
-                Classification::GenuinelyUncovered {
-                    standing: UncoveredStanding::real_work_not_done(
-                        "the workspace has no storage backend, no database and no filesystem \
-                         access, so a storage architecture has nothing to be an architecture of",
-                    )?,
-                },
-            )?],
-        )?,
-        entry(
-            12,
-            3,
-            "Relational Catalog Schema",
-            vec![unread(
-                "No crate records a position. A relational schema presupposes the database \
-                 `crates/infra` says does not exist, but nobody has decided whether the module is \
-                 therefore a foreign artifact — DDL in another language — or genuinely absent work.",
-                &surveyed,
-            )?],
-        )?,
-        entry(
-            12,
-            12,
-            "Observability And Slos",
-            vec![unread(
-                "No crate records a position. `crates/ops` implements the observability contract \
-                 of another section — signals, redaction policy, export batches — and never claims \
-                 this module, so whether the two are the same content under two ids is unchecked.",
-                &surveyed,
-            )?],
-        )?,
-        entry(
-            12,
-            13,
-            "Compute Provider And Kubernetes",
-            vec![inferred(
-                "bioprism-ops",
-                OPS,
-                "**No infrastructure.** No deployment, no provider binding",
-                "`crates/ops` records that the workspace has no deployment, no provider binding, \
-                 no health check, no container, no image, no cluster and no CI runner. That is a \
-                 statement about the workspace rather than about this module, and it is why this \
-                 module cannot be implemented here.",
-                Classification::GenuinelyUncovered {
-                    standing: UncoveredStanding::real_work_not_done(
-                        "there is no deployment, provider binding, container, image or cluster \
-                         anywhere in the workspace for a provider abstraction to abstract over",
-                    )?,
-                },
-            )?],
-        )?,
-        entry(
-            12,
-            14,
-            "Distributed Compute And Placement",
-            vec![unread(
-                "No crate records a position. `bioprism-factory` records that it has no \
-                 distributed lease fencing and `crates/infra` that it has no concurrency, which \
-                 together say the capability is absent — but neither says what this module is.",
-                &surveyed,
-            )?],
-        )?,
-        entry(
-            12,
-            15,
-            "Local First Deployment",
-            vec![inferred(
-                "bioprism-ops",
-                OPS,
-                "are statements about a running system, and a type",
-                "`crates/ops` classified the deployment module of another section and found that \
-                 three of its four invariants — local mode needs no external service, protected \
-                 mode denies egress, hosted metadata does not imply artifact access — are \
-                 statements about a running system, and that a type asserting any of them would be \
-                 claiming a control. The same holds for this module's local half.",
-                Classification::GenuinelyUncovered {
-                    standing: UncoveredStanding::real_work_not_done(
-                        "the invariants are properties of a running deployment, and a library of \
-                         plain types can model such a control but must never claim one",
-                    )?,
-                },
-            )?],
-        )?,
-        entry(
-            12,
-            16,
-            "Cloud And Federated Deployment",
-            vec![unread(
-                "No crate records a position. `bioprism-hubapi` owns federation and the rule that \
-                 trust does not transit, and `crates/atlashub` owns federated evaluation, but the \
-                 deployment half — what runs where — is claimed by nobody.",
-                &surveyed,
-            )?],
-        )?,
-    ])
-}
-
-/// §36, seven modules: one with a stated blocker, six with nobody.
-///
-/// `bioprism-policy` holds the section's classification, consent, federation and retention
-/// modules and `bioprism-safety` the adversarial half of its neighbour. The seven left are the
-/// ethics, biosecurity and quality-management half, and `crates/bioethics` is being written against
-/// them now.
+/// The sandboxing module carries a second verdict and the red-team module does not, and the
+/// difference is real rather than editorial. What is left of the red-team module after the discharge
+/// is a clause the blueprint never defines, so nobody could build it from the specification. What is
+/// left of the sandboxing module is a control that would work if somebody built it, and nobody has.
 fn biology_governance() -> Result<Vec<Entry>, RegisterError> {
-    let surveyed = [
-        "bioprism-policy",
-        "bioprism-safety",
-        "bioprism-stewardship",
-        "bioprism-foundation",
-    ];
+    let bioethics = |needle: &str, reasoning: &str, classification: Classification| {
+        transcribed(
+            "bioprism-bioethics",
+            BIOETHICS,
+            needle,
+            reasoning,
+            classification,
+        )
+    };
 
     Ok(vec![
         entry(
             36,
             7,
             "Sandboxing Untrusted Code And Research Artifacts",
-            vec![inferred(
-                "bioprism-safety",
-                SAFETY,
-                "seccomp, no capability drop, no user namespace",
-                "`bioprism-safety` states that it has no process spawning, no container, no \
-                 microVM, no WebAssembly, no seccomp, no capability drop and no user namespace, and \
-                 that the neighbouring section's sandbox modules are absent in full. It does not \
-                 classify this module; it records that the control it asks for does not exist.",
-                Classification::GenuinelyUncovered {
-                    standing: UncoveredStanding::real_work_not_done(
-                        "no isolation mechanism of any kind exists in the workspace, and a type \
-                         asserting containment would be claiming a control rather than modelling \
-                         one",
-                    )?,
-                },
-            )?],
-        )?,
-        entry(
-            36,
-            10,
-            "Physical Experiment And Wetlab Action Boundaries",
-            vec![unread(
-                "No crate records a position. `bioprism-foundation` enumerates executing wet \
-                 laboratory protocols and autonomously ordering assays among the things the \
-                 platform does not do, under another section's id, and `bioprism-onco` carries the \
-                 typed research boundary — but neither says this module is thereby discharged.",
-                &surveyed,
-            )?],
-        )?,
-        entry(
-            36,
-            11,
-            "Dual Use Biosecurity And Capability Release",
-            vec![unread(
-                "No crate records a position. `bioprism-safety` implements dual-use release gates \
-                 under the neighbouring security section and `bioprism-packs` carries a dual-use \
-                 portfolio axis, so this may be a duplicate; nobody has checked.",
-                &surveyed,
-            )?],
-        )?,
-        entry(
-            36,
-            13,
-            "Fairness Representation And Global Resource Context",
-            vec![unread(
-                "No crate records a position. `crates/stewardship` classified the neighbouring \
-                 governance section's benchmark-ethics-and-fairness module as process, which is \
-                 evidence about a sibling module rather than about this one.",
-                &surveyed,
-            )?],
+            vec![
+                bioethics(
+                    "Implementing it here would produce a second threat model",
+                    "`crates/bioethics` read the module and declined it: `bioprism-safety` states \
+                     the workspace's position on every one of its controls under four section-13 \
+                     ids, and `bioprism-sdk` holds the isolation-request ladder with its single \
+                     declared-only variant. Implementing it again would produce a second threat \
+                     model with its own opinion about what isolation means.",
+                    Classification::discharged_by(["bioprism-safety", "bioprism-sdk"])?,
+                )?,
+                inferred(
+                    "bioprism-bioethics",
+                    BIOETHICS,
+                    "All thirteen need a process boundary, a network stack or a scanner.",
+                    "`crates/bioethics` classified this module as positioned by a sibling and did \
+                     not classify it as work remaining. This register reads its own sentence — that \
+                     all thirteen required controls need a process boundary, a network stack or a \
+                     scanner — as saying the control exists nowhere, and records that separately so \
+                     a reader does not come away thinking a sandbox exists. The same crate reports \
+                     six enforced safeguards and thirty-six declared, and states that not one of \
+                     the six defends a perimeter.",
+                    Classification::GenuinelyUncovered {
+                        standing: UncoveredStanding::real_work_not_done(
+                            "isolation, egress control and artifact scanning need a process \
+                             boundary, a network stack or a scanner, and this workspace has none \
+                             of the three; every safeguard covering them is declared rather than \
+                             enforced",
+                        )?,
+                    },
+                )?,
+            ],
         )?,
         entry(
             36,
             19,
             "Security Privacy Safety Red Team Program",
-            vec![unread(
-                "No crate records a position. `bioprism-safety` implements security testing and \
-                 red team under the neighbouring section, and separately records that it has no \
-                 fuzzer, no scanner and no detector — so whether this module is a duplicate or the \
-                 programme around one is undecided.",
-                &surveyed,
-            )?],
-        )?,
-        entry(
-            36,
-            21,
-            "Quality Management Validation And Release Gates",
-            vec![unread(
-                "No crate records a position. Release-gate arithmetic with a three-valued outcome \
-                 exists in `bioprism-metrics` and quality gates in `crates/infra`; the \
-                 quality-management system around them is the part `crates/oraclex` called \
-                 programme when it met the same content in another section.",
-                &surveyed,
-            )?],
-        )?,
-        entry(
-            36,
-            22,
-            "Research Ethics Irb And Human Subject Boundaries",
-            vec![unread(
-                "No crate records a position. `crates/stewardship` owns the medical and \
-                 neuroscience boundary and `bioprism-foundation` the research-use-only wrapper, \
-                 both under other sections' ids; the ethics-review half is claimed by nobody.",
-                &surveyed,
+            vec![bioethics(
+                "`disclosure` module owns the red-team corpus and the",
+                "`crates/bioethics` read the module and declined it: `bioprism-safety` owns the \
+                 red-team corpus and the epoch-driven vulnerability ladder under two section-13 \
+                 ids, and its integrity module owns the witnesses. The one clause that looks \
+                 checkable — canary assets — is a gap the neighbouring section already records, \
+                 because nothing in the blueprint says what makes a canary detectable and a canary \
+                 type with an invented detectability rule would be fiction with a struct around it.",
+                Classification::discharged_by(["bioprism-safety"])?,
             )?],
         )?,
     ])
