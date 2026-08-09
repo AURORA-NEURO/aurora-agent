@@ -37,11 +37,14 @@
 //!
 //! No leak detection. The hub cannot look at a model's training corpus, crawl for republished
 //! instances, or measure memorisation. [`ContaminationWitness`] records a finding someone else
-//! made; this module decides what follows from it.
+//! made; this module decides what follows from it. The one finding it knows how to read directly
+//! is the split-integrity verdict of 43.41 — see [`DisclosureLedger::record_split_integrity`],
+//! which is careful about what a *passing* verdict does and does not license.
 
 use crate::error::HubError;
 use crate::id::Epoch;
 use bioprism_ids::ContentHash;
+use bioprism_section::{OracleStatus, OracleVerdict};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -60,6 +63,10 @@ pub enum ContaminationKind {
     SubmitterAuthoredPack,
     /// The grader itself leaked signal — error messages, timing, retry behaviour.
     GraderLeak,
+    /// The split-integrity oracle of 43.41 returned `invalid` on the pack. The leak is in how the
+    /// pack was built rather than in who has seen it, but the consequence for a headline score is
+    /// identical: the number does not mean what a reader would take it to mean.
+    SplitIntegrityFailure,
 }
 
 impl ContaminationKind {
@@ -70,6 +77,7 @@ impl ContaminationKind {
             ContaminationKind::TrainingCorpusOverlap => "training-corpus-overlap",
             ContaminationKind::SubmitterAuthoredPack => "submitter-authored-pack",
             ContaminationKind::GraderLeak => "grader-leak",
+            ContaminationKind::SplitIntegrityFailure => "split-integrity-failure",
         }
     }
 }
@@ -230,6 +238,49 @@ impl DisclosureLedger {
         witness: ContaminationWitness,
     ) -> Result<(), HubError> {
         self.ratchet(pack, DisclosureState::Contaminated { witness })
+    }
+
+    /// Fold a split-integrity verdict (43.41, `bioprism_section::OracleVerdict`) into the ledger.
+    ///
+    /// Three outcomes, and the two boring ones are the ones worth being careful about:
+    ///
+    /// - [`OracleStatus::Invalid`] contaminates the pack, carrying the witness kinds into the
+    ///   detail so the finding stays checkable rather than becoming the word "contaminated".
+    /// - [`OracleStatus::Underdetermined`] changes nothing. An oracle that abstained reported that
+    ///   it could not decide; converting an abstention into a finding, in either direction, is the
+    ///   dishonest move 43.28 makes abstention representable in order to avoid.
+    /// - [`OracleStatus::Valid`] also changes nothing, and this is the important one. A valid
+    ///   split-integrity verdict says the split was drawn without leakage. It says nothing about
+    ///   whether anyone has seen the pack, so it must not promote `Unknown` to `HeldOut`. Those
+    ///   are different claims with different evidence, and only one of them an oracle can supply.
+    ///
+    /// Returns the resulting state.
+    pub fn record_split_integrity(
+        &mut self,
+        pack: &ContentHash,
+        verdict: &OracleVerdict,
+        at: Epoch,
+        reported_by: impl Into<String>,
+    ) -> Result<DisclosureState, HubError> {
+        if verdict.status == OracleStatus::Invalid {
+            let kinds = verdict.witness_kinds();
+            let detail = format!(
+                "oracle `{}` returned invalid with {} witness(es): {}",
+                verdict.oracle_kind,
+                kinds.len(),
+                kinds.join(", ")
+            );
+            self.record_contamination(
+                pack,
+                ContaminationWitness {
+                    kind: ContaminationKind::SplitIntegrityFailure,
+                    detail,
+                    observed_at: at,
+                    reported_by: reported_by.into(),
+                },
+            )?;
+        }
+        Ok(self.state(pack))
     }
 
     /// Decide whether a score may be published as a headline number, and under what label.
@@ -410,6 +461,68 @@ mod tests {
             assert!(caveat.len() > 40, "caveat too thin: {caveat}");
             assert!(caveat.ends_with('.'), "caveat must be a sentence: {caveat}");
         }
+    }
+
+    #[test]
+    fn an_invalid_split_integrity_verdict_contaminates_the_pack_and_names_its_witnesses() {
+        use bioprism_section::LeakageWitness;
+        let mut ledger = DisclosureLedger::new();
+        ledger.declare_held_out(&pack()).unwrap();
+        let verdict = OracleVerdict::new(
+            "split-integrity/0.1",
+            vec![LeakageWitness::IdentityLeakage {
+                alias: "ALT-77".into(),
+                subjects: vec!["S001".into(), "S003".into()],
+                splits: vec!["train".into(), "holdout".into()],
+            }],
+        );
+        let state = ledger
+            .record_split_integrity(&pack(), &verdict, Epoch(4), "oracle-runner")
+            .unwrap();
+        assert!(matches!(state, DisclosureState::Contaminated { .. }));
+
+        let err = ledger
+            .headline_eligibility(&pack(), Epoch(1), true)
+            .expect_err("split integrity failed");
+        match err {
+            HubError::ContaminatedPack { kind, detail, .. } => {
+                assert_eq!(kind, "split-integrity-failure");
+                assert!(detail.contains("identity_leakage"), "{detail}");
+            }
+            other => panic!("expected ContaminatedPack, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_valid_split_integrity_verdict_does_not_make_an_unknown_pack_held_out() {
+        let mut ledger = DisclosureLedger::new();
+        let verdict = OracleVerdict::new("split-integrity/0.1", Vec::new());
+        let state = ledger
+            .record_split_integrity(&pack(), &verdict, Epoch(4), "oracle-runner")
+            .unwrap();
+        assert_eq!(state, DisclosureState::Unknown, "a clean split is not a secret split");
+        assert!(ledger.headline_eligibility(&pack(), Epoch(5), true).is_err());
+    }
+
+    #[test]
+    fn an_abstaining_split_integrity_oracle_neither_contaminates_nor_certifies() {
+        use bioprism_section::LeakageWitness;
+        let mut ledger = DisclosureLedger::new();
+        ledger.declare_held_out(&pack()).unwrap();
+        let verdict = OracleVerdict::abstain(
+            "split-integrity/0.1",
+            vec![LeakageWitness::PreprocessingLeakage {
+                detail: "normalisation provenance unavailable".into(),
+            }],
+        );
+        let state = ledger
+            .record_split_integrity(&pack(), &verdict, Epoch(4), "oracle-runner")
+            .unwrap();
+        assert_eq!(state, DisclosureState::HeldOut);
+        assert_eq!(
+            ledger.headline_eligibility(&pack(), Epoch(5), false).unwrap(),
+            HeadlineLabel::HeldOut
+        );
     }
 
     #[test]

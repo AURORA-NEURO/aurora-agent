@@ -501,40 +501,7 @@ pub fn accept(draft: SubmissionDraft, submitter: &Submitter) -> Result<Submissio
 mod tests {
     use super::*;
     use crate::attribution::Redistribution;
-
-    pub(crate) fn submitter() -> Submitter {
-        Submitter::unverified(SubmitterId::parse("lab-a").unwrap()).declaring_no_conflicts()
-    }
-
-    pub(crate) fn complete_draft() -> SubmissionDraft {
-        SubmissionDraft {
-            id: Some(SubmissionId::parse("sub-1").unwrap()),
-            submitter: Some(SubmitterId::parse("lab-a").unwrap()),
-            content: Some(ContentHash::of_bytes(b"artifact")),
-            scope: Some(DeclaredScope {
-                disease: vec!["glioma".into()],
-                modality: vec!["mri".into()],
-                decision_family: vec!["evidence-acquisition".into()],
-                intended_use: "compare context compilers on a synthetic glioma worldline".into(),
-                out_of_scope: vec!["paediatric cohorts".into()],
-            }),
-            licence: Some(Licence::permissive("CC0-1.0")),
-            provenance: Some(Provenance {
-                ancestors: Vec::new(),
-                build: BuildProvenance {
-                    toolchain: "rustc 1.85".into(),
-                    source_digest: ContentHash::of_bytes(b"source"),
-                    reproducible: true,
-                },
-                attestations: vec!["local-signature".into()],
-            }),
-            does_not_establish: vec![NonClaim::clinical_validity()],
-            attributions: Vec::new(),
-            evidence_scale: Some(EvidenceScale::new(120, 12)),
-            claimed_verification: None,
-            submitted_at: Epoch(3),
-        }
-    }
+    use crate::fixtures::{complete_draft, submitter};
 
     #[test]
     fn a_complete_draft_is_accepted_as_self_reported() {
@@ -560,7 +527,8 @@ mod tests {
 
     #[test]
     fn every_mandatory_field_is_refused_by_name_when_absent() {
-        let cases: [(&str, fn(&mut SubmissionDraft)); 5] = [
+        type Clear = fn(&mut SubmissionDraft);
+        let cases: [(&str, Clear); 5] = [
             ("content", |d| d.content = None),
             ("scope", |d| d.scope = None),
             ("licence", |d| d.licence = None),
