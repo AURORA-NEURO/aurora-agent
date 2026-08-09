@@ -1,0 +1,15 @@
+[package]
+name = "bioprism-megafactory"
+version = "0.1.0"
+edition = "2021"
+description = "Section 35 remainder: million-scale factory modules scale and factory did not claim"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-scale = { workspace = true }
+bioprism-factory = { workspace = true }
+bioprism-worldgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
