@@ -37,6 +37,22 @@
 //! 3. **Under removal against the world as shipped**, nothing. [`crate::UnknownReason::NoFactorTable`],
 //!    six times.
 //!
+//! ## And the same answer from the 43.11 pass
+//!
+//! [`mod@crate::interpret`] adds an abstract-domain registry, a join, a widening, a narrowing schedule
+//! and a bound for cyclic regions that no other method here can bound. It changes this measurement
+//! by exactly nothing, and the reason is worth stating in the same sentence as the capability: an
+//! abstract interpretation abstracts *something*, and `fiber-world/0.1` declares no potential for it
+//! to abstract. Every one of the six region factors comes back `⊤` in
+//! [`crate::domains::SupportDomain`] — recorded in [`ReferenceMeasurement::support_abstraction`], so
+//! it is a measurement rather than an assertion — and the analysis refuses on the hypothesis rather
+//! than reading a bound of one off `⊤`.
+//!
+//! That refusal is the load-bearing part. `⊤` reads out as a bound of one, a bound of one is
+//! `Bounded`, and `Bounded` supports a sufficiency claim. An interpreter that ran anyway would turn
+//! six honestly unknown groups into six that promise nothing and are formally sufficient, which is
+//! not closing the gap the crate exists to close but widening it.
+//!
 //! ## The 750 exploratory factors
 //!
 //! The world's 756 factors are 750 `exploratory_summary` factors, five `deterministic_rule`
@@ -96,6 +112,18 @@ pub struct ReferenceMeasurement {
     /// The all-ones valuation, retained only so the reader can see that it produces `0.0` and why
     /// that is not a result.
     pub uniform_valuation: Vec<FactorFinding>,
+    /// The 43.11 pass under removal against the world exactly as shipped.
+    ///
+    /// Separate from `removal` even though both come back unknown, because they come back unknown
+    /// for clauses a reader should be able to tell apart: the other methods have no ratio range to
+    /// read, and this one has no potential to abstract.
+    pub abstract_interpretation: Vec<FactorFinding>,
+    /// Every region factor's potential abstracted in [`crate::domains::SupportDomain`].
+    ///
+    /// The measurement behind the sentence "there is nothing to abstract". Each element is `⊤` of
+    /// the factor's table length, meaning every entry is `Either` — neither known to be zero nor
+    /// known to be positive.
+    pub support_abstraction: Vec<(String, crate::domains::Support)>,
 }
 
 impl ReferenceMeasurement {
@@ -114,6 +142,28 @@ impl ReferenceMeasurement {
             .count()
     }
 
+    /// How many region factors the 43.11 pass bounds against the world as shipped.
+    ///
+    /// Zero, and the crate ships that number rather than the capability's press release.
+    pub fn bounded_under_abstract_interpretation(&self) -> usize {
+        self.abstract_interpretation
+            .iter()
+            .filter(|finding| finding.estimate.is_bounded())
+            .count()
+    }
+
+    /// Whether every region factor abstracts to `⊤` — nothing known about any entry.
+    pub fn every_factor_abstracts_to_top(&self) -> bool {
+        self.support_abstraction.iter().all(|(_, element)| {
+            element.signs().is_some_and(|signs| {
+                !signs.is_empty()
+                    && signs
+                        .iter()
+                        .all(|sign| *sign == crate::domains::EntrySign::Either)
+            })
+        })
+    }
+
     /// The single bound every factor gets under a stated ±10% range.
     ///
     /// It is the same number for every factor because [`crate::BoundMethod::DynamicRange`] reads
@@ -129,7 +179,7 @@ impl ReferenceMeasurement {
     /// A line a certificate reader can act on.
     pub fn headline(&self) -> String {
         format!(
-            "reference world {}: {} facts, {} factors, slice reaches {} factors over {} variables; {} of {} region factors are bounded under removal ({} carry no potential), {} would be bounded under a declared ±{:.0}% range at {:.6}",
+            "reference world {}: {} facts, {} factors, slice reaches {} factors over {} variables; {} of {} region factors are bounded under removal ({} carry no potential), {} would be bounded under a declared ±{:.0}% range at {:.6}; the 43.11 abstract-interpretation pass bounds {} of them, because every factor abstracts to top",
             self.world_id,
             self.total_facts,
             self.total_factors,
@@ -141,6 +191,7 @@ impl ReferenceMeasurement {
             self.bounded_under_hypothetical_range(),
             HYPOTHETICAL_TOLERANCE * 100.0,
             self.hypothetical_bound().unwrap_or(f64::NAN),
+            self.bounded_under_abstract_interpretation(),
         )
     }
 }
@@ -181,7 +232,21 @@ pub fn measure() -> Result<ReferenceMeasurement, InfluenceError> {
 
     let mut removal = Vec::new();
     let mut hypothetical_stated_range = Vec::new();
+    let mut abstract_interpretation = Vec::new();
     for factor in region.factors() {
+        let subject = vec![factor.id().to_string()];
+        abstract_interpretation.push(FactorFinding {
+            factor: factor.id().to_string(),
+            arity: factor.arity(),
+            estimate: match crate::interpret::interpret_with_standard_domains(
+                &region,
+                &subject,
+                &removal_class,
+            )? {
+                Ok(interpretation) => InfluenceEstimate::Bounded(interpretation.bound),
+                Err(reason) => InfluenceEstimate::Unknown(reason),
+            },
+        });
         removal.push(FactorFinding {
             factor: factor.id().to_string(),
             arity: factor.arity(),
@@ -231,5 +296,7 @@ pub fn measure() -> Result<ReferenceMeasurement, InfluenceError> {
         removal,
         hypothetical_stated_range,
         uniform_valuation,
+        abstract_interpretation,
+        support_abstraction: crate::interpret::region_support(&region),
     })
 }

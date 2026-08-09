@@ -88,6 +88,10 @@ fn every_method_that_answered_is_individually_sound_not_merely_their_minimum() {
     assert!(per_method.contains_key("dynamic_range"));
     assert!(per_method.contains_key("chain_contraction"));
     assert!(per_method.contains_key("exact_removal"));
+    assert!(
+        per_method.contains_key("widened_abstract_interpretation"),
+        "the 43.11 pass must be under the same per-method soundness discipline as the rest, and answered on {per_method:?}"
+    );
 }
 
 #[test]

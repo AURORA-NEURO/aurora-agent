@@ -69,6 +69,18 @@ pub enum BoundMethod {
     /// [`bioprism_section::InfluenceClass::Zero`] arrived at from the numeric side, and it is kept
     /// distinct from a computed `0.0` because the arguments differ.
     StructuralZero,
+    /// The 43.11 fixed point of [`mod@crate::interpret`], reached under join alone. The reported
+    /// element is the least fixed point the domain can express: nothing was traded for termination.
+    AbstractInterpretation,
+    /// The same analysis, reached with widening. A post-fixpoint rather than the least one, so the
+    /// number is weaker than [`BoundMethod::AbstractInterpretation`]'s by an amount nothing here
+    /// measures.
+    ///
+    /// This is a separate variant rather than a flag because the method is what a certificate
+    /// carries. A reader comparing two certificates has to be able to see that the larger number
+    /// came from a cheaper argument and not from more influence, and a distinction that lived only
+    /// in a validity string would have to be parsed out of prose to be acted on.
+    WidenedAbstractInterpretation,
 }
 
 impl BoundMethod {
@@ -79,7 +91,16 @@ impl BoundMethod {
             BoundMethod::RatioComposition => "ratio_composition",
             BoundMethod::ChainContraction => "chain_contraction",
             BoundMethod::StructuralZero => "structural_zero",
+            BoundMethod::AbstractInterpretation => "abstract_interpretation",
+            BoundMethod::WidenedAbstractInterpretation => "widened_abstract_interpretation",
         }
+    }
+
+    /// Whether the bound was reached by giving up precision to make an iteration terminate.
+    ///
+    /// False for every method that is not a fixed point, because none of them iterates.
+    pub fn used_widening(self) -> bool {
+        matches!(self, BoundMethod::WidenedAbstractInterpretation)
     }
 
     /// Whether this method's number is the true influence rather than an upper bound on it.

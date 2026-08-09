@@ -12,7 +12,14 @@
 //! |---|---|---|
 //! | [`BoundMethod::DynamicRange`] | the perturbation's ratio range | no, ignores all structure |
 //! | [`BoundMethod::ChainContraction`] | a recognised Markov chain | no, ignores within-row structure |
+//! | [`BoundMethod::AbstractInterpretation`] | a strictly positive factor graph under Dobrushin's condition | no, sums over all paths including the ones that double back |
 //! | [`BoundMethod::ExactRemoval`] | tables everywhere and a willing backend | yes, for removal |
+//!
+//! The 43.11 method is the only one that accepts a *cycle*, which is the class
+//! [`crate::contraction`] refuses on principle rather than for want of effort. It reports itself as
+//! [`BoundMethod::WidenedAbstractInterpretation`] whenever it had to widen to terminate, which on
+//! this analysis is almost always: conditional dependence between two sites runs both ways, so the
+//! interdependence matrix is never nilpotent and the ascending chain never stabilises under join.
 //!
 //! `DynamicRange` is the only one that survives a region with no potentials, and then only for a
 //! *stated* range: a removal bound is read off the factor's own entries and there are none. This
@@ -45,6 +52,7 @@ use crate::bound::{
 use crate::contraction::{self, ChainStructure};
 use crate::error::{InfluenceError, UnknownReason};
 use crate::exact;
+use crate::interpret;
 use crate::perturbation::Perturbation;
 use crate::perturbed;
 use crate::ratio::{union_bound, RatioRange};
@@ -193,6 +201,15 @@ impl InfluenceAnalyzer {
             }
         }
 
+        let subject = vec![factor_id.to_string()];
+        self.attempt_abstract_interpretation(
+            region,
+            &subject,
+            perturbation,
+            &mut attempted,
+            &mut best,
+        )?;
+
         if self.execute {
             if let Perturbation::Removal = perturbation {
                 match exact::exact_removal_bound(region, factor_id, self.budget) {
@@ -238,11 +255,60 @@ impl InfluenceAnalyzer {
         };
 
         Ok(InfluenceAnalysis {
-            subject: vec![factor_id.to_string()],
+            subject,
             perturbation: *perturbation,
             estimate,
             attempted,
         })
+    }
+
+    /// Runs the 43.11 pass and records what it said.
+    ///
+    /// The pass is structural in the sense that matters for a compile: it reads potentials and
+    /// never executes the query, so it is available under
+    /// [`InfluenceAnalyzer::structural_only`] alongside the other two structural methods. Its
+    /// method variant records whether it widened, which is why the outcome is pushed with the
+    /// method the interpretation reported rather than with a fixed one.
+    fn attempt_abstract_interpretation(
+        &self,
+        region: &QueryRegion,
+        factor_ids: &[String],
+        perturbation: &Perturbation,
+        attempted: &mut Vec<MethodOutcome>,
+        best: &mut Option<InfluenceBound>,
+    ) -> Result<(), InfluenceError> {
+        let outcome = match interpret::interpret_with_standard_domains(
+            region,
+            factor_ids,
+            perturbation,
+        ) {
+            Ok(outcome) => outcome,
+            Err(InfluenceError::UnknownFactor { factor, .. }) => Err(
+                UnknownReason::RegionOutsideMethodClass {
+                    method: BoundMethod::AbstractInterpretation.as_str().to_string(),
+                    handles: "perturbations of factors the region declares".to_string(),
+                    detail: format!("factor {factor:?} is not in the region"),
+                },
+            ),
+            Err(other) => return Err(other),
+        };
+        match outcome {
+            Ok(interpretation) => {
+                attempted.push(MethodOutcome::produced(
+                    interpretation.bound.method(),
+                    interpretation.bound.value(),
+                ));
+                *best = Some(match best.take() {
+                    Some(current) => current.tightest(interpretation.bound),
+                    None => interpretation.bound,
+                });
+            }
+            Err(reason) => attempted.push(MethodOutcome::refused(
+                BoundMethod::AbstractInterpretation,
+                reason,
+            )),
+        }
+        Ok(())
     }
 
     /// Bounds the joint influence of perturbing a whole group of factors.
@@ -309,6 +375,14 @@ impl InfluenceAnalyzer {
                 best = Some(bound);
             }
         }
+
+        self.attempt_abstract_interpretation(
+            region,
+            factor_ids,
+            perturbation,
+            &mut attempted,
+            &mut best,
+        )?;
 
         match self.chain_union_bound(region, factor_ids, perturbation)? {
             Ok(bound) => {

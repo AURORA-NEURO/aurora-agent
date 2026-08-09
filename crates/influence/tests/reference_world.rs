@@ -169,3 +169,72 @@ fn the_analyzer_declines_the_reference_region_the_same_way_whether_or_not_it_may
         assert!(with.attempted.len() > without.attempted.len());
     }
 }
+
+/// The honest measurement on the capability this crate most recently gained.
+///
+/// A domain registry, a join, a widening, a narrowing schedule and a bound for cyclic regions —
+/// and on the world as shipped, still zero. A registry does not fix a schema gap, and reporting
+/// otherwise would make the limitation string shrink while the certificate it appears on gained
+/// nothing.
+#[test]
+fn the_43_11_pass_bounds_nothing_on_the_shipped_reference_world_either() {
+    let measurement = reference::measure().expect("the shipped fixture parses");
+    assert_eq!(
+        measurement.bounded_under_abstract_interpretation(),
+        0,
+        "the headline finding changed: {}",
+        measurement.headline()
+    );
+    assert_eq!(measurement.abstract_interpretation.len(), 6);
+    for finding in &measurement.abstract_interpretation {
+        assert!(matches!(
+            &finding.estimate,
+            InfluenceEstimate::Unknown(UnknownReason::NoFactorTable { .. })
+        ));
+    }
+    assert!(measurement
+        .headline()
+        .contains("abstract-interpretation pass bounds 0 of them"));
+}
+
+#[test]
+fn every_reference_world_factor_abstracts_to_top_which_is_why_no_bound_follows() {
+    let measurement = reference::measure().expect("the shipped fixture parses");
+    assert_eq!(measurement.support_abstraction.len(), 6);
+    assert!(
+        measurement.every_factor_abstracts_to_top(),
+        "a factor that abstracted to something other than top would mean the schema had gained a potential"
+    );
+    for (factor, element) in &measurement.support_abstraction {
+        let signs = element.signs().expect("top is not bottom");
+        assert!(
+            !signs.is_empty(),
+            "{factor}: an abstraction over no entries would be vacuously top for the wrong reason"
+        );
+    }
+}
+
+#[test]
+fn the_pass_refuses_the_reference_region_rather_than_reading_a_bound_of_one_off_top() {
+    let world = reference::reference_world().unwrap();
+    let region = reference::reference_region(&world).unwrap();
+    for factor in region.factors() {
+        let subject = vec![factor.id().to_string()];
+        let outcome = bioprism_influence::interpret_with_standard_domains(
+            &region,
+            &subject,
+            &Perturbation::Removal,
+        )
+        .expect("the region is well formed");
+        let reason = outcome.expect_err("top must not read out as a bound");
+        assert!(matches!(reason, UnknownReason::NoFactorTable { .. }));
+    }
+
+    let unknown = InfluenceEstimate::Unknown(UnknownReason::NoFactorTable {
+        factor: "any".to_string(),
+    });
+    assert!(
+        !unknown.supports_sufficiency(),
+        "the whole point of refusing is that the group must not support a sufficiency claim"
+    );
+}

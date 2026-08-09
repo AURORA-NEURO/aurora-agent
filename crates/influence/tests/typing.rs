@@ -5,8 +5,8 @@
 //! crate that blurs them.
 
 use bioprism_influence::{
-    manifest, structural_zero, Approximation, BoundMethod, InfluenceBound, InfluenceEstimate,
-    InfluenceMetric, UnknownReason,
+    manifest, structural_zero, Approximation, BoundMethod, InfluenceAnalysis, InfluenceBound,
+    InfluenceEstimate, InfluenceMetric, Perturbation, UnknownReason,
 };
 use bioprism_section::{InfluenceClass, OmissionManifest};
 
@@ -215,4 +215,63 @@ fn every_named_gap_states_a_reason_rather_than_only_a_title() {
             "the gap {title:?} is named but not explained"
         );
     }
+}
+
+#[test]
+fn a_widened_bound_and_a_joined_one_are_different_methods_on_the_wire() {
+    let joined = InfluenceBound::new(
+        0.25,
+        InfluenceMetric::TotalVariationOnNormalisedAnswer,
+        BoundMethod::AbstractInterpretation,
+        Approximation::ConservativeUpperBound,
+        "least fixed point under join",
+    )
+    .unwrap();
+    let widened = InfluenceBound::new(
+        0.25,
+        InfluenceMetric::TotalVariationOnNormalisedAnswer,
+        BoundMethod::WidenedAbstractInterpretation,
+        Approximation::ConservativeUpperBound,
+        "post-fixpoint after widening",
+    )
+    .unwrap();
+
+    assert_eq!(joined.value(), widened.value());
+    assert_ne!(joined.method(), widened.method());
+    assert_ne!(joined.method().as_str(), widened.method().as_str());
+    assert!(!joined.method().used_widening());
+    assert!(widened.method().used_widening());
+    assert!(!joined.method().is_exact());
+    assert!(!widened.method().is_exact());
+
+    let encoded = serde_json::to_string(&widened).unwrap();
+    assert!(encoded.contains("widened_abstract_interpretation"));
+    let decoded: InfluenceBound = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded.method(), BoundMethod::WidenedAbstractInterpretation);
+}
+
+#[test]
+fn a_group_reason_carries_the_widening_all_the_way_onto_the_certificate() {
+    let analysis = InfluenceAnalysis {
+        subject: vec!["f.c0".to_string()],
+        perturbation: Perturbation::Removal,
+        estimate: InfluenceEstimate::Bounded(
+            InfluenceBound::new(
+                0.0475,
+                InfluenceMetric::TotalVariationOnNormalisedAnswer,
+                BoundMethod::WidenedAbstractInterpretation,
+                Approximation::ConservativeUpperBound,
+                "post-fixpoint after widening and narrowing",
+            )
+            .unwrap(),
+        ),
+        attempted: Vec::new(),
+    };
+    let group = manifest::omission_group_from_analysis(&analysis, 1, ["fact.one".to_string()]);
+    assert_eq!(group.influence, InfluenceClass::Bounded);
+    assert!(
+        group.reason.contains("widened_abstract_interpretation"),
+        "the reason a reader sees must say the bound was widened, and said {:?}",
+        group.reason
+    );
 }

@@ -11,6 +11,7 @@
 //! | [`Family::Star`] | many arms into one free centre | chain detection must refuse on degree, and the structural bound must still hold |
 //! | [`Family::Tree`] | a branching path to the free root | chain detection must refuse on branching even though a path to the target exists |
 //! | [`Family::Triangle`] | three variables, three pairwise factors | chain detection must refuse on the cycle, where the coefficient argument genuinely does not generalise |
+//! | [`Family::WeakCycle`] | a cycle of any length with near-uniform potentials | the class [`crate::gibbs`] accepts and [`crate::contraction`] refuses: cyclic, and weakly enough coupled that Dobrushin's uniqueness condition holds |
 //!
 //! The families are structural, not biological. They carry the all-positive random potentials the
 //! soundness argument needs and nothing about them is evidence about anything. That is stated on
@@ -34,6 +35,7 @@ pub enum Family {
     Star,
     Tree,
     Triangle,
+    WeakCycle,
 }
 
 impl Family {
@@ -43,6 +45,7 @@ impl Family {
             Family::Star => "star",
             Family::Tree => "tree",
             Family::Triangle => "triangle",
+            Family::WeakCycle => "weak_cycle",
         }
     }
 }
@@ -100,7 +103,49 @@ pub fn generate(spec: &SmallWorldSpec) -> Result<QueryRegion, InfluenceError> {
         Family::Star => star(spec),
         Family::Tree => tree(spec),
         Family::Triangle => triangle(spec),
+        Family::WeakCycle => weak_cycle(spec),
     }
+}
+
+/// The maximum relative deviation from one in a [`Family::WeakCycle`] potential.
+///
+/// Chosen so the Dobrushin interdependence matrix of the generated cycles has maximum row sum
+/// comfortably below one, which is the hypothesis [`crate::gibbs`] checks and refuses on. A larger
+/// coupling would generate regions the method declines, which the [`Family::Triangle`] fixtures
+/// already supply; the point of this family is to exercise the accepted case.
+pub const WEAK_CYCLE_COUPLING: f64 = 0.2;
+
+/// A cycle whose factors barely couple their endpoints.
+///
+/// Cyclic, so [`crate::contraction::detect`] refuses it — the coefficient of a cycle is not the
+/// product of its edges. Weakly coupled, so the comparison theorem of [`crate::gibbs`] applies and
+/// its infinite series converges. Between them these two facts are the reason 43.11's widening is
+/// load-bearing in this crate rather than decorative.
+fn weak_cycle(spec: &SmallWorldSpec) -> Result<QueryRegion, InfluenceError> {
+    let mut rng = SplitMix64::new(spec.seed);
+    let length = spec.size.clamp(3, 5);
+    let card = spec.cardinality.max(2);
+
+    let names: Vec<String> = (0..length).map(|index| format!("c{index}")).collect();
+    let mut builder = QueryRegion::builder(spec.label());
+    for name in &names {
+        builder = builder.observed_variable(name, card);
+    }
+    for index in 0..length {
+        let table: Vec<f64> = (0..card * card)
+            .map(|_| rng.between(1.0 - WEAK_CYCLE_COUPLING, 1.0 + WEAK_CYCLE_COUPLING))
+            .collect();
+        builder = builder.factor(RegionFactor::with_table(
+            format!("f.c{index}"),
+            vec![names[index].clone(), names[(index + 1) % length].clone()],
+            table,
+        ));
+    }
+    builder
+        .free(names[0].clone())
+        .assumption(ASSUMPTION)
+        .build()
+        .map_err(rejected)
 }
 
 fn chain(spec: &SmallWorldSpec) -> Result<QueryRegion, InfluenceError> {
@@ -262,6 +307,18 @@ pub fn family() -> Vec<SmallWorldSpec> {
                 size: 0,
                 cardinality,
                 seed,
+            });
+            specs.push(SmallWorldSpec {
+                family: Family::WeakCycle,
+                size: 3,
+                cardinality,
+                seed,
+            });
+            specs.push(SmallWorldSpec {
+                family: Family::WeakCycle,
+                size: 4,
+                cardinality,
+                seed: seed ^ 0x22,
             });
         }
     }

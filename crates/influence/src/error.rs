@@ -54,6 +54,14 @@ pub enum InfluenceError {
 
     #[error("the shipped reference world could not be read: {message}")]
     ReferenceWorldUnreadable { message: String },
+
+    /// A misuse of the abstract-domain machinery of 43.11.
+    ///
+    /// Transparent rather than wrapped in a sentence of its own: a caller who passed one domain's
+    /// abstraction to another's transformer needs [`crate::DomainError`]'s words, not a paraphrase
+    /// of them.
+    #[error(transparent)]
+    Domain(#[from] crate::domain::DomainError),
 }
 
 /// Why no implemented method produced a bound.
