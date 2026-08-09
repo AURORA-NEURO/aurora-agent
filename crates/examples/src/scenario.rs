@@ -15,6 +15,7 @@
 
 use crate::error::ExampleError;
 use bioprism_fiber::Query;
+use bioprism_ids::{CanonicalError, ContentHash};
 use bioprism_world::World;
 use bioprism_worldgen::{generate, WorldSpec};
 use serde::{Deserialize, Serialize};
@@ -149,15 +150,38 @@ impl SliceWorld {
     /// A failure here is [`ExampleError`], not a slice failure: an example whose own world does
     /// not load has demonstrated nothing about the platform.
     pub fn build(&self, slice_id: &str) -> Result<(World, Query), ExampleError> {
-        let (world_doc, query_doc) = self.documents();
-        let world = World::from_json(world_doc).map_err(|source| ExampleError::World {
-            slice: slice_id.to_string(),
-            source,
-        })?;
-        let query = Query::from_json(query_doc).map_err(|source| ExampleError::Query {
-            slice: slice_id.to_string(),
-            source,
-        })?;
+        let (world, query, _, _) = self.build_documented(slice_id)?;
         Ok((world, query))
+    }
+
+    /// [`SliceWorld::build`], keeping the wire documents the parse consumed.
+    ///
+    /// A slice that packages its result as a bundle has to put the *bytes* a consumer would
+    /// receive into the manifest, not a re-rendering of the parsed types, so the documents have to
+    /// survive the parse. Generating them a second time would be the alternative and would make
+    /// the bundle's world digest a claim about a second generation rather than about the world the
+    /// slice compiled.
+    pub fn build_documented(
+        &self,
+        slice_id: &str,
+    ) -> Result<(World, Query, Value, Value), ExampleError> {
+        let (world_doc, query_doc) = self.documents();
+        let world = World::from_json(world_doc.clone()).map_err(|source| ExampleError::World {
+            slice: slice_id.to_string(),
+            source,
+        })?;
+        let query = Query::from_json(query_doc.clone()).map_err(|source| ExampleError::Query {
+            slice: slice_id.to_string(),
+            source,
+        })?;
+        Ok((world, query, world_doc, query_doc))
+    }
+
+    /// The digest of the spec the world is generated from.
+    ///
+    /// The world is a deterministic function of this spec, so these bytes are the immutable
+    /// revision 13.15 §Pinning asks a provenance record to name.
+    pub fn spec_digest(&self) -> Result<ContentHash, CanonicalError> {
+        ContentHash::of_value(&serde_json::to_value(&self.spec).expect("a spec is serialisable"))
     }
 }

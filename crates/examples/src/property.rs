@@ -11,6 +11,20 @@
 //! carries a [`Property::blocker`] naming the concrete reason — a missing wire field, a missing
 //! generator knob, a code path nothing constructs — so the gap is a line item rather than a
 //! silence. [`crate::registry::CoverageReport`] reports both halves.
+//!
+//! # A claim may be narrowed, and narrowing is not closing
+//!
+//! [`Property::AttestedResultBundleReplay`] was registered as `signed_result_bundle_replay` and
+//! claimed that "a signed result bundle verifies independently of the runtime that produced it".
+//! `bioprism-bundle` now exists and offers HMAC-SHA256 and nothing asymmetric, so a verifier needs
+//! the producing secret and anyone holding it could have written the tag. Two words in the old
+//! claim were therefore unearned: the bundle is *attested*, not signed, and verification is
+//! independent of the *compiler* but not of the *producer*.
+//!
+//! The renamed property states only what the workspace can show, and the slice that exercises it
+//! records the forgery as an observation rather than a caveat. Demonstrating the old wording
+//! against the new crate would have been the worse outcome of the two available: a claim marked
+//! green by evidence that does not reach it is harder to find than a claim marked blocked.
 
 use serde::{Deserialize, Serialize};
 
@@ -71,8 +85,10 @@ pub enum Property {
     NonProtectedTemporalWithholding,
     /// The six mutation families 38.01 names, not the four the generator implements.
     MutationFamilyCoverage,
-    /// A signed result bundle that a third party verifies independently.
-    SignedResultBundleReplay,
+    /// A result bundle recomputed and authenticated from its own bytes by a key holder.
+    ///
+    /// Narrowed from `signed_result_bundle_replay`; see the module docs for what was withdrawn.
+    AttestedResultBundleReplay,
     /// Forking two architectures from one decision cell and localising the first divergence.
     FirstCausalDivergence,
 }
@@ -106,7 +122,7 @@ impl Property {
         Property::BackendPortfolioSelection,
         Property::NonProtectedTemporalWithholding,
         Property::MutationFamilyCoverage,
-        Property::SignedResultBundleReplay,
+        Property::AttestedResultBundleReplay,
         Property::FirstCausalDivergence,
     ];
 
@@ -143,7 +159,7 @@ impl Property {
             Property::BackendPortfolioSelection => "backend_portfolio_selection",
             Property::NonProtectedTemporalWithholding => "non_protected_temporal_withholding",
             Property::MutationFamilyCoverage => "mutation_family_coverage",
-            Property::SignedResultBundleReplay => "signed_result_bundle_replay",
+            Property::AttestedResultBundleReplay => "attested_result_bundle_replay",
             Property::FirstCausalDivergence => "first_causal_divergence",
         }
     }
@@ -177,7 +193,7 @@ impl Property {
             Property::BackendPortfolioSelection => &["43.36", "43.37"],
             Property::NonProtectedTemporalWithholding => &["43.09"],
             Property::MutationFamilyCoverage => &["38.01", "19.05"],
-            Property::SignedResultBundleReplay => &["38.01", "19.06"],
+            Property::AttestedResultBundleReplay => &["38.01", "19.06", "34.14"],
             Property::FirstCausalDivergence => &["38.01", "19.16"],
         }
     }
@@ -263,8 +279,8 @@ impl Property {
             Property::MutationFamilyCoverage => {
                 "all six mutation families 38.01 names are generable and semantically validated"
             }
-            Property::SignedResultBundleReplay => {
-                "a signed result bundle verifies independently of the runtime that produced it"
+            Property::AttestedResultBundleReplay => {
+                "a result bundle carrying a compiled certificate is recomputed from its own bytes and its manifest authenticated, without the compiler that produced it and by a party holding the producing secret — who could equally have written the tag"
             }
             Property::FirstCausalDivergence => {
                 "two architectures fork from one decision cell and the first divergence is localised"
@@ -294,26 +310,17 @@ impl Property {
             Property::UnderdeterminedAbstention => Some(
                 "OracleVerdict::abstain exists in bioprism-section but no path in bioprism-fiber constructs it; the v0.1 oracle derives status solely from whether the witness list is empty",
             ),
-            Property::PolicyBlockedOmission => Some(
-                "bioprism-worldgen's policy knob now generates a world that binds the dimension and bioprism-fiber's screen withholds a fact from it, so the class is producible; what this crate still cannot do is reach it, because no slice in its registry compiles a policy-restricted world",
-            ),
             Property::BoundedInfluenceOmission => Some(
                 "bioprism-fiber emits only InfluenceClass::Zero and DeferredAcquisition; nothing computes a numeric influence bound, so no group is ever Bounded",
             ),
             Property::BackendPortfolioSelection => Some(
                 "bioprism-fiber hard-codes Backend::BackwardFactorSliceReference and leaves PlanDescriptor::fallback None on every compile; the other six backends have no implementation to select",
             ),
-            Property::NonProtectedTemporalWithholding => Some(
-                "bioprism-worldgen's protected_variables knob now separates protection from event management, and a generated world withholds a decisive non-protected variable at the cut with an empty dropped_protected, so the property is exercisable; what this crate still cannot do is exercise it, because its slices compile only the reference-shaped family",
-            ),
             Property::MutationFamilyCoverage => Some(
                 "WorldSpec::LeakageMechanism has four members; 38.01 names six mutation families, and prevalence shift, segmentation perturbation and assay uncertainty have no generator knob",
             ),
-            Property::SignedResultBundleReplay => Some(
-                "no signing or bundle crate is in this crate's dependency set; certificates are content-addressed but unsigned",
-            ),
             Property::FirstCausalDivergence => Some(
-                "decision cells and the PRISM fork machinery are not available here; a slice is a single compile, not a pair of trajectories",
+                "the two halves of this claim sit in crates that do not meet: bioprism-prism forks architectures from one decision cell but reports per-arm acceptance and a single attribution sentence, with no ordered trajectory along which a *first* divergence could be located, while bioprism-benchcompiler localises a first causal divergence only over a pair of bioprism-trace trajectories whose steps are agent decisions; a slice's compile emits pass receipts, which are compiler stages and not decisions, so taking either crate as a dependency here would add machinery with no trajectory to run it on",
             ),
             _ => None,
         }

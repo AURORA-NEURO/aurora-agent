@@ -11,13 +11,15 @@
 //! *query asked of it* change. That is what makes the differences between these reports
 //! attributable to one variable at a time rather than to a different benchmark.
 
-use crate::expectation::{Compiled, Expectation, GraphWalkProbe, Refusal};
+use crate::expectation::{
+    BundleExpectation, BundleProbe, Compiled, Expectation, GraphWalkProbe, Refusal,
+};
 use crate::property::Property;
 use crate::report::RefusalCode;
 use crate::scenario::{QueryOverlay, SliceWorld};
 use crate::slice::VerticalSlice;
 use bioprism_section::OracleStatus;
-use bioprism_worldgen::{LeakageMechanism, WorldSpec};
+use bioprism_worldgen::{LeakageMechanism, PolicySpec, WorldSpec, LOCAL_LAB_VALUE};
 
 /// The eleven facts the compiler selects for the split-integrity query, in certificate order.
 ///
@@ -82,6 +84,38 @@ const CANONICAL_WORLD: &str = "radiogenomic-integrity-v1";
 /// byte-identical — which a shared `world_id` and a deterministic generator guarantee.
 const NARROW_TARGET_WORLD: &str = "narrow-target-pair-v1";
 
+/// The world both policy slices run against.
+///
+/// Shared for the third time and for the third instance of the same reason. The pair's argument is
+/// that the withheld fact is withheld *by a clause the caller did not accept* and by nothing else,
+/// which is only checkable when the two runs face the same corpus: a requirement lives on the
+/// world, a grant lives on the query, so accepting the clause moves the query and leaves the world
+/// byte-identical.
+const POLICY_CONSENT_WORLD: &str = "policy-consent-pair-v1";
+
+/// The twelve facts the external-confirmation skeleton compiles when the lab value is readable.
+///
+/// [`DECISIVE_FACTS`] plus `fact.local_lab`, in certificate order. Written out for the reason the
+/// eleven are: the interesting difference between the policy pair's two runs is *which* fact left
+/// the selection, and a count cannot express that.
+pub const DECISIVE_FACTS_WITH_LOCAL_LAB: [&str; 12] = [
+    "fact.cohort",
+    "fact.decision_cut",
+    "fact.label_source",
+    "fact.local_lab",
+    "fact.negative_duplicates",
+    "fact.policy",
+    "fact.preprocess_fit",
+    "fact.scanner",
+    "fact.site",
+    "fact.specimen_dates",
+    "fact.split",
+    "fact.subject_aliases",
+];
+
+/// The check that reads the two lab variables. Its presence is what makes them decisive.
+const CONFIRMATION_CHECK: &str = "factor.confirmation_check";
+
 /// Every slice this crate registers, in the order a reader should meet them.
 ///
 /// [`Property::DeterministicReplay`] is appended to every slice rather than assigned to one.
@@ -102,6 +136,10 @@ pub fn all() -> Vec<VerticalSlice> {
         mutation_temporal(),
         mutation_preprocessing(),
         cohort_scale(),
+        unprotected_temporal_withholding(),
+        policy_blocked_omission(),
+        policy_released_control(),
+        attested_bundle_replay(),
     ];
 
     slices
@@ -555,5 +593,227 @@ pub fn cohort_scale() -> VerticalSlice {
          compiled region and not the corpus. The four witnesses still name the exact subjects \
          involved, which at this cohort size is the difference between a usable finding and a \
          flag.",
+    )
+}
+
+/// 43.09: withholding that leaves the mandatory closure intact.
+///
+/// The partner to [`temporal_firewall`], and the reason the two must both exist. There, an early
+/// cut removed *protected* evidence and the certificate said so through `dropped_protected` and an
+/// unsatisfied closure. Here the cut removes `fact.central_lab`, which the query does not protect,
+/// so `dropped_protected` is empty and the closure is complete — and evidence the decision depends
+/// on is gone anyway. A consumer checking only the closure sees nothing wrong.
+pub fn unprotected_temporal_withholding() -> VerticalSlice {
+    VerticalSlice::new(
+        "unprotected-temporal-withholding-v1",
+        "A decisive unprotected fact is withheld at the cut while the protected closure stays complete",
+        Property::NonProtectedTemporalWithholding,
+        SliceWorld::new(
+            WorldSpec::external_confirmation(20)
+                .with_world_id("unprotected-temporal-withholding-v1"),
+        ),
+        Expectation::compiles(
+            Compiled::new()
+                .status(OracleStatus::Invalid)
+                .witness_kinds(ALL_WITNESS_KINDS)
+                .selected_facts(DECISIVE_FACTS_WITH_LOCAL_LAB)
+                .selected_factors_include([CONFIRMATION_CHECK])
+                .protected_closure(DECISIVE_FACTS)
+                .protected_closure_satisfied(true)
+                .dropped_protected(Vec::<String>::new())
+                .inaccessible_selected_before_cut(["fact.central_lab"])
+                .unresolved_obligation_count(1)
+                .refinement_frontier_actions(["advance_time_cut_or_use_retrospective_mode"])
+                .omission_influence_classes(["zero", "deferred_acquisition"])
+                .omitted_fact_count(22)
+                .supports_sufficiency_claim(false)
+                .certificate_verifies(true),
+        ),
+    )
+    .citing(["43.09", "43.13", "43.26", "38.08"])
+    .also_exercising([
+        Property::OmissionInfluenceClassified,
+        Property::RefinementFrontierNonEmpty,
+    ])
+    .narrating(
+        "The world adds a sixth check that reads two lab variables, both tagged `assay_result`, \
+         which no query in this crate protects. `local_lab_value` is released before the decision \
+         cut and `central_lab_confirmation` months after it, so the two are identical in tagging \
+         and in event management and differ only in when a reader may see them. The compile \
+         therefore selects twelve facts rather than eleven, loses `fact.central_lab` to the cut, \
+         and reports `dropped_protected` empty with the closure satisfied — the state \
+         temporal-firewall-v1 cannot produce, because there every withheld fact was also \
+         protected. What stands in for the closure here is the rest of the accounting: the \
+         withheld fact is named, its omission group is classed deferred_acquisition rather than \
+         zero, the sufficiency claim is false, and the frontier names the move that would recover \
+         it. This is the separation 43.09 asks for made checkable: a temporal withholding is a \
+         different failure from a closure violation, and a certificate that reported only the \
+         second would call this world clean.",
+    )
+}
+
+/// 43.33 and 39.05: evidence a policy screen withheld, classed as such.
+///
+/// `local_lab_value` requires the clause `consent-tier-2`. The corpus grants it and the query does
+/// not accept it, so the fact is withheld — and the omission is recorded as `inaccessible_by_policy`
+/// rather than swept into the structural-irrelevance group with the 21 exploratory summaries.
+pub fn policy_blocked_omission() -> VerticalSlice {
+    VerticalSlice::new(
+        "policy-blocked-omission-v1",
+        "A fact the caller is not entitled to read is withheld and classed as policy-blocked, not as irrelevant",
+        Property::PolicyBlockedOmission,
+        SliceWorld::new(WorldSpec::policy_restricted(20).with_world_id(POLICY_CONSENT_WORLD)),
+        Expectation::compiles(
+            Compiled::new()
+                .status(OracleStatus::Invalid)
+                .witness_kinds(ALL_WITNESS_KINDS)
+                .selected_facts(DECISIVE_FACTS)
+                .selected_factors_include([CONFIRMATION_CHECK])
+                .protected_closure(DECISIVE_FACTS)
+                .protected_closure_satisfied(true)
+                .dropped_protected(Vec::<String>::new())
+                .inaccessible_selected_before_cut(["fact.central_lab"])
+                .unresolved_obligation_count(2)
+                .refinement_frontier_actions([
+                    "declare_the_required_policy_clauses_or_obtain_a_grant",
+                    "advance_time_cut_or_use_retrospective_mode",
+                ])
+                .omission_influence_classes(["zero", "inaccessible_by_policy", "deferred_acquisition"])
+                .omitted_fact_count(23)
+                .supports_sufficiency_claim(false)
+                .certificate_verifies(true),
+        ),
+    )
+    .citing(["43.26", "43.33", "39.05"])
+    .also_exercising([
+        Property::OmissionInfluenceClassified,
+        Property::RefinementFrontierNonEmpty,
+    ])
+    .narrating(
+        "The corpus declares that `local_lab_value` may be released only to a reader holding \
+         `consent-tier-2`; the query accepts `research-only` alone. The screen withholds the fact \
+         and the certificate carries three omission groups where the reference world carries one: \
+         21 facts no dependency path reaches, classed zero; one withheld by the data policy, \
+         classed inaccessible_by_policy; and one governed by an event the cut has not reached, \
+         classed deferred_acquisition. The three are not interchangeable and this slice asserts \
+         all three by name, because the failure mode worth ruling out is the tidy one — a screen \
+         that withholds a fact and then files it under 'not reachable from the target', which is \
+         true of nothing here and would make the certificate say the decision rested on \
+         everything relevant. The mandatory closure is untouched: 43.13 forbids trimming it, so a \
+         policy requirement over a protected variable is a refusal rather than an omission, and \
+         this world deliberately puts the requirement somewhere the compile can survive it. The \
+         partner slice, policy-released-control-v1, accepts the clause on the same corpus.",
+    )
+}
+
+/// The control for [`policy_blocked_omission`]: the same corpus, with the clause accepted.
+///
+/// A withheld fact and a fact the world never had are indistinguishable from one compile. Granting
+/// the clause on byte-identical world bytes is what makes the exclusion attributable to the policy
+/// decision rather than to the world's contents.
+pub fn policy_released_control() -> VerticalSlice {
+    VerticalSlice::new(
+        "policy-released-control-v1",
+        "Accepting the clause on the same corpus releases the fact and removes the policy omission group",
+        Property::PolicyBlockedOmission,
+        SliceWorld::new(WorldSpec {
+            policy: PolicySpec::requiring(LOCAL_LAB_VALUE, "consent-tier-2")
+                .accepting("consent-tier-2"),
+            ..WorldSpec::policy_restricted(20).with_world_id(POLICY_CONSENT_WORLD)
+        })
+        .with_query(QueryOverlay::new().query_id("policy-consent-pair-v1-consented")),
+        Expectation::compiles(
+            Compiled::new()
+                .status(OracleStatus::Invalid)
+                .witness_kinds(ALL_WITNESS_KINDS)
+                .selected_facts(DECISIVE_FACTS_WITH_LOCAL_LAB)
+                .protected_closure(DECISIVE_FACTS)
+                .protected_closure_satisfied(true)
+                .dropped_protected(Vec::<String>::new())
+                .inaccessible_selected_before_cut(["fact.central_lab"])
+                .unresolved_obligation_count(1)
+                .refinement_frontier_actions(["advance_time_cut_or_use_retrospective_mode"])
+                .omission_influence_classes(["zero", "deferred_acquisition"])
+                .omitted_fact_count(22)
+                .supports_sufficiency_claim(false)
+                .certificate_verifies(true),
+        ),
+    )
+    .citing(["43.33", "39.05"])
+    .narrating(
+        "One field differs from policy-blocked-omission-v1: the clause list the query accepts. A \
+         requirement is declared on the corpus and a grant is declared on the query, so accepting \
+         `consent-tier-2` leaves the world byte-identical — the two slices share a world digest, \
+         which is what makes this a control rather than a second experiment. `fact.local_lab` \
+         returns to the selection, the inaccessible_by_policy group disappears, and the policy \
+         obligation with it. What does not change is the deferred_acquisition group: \
+         `fact.central_lab` is still behind a release the cut has not reached, and no clause a \
+         caller accepts moves a date. Reading the two reports side by side is the whole argument \
+         that the first slice's omission was a policy decision and not a gap in the corpus.",
+    )
+}
+
+/// 34.14 and 19.06: this slice's own compile, packaged and handed back.
+///
+/// The bundle carries the certificate and section that were just compiled, the query as asked, and
+/// the world by digest. A verifier recomputes what travelled, finds the world unchecked and says
+/// so, and authenticates the manifest — under a shared secret published in this crate's source,
+/// which is why the report also records that the verifier can mint the identical bytes.
+pub fn attested_bundle_replay() -> VerticalSlice {
+    VerticalSlice::new(
+        "attested-bundle-replay-v1",
+        "A compiled certificate survives a bundle round trip, and the tag authenticates a key rather than a party",
+        Property::AttestedResultBundleReplay,
+        SliceWorld::new(
+            WorldSpec::reference_like(20).with_world_id("attested-bundle-replay-v1"),
+        ),
+        Expectation::compiles(
+            Compiled::new()
+                .status(OracleStatus::Invalid)
+                .witness_kinds(ALL_WITNESS_KINDS)
+                .selected_facts(DECISIVE_FACTS)
+                .protected_closure(DECISIVE_FACTS)
+                .protected_closure_satisfied(true)
+                .omission_influence_classes(["zero"])
+                .omitted_fact_count(21)
+                .supports_sufficiency_claim(true)
+                .certificate_verifies(true),
+        ),
+    )
+    .citing(["34.14", "19.06", "43.26", "38.01"])
+    .with_bundle(
+        BundleProbe::new(
+            "attested-bundle-replay-v1",
+            "aurora-examples-2026",
+            vec![0x2a; 32],
+            "AURORA BioPRISM reference examples",
+        )
+        .expecting(
+            BundleExpectation::new()
+                .recomputed_entries(["certificate", "query", "section"])
+                .not_recomputed(["world"])
+                .embedded_certificate("self_verified".to_string())
+                .survives_json_round_trip(true)
+                .authenticated_key("aurora-examples-2026".to_string())
+                .scheme("symmetric-shared-secret".to_string())
+                .repudiability("forgeable-by-any-verifier".to_string())
+                .without_the_key("wrong_key_offered".to_string())
+                .verifier_forgery_is_identical(true),
+        ),
+    )
+    .narrating(
+        "The certificate this bundle carries was not written for the bundle; it came out of the \
+         compile three lines above it, which is the difference between testing the bundle format \
+         and testing that a compiled result survives transport. Three entries travel and are \
+         rehashed on arrival — the certificate, the section, the query — and the world travels as \
+         a digest, which verification reports as one entry it could not check rather than as a \
+         fourth pass. The carried certificate still satisfies 43.26's own self-verification after \
+         the round trip. Then the part that would be easy to leave out: the scheme is HMAC-SHA256 \
+         under a shared secret, so a reviewer holding a different key learns nothing at all rather \
+         than learning that the tag is bad, and a reviewer holding *this* key mints a \
+         byte-identical bundle. Both are recorded as observations. The claim this slice is \
+         registered against was narrowed for that reason — 'signed' and 'independently' were both \
+         doing work the workspace cannot pay for, and the honest statement is that the bundle \
+         verifies without the compiler, not without the producer.",
     )
 }

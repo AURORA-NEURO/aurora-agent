@@ -15,8 +15,9 @@
 //! `Ok` with a failing report when a claim stops holding, and `Err` only when the example itself
 //! is broken. Those are different findings and collapsing them would hide the interesting one.
 
+use crate::bundle::{self, BundleInputs};
 use crate::error::ExampleError;
-use crate::expectation::{Expectation, GraphWalkProbe};
+use crate::expectation::{BundleProbe, Expectation, GraphWalkProbe};
 use crate::property::Property;
 use crate::report::{
     CompiledObservation, DeferredPass, Observations, PassObservation, RefusalCode,
@@ -49,6 +50,9 @@ pub struct VerticalSlice {
     /// An equal-engineering neighbourhood-walk sweep run alongside the compile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_walk: Option<GraphWalkProbe>,
+    /// A result bundle assembled from this compile and handed back to a verifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<BundleProbe>,
 }
 
 impl VerticalSlice {
@@ -73,6 +77,7 @@ impl VerticalSlice {
             world,
             expectation,
             graph_walk: None,
+            bundle: None,
         }
     }
 
@@ -100,6 +105,11 @@ impl VerticalSlice {
         self
     }
 
+    pub fn with_bundle(mut self, probe: BundleProbe) -> Self {
+        self.bundle = Some(probe);
+        self
+    }
+
     /// Every property this slice claims to touch, primary first.
     pub fn exercised(&self) -> Vec<Property> {
         let mut all = vec![self.demonstrates];
@@ -109,7 +119,8 @@ impl VerticalSlice {
 
     /// Builds the world, compiles, probes, and checks every declared expectation.
     pub fn run(&self) -> Result<SliceReport, ExampleError> {
-        let (world, query) = self.world.build(&self.id)?;
+        let (world, query, world_document, query_document) =
+            self.world.build_documented(&self.id)?;
 
         let mut observations = Observations {
             world_id: WorldSource::world_id(&world).to_string(),
@@ -120,11 +131,14 @@ impl VerticalSlice {
             compiled: None,
             refused: None,
             graph_walk: None,
+            bundle: None,
         };
 
+        let mut compiled = None;
         match compile(&world, &query) {
             Ok(output) => {
                 observations.compiled = Some(observe_compile(&self.id, &output)?);
+                compiled = Some(output);
             }
             Err(error) => observations.refused = Some(observe_refusal(&error)),
         }
@@ -135,6 +149,37 @@ impl VerticalSlice {
             let observed = walk::sweep(&world, &query, probe.max_depth);
             failures.extend(probe.check(&observed));
             observations.graph_walk = Some(observed);
+        }
+
+        if let Some(probe) = &self.bundle {
+            match &compiled {
+                Some(output) => {
+                    let spec_digest =
+                        self.world
+                            .spec_digest()
+                            .map_err(|source| ExampleError::Digest {
+                                slice: self.id.clone(),
+                                source,
+                            })?;
+                    let observed = bundle::run(
+                        &self.id,
+                        probe,
+                        &BundleInputs {
+                            output,
+                            world_document: &world_document,
+                            query_document: &query_document,
+                            spec_digest: &spec_digest,
+                        },
+                    )?;
+                    failures.extend(probe.check(&observed));
+                    observations.bundle = Some(observed);
+                }
+                None => failures.push(
+                    "expected a result bundle over this compile, but the compiler refused and \
+                     there was nothing to bundle"
+                        .into(),
+                ),
+            }
         }
 
         let mut report = SliceReport {
@@ -215,6 +260,10 @@ fn observe_compile(
             .iter()
             .map(|group| group.influence.as_str().to_string())
             .collect(),
+        inaccessible_selected_before_cut: certificate
+            .omissions
+            .inaccessible_selected_before_cut
+            .clone(),
         omitted_fact_count: certificate.omissions.total_facts,
         supports_sufficiency_claim: certificate.manifest.supports_sufficiency_claim(),
         deferred_passes: output

@@ -94,13 +94,28 @@ fn the_property_ids_this_crate_names_still_exist_in_the_examples_catalogue() {
     }
 }
 
+/// The obstacle this crate was built against is gone, because the claim it blocked is now
+/// demonstrated.
+///
+/// This assertion used to pin the blocker's exact wording, so that a reword would fail here rather
+/// than silently stranding the worlds built against it. It fired when `crates/examples` gained a
+/// slice compiling a protection-separated world: the property moved from blocked to demonstrated
+/// and the sentence was removed entirely rather than reworded.
+///
+/// So the pin inverts. What is worth guarding now is that the property is still *named* and no
+/// longer carries an obstacle — if an obstacle reappears, the claim regressed and the worlds here
+/// are answering a question that is open again.
 #[test]
-fn the_recorded_obstacle_this_crate_answers_is_still_the_one_examples_records() {
+fn the_obstacle_this_crate_answered_is_gone_because_the_claim_is_demonstrated() {
     let source = examples_property_source();
     assert!(
-        source.contains("withholds a decisive non-protected variable at the cut with an empty dropped_protected"),
-        "the blocker text has changed; the worlds here were built against the old wording and the \
-         claim should be re-checked rather than assumed"
+        source.contains("NonProtectedTemporalWithholding"),
+        "the property this crate's worlds were built for is no longer in the registry at all"
+    );
+    assert!(
+        !source
+            .contains("withholds a decisive non-protected variable at the cut with an empty dropped_protected"),
+        "the blocker sentence is back, so the claim has regressed from demonstrated to blocked and          the worlds here should be re-checked against whatever now blocks it"
     );
 }
 

@@ -146,6 +146,28 @@ fn the_temporal_property_is_reported_as_exercisable_and_still_not_demonstrated()
     );
 }
 
+/// This crate's `still_blocked` entry is true of *this crate* and no longer true of the workspace.
+///
+/// The distinction is worth keeping rather than deleting the entry. `bioprism-fiber` is
+/// deliberately not a dependency here, so these worlds are characterised structurally and this
+/// crate genuinely still cannot demonstrate the property — that is what `still_blocked` records.
+/// What changed is that `crates/examples` now can, using a world spec this crate's findings argued
+/// for. A reader comparing the two crates should see why they disagree rather than concluding one
+/// of them is stale.
+#[test]
+fn what_this_crate_still_cannot_do_is_now_done_by_a_crate_that_compiles() {
+    let source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../examples/src/catalog.rs"
+    ))
+    .expect("the examples catalogue is readable");
+
+    assert!(
+        source.contains("unprotected-temporal-withholding-v1"),
+        "the slice that answers this crate's still_blocked entry is gone; either the claim          regressed or the slice was renamed, and this crate's own account of the gap is now wrong"
+    );
+}
+
 #[test]
 fn the_unfavourable_control_ships_its_finding_rather_than_hiding_it() {
     let catalogue = SliceCatalog::standard().expect("builds");

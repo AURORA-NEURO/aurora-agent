@@ -13,7 +13,8 @@
 //! not a hidden one.
 
 use crate::report::{
-    CompiledObservation, GraphWalkObservation, Observations, RefusalCode, RefusalObservation,
+    BundleObservation, CompiledObservation, GraphWalkObservation, Observations, RefusalCode,
+    RefusalObservation,
 };
 use bioprism_section::OracleStatus;
 use serde::{Deserialize, Serialize};
@@ -79,6 +80,12 @@ pub struct Compiled {
     pub selected_facts: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_fact_count: Option<usize>,
+    /// Compiled factors a slice expects to see. A subset check, for the same reason
+    /// [`Compiled::deferred_passes_include`] is one: what a slice claims is that a particular
+    /// check reached the target, and pinning the relay factors alongside it would make the
+    /// assertion fail on a change to relay bookkeeping the claim does not depend on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_factors_include: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protected_closure: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,6 +102,11 @@ pub struct Compiled {
     pub refinement_frontier_actions: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub omission_influence_classes: Option<Vec<String>>,
+    /// The exact facts the temporal cut removed from the selection, by id. Asserting the set
+    /// rather than a count is what separates "some evidence was withheld" from "*this* evidence
+    /// was withheld", and only the second is checkable against the release schedule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inaccessible_selected_before_cut: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub omitted_fact_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,12 +167,30 @@ impl Compiled {
         self
     }
 
+    pub fn selected_factors_include<I, S>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.selected_factors_include = Some(values.into_iter().map(Into::into).collect());
+        self
+    }
+
     pub fn protected_closure<I, S>(mut self, values: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
         self.protected_closure = Some(values.into_iter().map(Into::into).collect());
+        self
+    }
+
+    pub fn inaccessible_selected_before_cut<I, S>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.inaccessible_selected_before_cut = Some(values.into_iter().map(Into::into).collect());
         self
     }
 
@@ -283,6 +313,12 @@ impl Compiled {
             failures,
         );
         compare(
+            "facts withheld at the decision cut",
+            self.inaccessible_selected_before_cut.as_ref(),
+            Some(&observed.inaccessible_selected_before_cut),
+            failures,
+        );
+        compare(
             "omitted fact count",
             self.omitted_fact_count,
             Some(observed.omitted_fact_count),
@@ -306,6 +342,17 @@ impl Compiled {
             Some(&observed.backend),
             failures,
         );
+
+        if let Some(expected) = &self.selected_factors_include {
+            for factor in expected {
+                if !observed.selected_factors.contains(factor) {
+                    failures.push(format!(
+                        "expected factor {factor:?} in the compiled selection, but the compiler selected {:?}",
+                        observed.selected_factors
+                    ));
+                }
+            }
+        }
 
         if let Some(expected) = &self.deferred_passes_include {
             for pass in expected {
@@ -456,6 +503,175 @@ impl GraphWalkProbe {
             );
         }
         failures
+    }
+}
+
+/// A result bundle built from the slice's own compile and handed back to a verifier (34.14).
+///
+/// The bundle is not a second scenario, it is the *same* compile packaged for transport, which is
+/// why it belongs to the slice in the same way [`GraphWalkProbe`] does. Blueprint 19.06 asks that a
+/// result be judged from a bundle rather than from console output, and a bundle assembled from a
+/// hand-written certificate — as `bioprism-bundle`'s own tests must do, having no compiler — cannot
+/// say whether the compiler's certificate survives the round trip.
+///
+/// # The key is published in this file, and that is not a mistake
+///
+/// [`BundleProbe::key_bytes`] ships in the source. Under HMAC-SHA256 a published secret means every
+/// reader can verify the tag *and* mint an identical one, which is exactly the property this crate
+/// now claims and no more. A slice that hid the key would look like it was protecting something and
+/// would be claiming, by implication, an origin guarantee the scheme does not provide.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundleProbe {
+    pub bundle_id: String,
+    /// The label a verifier looks the key up by. Not a credential, and not derived from the key.
+    pub key_identity: String,
+    /// The shared secret, as bytes. See the type docs for why it is in the open.
+    pub key_bytes: Vec<u8>,
+    /// The name the producer asserts. Authenticated in the sense that a key holder committed to
+    /// the string, and corroborated by nothing.
+    pub claimed_producer: String,
+    #[serde(default)]
+    pub expected: BundleExpectation,
+}
+
+/// Assertions over a bundle round trip. `None` means unasserted, as everywhere else here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundleExpectation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recomputed_entries: Option<Vec<String>>,
+    /// Entries that travelled as a digest alone. Asserted, because an entry silently dropping out
+    /// of the carried set would otherwise make the bundle look smaller and cleaner than it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_recomputed: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedded_certificate: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub survives_json_round_trip: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authenticated_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repudiability: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub without_the_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_forgery_is_identical: Option<bool>,
+}
+
+impl BundleProbe {
+    pub fn new(
+        bundle_id: impl Into<String>,
+        key_identity: impl Into<String>,
+        key_bytes: Vec<u8>,
+        claimed_producer: impl Into<String>,
+    ) -> Self {
+        BundleProbe {
+            bundle_id: bundle_id.into(),
+            key_identity: key_identity.into(),
+            key_bytes,
+            claimed_producer: claimed_producer.into(),
+            expected: BundleExpectation::default(),
+        }
+    }
+
+    pub fn expecting(mut self, expected: BundleExpectation) -> Self {
+        self.expected = expected;
+        self
+    }
+
+    pub fn check(&self, observed: &BundleObservation) -> Vec<String> {
+        let expected = &self.expected;
+        let mut failures = Vec::new();
+        compare(
+            "bundle entries recomputed from carried content",
+            expected.recomputed_entries.as_ref(),
+            Some(&observed.recomputed_entries),
+            &mut failures,
+        );
+        compare(
+            "bundle entries recorded by digest only",
+            expected.not_recomputed.as_ref(),
+            Some(&observed.not_recomputed),
+            &mut failures,
+        );
+        compare(
+            "embedded certificate",
+            expected.embedded_certificate.as_ref(),
+            Some(&observed.embedded_certificate),
+            &mut failures,
+        );
+        compare(
+            "bundle survives a JSON round trip",
+            expected.survives_json_round_trip,
+            Some(observed.survives_json_round_trip),
+            &mut failures,
+        );
+        compare(
+            "authenticated key",
+            expected.authenticated_key.as_ref(),
+            Some(&observed.authenticated_key),
+            &mut failures,
+        );
+        compare(
+            "authentication scheme",
+            expected.scheme.as_ref(),
+            Some(&observed.scheme),
+            &mut failures,
+        );
+        compare(
+            "repudiability",
+            expected.repudiability.as_ref(),
+            Some(&observed.repudiability),
+            &mut failures,
+        );
+        compare(
+            "what a reviewer without the key learns",
+            expected.without_the_key.as_ref(),
+            Some(&observed.without_the_key),
+            &mut failures,
+        );
+        compare(
+            "a verifier's forgery is byte-identical",
+            expected.verifier_forgery_is_identical,
+            Some(observed.verifier_forgery_is_identical),
+            &mut failures,
+        );
+        failures
+    }
+}
+
+impl BundleExpectation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    builder! {
+        embedded_certificate: String,
+        survives_json_round_trip: bool,
+        authenticated_key: String,
+        scheme: String,
+        repudiability: String,
+        without_the_key: String,
+        verifier_forgery_is_identical: bool,
+    }
+
+    pub fn recomputed_entries<I, S>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.recomputed_entries = Some(values.into_iter().map(Into::into).collect());
+        self
+    }
+
+    pub fn not_recomputed<I, S>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.not_recomputed = Some(values.into_iter().map(Into::into).collect());
+        self
     }
 }
 

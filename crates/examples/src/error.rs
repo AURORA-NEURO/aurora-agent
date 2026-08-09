@@ -36,6 +36,19 @@ pub enum ExampleError {
         source: bioprism_ids::CanonicalError,
     },
 
+    /// The result bundle built from a slice's own compile did not assemble or did not verify.
+    ///
+    /// An error rather than a recorded failure, and the reason is the same one that governs the
+    /// rest of this taxonomy: a bundle that cannot be built has demonstrated nothing about
+    /// replayability, whereas a bundle that verifies *differently* from what a slice expected is a
+    /// finding and lands on [`crate::SliceReport::failures`].
+    #[error("slice {slice:?}: result bundle does not assemble or verify: {source}")]
+    Bundle {
+        slice: String,
+        #[source]
+        source: bioprism_bundle::BundleError,
+    },
+
     /// A caller asked the registry for a slice that is not registered.
     #[error("no slice registered under id {0:?}")]
     UnknownSlice(String),

@@ -328,6 +328,7 @@ dependencies = [
 name = "bioprism-examples"
 version = "0.1.0"
 dependencies = [
+ "bioprism-bundle",
  "bioprism-fiber",
  "bioprism-ids",
  "bioprism-section",
@@ -365,8 +366,10 @@ dependencies = [
 name = "bioprism-fiber"
 version = "0.1.0"
 dependencies = [
+ "bioprism-backends",
  "bioprism-governance",
  "bioprism-ids",
+ "bioprism-influence",
  "bioprism-scope",
  "bioprism-section",
  "bioprism-world",

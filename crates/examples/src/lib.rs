@@ -38,14 +38,21 @@
 //! * **No fixture replay.** Slices build their worlds from `bioprism-worldgen` specs, so every
 //!   world in this crate is reproducible from a serialisable spec. The shipped
 //!   `fixtures/fiber-v0.1` golden certificate is checked by `bioprism-conformance`, not here.
-//! * **No decision cells, no PRISM forks, no signed bundles.** 38.01's acceptance list includes
-//!   forking two architectures from one cell and verifying a signed result bundle. Neither is
-//!   reachable from this crate's dependency set, and both are registered as unexercised claims
-//!   rather than omitted from the catalogue.
+//! * **No decision cells and no PRISM forks.** 38.01's acceptance list includes forking two
+//!   architectures from one cell and localising the first divergence between them. A slice is one
+//!   compile and emits pass receipts rather than decisions, so there is no trajectory here for a
+//!   fork to diverge along; the claim stays registered as unexercised, with the obstacle rewritten
+//!   to say which two crates would have to meet.
+//! * **No signatures, and therefore no third-party verifiability.** 38.01 also asks for a *signed*
+//!   result bundle. `bioprism-bundle` offers HMAC-SHA256 and nothing asymmetric, so a verifier
+//!   needs the producing secret and could have written the tag. The claim is registered under the
+//!   narrower name [`Property::AttestedResultBundleReplay`], and the slice that exercises it
+//!   records the forgery as an observation.
 //! * **No timing or memory measurement.** 43.41's evaluation program asks for tokens, bytes,
 //!   compile time and peak memory. Slices assert *what* was compiled, never how fast, because a
 //!   wall-clock assertion in a test suite is a flake generator rather than a measurement.
 
+pub mod bundle;
 pub mod catalog;
 pub mod error;
 pub mod expectation;
@@ -56,13 +63,17 @@ pub mod scenario;
 pub mod slice;
 pub mod walk;
 
+pub use bundle::BundleInputs;
 pub use error::ExampleError;
-pub use expectation::{Compiled, DepthExpectation, Expectation, GraphWalkProbe, Refusal};
+pub use expectation::{
+    BundleExpectation, BundleProbe, Compiled, DepthExpectation, Expectation, GraphWalkProbe,
+    Refusal,
+};
 pub use property::{Property, PropertyClaim};
 pub use registry::{CoverageReport, RegistryReport, SliceRegistry};
 pub use report::{
-    CompiledObservation, DeferredPass, DepthObservation, GraphWalkObservation, Observations,
-    PassObservation, RefusalCode, RefusalObservation, SliceReport,
+    BundleObservation, CompiledObservation, DeferredPass, DepthObservation, GraphWalkObservation,
+    Observations, PassObservation, RefusalCode, RefusalObservation, SliceReport,
 };
 pub use scenario::{QueryOverlay, SliceWorld};
 pub use slice::VerticalSlice;

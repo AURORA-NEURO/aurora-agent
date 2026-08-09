@@ -52,6 +52,14 @@ pub struct CompiledObservation {
     pub unresolved_obligations: Vec<UnresolvedObligation>,
     pub refinement_frontier_actions: Vec<String>,
     pub omission_influence_classes: Vec<String>,
+    /// Facts the selection asked for and the temporal cut removed, by id.
+    ///
+    /// Recorded separately from `dropped_protected` because the two are different failures and
+    /// 43.09 treats them differently: a withheld *protected* fact breaks the mandatory closure,
+    /// and a withheld unprotected one leaves the closure intact while removing evidence the
+    /// decision depended on. A report carrying only the first cannot tell the second from a world
+    /// that never had the evidence.
+    pub inaccessible_selected_before_cut: Vec<String>,
     pub omitted_fact_count: usize,
     pub supports_sufficiency_claim: bool,
     /// Passes the compiler declined to run, each with the reason. Never empty in v0.1.
@@ -124,6 +132,40 @@ pub struct GraphWalkObservation {
     pub usable_depths: Vec<usize>,
 }
 
+/// What became of the result bundle built from a slice's own compile (34.14, 19.06).
+///
+/// Every field a reader would need in order to disagree with the bundle's verdict, including the
+/// three that limit it. `not_recomputed` names the entries that travelled as a digest and were
+/// therefore not checked at all; `without_the_key` records what a reviewer who does not hold the
+/// producing secret learns, which is nothing; and `verifier_forgery_is_identical` records that a
+/// reviewer who does hold it can mint the same bytes. A bundle observation carrying only the
+/// successful verification would read as third-party verifiability, which this workspace cannot do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundleObservation {
+    pub bundle_id: String,
+    pub manifest_digest: String,
+    /// Entries whose carried content was rehashed and matched, in manifest order.
+    pub recomputed_entries: Vec<String>,
+    /// Entries recorded by digest only. Never a pass.
+    pub not_recomputed: Vec<String>,
+    /// Whether the carried Context Certificate satisfied 43.26's own self-verification.
+    pub embedded_certificate: String,
+    /// Whether the bundle verified after being serialised and parsed back, as a consumer would.
+    pub survives_json_round_trip: bool,
+    /// The key whose holder produced the tag. Never a party; see `bioprism_bundle::attestation`.
+    pub authenticated_key: String,
+    /// The tag, in its own wire form, which names its algorithm and cannot be quoted as a signature.
+    pub tag: String,
+    pub scheme: String,
+    pub repudiability: String,
+    /// The outcome of offering the attestation to a reviewer holding a different key.
+    pub without_the_key: String,
+    /// Whether a second holder of the producing secret mints a byte-identical bundle.
+    pub verifier_forgery_is_identical: bool,
+    /// The sentence a surface displaying this bundle must print.
+    pub honest_label: String,
+}
+
 /// Facts about the world a slice ran against, independent of any compile.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Observations {
@@ -138,6 +180,8 @@ pub struct Observations {
     pub refused: Option<RefusalObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_walk: Option<GraphWalkObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<BundleObservation>,
 }
 
 /// The result of executing one vertical slice.

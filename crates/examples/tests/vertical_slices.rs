@@ -364,6 +364,181 @@ fn no_omission_group_in_the_suite_is_left_unclassified() {
     }
 }
 
+/// The separation 43.09 asks for: withheld evidence and a broken closure are different failures.
+#[test]
+fn a_withheld_unprotected_fact_leaves_the_closure_intact_where_a_protected_one_does_not() {
+    let protected = compiled("temporal-firewall-v1");
+    let unprotected = compiled("unprotected-temporal-withholding-v1");
+
+    assert!(!protected.dropped_protected.is_empty());
+    assert!(!protected.protected_closure_satisfied);
+
+    assert!(
+        unprotected.dropped_protected.is_empty(),
+        "the withheld fact carries no protected tag, so nothing may be reported as dropped"
+    );
+    assert!(unprotected.protected_closure_satisfied);
+    assert_eq!(
+        unprotected.protected_closure.len(),
+        11,
+        "an empty closure would be satisfied trivially and prove nothing"
+    );
+    assert_eq!(
+        unprotected.inaccessible_selected_before_cut,
+        vec!["fact.central_lab".to_string()],
+        "a complete closure must not be allowed to stand in for complete evidence"
+    );
+}
+
+/// The withheld fact is one the target depends on, not a spare the selection could afford to lose.
+#[test]
+fn the_fact_the_cut_withheld_is_read_by_a_check_inside_the_compiled_slice() {
+    let observed = compiled("unprotected-temporal-withholding-v1");
+    assert!(observed
+        .selected_factors
+        .contains(&"factor.confirmation_check".to_string()));
+    assert!(
+        !observed.supports_sufficiency_claim,
+        "evidence withheld from a compiled check cannot support a sufficiency claim"
+    );
+    assert!(observed
+        .omission_influence_classes
+        .contains(&"deferred_acquisition".to_string()));
+}
+
+// ---------------------------------------------------------------------------
+// 43.33 / 39.05 — policy
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_fact_withheld_by_policy_is_classed_as_policy_blocked_rather_than_as_irrelevant() {
+    let observed = compiled("policy-blocked-omission-v1");
+    assert!(
+        observed
+            .omission_influence_classes
+            .contains(&"inaccessible_by_policy".to_string()),
+        "observed classes were {:?}",
+        observed.omission_influence_classes
+    );
+    assert!(
+        !observed
+            .selected_facts
+            .contains(&"fact.local_lab".to_string()),
+        "the screen must actually withhold the fact, not merely label it"
+    );
+    assert!(
+        observed.protected_closure_satisfied,
+        "a policy requirement over a protected variable is a refusal; this world puts it elsewhere"
+    );
+    assert!(!observed.supports_sufficiency_claim);
+}
+
+/// The pair argument, for the third time: one field differs, and the omission changes class.
+#[test]
+fn the_policy_pair_differs_only_in_the_clause_the_query_accepts() {
+    let withheld = run("policy-blocked-omission-v1");
+    let released = run("policy-released-control-v1");
+
+    assert_eq!(
+        withheld.observations.world_digest, released.observations.world_digest,
+        "a requirement lives on the world and a grant lives on the query; the corpus must not move"
+    );
+    assert_ne!(
+        withheld.observations.query_id,
+        released.observations.query_id
+    );
+
+    let withheld = withheld.observations.compiled.expect("compiles");
+    let released = released.observations.compiled.expect("compiles");
+
+    let gained: Vec<&String> = released
+        .selected_facts
+        .iter()
+        .filter(|id| !withheld.selected_facts.contains(id))
+        .collect();
+    assert_eq!(
+        gained,
+        vec!["fact.local_lab"],
+        "accepting one clause must release exactly the fact that clause governs"
+    );
+    assert!(!released
+        .omission_influence_classes
+        .contains(&"inaccessible_by_policy".to_string()));
+    assert_eq!(
+        released.inaccessible_selected_before_cut, withheld.inaccessible_selected_before_cut,
+        "no clause a caller accepts moves a release date"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 34.14 / 19.06 — the result bundle
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_compiled_certificate_survives_the_bundle_round_trip_and_still_self_verifies() {
+    let report = run("attested-bundle-replay-v1");
+    let bundle = report.observations.bundle.expect("the probe runs");
+    assert!(bundle.survives_json_round_trip);
+    assert_eq!(bundle.embedded_certificate, "self_verified");
+    assert_eq!(
+        bundle.recomputed_entries,
+        vec![
+            "certificate".to_string(),
+            "query".to_string(),
+            "section".to_string()
+        ]
+    );
+}
+
+/// An entry that travelled as a digest is unchecked, and the report has to keep saying so.
+#[test]
+fn the_world_travels_as_a_digest_and_is_reported_as_not_recomputed_rather_than_as_a_pass() {
+    let report = run("attested-bundle-replay-v1");
+    let bundle = report.observations.bundle.expect("the probe runs");
+    assert_eq!(bundle.not_recomputed, vec!["world".to_string()]);
+    assert!(
+        bundle.honest_label.contains("recorded by digest only"),
+        "{}",
+        bundle.honest_label
+    );
+}
+
+/// The limit that makes the claim's old wording unearned, asserted rather than footnoted.
+#[test]
+fn a_reviewer_without_the_producing_key_learns_nothing_and_one_holding_it_can_forge() {
+    let report = run("attested-bundle-replay-v1");
+    let bundle = report.observations.bundle.expect("the probe runs");
+    assert_eq!(bundle.without_the_key, "wrong_key_offered");
+    assert!(
+        bundle.verifier_forgery_is_identical,
+        "under a shared secret the set of parties that can check a tag is the set that can write it"
+    );
+    assert_eq!(bundle.repudiability, "forgeable-by-any-verifier");
+    assert_eq!(bundle.scheme, "symmetric-shared-secret");
+    assert!(bundle.tag.starts_with("hmac-sha256:"));
+}
+
+/// A tag authenticates a key. The catalogue's name for the claim must not outrun that.
+#[test]
+fn no_property_in_the_catalogue_claims_a_signature() {
+    assert_eq!(
+        Property::AttestedResultBundleReplay.id(),
+        "attested_result_bundle_replay"
+    );
+    for property in Property::ALL {
+        assert!(
+            !property.id().contains("signed"),
+            "{} claims a signature, and the workspace has no asymmetric scheme to back one",
+            property.id()
+        );
+        assert!(
+            !property.claim().contains("signed"),
+            "{} claims a signature in its statement",
+            property.id()
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 43.13 / 43.25 — closure and refusal
 // ---------------------------------------------------------------------------
@@ -624,6 +799,22 @@ fn every_unexercised_claim_names_a_concrete_obstacle() {
         unblocked.is_empty(),
         "these claims are unexercised for no stated reason, which is indistinguishable from having been forgotten: {unblocked:?}"
     );
+}
+
+/// A blocker is the reason no slice runs a claim, so a demonstrated claim must not carry one.
+///
+/// Without this, closing a claim and forgetting to withdraw its obstacle would leave the registry
+/// asserting both that a slice exercises the property and that nothing can — and the coverage table
+/// prints the obstacle only in the unexercised half, so nobody would see the contradiction.
+#[test]
+fn a_claim_a_slice_demonstrates_no_longer_carries_an_obstacle() {
+    for claim in &registry().coverage().demonstrated {
+        assert_eq!(
+            claim.blocker, None,
+            "{} is demonstrated by {:?} and still records an obstacle",
+            claim.id, claim.exercised_by
+        );
+    }
 }
 
 #[test]
