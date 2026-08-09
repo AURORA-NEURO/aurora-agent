@@ -1,0 +1,18 @@
+[package]
+name = "bioprism-worldgen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Synthetic structural benchmark families: worlds whose topology, depth and tag informativeness vary independently"
+
+[dependencies]
+bioprism-world = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+bioprism-baseline = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-fiber = { workspace = true }
