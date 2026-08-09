@@ -1,0 +1,21 @@
+[package]
+name = "bioprism-prism"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Decision Cells, matched counterfactual forks, state minimization and attested result bundles"
+
+[dependencies]
+bioprism-baseline = { workspace = true }
+bioprism-fiber = { workspace = true }
+bioprism-ids = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-world = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-worldgen = { workspace = true }
