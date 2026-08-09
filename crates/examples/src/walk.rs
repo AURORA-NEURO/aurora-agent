@@ -84,6 +84,15 @@ fn reachable_facts(adjacency: &Incidence, query: &Query, depth: usize) -> BTreeS
         .collect()
 }
 
+/// The exact fact ids a depth-limited walk reaches.
+///
+/// Exposed separately from [`sweep`] because "the walk selects eleven facts" and "the walk selects
+/// *the same* eleven facts" are different claims, and only the second one settles whether the
+/// compiler bought anything on a given world.
+pub fn facts_at(world: &World, query: &Query, depth: usize) -> BTreeSet<String> {
+    reachable_facts(&incidence(world), query, depth)
+}
+
 /// Runs the deterministic oracle over exactly the facts a strategy selected.
 ///
 /// This is what makes "sound" mean something. A strategy is not judged on how many facts it kept

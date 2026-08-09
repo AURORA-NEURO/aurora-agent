@@ -116,9 +116,7 @@ impl Property {
             Property::ExactLeakageWitnesses => "exact_leakage_witnesses",
             Property::CleanWorldValidVerdict => "clean_world_valid_verdict",
             Property::MechanismIsolation => "mechanism_isolation",
-            Property::ProtectedClosureOverridesRelevance => {
-                "protected_closure_overrides_relevance"
-            }
+            Property::ProtectedClosureOverridesRelevance => "protected_closure_overrides_relevance",
             Property::RelevanceOnlySelectionIsUnsound => "relevance_only_selection_is_unsound",
             Property::UnmatchedProtectedTagsReported => "unmatched_protected_tags_reported",
             Property::TemporalAccessibilityWithholdsEvidence => {

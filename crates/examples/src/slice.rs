@@ -26,7 +26,7 @@ use crate::scenario::SliceWorld;
 use crate::walk;
 use bioprism_fiber::{compile, CompileOutput, FiberError};
 use bioprism_section::CertificateProfile;
-use bioprism_world::{World, WorldSource};
+use bioprism_world::WorldSource;
 use serde::{Deserialize, Serialize};
 
 /// One end-to-end scenario the platform claims to handle.
@@ -124,7 +124,7 @@ impl VerticalSlice {
 
         match compile(&world, &query) {
             Ok(output) => {
-                observations.compiled = Some(observe_compile(&self.id, &world, &output)?);
+                observations.compiled = Some(observe_compile(&self.id, &output)?);
             }
             Err(error) => observations.refused = Some(observe_refusal(&error)),
         }
@@ -165,7 +165,6 @@ impl VerticalSlice {
 /// recorded only the first would be silently blind to the manifest.
 fn observe_compile(
     slice: &str,
-    world: &World,
     output: &CompileOutput,
 ) -> Result<CompiledObservation, ExampleError> {
     let digest_error = |source| ExampleError::Digest {
@@ -188,8 +187,6 @@ fn observe_compile(
         && bioprism_section::ContextCertificate::verify(&extended_document)
             .map_err(digest_error)?
             .is_valid();
-
-    let _ = world;
 
     Ok(CompiledObservation {
         status: certificate.oracle.status,

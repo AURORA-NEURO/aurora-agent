@@ -68,9 +68,10 @@ pub struct CompiledObservation {
 
 /// The typed reason a compile refused.
 ///
-/// Mirrors the `bioprism_fiber::FiberError` variants a slice may legitimately expect. Anything
-/// outside this set is [`RefusalCode::Other`], which no expectation may match: an unexpected
-/// failure mode must show up as a slice failure rather than being absorbed by a wildcard.
+/// Every `bioprism_fiber::FiberError` variant maps onto exactly one code, and the mapping is
+/// written without a wildcard arm. A new failure mode in the compiler therefore breaks this crate
+/// at compile time and forces a decision, rather than arriving as an unnamed catch-all that every
+/// refusal expectation would silently accept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefusalCode {
@@ -82,8 +83,6 @@ pub enum RefusalCode {
     MalformedQuery,
     /// The world document is not a well-formed `fiber-world/0.1` document.
     MalformedWorld,
-    /// A failure mode this crate does not model.
-    Other,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

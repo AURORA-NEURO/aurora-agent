@@ -210,7 +210,12 @@ impl Compiled {
     }
 
     fn check(&self, observed: &CompiledObservation, failures: &mut Vec<String>) {
-        compare("oracle status", self.status, Some(observed.status), failures);
+        compare(
+            "oracle status",
+            self.status,
+            Some(observed.status),
+            failures,
+        );
         compare(
             "witness kinds",
             self.witness_kinds.as_ref(),
@@ -358,7 +363,12 @@ impl Refusal {
             Some(observed.code),
             failures,
         );
-        compare("refusal selected", self.selected, observed.selected, failures);
+        compare(
+            "refusal selected",
+            self.selected,
+            observed.selected,
+            failures,
+        );
         compare(
             "refusal max_facts",
             self.max_facts,
@@ -460,7 +470,9 @@ fn compare<T: PartialEq + Debug>(
     match observed {
         Some(observed) if observed == expected => {}
         Some(observed) => {
-            failures.push(format!("{field}: expected {expected:?}, observed {observed:?}"));
+            failures.push(format!(
+                "{field}: expected {expected:?}, observed {observed:?}"
+            ));
         }
         None => failures.push(format!("{field}: expected {expected:?}, nothing observed")),
     }

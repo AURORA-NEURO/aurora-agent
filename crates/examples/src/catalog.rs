@@ -68,9 +68,27 @@ const PROTECTED_TAGS: [&str; 10] = [
     "protected",
 ];
 
+/// The canonical 43.41 world, shared by the compiler slice and the baseline slice.
+///
+/// Shared deliberately, for the same reason as [`NARROW_TARGET_WORLD`]: "the graph walk ties the
+/// compiler" is a claim about one world, and it is only checkable when both slices demonstrably
+/// ran against the same bytes.
+const CANONICAL_WORLD: &str = "radiogenomic-integrity-v1";
+
+/// The world both narrow-target slices run against.
+///
+/// Shared deliberately. The pair's argument is that the *only* difference between a wrong answer
+/// and a right one is the protected-tag list, and that is only checkable if the two worlds are
+/// byte-identical — which a shared `world_id` and a deterministic generator guarantee.
+const NARROW_TARGET_WORLD: &str = "narrow-target-pair-v1";
+
 /// Every slice this crate registers, in the order a reader should meet them.
+///
+/// [`Property::DeterministicReplay`] is appended to every slice rather than assigned to one.
+/// Byte-identical replay is not a property of a particular scenario; it is a property each slice
+/// either has or has not, and the suite replays all of them.
 pub fn all() -> Vec<VerticalSlice> {
-    vec![
+    let slices = vec![
         radiogenomic_integrity(),
         reference_world_tie(),
         structural_discrimination(),
@@ -84,7 +102,17 @@ pub fn all() -> Vec<VerticalSlice> {
         mutation_temporal(),
         mutation_preprocessing(),
         cohort_scale(),
-    ]
+    ];
+
+    slices
+        .into_iter()
+        .map(|mut slice| {
+            if !slice.exercised().contains(&Property::DeterministicReplay) {
+                slice.also_exercises.push(Property::DeterministicReplay);
+            }
+            slice
+        })
+        .collect()
 }
 
 /// 43.41, the canonical slice: the radiogenomic cohort-integrity compiler.
@@ -98,7 +126,7 @@ pub fn radiogenomic_integrity() -> VerticalSlice {
         "radiogenomic-integrity-v1",
         "Radiogenomic cohort integrity: four leakage mechanisms, four exact witnesses",
         Property::ExactLeakageWitnesses,
-        SliceWorld::new(WorldSpec::reference_like(750).with_world_id("radiogenomic-integrity-v1")),
+        SliceWorld::new(WorldSpec::reference_like(750).with_world_id(CANONICAL_WORLD)),
         Expectation::compiles(
             Compiled::new()
                 .status(OracleStatus::Invalid)
@@ -123,7 +151,6 @@ pub fn radiogenomic_integrity() -> VerticalSlice {
         Property::OmissionInfluenceClassified,
         Property::CertificateSelfVerifies,
         Property::DeferredPassesDeclared,
-        Property::DeterministicReplay,
     ])
     .narrating(
         "The world injects identity, site, temporal and preprocessing leakage simultaneously and \
@@ -148,7 +175,7 @@ pub fn reference_world_tie() -> VerticalSlice {
         "reference-world-tie-v1",
         "The shipped world does not discriminate: a tuned graph walk selects the same eleven facts",
         Property::ReferenceWorldDoesNotDiscriminate,
-        SliceWorld::new(WorldSpec::reference_like(750).with_world_id("reference-world-tie-v1")),
+        SliceWorld::new(WorldSpec::reference_like(750).with_world_id(CANONICAL_WORLD)),
         Expectation::compiles(
             Compiled::new()
                 .status(OracleStatus::Invalid)
@@ -197,7 +224,6 @@ pub fn structural_discrimination() -> VerticalSlice {
         ),
     )
     .citing(["43.39", "43.38", "43.01"])
-    .also_exercising([Property::DeterministicReplay])
     .with_graph_walk(
         GraphWalkProbe::new(16, vec![])
             .at(7, 750, false)
@@ -312,7 +338,11 @@ pub fn budget_refusal() -> VerticalSlice {
         Property::RefusalOverSilentTruncation,
         SliceWorld::new(WorldSpec::reference_like(20).with_world_id("budget-refusal-v1"))
             .with_query(QueryOverlay::new().max_facts(5)),
-        Expectation::refuses(Refusal::new(RefusalCode::BudgetExceeded).selected(11).max_facts(5)),
+        Expectation::refuses(
+            Refusal::new(RefusalCode::BudgetExceeded)
+                .selected(11)
+                .max_facts(5),
+        ),
     )
     .citing(["43.13", "43.25"])
     .narrating(
@@ -336,15 +366,13 @@ pub fn relevance_only_narrow_target() -> VerticalSlice {
         "relevance-only-narrow-target-v1",
         "Relevance alone selects one fact and returns a confidently wrong valid verdict",
         Property::RelevanceOnlySelectionIsUnsound,
-        SliceWorld::new(
-            WorldSpec::reference_like(20).with_world_id("relevance-only-narrow-target-v1"),
-        )
-        .with_query(
-            QueryOverlay::new()
-                .query_id("relevance-only-narrow-target-v1-policy")
-                .targets(["policy_validity"])
-                .protected_tags(Vec::<String>::new()),
-        ),
+        SliceWorld::new(WorldSpec::reference_like(20).with_world_id(NARROW_TARGET_WORLD))
+            .with_query(
+                QueryOverlay::new()
+                    .query_id("relevance-only-narrow-target-v1-policy")
+                    .targets(["policy_validity"])
+                    .protected_tags(Vec::<String>::new()),
+            ),
         Expectation::compiles(
             Compiled::new()
                 .status(OracleStatus::Valid)
@@ -380,7 +408,7 @@ pub fn protected_closure_narrow_target() -> VerticalSlice {
         "Protected closure adds ten facts the dependency slice never reached, and flips the verdict",
         Property::ProtectedClosureOverridesRelevance,
         SliceWorld::new(
-            WorldSpec::reference_like(20).with_world_id("protected-closure-narrow-target-v1"),
+            WorldSpec::reference_like(20).with_world_id(NARROW_TARGET_WORLD),
         )
         .with_query(
             QueryOverlay::new()
