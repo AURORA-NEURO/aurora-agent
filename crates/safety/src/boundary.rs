@@ -764,7 +764,8 @@ mod tests {
     #[test]
     fn an_unmodelled_edge_is_closed_rather_than_open() {
         let model = BoundaryModel::evaluation_model();
-        let bundle = MovingArtifact::new("out-1", ArtifactKind::AgentOutput, TrustZone::AgentSandbox);
+        let bundle =
+            MovingArtifact::new("out-1", ArtifactKind::AgentOutput, TrustZone::AgentSandbox);
         let error = model
             .deliver(&bundle, TrustZone::Catalog, Channel::Publication)
             .expect_err("no edge was modelled");
@@ -799,9 +800,16 @@ mod tests {
 
     #[test]
     fn a_credential_may_not_enter_either_sandbox() {
-        let key = MovingArtifact::new("provider-key", ArtifactKind::Credential, TrustZone::ControlPlane);
+        let key = MovingArtifact::new(
+            "provider-key",
+            ArtifactKind::Credential,
+            TrustZone::ControlPlane,
+        );
         assert!(key.kind.forbidden_in().contains(&TrustZone::AgentSandbox));
-        assert!(key.kind.forbidden_in().contains(&TrustZone::EvaluatorSandbox));
+        assert!(key
+            .kind
+            .forbidden_in()
+            .contains(&TrustZone::EvaluatorSandbox));
         let model = BoundaryModel::evaluation_model();
         assert!(model
             .deliver(&key, TrustZone::EvaluatorSandbox, Channel::ReadOnlyInput)
@@ -828,8 +836,11 @@ mod tests {
     #[test]
     fn a_permitted_crossing_records_that_the_model_allowed_it_not_that_it_happened() {
         let model = BoundaryModel::evaluation_model();
-        let bundle =
-            MovingArtifact::new("bundle-9", ArtifactKind::AgentOutput, TrustZone::AgentSandbox);
+        let bundle = MovingArtifact::new(
+            "bundle-9",
+            ArtifactKind::AgentOutput,
+            TrustZone::AgentSandbox,
+        );
         let crossing = model
             .deliver(
                 &bundle,
@@ -838,7 +849,9 @@ mod tests {
             )
             .expect("the sealed bundle is the agent's outbound path");
         assert!(
-            crossing.honest_label().contains("nothing observed the transfer"),
+            crossing
+                .honest_label()
+                .contains("nothing observed the transfer"),
             "{}",
             crossing.honest_label()
         );
@@ -887,7 +900,8 @@ mod tests {
 
     #[test]
     fn a_tenant_boundary_admits_a_finer_scope_and_refuses_a_sibling() {
-        let boundary = TenantBoundary::declared("acme", ScopeKey::default().exact("tenant", "acme"));
+        let boundary =
+            TenantBoundary::declared("acme", ScopeKey::default().exact("tenant", "acme"));
         let inside = ScopeKey::default()
             .exact("tenant", "acme")
             .bind("project", ScopeValue::Exact("p1".into()));
@@ -899,7 +913,11 @@ mod tests {
     #[test]
     fn influence_paths_are_simple_paths_and_terminate_on_a_cycle() {
         let cyclic = BoundaryModel::new()
-            .allow(TrustZone::ControlPlane, TrustZone::Catalog, Channel::Publication)
+            .allow(
+                TrustZone::ControlPlane,
+                TrustZone::Catalog,
+                Channel::Publication,
+            )
             .allow(
                 TrustZone::Catalog,
                 TrustZone::ControlPlane,

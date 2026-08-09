@@ -477,10 +477,7 @@ mod tests {
         let error = incident
             .report_contained()
             .expect_err("nobody ran the lineage query");
-        assert!(matches!(
-            error,
-            SafetyError::ContainmentOverclaimed { .. }
-        ));
+        assert!(matches!(error, SafetyError::ContainmentOverclaimed { .. }));
         assert!(error.to_string().contains("unknown"), "{error}");
     }
 
@@ -493,11 +490,12 @@ mod tests {
 
     #[test]
     fn one_result_still_under_investigation_blocks_containment() {
-        let incident = Incident::open("I-3", IncidentClass::HiddenHoldoutLeak, 1).with_blast_radius(
-            BlastRadius::complete()
-                .with("r-1", ResultDisposition::Invalidated)
-                .with("r-2", ResultDisposition::UnderInvestigation),
-        );
+        let incident = Incident::open("I-3", IncidentClass::HiddenHoldoutLeak, 1)
+            .with_blast_radius(
+                BlastRadius::complete()
+                    .with("r-1", ResultDisposition::Invalidated)
+                    .with("r-2", ResultDisposition::UnderInvestigation),
+            );
         let error = incident.report_contained().expect_err("one is still open");
         assert!(error.to_string().contains("1 dependent result"), "{error}");
     }
@@ -551,8 +549,12 @@ mod tests {
     #[test]
     fn the_forensic_timeline_refuses_an_entry_that_moves_backwards() {
         let mut timeline = Timeline::default();
-        timeline.push(5, "sre", "pool stop requested").expect("first");
-        timeline.push(5, "sre", "logs preserved").expect("same epoch");
+        timeline
+            .push(5, "sre", "pool stop requested")
+            .expect("first");
+        timeline
+            .push(5, "sre", "logs preserved")
+            .expect("same epoch");
         let error = timeline
             .push(4, "sre", "backdated note")
             .expect_err("a compromised host does not get to reorder its own history");

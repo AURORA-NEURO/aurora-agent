@@ -153,11 +153,7 @@ impl Observation {
                 fields.push(component.clone());
                 fields.push(equal.to_string());
             }
-            Observation::BoundaryCrossingRefused {
-                artifact,
-                from,
-                to,
-            } => {
+            Observation::BoundaryCrossingRefused { artifact, from, to } => {
                 fields.push(artifact.clone());
                 fields.push(from.clone());
                 fields.push(to.clone());
@@ -307,7 +303,9 @@ impl AuditLog {
         let mut fields = vec![previous.to_string()];
         fields.extend(record.digest_fields());
         let encoded = fields.join(&Self::SEPARATOR.to_string());
-        ContentHash::of_bytes(encoded.as_bytes()).as_str().to_string()
+        ContentHash::of_bytes(encoded.as_bytes())
+            .as_str()
+            .to_string()
     }
 
     /// Appends a record, linking it to the current head.
@@ -510,7 +508,8 @@ mod tests {
         let mut log = AuditLog::new();
         log.append(record("pack-a", 1)).expect("first");
         log.append(record("pack-b", 2)).expect("second");
-        log.append(record("pack-c", 2)).expect("same epoch is allowed");
+        log.append(record("pack-c", 2))
+            .expect("same epoch is allowed");
         log.verify().expect("nothing was touched");
         assert_eq!(log.records()[0].previous, "");
         assert_eq!(log.records()[1].previous, log.records()[0].digest);
@@ -593,10 +592,7 @@ mod tests {
             },
         )
         .expect_err("there is no builder here");
-        assert!(matches!(
-            error,
-            SafetyError::UnwitnessedAttestation { .. }
-        ));
+        assert!(matches!(error, SafetyError::UnwitnessedAttestation { .. }));
     }
 
     #[test]

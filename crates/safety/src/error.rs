@@ -109,10 +109,15 @@ pub enum SafetyError {
     /// A published run contains a component with no immutable pin. 13.15: "no floating `latest` in
     /// published runs".
     #[error("component {component:?} is pinned to the floating reference {reference:?}")]
-    FloatingPin { component: String, reference: String },
+    FloatingPin {
+        component: String,
+        reference: String,
+    },
 
     /// An audit chain does not rehash to its recorded links.
-    #[error("audit record {index} links to {recorded}, but the preceding record hashes to {actual}")]
+    #[error(
+        "audit record {index} links to {recorded}, but the preceding record hashes to {actual}"
+    )]
     AuditChainBroken {
         index: usize,
         recorded: String,
@@ -121,7 +126,9 @@ pub enum SafetyError {
 
     /// An attestation asserted something this process never observed. 13.20 asks for narrow claims
     /// like "built from manifest X"; this crate can only mint the ones it computed itself.
-    #[error("attestation {claim:?} is asserted by {asserter:?}; nothing in this process observed it")]
+    #[error(
+        "attestation {claim:?} is asserted by {asserter:?}; nothing in this process observed it"
+    )]
     UnwitnessedAttestation { claim: String, asserter: String },
 
     /// A vulnerability moved through its lifecycle out of order, or backwards in epoch.
@@ -172,7 +179,9 @@ pub enum SafetyError {
     SuppressionDisguisedAsSafety { finding: String },
 
     /// An output crossed 13.25's research boundary into clinical territory.
-    #[error("{output:?} is a {category} output; this platform is research-only and does not produce it")]
+    #[error(
+        "{output:?} is a {category} output; this platform is research-only and does not produce it"
+    )]
     ClinicalBoundary { output: String, category: String },
 
     /// A safety-relevant check was asked for a verdict with no evidence to give one.

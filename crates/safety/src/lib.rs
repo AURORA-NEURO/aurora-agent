@@ -31,9 +31,12 @@
 //! | Tamper-evident audit (13.20) | A real hash chain that detects an edited record and not a rewritten log |
 //! | Containment (13.22, 13.23) | [`incident::ContainmentRequest`]. There is no `ContainmentPerformed` type |
 //!
-//! [`model::section_13`] is the shipped instance, and its result is the crate's actual finding:
-//! **every threat it reports as mitigated is a threat against the platform's own honesty**, not
-//! against an attacker. A test holds that.
+//! [`model::section_13`] is the shipped instance. It carries 25 threats and scores **6 enforced,
+//! 15 declared-only, 4 unmitigated** — three numbers that are never added together and never turned
+//! into a percentage, because deciding whether a declaration counts would make either answer wrong.
+//! Its result is the crate's actual finding: **every one of those 6 is a threat against the
+//! platform's own honesty**, not against an attacker. Two tests hold it — one pins the counts, one
+//! fails if any perimeter threat is ever marked enforced.
 //!
 //! # Shape
 //!

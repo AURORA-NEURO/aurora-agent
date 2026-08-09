@@ -1,12 +1,12 @@
-        [package]
-        name = "bioprism-safety"
-        version = "0.1.0"
-        edition = "2021"
-        description = "Platform security and safety: threat model, trust boundaries, prompt injection, poisoning, supply chain, disclosure"
+[package]
+name = "bioprism-safety"
+version = "0.1.0"
+edition = "2021"
+description = "Platform security and safety: threat model, trust boundaries, prompt injection, poisoning, supply chain, disclosure"
 
-        [dependencies]
-        bioprism-ids = { workspace = true }
+[dependencies]
+bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
-        serde = { workspace = true }
-        serde_json = { workspace = true }
-        thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

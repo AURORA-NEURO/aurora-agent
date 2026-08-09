@@ -344,7 +344,11 @@ pub enum AbsenceReason {
     /// A human process, not code: a review, a campaign, a notification.
     HumanProcess { process: String },
     /// Analysed, understood, and accepted by a named party at a named epoch.
-    Accepted { by: String, epoch: u64, note: String },
+    Accepted {
+        by: String,
+        epoch: u64,
+        note: String,
+    },
     /// Nobody looked. Never counts as handled.
     NotAnalysed,
 }
@@ -894,10 +898,7 @@ mod tests {
             AbsenceReason::NotAnalysed,
         )]);
         assert_eq!(threat.unaccepted_gaps().len(), 1);
-        assert_eq!(
-            ThreatModel::new().with_threat(threat).unanalysed().len(),
-            1
-        );
+        assert_eq!(ThreatModel::new().with_threat(threat).unanalysed().len(), 1);
     }
 
     #[test]
@@ -974,15 +975,22 @@ mod tests {
         );
         let json = serde_json::to_string(&mitigation).expect("serialises");
         assert!(json.contains("\"state\":\"enforced\""), "{json}");
-        assert!(json.contains("no_value_claims_a_signature_verified"), "{json}");
+        assert!(
+            json.contains("no_value_claims_a_signature_verified"),
+            "{json}"
+        );
         let back: Mitigation = serde_json::from_str(&json).expect("deserialises");
         assert_eq!(back, mitigation);
     }
 
     #[test]
     fn an_honest_label_for_a_declaration_says_nothing_applies_it() {
-        let label = Mitigation::declared("no ambient credentials", ControlRole::Preventative, "13.03")
-            .honest_label();
-        assert!(label.contains("nothing in this process applies it"), "{label}");
+        let label =
+            Mitigation::declared("no ambient credentials", ControlRole::Preventative, "13.03")
+                .honest_label();
+        assert!(
+            label.contains("nothing in this process applies it"),
+            "{label}"
+        );
     }
 }

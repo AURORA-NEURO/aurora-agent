@@ -609,7 +609,10 @@ mod tests {
             .accepted_by("T-1")
             .accepted_by("T-2")];
         let verdict = check_oracle_degeneracy("json-shape", &probes, 2);
-        assert_eq!(verdict.witness_kinds(), vec!["constant_output_satisfies_oracle"]);
+        assert_eq!(
+            verdict.witness_kinds(),
+            vec!["constant_output_satisfies_oracle"]
+        );
     }
 
     #[test]
@@ -771,8 +774,9 @@ mod tests {
     #[test]
     fn witnesses_separate_a_broken_benchmark_from_a_gaming_contributor() {
         let mut report = IntegrityReport::default();
-        report.push(check_answer_containment(&[TaskSpec::new("T-1", "yes")
-            .with_context("c", "the answer is yes")]));
+        report.push(check_answer_containment(&[
+            TaskSpec::new("T-1", "yes").with_context("c", "the answer is yes")
+        ]));
         report.push(check_author_submitter_separation(
             "p",
             "org:a",
@@ -790,8 +794,10 @@ mod tests {
             TrustZone::EvaluatorSandbox,
             Channel::HiddenOracleMount,
         );
-        let verdict =
-            check_hidden_asset_placement(&sealed, &[("holdout".into(), TrustZone::EvaluatorSandbox)]);
+        let verdict = check_hidden_asset_placement(
+            &sealed,
+            &[("holdout".into(), TrustZone::EvaluatorSandbox)],
+        );
         assert_eq!(
             verdict.status,
             IntegrityStatus::NoWitness,

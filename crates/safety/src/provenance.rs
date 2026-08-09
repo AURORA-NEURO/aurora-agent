@@ -503,13 +503,13 @@ mod tests {
     fn retrieved_content_cannot_be_assembled_above_data_authority() {
         let mut assembly = ContextAssembly::new();
         let error = assembly
-            .add(
-                Segment::new("doc-1", Provenance::RetrievedContent)
-                    .at(Authority::TaskInstruction),
-            )
+            .add(Segment::new("doc-1", Provenance::RetrievedContent).at(Authority::TaskInstruction))
             .expect_err("retrieved content defaults to data, not policy");
         assert!(matches!(error, SafetyError::AuthorityElevation { .. }));
-        assert!(error.to_string().contains("permits at most data"), "{error}");
+        assert!(
+            error.to_string().contains("permits at most data"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -541,10 +541,7 @@ mod tests {
     fn untrusted_content_in_an_instruction_position_is_reported_as_a_path_not_a_score() {
         let mut assembly = ContextAssembly::new();
         assembly
-            .add(
-                Segment::new("tool-out", Provenance::ToolResult)
-                    .positioned(Position::Instruction),
-            )
+            .add(Segment::new("tool-out", Provenance::ToolResult).positioned(Position::Instruction))
             .expect("data authority in an instruction position is legal and is the finding");
         let paths = assembly.injection_paths();
         assert_eq!(paths.len(), 1);
@@ -690,8 +687,8 @@ mod tests {
     #[test]
     fn declared_carriers_are_a_narrower_query_than_structural_paths() {
         let mut assembly = ContextAssembly::new();
-        let mut quiet = Segment::new("doc", Provenance::RetrievedContent)
-            .positioned(Position::Instruction);
+        let mut quiet =
+            Segment::new("doc", Provenance::RetrievedContent).positioned(Position::Instruction);
         quiet.may_contain_instructions = false;
         assembly.add(quiet).expect("the assembler may declare this");
         assert!(assembly.declared_instruction_carriers().is_empty());

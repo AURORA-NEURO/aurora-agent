@@ -72,9 +72,7 @@ impl ResearchUse {
             ResearchUse::WorkflowReproducibility => "workflow_reproducibility",
             ResearchUse::DataQualityChecks => "data_quality_checks",
             ResearchUse::PaperDataCodeLinkage => "paper_data_code_linkage",
-            ResearchUse::ImagingAndOmicsMetadataReasoning => {
-                "imaging_and_omics_metadata_reasoning"
-            }
+            ResearchUse::ImagingAndOmicsMetadataReasoning => "imaging_and_omics_metadata_reasoning",
             ResearchUse::ToolUse => "tool_use",
             ResearchUse::Provenance => "provenance",
             ResearchUse::EvidenceSynthesis => "evidence_synthesis",
@@ -125,7 +123,10 @@ impl fmt::Display for ProhibitedOutput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "side", rename_all = "snake_case")]
 pub enum RequestedOutput {
-    Research { use_case: ResearchUse, label: String },
+    Research {
+        use_case: ResearchUse,
+        label: String,
+    },
     Clinical {
         category: ProhibitedOutput,
         label: String,
@@ -618,8 +619,7 @@ mod tests {
 
     #[test]
     fn one_high_risk_dimension_conditions_the_release_and_two_block_it() {
-        let one_high =
-            fully_rated("pack-a").rating(RiskDimension::Actionability, Rating::High);
+        let one_high = fully_rated("pack-a").rating(RiskDimension::Actionability, Rating::High);
         assert!(matches!(
             ReleaseGate.decide(&one_high).expect("rated"),
             GateDecision::Conditioned { .. }
@@ -667,7 +667,10 @@ mod tests {
             .promote("arch-v3")
             .expect_err("an unmeasured safety metric is not a zero one");
         assert!(matches!(error, SafetyError::Underdetermined { .. }));
-        assert!(error.to_string().contains("permission_bypass_rate"), "{error}");
+        assert!(
+            error.to_string().contains("permission_bypass_rate"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -50,8 +50,11 @@ pub fn adversaries() -> Vec<Adversary> {
         Adversary::new("malicious-grader", "a submitted evaluator or oracle")
             .with(Capability::ExecutesInEvaluatorSandbox)
             .with(Capability::AuthorsContent),
-        Adversary::new("compromised-dependency", "an upstream package or base image")
-            .with(Capability::ControlsBuildInput),
+        Adversary::new(
+            "compromised-dependency",
+            "an upstream package or base image",
+        )
+        .with(Capability::ControlsBuildInput),
         Adversary::new("result-submitter", "a party publishing a score")
             .with(Capability::SubmitsResults)
             .with(Capability::AuthorsContent)
@@ -61,10 +64,13 @@ pub fn adversaries() -> Vec<Adversary> {
             .with(Capability::AuthorsContent)
             .with(Capability::SubmitsResults)
             .with(Capability::ObservesPublicSurface),
-        Adversary::new("malicious-tenant", "another organisation on the same deployment")
-            .with(Capability::HoldsCredential)
-            .with(Capability::ExecutesInAgentSandbox)
-            .with(Capability::ObservesPublicSurface),
+        Adversary::new(
+            "malicious-tenant",
+            "another organisation on the same deployment",
+        )
+        .with(Capability::HoldsCredential)
+        .with(Capability::ExecutesInAgentSandbox)
+        .with(Capability::ObservesPublicSurface),
         Adversary::new("external-service", "a model provider or federation peer")
             .with(Capability::ControlsExternalService),
         Adversary::new("public-reader", "anyone reading the leaderboard")
@@ -663,7 +669,10 @@ mod tests {
             .iter()
             .map(|threat| threat.id.as_str())
             .collect();
-        assert!(reachable.contains(&"T-13.03-sandbox-escape"), "{reachable:?}");
+        assert!(
+            reachable.contains(&"T-13.03-sandbox-escape"),
+            "{reachable:?}"
+        );
         assert!(reachable.contains(&"T-13.05-holdout-read"), "{reachable:?}");
         assert!(
             !reachable.contains(&"T-13.15-signature-forgery"),
@@ -683,7 +692,9 @@ mod tests {
         let model = section_13();
         let escape = model.threat("T-13.03-sandbox-escape").expect("present");
         assert!(escape.rely().is_err());
-        let overclaim = model.threat("T-13.19-isolation-overclaim").expect("present");
+        let overclaim = model
+            .threat("T-13.19-isolation-overclaim")
+            .expect("present");
         assert!(overclaim.rely().is_ok());
     }
 

@@ -5,10 +5,10 @@
 //! [`bioprism_safety::model::section_13`] correspond to type properties a test can actually
 //! demonstrate, rather than to sentences somebody typed into an enum.
 
+use bioprism_safety::attest::Attestation;
 use bioprism_safety::attest::{
     AttestationClaim, AuditEvent, AuditLog, AuditRecord, Observation, Statement,
 };
-use bioprism_safety::attest::Attestation;
 use bioprism_safety::boundary::{
     ArtifactKind, BoundaryModel, Channel, MovingArtifact, TenantIsolation, TrustZone,
 };
@@ -24,9 +24,7 @@ use bioprism_safety::integrity::{
     IntegrityStatus, TaskSpec,
 };
 use bioprism_safety::model::section_13;
-use bioprism_safety::provenance::{
-    ContextAssembly, Position, Provenance, Segment, Sink, ToolCall,
-};
+use bioprism_safety::provenance::{ContextAssembly, Position, Provenance, Segment, Sink, ToolCall};
 use bioprism_safety::supply::{Component, ComponentKind, Pin, SignatureStatus};
 use bioprism_safety::threat::{Mitigation, ThreatStatus, Unrepresentable};
 use bioprism_safety::SafetyError;
@@ -52,7 +50,8 @@ fn every_unrepresentable_state_the_model_cites_is_demonstrated_by_a_type_propert
         match state {
             Unrepresentable::NoValueClaimsASignatureVerified => {
                 let component =
-                    Component::new("p", ComponentKind::BenchmarkAsset, Pin::digest("a")).signed("s");
+                    Component::new("p", ComponentKind::BenchmarkAsset, Pin::digest("a"))
+                        .signed("s");
                 assert_eq!(component.signature_status, SignatureStatus::NotChecked);
             }
             Unrepresentable::NoValueClaimsTenantIsolationWasApplied => {
@@ -68,9 +67,7 @@ fn every_unrepresentable_state_the_model_cites_is_demonstrated_by_a_type_propert
             }
             Unrepresentable::NoAttestationClaimsObservationWithoutOne => {
                 assert!(Attestation::observed(
-                    AttestationClaim::BundleClosureVerified {
-                        bundle: "b".into()
-                    },
+                    AttestationClaim::BundleClosureVerified { bundle: "b".into() },
                     Observation::ChainLinkRecomputed { index: 0 },
                 )
                 .is_err());
@@ -162,8 +159,9 @@ fn a_pack_review_files_witnesses_as_observations_and_the_audit_chain_verifies() 
 #[test]
 fn an_unprobed_oracle_keeps_a_pack_from_reporting_clean() {
     let mut report = IntegrityReport::default();
-    report.push(check_answer_containment(&[TaskSpec::new("T-1", "yes")
-        .with_context("ctx", "unrelated background")]));
+    report.push(check_answer_containment(&[
+        TaskSpec::new("T-1", "yes").with_context("ctx", "unrelated background")
+    ]));
     assert!(report.is_clean(), "the one check that ran found nothing");
     report.push(check_oracle_degeneracy("exact-match", &[], 2));
     assert!(!report.is_clean());
@@ -280,8 +278,7 @@ fn a_confirmed_finding_becomes_a_sentinel_and_walks_the_disclosure_ladder() {
     assert!(cell.minimised);
     assert!(!cell.public_summary().contains("error message"));
 
-    let mut vulnerability =
-        Vulnerability::reported("V-11", finding.class, Severity::High, 20);
+    let mut vulnerability = Vulnerability::reported("V-11", finding.class, Severity::High, 20);
     assert!(vulnerability.severity.requires_independent_verification());
     vulnerability
         .advance(Transition::to(Stage::Triaged, 21))
@@ -323,7 +320,8 @@ fn no_perimeter_threat_in_the_shipped_model_can_be_relied_on() {
                 "{} returned Ok without being mitigated",
                 threat.id
             ),
-            Err(SafetyError::UnenforcedReliance { .. } | SafetyError::UnmitigatedThreat { .. }) => {}
+            Err(SafetyError::UnenforcedReliance { .. } | SafetyError::UnmitigatedThreat { .. }) => {
+            }
             Err(other) => panic!("{} produced an unexpected error: {other}", threat.id),
         }
     }

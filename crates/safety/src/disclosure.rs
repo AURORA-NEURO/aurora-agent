@@ -514,7 +514,10 @@ impl Corpus {
 
     /// Boundaries with at least one sentinel.
     pub fn covered_boundaries(&self) -> BTreeSet<&str> {
-        self.cells.iter().map(|cell| cell.boundary.as_str()).collect()
+        self.cells
+            .iter()
+            .map(|cell| cell.boundary.as_str())
+            .collect()
     }
 
     /// Boundaries in a supplied universe that no sentinel covers.
@@ -573,13 +576,20 @@ mod tests {
         let error = vulnerability
             .advance(Transition::to(Stage::Reported, 3))
             .expect_err("a triaged report does not become untriaged");
-        assert!(error.to_string().contains("does not run backwards"), "{error}");
+        assert!(
+            error.to_string().contains("does not run backwards"),
+            "{error}"
+        );
     }
 
     #[test]
     fn an_epoch_that_moves_backwards_is_refused_even_on_a_legal_rung() {
-        let mut vulnerability =
-            Vulnerability::reported("V-3", VulnerabilityClass::CodeVulnerability, Severity::Low, 9);
+        let mut vulnerability = Vulnerability::reported(
+            "V-3",
+            VulnerabilityClass::CodeVulnerability,
+            Severity::Low,
+            9,
+        );
         assert!(matches!(
             vulnerability
                 .advance(Transition::to(Stage::Triaged, 8))
@@ -590,8 +600,12 @@ mod tests {
 
     #[test]
     fn a_report_may_be_withdrawn_from_any_stage_before_disclosure() {
-        let mut vulnerability =
-            Vulnerability::reported("V-4", VulnerabilityClass::BenchmarkExploit, Severity::Low, 1);
+        let mut vulnerability = Vulnerability::reported(
+            "V-4",
+            VulnerabilityClass::BenchmarkExploit,
+            Severity::Low,
+            1,
+        );
         vulnerability
             .advance(Transition::to(Stage::Triaged, 2))
             .expect("forward");
@@ -622,7 +636,11 @@ mod tests {
             1,
         );
         assert!(vulnerability.embargoed);
-        for (stage, epoch) in [(Stage::Triaged, 2), (Stage::Fixed, 4), (Stage::Disclosed, 7)] {
+        for (stage, epoch) in [
+            (Stage::Triaged, 2),
+            (Stage::Fixed, 4),
+            (Stage::Disclosed, 7),
+        ] {
             vulnerability
                 .advance(Transition::to(stage, epoch))
                 .expect("each rung in turn");
@@ -731,10 +749,7 @@ mod tests {
         );
         assert_eq!(
             corpus.uncovered(&["agent_sandbox", "evaluator_sandbox", "build_service"]),
-            vec![
-                "evaluator_sandbox".to_string(),
-                "build_service".to_string()
-            ]
+            vec!["evaluator_sandbox".to_string(), "build_service".to_string()]
         );
     }
 
@@ -758,9 +773,6 @@ mod tests {
             ..ImpactAxes::default()
         });
         assert!(vulnerability.impact.any());
-        assert_eq!(
-            vulnerability.class.as_str(),
-            "misleading_security_claim"
-        );
+        assert_eq!(vulnerability.class.as_str(), "misleading_security_claim");
     }
 }

@@ -502,8 +502,14 @@ mod tests {
     #[test]
     fn an_inventory_counts_signatures_it_did_not_check_rather_than_reporting_them_as_good() {
         let inventory = Inventory::new()
-            .with(Component::new("a", ComponentKind::ContainerImage, Pin::digest("1")).signed("sig"))
-            .with(Component::new("b", ComponentKind::Dataset, Pin::revision("2")));
+            .with(
+                Component::new("a", ComponentKind::ContainerImage, Pin::digest("1")).signed("sig"),
+            )
+            .with(Component::new(
+                "b",
+                ComponentKind::Dataset,
+                Pin::revision("2"),
+            ));
         assert_eq!(inventory.unchecked_signatures(), 1);
     }
 
@@ -511,9 +517,14 @@ mod tests {
     fn unlicensed_components_are_listed_rather_than_assumed_permissive() {
         let inventory = Inventory::new()
             .with(
-                Component::new("a", ComponentKind::Dataset, Pin::revision("1")).licensed("CC-BY-4.0"),
+                Component::new("a", ComponentKind::Dataset, Pin::revision("1"))
+                    .licensed("CC-BY-4.0"),
             )
-            .with(Component::new("b", ComponentKind::Dataset, Pin::revision("2")));
+            .with(Component::new(
+                "b",
+                ComponentKind::Dataset,
+                Pin::revision("2"),
+            ));
         assert_eq!(inventory.unlicensed().len(), 1);
         assert_eq!(inventory.unlicensed()[0].name, "b");
     }
