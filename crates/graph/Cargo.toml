@@ -1,0 +1,20 @@
+[package]
+name = "bioprism-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Generated graph, hypergraph, timeline and table projections over compiled decision regions"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-world = { workspace = true }
+bioprism-section = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-worldgen = { workspace = true }
