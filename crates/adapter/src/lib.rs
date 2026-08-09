@@ -1,0 +1,108 @@
+//! The data adapter contract.
+//!
+//! Implements blueprint 40.17 (Data Adapter Contract) and the ingestion half of section 28
+//! (Biology Data and Standards) — specifically 28.00's "no silent coercion" list and 04.06's
+//! conformance ladder.
+//!
+//! An adapter turns external bytes into local evidence sections in the sense of 43.04. The
+//! hard part is not the turning; it is that the turning always loses something, and a pipeline
+//! that does not say what it lost produces worlds that are confidently, undetectably wrong.
+//! A table of tumour volumes ingested without its units, a variant table ingested without its
+//! reference build, a gene column ingested without the version of the symbol mapping — each
+//! yields facts that parse, validate, compile and answer queries, and each answers them wrong
+//! in a way no downstream check can see, because the evidence needed to notice is exactly the
+//! evidence that was dropped.
+//!
+//! Everything here follows from that.
+//!
+//! - [`Adapter::ingest`] returns an [`Ingestion`], which carries facts *and* a [`SemanticLoss`]
+//!   in one sealed value. There is no way to return the facts alone.
+//! - [`SemanticLoss::Lossless`] and [`SemanticLoss::Unaudited`] are different variants, because
+//!   an empty list of losses conflates "we checked and nothing was dropped" with "nobody
+//!   looked", and the conflation always favours the adapter that did not look.
+//! - [`LossReport`] cannot be empty, so [`SemanticLoss::Lossy`] cannot smuggle the same
+//!   conflation back in through a zero-length vector.
+//! - Every loss entry names a [`SourceLocation`]. A count is not actionable; a locator is.
+//! - [`conformance::certify`] checks determinism and loss completeness against an *independent*
+//!   reading of the source from [`probe`], so an adapter cannot supply both sides of its own
+//!   audit.
+//!
+//! # What is here
+//!
+//! [`TabularAdapter`] reads CSV and TSV under an explicit mapping policy, using the hand-rolled
+//! reader in [`csv`] — there is no CSV crate in this workspace's dependency set, and a
+//! permissive third-party reader would make "what did the source actually say" a question
+//! about someone else's heuristics. [`InventoryAdapter`] walks a directory and produces facts
+//! about files without interpreting their contents.
+//!
+//! # What is not here, and why
+//!
+//! DICOM, NIfTI/BIDS, AnnData/MuData, OME-Zarr, BAM/CRAM and VCF readers are absent by design,
+//! not by omission. They belong to the Python adapter layer of 40.14. Their reference
+//! implementations are the de-facto specification for those formats, and a second Rust reading
+//! of a DICOM header would surface its disagreements as biology rather than as a parser bug.
+//! This crate's job at that boundary is [`InventoryAdapter`]: establish that the bytes exist,
+//! hash them so they stay addressable, and declare every unread byte as
+//! [`LossKind::ContentUninterpreted`] so that the gap is in the record rather than in
+//! somebody's memory.
+//!
+//! Also absent: credentials and fetching. A source arrives here as bytes the caller already
+//! holds. Keeping network authority out of the adapter is what makes it safe to run an
+//! untrusted mapping policy.
+//!
+//! # Example
+//!
+//! ```
+//! use bioprism_adapter::{
+//!     Adapter, ColumnRole, LossKind, Source, TabularAdapter, TabularProfile, VariableMapping,
+//!     ValueType, conformance,
+//! };
+//!
+//! let profile = TabularProfile::new("RG-DEMO-001")
+//!     .scope("subject", "subject")
+//!     .variable(
+//!         "age",
+//!         VariableMapping::new("age_at_diagnosis").typed(ValueType::Integer),
+//!     );
+//!
+//! let source = Source::bytes("cohort", b"subject,age,comment\nS1,41,ok\n".to_vec())
+//!     .with_format("text/csv");
+//! let adapter = TabularAdapter::new(profile);
+//!
+//! let (report, ingestion) = conformance::certify(&adapter, &source).unwrap();
+//! assert!(report.verified());
+//! assert_eq!(ingestion.fact_count(), 1);
+//!
+//! // `comment` has no rule, so it is reported rather than dropped in silence.
+//! assert!(ingestion.loss().kinds().contains(&LossKind::UnmappedColumn));
+//! # let _ = ColumnRole::Provenance;
+//! ```
+
+pub mod adapter;
+pub mod conformance;
+pub mod csv;
+pub mod error;
+pub mod fact;
+pub mod ingestion;
+pub mod inventory;
+pub mod location;
+pub mod loss;
+pub mod probe;
+pub mod source;
+pub mod tabular;
+
+pub use adapter::{Adapter, AdapterManifest, ConformanceLevel};
+pub use conformance::{certify, Check, CheckOutcome, ConformanceReport, Status};
+pub use csv::Table;
+pub use error::{AdapterError, CsvError};
+pub use fact::{FactDraft, ValueQualifiers};
+pub use ingestion::Ingestion;
+pub use inventory::{InventoryAdapter, InventoryProfile};
+pub use location::{LocationSet, SourceLocation};
+pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
+pub use probe::{field_inventory, Inventory};
+pub use source::{Locator, Source, SourceManifest, SourceProvenance};
+pub use tabular::{
+    ColumnRole, FramePolicy, OntologyPolicy, TabularAdapter, TabularProfile, TypePolicy,
+    UnitPolicy, ValueType, VariableMapping,
+};
