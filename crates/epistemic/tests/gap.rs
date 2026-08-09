@@ -1,20 +1,23 @@
-//! Blueprint 43.50: what `fiber-query/0.1` cannot carry, measured against the real parser.
+//! Blueprint 43.50: what `fiber-query/0.2` cannot carry, measured against the real parser.
 
 use bioprism_epistemic::gap::{
-    audit, proposed_query_document, unknown_fields_are_discarded, FieldState,
+    audit, proposed_query_document, unknown_fields_are_refused, FieldState,
     CURRENT_SCHEMA_VERSION, PROPOSED_SCHEMA_VERSION, REQUIRED_FOR_RATE_DISTORTION,
 };
 use serde_json::json;
 
 #[test]
-fn fiber_query_0_1_silently_discards_a_decision_loss_field_rather_than_rejecting_it() {
-    let discarded = unknown_fields_are_discarded().expect("the document parses");
+fn fiber_query_0_2_refuses_a_decision_loss_field_by_name_rather_than_discarding_it() {
+    let refused = unknown_fields_are_refused().expect("the parser refuses rather than erroring");
     assert!(
-        discarded.contains(&"decision_loss".to_string()),
-        "a caller who supplies the loss must be told it was ignored; instead the parse succeeds \
-         and the field is still reported missing. discarded: {discarded:?}"
+        refused.contains(&"decision_loss".to_string()),
+        "0.1 accepted this document and dropped the field, so a caller got no error, no warning          and no effect while missing_contract_fields went on reporting it missing. 0.2 must name          the key it refused. refused: {refused:?}"
     );
-    assert!(discarded.contains(&"permitted_actions".to_string()));
+    assert!(refused.contains(&"permitted_actions".to_string()));
+    assert!(
+        !refused.is_empty(),
+        "an empty refusal would mean the boundary had gone quiet again, which is the defect"
+    );
 }
 
 #[test]
@@ -92,7 +95,7 @@ fn the_audit_distinguishes_absent_from_present_and_discarded() {
     assert!(
         states.iter().any(|s| matches!(
             s,
-            FieldState::PresentAndDiscarded {
+            FieldState::PresentAndRefused {
                 field: "decision_loss"
             }
         )),

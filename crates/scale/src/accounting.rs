@@ -177,18 +177,27 @@ pub struct MillionScaleAccounting {
 
 impl MillionScaleAccounting {
     /// The sentence that must appear next to any "one million instances" claim.
+    ///
+    /// The closing multiple is the whole point of the sentence, so an absent one is stated rather
+    /// than printed as a number: a design that deflated to no classes at all has not delivered the
+    /// information a ×0 would suggest, it has delivered none.
     pub fn headline_sentence(&self) -> String {
+        let multiple = match self.headline.inflation_ratio {
+            Some(ratio) => format!("The headline is ×{ratio:.0} the information the release \
+                                    delivers."),
+            None => "The release deflates to no equivalence classes at all, so the headline stands \
+                     over nothing."
+                .to_string(),
+        };
         format!(
             "{} enumerable descendants → {} equivalence classes → {} executed → ~{:.0} independent \
-             observations at rho={} → {} independent parent worlds. The headline is ×{:.0} the \
-             information the release delivers.",
+             observations at rho={} → {} independent parent worlds. {multiple}",
             self.plan.enumerable_descendants,
             self.enumerable.effective,
             self.plan.release_suite_instances,
             self.headline.effective,
             REFERENCE_RHO,
             self.parent_world_floor,
-            self.headline.inflation_ratio
         )
     }
 }

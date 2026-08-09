@@ -37,6 +37,54 @@ class CompileResult:
     certificate: dict[str, Any]
 
 
+ACCEPTED_QUERY_SCHEMA_VERSIONS = ("fiber-query/0.1", "fiber-query/0.2")
+
+# Every key fiber-query/0.2 declares, as dotted paths, sorted. Must equal
+# bioprism_fiber::QUERY_FIELD_PATHS: if the two languages disagree about which keys exist they
+# disagree about which queries compile, and "the Rust engine emits these bytes exactly" becomes a
+# claim about a smaller set of documents than anyone thinks.
+QUERY_FIELD_PATHS = (
+    "budgets",
+    "budgets.max_facts",
+    "budgets.max_tokens",
+    "decision_time",
+    "distortion_tolerance",
+    "goal",
+    "policy",
+    "protected_tags",
+    "query_id",
+    "role",
+    "schema_version",
+    "targets",
+)
+
+
+def validate_query(query: dict[str, Any]) -> None:
+    """Version, then undeclared keys, then nothing else.
+
+    Through 0.1 this function checked the version and let every other key through. The query
+    document is hashed whole into source_hashes.query_sha256 and thence into the certificate's own
+    digest, so an undeclared key was ignored semantically and honoured cryptographically: it moved
+    a compiled answer's identity without being able to move the answer. 0.2 refuses it.
+
+    A 0.1 label is still read. The published schema has declared additionalProperties: false since
+    0.1, so a document carrying an undeclared key was never a valid 0.1 query -- the readers simply
+    were not enforcing it -- and re-labelling the frozen reference pair would move the very digest
+    three implementations agree on.
+    """
+    if query.get("schema_version") not in ACCEPTED_QUERY_SCHEMA_VERSIONS:
+        raise ValueError("unsupported query schema")
+    undeclared = [k for k in query if k not in QUERY_FIELD_PATHS]
+    budgets = query.get("budgets")
+    if isinstance(budgets, dict):
+        undeclared += [f"budgets.{k}" for k in budgets if f"budgets.{k}" not in QUERY_FIELD_PATHS]
+    if undeclared:
+        raise ValueError(
+            f"query carries undeclared field(s) {sorted(undeclared)}; "
+            f"fiber-query/0.2 declares exactly {list(QUERY_FIELD_PATHS)}"
+        )
+
+
 def validate_world(world: dict[str, Any]) -> None:
     if world.get("schema_version") != "fiber-world/0.1":
         raise ValueError("unsupported world schema")
@@ -203,8 +251,7 @@ def evaluate_oracle(values: dict[str,Any]) -> dict[str,Any]:
 
 def compile_fiber(world: dict[str,Any], query: dict[str,Any]) -> CompileResult:
     validate_world(world)
-    if query.get("schema_version") != "fiber-query/0.1":
-        raise ValueError("unsupported query schema")
+    validate_query(query)
     governing,in_force=resolve_policy(world,query)
     facts_by_var={f["provides"]:f for f in world["facts"]}
     facts_by_id={f["id"]:f for f in world["facts"]}

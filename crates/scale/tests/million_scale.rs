@@ -55,7 +55,7 @@ fn a_million_nominal_items_deliver_three_orders_of_magnitude_fewer_observations(
         accounting.headline.effective, 7_435,
         "100,000 executed instances clustered on 400 parents at rho=0.05"
     );
-    assert!(accounting.headline.inflation_ratio > 160.0);
+    assert!(accounting.headline.inflation_ratio.expect("7,435 classes is a denominator") > 160.0);
     assert_eq!(accounting.parent_world_floor, 400);
     assert_eq!(
         1_200_000 / accounting.parent_world_floor,
@@ -156,7 +156,7 @@ fn a_measured_corpus_agrees_with_the_analytic_class_ceiling() {
         parents * decisions_per_parent * families + parents,
         "the second parameterization of every family adds instances and no classes"
     );
-    assert!((measured.inflation_ratio - 2.0).abs() < 0.01);
+    assert!((measured.inflation_ratio.expect("a non-empty corpus has classes") - 2.0).abs() < 0.01);
 
     let analytic = FactoryPlan {
         parent_worlds: parents,

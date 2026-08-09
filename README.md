@@ -351,7 +351,7 @@ prints them:
 |---|---|
 | Gluing and obstruction tests (43.06) | Requires a declared cover; `fiber-world/0.1` carries none |
 | Abstract interpretation (43.11) | Requires an abstract-domain registry absent from the wire schema |
-| Decision-equivalence quotient (43.10) | Defined relative to permitted actions and decision loss, neither of which `fiber-query/0.1` carries |
+| Decision-equivalence quotient (43.10) | Defined relative to permitted actions and decision loss, neither of which `fiber-query/0.2` carries |
 | Rate-distortion optimisation (43.12) | Optimises against a decision loss the query does not declare |
 
 The backend portfolio of 43.19–43.24 (FAQ/InsideOut, worst-case-optimal joins, tensor networks,

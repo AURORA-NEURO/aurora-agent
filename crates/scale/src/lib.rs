@@ -63,7 +63,10 @@ pub use audit::{AuditReport, Auditor, QualityGate, ReleaseAudit};
 pub use cas::{ComputationKey, Delta, ObjectStore, ReplayCache, Snapshot};
 pub use corpus::{content_digest, Corpus, GeneratedItem, NominalCount};
 pub use cost::{CostForecast, CostModel, FactoryPlan};
-pub use effective::{EffectiveSize, EffectiveSizeReport, RelationQuality, SimilarityRelation};
+pub use effective::{
+    ClusterStability, EffectiveSize, EffectiveSizeReport, RelationQuality, SimilarityRelation,
+    STABILITY_PAIR_LIMIT,
+};
 pub use error::{
     AdaptiveError, AuditError, CacheError, EscrowError, ReleaseError, ScaleError, SplitError,
 };

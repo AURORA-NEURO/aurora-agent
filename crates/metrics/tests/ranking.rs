@@ -5,7 +5,7 @@ mod common;
 use bioprism_atlas::UnmeasuredReason;
 use bioprism_metrics::{
     breakdown, compare, CapabilityGrid, CapabilityVector, DeclaredWeighting, Dominance, GridCell,
-    MetricsError, PartialRanking, RankInstability, SystemId, Unorderable,
+    Instability, MetricsError, PartialRanking, RankInstability, SystemId, Unorderable,
 };
 use common::{cap, grid_of, lower_is_better, point_cell, recorded, unrecorded};
 
@@ -327,7 +327,14 @@ fn rank_instability_names_the_capability_whose_removal_flips_the_leader() {
 
     let instability = RankInstability::measure(&ranking, &weighting).expect("measurable");
     assert_eq!(instability.perturbations, 2);
-    assert!(instability.instability > 0.0);
+    assert_eq!(
+        instability.instability,
+        Instability::Measured {
+            top_changed_in: 1,
+            evaluated: 2
+        }
+    );
+    assert_eq!(instability.instability.fraction(), Some(0.5));
     assert!(instability
         .flipping_capabilities
         .contains(&cap("verify.oracle")));
@@ -349,8 +356,99 @@ fn a_leader_that_wins_on_every_capability_reports_zero_instability() {
 
     let instability = RankInstability::measure(&ranking, &weighting).expect("measurable");
     assert_eq!(instability.top_changed_in, 0);
-    assert_eq!(instability.instability, 0.0);
+    assert_eq!(instability.instability.fraction(), Some(0.0));
     assert!(instability.leader_is_robust());
+}
+
+/// The defect: `perturbations` went into the denominator whether or not it went into the numerator,
+/// so a ranking with nothing to perturb published `0.0` — a leader that survived everything — and
+/// `leader_is_robust()` agreed with it.
+#[test]
+fn nothing_evaluable_is_not_perfect_stability() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.90, 0.90)),
+        system("b", two_cell_grid("b", 0.10, 0.10)),
+    ])
+    .expect("two systems");
+    let single = DeclaredWeighting::declare("verification only", vec![(cap("verify.oracle"), 1.0)])
+        .expect("valid weighting");
+
+    let instability = RankInstability::measure(&ranking, &single).expect("measurable");
+
+    assert_eq!(
+        instability.perturbations, 0,
+        "dropping the only weighted capability leaves nothing to weight"
+    );
+    assert_eq!(
+        instability.instability,
+        Instability::NotPerturbable {
+            weighted_capabilities: 1
+        }
+    );
+    assert_eq!(
+        instability.instability.fraction(),
+        None,
+        "an empty perturbation set has no fraction, and 0.0 claimed it survived all of them"
+    );
+    assert!(
+        !instability.leader_is_robust(),
+        "zero checks cannot establish robustness"
+    );
+}
+
+/// An unevaluable perturbation may not enter a denominator it can never enter the numerator of.
+/// Nothing in this crate produces one today — every perturbation is a subset of a weighting that
+/// already totalised — so the claim is pinned against the type, which is where it has to hold if a
+/// future refusal is ever to reach it.
+#[test]
+fn an_unevaluable_perturbation_stays_out_of_the_denominator() {
+    let partly = Instability::Measured {
+        top_changed_in: 1,
+        evaluated: 2,
+    };
+    assert_eq!(
+        partly.fraction(),
+        Some(0.5),
+        "one flip in two evaluable perturbations is one half, not one third of three attempted"
+    );
+
+    let none = Instability::NothingEvaluable { attempted: 3 };
+    assert_eq!(none.fraction(), None);
+    assert!(!none.is_measured());
+    assert!(none.headline().contains("no evidence either way"));
+}
+
+/// The three states are three JSON shapes. A renderer cannot coerce an absent denominator into a
+/// zero, because there is no number in the document to coerce.
+#[test]
+fn an_instability_without_a_denominator_does_not_serialize_as_a_number() {
+    let measured = serde_json::to_value(Instability::Measured {
+        top_changed_in: 0,
+        evaluated: 4,
+    })
+    .unwrap();
+    let nothing = serde_json::to_value(Instability::NothingEvaluable { attempted: 4 }).unwrap();
+    let none = serde_json::to_value(Instability::NotPerturbable {
+        weighted_capabilities: 1,
+    })
+    .unwrap();
+
+    assert_eq!(measured["instability"], "measured");
+    assert_eq!(nothing["instability"], "nothing_evaluable");
+    assert_eq!(none["instability"], "not_perturbable");
+    for absent in ["top_changed_in", "evaluated"] {
+        assert!(
+            nothing.get(absent).is_none() && none.get(absent).is_none(),
+            "an instability with no denominator must not carry {absent}"
+        );
+    }
+    assert_ne!(measured, nothing);
+    assert_ne!(nothing, none);
+
+    for state in [measured, nothing, none] {
+        let decoded: Instability = serde_json::from_value(state.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), state);
+    }
 }
 
 #[test]

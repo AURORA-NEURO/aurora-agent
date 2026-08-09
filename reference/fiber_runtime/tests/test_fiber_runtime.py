@@ -41,6 +41,50 @@ class FiberRuntimeTests(unittest.TestCase):
         self.assertEqual(cert['certificate_sha256'],'c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4')
 
 
+class QuerySchemaTests(unittest.TestCase):
+    """fiber-query/0.2: an undeclared key is refused here too, or parity is broken by construction.
+
+    The Rust engine and this file must agree about which documents *compile*, not
+    only about the bytes a compile emits. A reference that accepted a key the
+    engine refuses would make "three implementations agree" a claim about a
+    smaller set of documents than anyone reading it would assume. The mirror of
+    these assertions is crates/fiber/tests/unknown_query_keys.rs.
+    """
+    @classmethod
+    def setUpClass(cls):
+        cls.world=json.loads((HERE/'examples/radiogenomic_world.json').read_text())
+        cls.query=json.loads((HERE/'examples/leakage_query.json').read_text())
+
+    def _with(self,**extra):
+        query=dict(self.query);query.update(extra);return query
+
+    def test_a_decision_loss_field_is_refused_by_name(self):
+        with self.assertRaises(ValueError) as raised:
+            compile_fiber(self.world,self._with(decision_loss={'actions':['treat'],'models':['m1'],'loss':[[0.0]]}))
+        self.assertIn('decision_loss',str(raised.exception))
+        self.assertIn('undeclared field',str(raised.exception))
+
+    def test_an_undeclared_key_inside_budgets_is_refused_too(self):
+        query=dict(self.query);query['budgets']=dict(query['budgets'],max_items=3)
+        with self.assertRaises(ValueError) as raised:
+            compile_fiber(self.world,query)
+        self.assertIn('budgets.max_items',str(raised.exception))
+
+    def test_the_frozen_reference_query_keeps_its_0_1_label_and_is_still_read(self):
+        self.assertEqual(self.query['schema_version'],'fiber-query/0.1')
+        cert=compile_fiber(self.world,self.query).certificate
+        self.assertEqual(cert['certificate_sha256'],'c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4')
+
+    def test_relabelling_the_query_would_have_moved_the_parity_anchor(self):
+        cert=compile_fiber(self.world,self._with(schema_version='fiber-query/0.2')).certificate
+        self.assertNotEqual(cert['certificate_sha256'],'c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4')
+
+    def test_a_version_outside_the_accepted_set_is_still_refused(self):
+        with self.assertRaises(ValueError) as raised:
+            compile_fiber(self.world,self._with(schema_version='fiber-query/0.9'))
+        self.assertIn('unsupported query schema',str(raised.exception))
+
+
 class PolicyPassTests(unittest.TestCase):
     """The policy screen, against the same bytes crates/fiber/tests/policy_pass.rs compiles.
 

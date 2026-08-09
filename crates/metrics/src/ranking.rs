@@ -40,11 +40,16 @@
 //!
 //! 33.01 lists "rank instability" and "weight sensitivity" among its primary metrics and defines
 //! neither — as it does for every metric it names. [`RankInstability`] therefore states *a*
-//! definition rather than claiming *the* definition: the fraction of leave-one-capability-out
-//! perturbations of the declared weighting under which the top-ranked system changes, together with
-//! the capabilities responsible. Leave-one-out rather than a random reweighting because there is no
-//! RNG in this crate and a sensitivity number a reader cannot regenerate from the declaration is
-//! not a sensitivity analysis.
+//! definition rather than claiming *the* definition: the fraction of the *evaluable*
+//! leave-one-capability-out perturbations of the declared weighting under which the top-ranked
+//! system changes, together with the capabilities responsible. Leave-one-out rather than a random
+//! reweighting because there is no RNG in this crate and a sensitivity number a reader cannot
+//! regenerate from the declaration is not a sensitivity analysis.
+//!
+//! The word *evaluable* is load-bearing and [`Instability`] is what enforces it. A perturbation
+//! nobody could evaluate is not evidence of stability, and neither is a weighting with nothing to
+//! leave out; both once entered the denominator of a fraction they could never enter the numerator
+//! of, and both are now states rather than a zero.
 //!
 //! # Not implemented
 //!
@@ -504,6 +509,91 @@ impl TotalRanking {
     }
 }
 
+/// How often the leader moved, and over what.
+///
+/// Three states rather than an `f64`, because two of them have no fraction and a fraction is the
+/// only thing an `f64` can say. The defect this replaced put every perturbation in the denominator
+/// and only the evaluable ones in the numerator, so an unevaluable perturbation entered the
+/// published number as a stable one — the exact reading [`RankInstability::unevaluable`]'s own doc
+/// comment forbids — and a weighting with nothing to leave out reported `0.0`, which reads as a
+/// leader that survived everything when nothing was tried.
+///
+/// An `Option<f64>` would fix the arithmetic and stop there: it collapses "attempted, nothing
+/// judged" into "never attempted", which is the distinction `bioprism_atlas::UnmeasuredReason` and
+/// [`crate::gate::GateVerdict`] both exist to keep, and it hands a renderer a nullable number to
+/// coerce. This is tagged, so the two empty cases are different JSON *shapes* from a fraction and
+/// from each other, and it carries the denominator the fraction was taken over. The fraction itself
+/// is not a field: it is derived by [`Instability::fraction`] from counts that are on the wire, so
+/// unlike [`crate::aggregate::CoveredAggregate`] — which re-derives its coverage on the way in —
+/// there is no stored number here that could need revalidating, because there is no way to write
+/// one down that disagrees with its own denominator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "instability", rename_all = "snake_case")]
+pub enum Instability {
+    /// The leader moved in `top_changed_in` of the `evaluated` perturbations that produced an
+    /// order. Unevaluable perturbations are not in `evaluated`.
+    Measured {
+        top_changed_in: usize,
+        evaluated: usize,
+    },
+    /// Perturbations were attempted and none of them produced an order, so there is no denominator.
+    /// Not a fraction of zero: nobody checked.
+    NothingEvaluable { attempted: usize },
+    /// The weighting names one capability, so leave-one-out has no members. Sensitivity to a weight
+    /// that has nothing to trade against is not a question this metric can be asked.
+    NotPerturbable { weighted_capabilities: usize },
+}
+
+impl Instability {
+    /// `top_changed_in / evaluated`, or `None` where there is no denominator.
+    ///
+    /// The two `None` cases are the ones a bare `f64` reported as `0.0`. A caller that wants a
+    /// number for a chart has to decide what to draw for them, which is the point.
+    pub fn fraction(&self) -> Option<f64> {
+        match self {
+            Instability::Measured {
+                top_changed_in,
+                evaluated,
+            } if *evaluated > 0 => Some(*top_changed_in as f64 / *evaluated as f64),
+            _ => None,
+        }
+    }
+
+    /// Whether a fraction exists at all. Read this before believing a zero.
+    pub fn is_measured(&self) -> bool {
+        self.fraction().is_some()
+    }
+
+    /// The sentence a methods section owes its reader.
+    pub fn headline(&self) -> String {
+        match self {
+            Instability::Measured {
+                top_changed_in,
+                evaluated,
+            } => format!(
+                "the leader changed under {top_changed_in} of {evaluated} evaluable \
+                 leave-one-out perturbation(s)"
+            ),
+            Instability::NothingEvaluable { attempted } => format!(
+                "none of the {attempted} leave-one-out perturbation(s) could be evaluated, so this \
+                 ranking carries no evidence either way about its leader"
+            ),
+            Instability::NotPerturbable {
+                weighted_capabilities,
+            } => format!(
+                "the weighting names {weighted_capabilities} capability, so there is no \
+                 leave-one-out perturbation set and no sensitivity to report"
+            ),
+        }
+    }
+}
+
+impl fmt::Display for Instability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.headline())
+    }
+}
+
 /// How much the top of a ranking depends on the exact weights — 33.01's "rank instability" and
 /// "weight sensitivity", given a definition because the blueprint gives none.
 ///
@@ -512,18 +602,22 @@ impl TotalRanking {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RankInstability {
     pub baseline_top: Vec<SystemId>,
-    /// Size of the leave-one-out perturbation set.
+    /// Size of the leave-one-out perturbation set, evaluable or not.
     pub perturbations: usize,
     pub top_changed_in: usize,
-    /// `top_changed_in / perturbations`. Zero means the leader survives dropping any single
-    /// weighted capability; anything above zero means the leader is partly an artifact of the
-    /// weighting.
-    pub instability: f64,
+    /// The fraction and the denominator it was taken over, or the reason there is neither.
+    pub instability: Instability,
     /// The capabilities whose removal changes the leader. The actionable half of the metric.
     pub flipping_capabilities: Vec<CapabilityId>,
     /// Perturbations that could not be evaluated — usually because dropping a capability leaves a
     /// weighting over a capability some system never measured. Reported rather than counted as
     /// stable, because an unevaluable perturbation is not evidence of stability.
+    ///
+    /// No perturbation currently lands here: every one is a *subset* of a weighting that already
+    /// totalised, and the refusals [`PartialRanking::totalise`] can raise are all about a weighted
+    /// capability being absent or unmeasured, which dropping weights cannot cause. The branch is
+    /// kept because that is a property of today's refusals rather than of leave-one-out, and the
+    /// denominator must not silently reabsorb these the day it stops holding.
     pub unevaluable: Vec<CapabilityId>,
 }
 
@@ -554,12 +648,24 @@ impl RankInstability {
             }
         }
 
+        let evaluated = perturbations - unevaluable.len();
+        let instability = if perturbations == 0 {
+            Instability::NotPerturbable {
+                weighted_capabilities: weighting.len(),
+            }
+        } else if evaluated == 0 {
+            Instability::NothingEvaluable {
+                attempted: perturbations,
+            }
+        } else {
+            Instability::Measured {
+                top_changed_in,
+                evaluated,
+            }
+        };
+
         Ok(RankInstability {
-            instability: if perturbations == 0 {
-                0.0
-            } else {
-                top_changed_in as f64 / perturbations as f64
-            },
+            instability,
             baseline_top,
             perturbations,
             top_changed_in,
@@ -571,9 +677,12 @@ impl RankInstability {
     /// Whether the leader survived every perturbation that could be evaluated.
     ///
     /// Deliberately false when any perturbation was unevaluable: "we could not check" is not
-    /// "we checked and it held".
+    /// "we checked and it held". Deliberately false too when nothing was evaluated at all, for the
+    /// same reason [`crate::ranking::PartialRanking`]'s sibling
+    /// `bioprism_prism::ForkResult::is_regression_free` refuses an empty panel — a claim of
+    /// robustness resting on zero checks is the emptiest form of the same lie.
     pub fn leader_is_robust(&self) -> bool {
-        self.top_changed_in == 0 && self.unevaluable.is_empty()
+        self.instability.is_measured() && self.top_changed_in == 0 && self.unevaluable.is_empty()
     }
 }
 

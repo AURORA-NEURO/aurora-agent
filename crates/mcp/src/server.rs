@@ -342,7 +342,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "type": "object",
         "properties": {
             "world": { "type": "string", "description": "Path to a fiber-world/0.1 document or an indexed store directory, relative to the server root." },
-            "query": { "type": "string", "description": "Path to a fiber-query/0.1 document, relative to the server root." }
+            "query": { "type": "string", "description": "Path to a fiber-query/0.2 document, relative to the server root. A document still labelled fiber-query/0.1 is read; one carrying a key the schema does not declare is refused under either label." }
         },
         "required": ["world", "query"]
     });

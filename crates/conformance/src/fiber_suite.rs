@@ -1088,6 +1088,7 @@ fn fiber_failure(error: FiberError) -> CompileFailure {
     let kind = match &error {
         FiberError::UnsupportedQuerySchema { .. } => "unsupported_query_schema",
         FiberError::QueryNotAnObject => "query_not_an_object",
+        FiberError::UnknownQueryFields { .. } => "undeclared_query_field",
         FiberError::MissingQueryField(_) => "missing_query_field",
         FiberError::WrongQueryFieldType { .. } => "wrong_query_field_type",
         FiberError::InvalidIdentifier(_) => "invalid_identifier",

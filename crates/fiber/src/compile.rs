@@ -391,7 +391,7 @@ fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
         ),
         (
             "role_and_purpose_filter",
-            "43.33 binds role and purpose to the query before selection; fiber-query/0.1 carries a role string and no purpose, and no pass reads either",
+            "43.33 binds role and purpose to the query before selection; fiber-query/0.2 carries a role string and no purpose, and no pass reads either",
         ),
         (
             "information_flow_export",
@@ -401,7 +401,7 @@ fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
     if query.missing_contract_fields().contains(&"decision_loss") {
         deferred.push((
             "decision_quotient",
-            "43.10 is defined relative to permitted actions and decision loss, neither of which fiber-query/0.1 carries",
+            "43.10 is defined relative to permitted actions and decision loss, neither of which fiber-query/0.2 carries",
         ));
         deferred.push((
             "rate_distortion",

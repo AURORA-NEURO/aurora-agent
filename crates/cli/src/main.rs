@@ -531,7 +531,11 @@ fn prism_fork(
 
     let mut bundle = ResultBundle::new(cell, fork.clone());
     if with_minimization {
-        bundle = bundle.with_minimization(minimize_world(&world));
+        // A bundle carrying a minimization the oracle refused would attest a reduction that
+        // preserved nothing, so the refusal ends the command rather than riding along in it.
+        let minimization = minimize_world(&world)
+            .map_err(|error| CliError::from_minimize(error).about(world_path.display().to_string()))?;
+        bundle = bundle.with_minimization(minimization);
     }
     let attested = bundle.attest();
 
@@ -664,8 +668,12 @@ fn prism_minimize(world_path: &Path) -> CliResult<Outcome> {
     use bioprism_prism::{minimize_world, preserves};
 
     let world = io::load_world(world_path)?;
-    let result = minimize_world(&world);
-    let verified = preserves(&world, &result);
+    let result = minimize_world(&world)
+        .map_err(|error| CliError::from_minimize(error).about(world_path.display().to_string()))?;
+    // Three re-verification outcomes reach the envelope as three, because `ok: false` on a check
+    // that never ran would report the reduction refuted when nobody judged it.
+    let preservation = preserves(&world, &result);
+    let verified = preservation.is_preserved();
 
     let document = json!({
         "ok": verified,
@@ -676,8 +684,9 @@ fn prism_minimize(world_path: &Path) -> CliResult<Outcome> {
         "preserved_status": result.preserved_status,
         "preserved_witnesses": result.preserved_witnesses,
         "oracle_evaluations": result.evaluations,
+        "unjudged": result.unjudged,
         "guarantee": result.guarantee,
-        "reverified": verified,
+        "reverified": preservation,
     });
 
     let human = format!(
@@ -696,7 +705,7 @@ Next: bioprism prism fork --world {} --query <query.json>
         result.preserved_status,
         result.preserved_witnesses.join(", "),
         result.evaluations,
-        verified,
+        reverification_line(&preservation),
         result.guarantee,
         result.minimal.join("
 "),
@@ -704,6 +713,22 @@ Next: bioprism prism fork --world {} --query <query.json>
     );
 
     Ok(Outcome::ok(document, human).failing_if(!verified))
+}
+
+/// The re-verification sentence, which must not read as a pass or as a refutation when it is
+/// neither.
+fn reverification_line(preservation: &bioprism_prism::Preservation) -> String {
+    use bioprism_prism::Preservation;
+    match preservation {
+        Preservation::Preserved => "yes".to_string(),
+        Preservation::Diverged { status, witnesses } => format!(
+            "no — the minimal set now reads {status} with witnesses [{}]",
+            witnesses.join(", ")
+        ),
+        Preservation::Unverifiable { detail } => {
+            format!("not checked — the oracle refused the minimal set: {detail}")
+        }
+    }
 }
 
 fn context_verify(path: &Path) -> CliResult<Outcome> {

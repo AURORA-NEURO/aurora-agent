@@ -11,14 +11,21 @@
 //! This module is the other half of that sentence. It names the fields, their shapes, and what
 //! each one unblocks, so the gap is a diff rather than a complaint.
 //!
-//! ## The finding that is worse than the gap
+//! ## The finding that was worse than the gap, and is now fixed
 //!
-//! `fiber-query/0.1` **silently discards** a `decision_loss` field. Its parser reads the keys it
-//! knows and ignores the rest, so a caller who writes the field gets no error, no warning, and no
-//! effect — and `missing_contract_fields` still reports the field as missing, correctly, while the
-//! document on disk appears to supply it. A schema that rejected unknown keys would turn this into
-//! a loud failure at the boundary. [`unknown_fields_are_discarded`] demonstrates it against the
-//! real parser, and it is the single cheapest thing to fix in this whole area.
+//! `fiber-query/0.1` **silently discarded** a `decision_loss` field. Its parser read the keys it
+//! knew and ignored the rest, so a caller who wrote the field got no error, no warning and no
+//! effect — while `missing_contract_fields` went on reporting it missing, correctly, against a
+//! document that appeared to supply it. Worse, the query document is hashed whole into the
+//! certificate digest, so the discarded key was ignored *semantically* and honoured
+//! *cryptographically*.
+//!
+//! `fiber-query/0.2` refuses it, naming the offending key and the accepted set.
+//! [`unknown_fields_are_refused`] holds that against the real parser.
+//!
+//! What survives is the plain gap this module is about: 0.2 still declares no `decision_loss`, so a
+//! caller who writes one now gets a loud failure at the boundary instead of silence. That is the
+//! right failure, and it is still not the field.
 //!
 //! ## Why this is a schema bump and not an extension
 //!
@@ -36,7 +43,7 @@ use serde_json::{json, Value};
 ///
 /// This crate does not own the wire format and does not ship this version. The constant exists so
 /// the proposal has a name that a reviewer can accept or reject, rather than being a paragraph.
-pub const PROPOSED_SCHEMA_VERSION: &str = "fiber-query/0.2";
+pub const PROPOSED_SCHEMA_VERSION: &str = "fiber-query/0.3";
 
 /// The version the workspace actually ships, restated so the two can be compared in one place.
 pub const CURRENT_SCHEMA_VERSION: &str = bioprism_fiber::QUERY_SCHEMA_VERSION;
@@ -157,7 +164,7 @@ pub enum FieldState {
     /// The document does not carry the key at all.
     Absent { field: &'static str },
     /// The document carries the key and the compiler ignores it. The dangerous state.
-    PresentAndDiscarded { field: &'static str },
+    PresentAndRefused { field: &'static str },
     /// The document carries the key and `bioprism-fiber` reads it.
     PresentAndRead { field: &'static str },
 }
@@ -180,7 +187,7 @@ pub fn audit(document: &Value) -> Result<Vec<FieldState>, EpistemicError> {
             match (present, read_by_fiber(field.name)) {
                 (false, _) => FieldState::Absent { field: field.name },
                 (true, true) => FieldState::PresentAndRead { field: field.name },
-                (true, false) => FieldState::PresentAndDiscarded { field: field.name },
+                (true, false) => FieldState::PresentAndRefused { field: field.name },
             }
         })
         .collect())
@@ -195,11 +202,13 @@ fn read_by_fiber(field: &str) -> bool {
     matches!(field, "distortion_tolerance")
 }
 
-/// Demonstrates the silent-discard defect against the real parser.
+/// Holds the repaired boundary against the real parser.
 ///
-/// Returns the fields that were written into a valid v0.1 document, accepted without error, and
-/// still reported missing by `bioprism-fiber` afterwards. A non-empty result is the finding.
-pub fn unknown_fields_are_discarded() -> Result<Vec<String>, EpistemicError> {
+/// Writes the proposed decision-contract fields into an otherwise valid document and returns the
+/// keys `bioprism-fiber` named in its refusal. Under 0.1 this function returned the fields that had
+/// been accepted and silently dropped; a non-empty result was the defect. Under 0.2 a non-empty
+/// result is the fix, and an empty one would mean the refusal had stopped naming what it rejected.
+pub fn unknown_fields_are_refused() -> Result<Vec<String>, EpistemicError> {
     let mut document = json!({
         "schema_version": CURRENT_SCHEMA_VERSION,
         "query_id": "q-silent-discard-0001",
@@ -218,19 +227,12 @@ pub fn unknown_fields_are_discarded() -> Result<Vec<String>, EpistemicError> {
         }
     }
 
-    let query =
-        bioprism_fiber::Query::from_json(document.clone()).map_err(|e| {
-            EpistemicError::QueryRejected {
-                schema: CURRENT_SCHEMA_VERSION.to_string(),
-                detail: e.to_string(),
-            }
-        })?;
-
-    let still_missing = query.missing_contract_fields();
-    Ok(REQUIRED_FOR_RATE_DISTORTION
-        .iter()
-        .filter(|field| document.get(field.name).is_some())
-        .filter(|field| still_missing.contains(&field.name))
-        .map(|field| field.name.to_string())
-        .collect())
+    match bioprism_fiber::Query::from_json(document.clone()) {
+        Err(bioprism_fiber::FiberError::UnknownQueryFields { fields, .. }) => Ok(fields),
+        Err(other) => Err(EpistemicError::QueryRejected {
+            schema: CURRENT_SCHEMA_VERSION.to_string(),
+            detail: other.to_string(),
+        }),
+        Ok(_) => Ok(Vec::new()),
+    }
 }

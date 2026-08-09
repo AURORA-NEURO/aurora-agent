@@ -66,7 +66,7 @@ pub fn catalogue() -> Vec<Diagnostic> {
             "3 protected facts were withheld to fit a budget of 12 facts",
             Site::Artifact {
                 node_kind: "query".into(),
-                id: "fiber-query/0.1".into(),
+                id: "fiber-query/0.2".into(),
             },
         )
         .with_discrepancy(Discrepancy::new("15 facts", "12 facts"))

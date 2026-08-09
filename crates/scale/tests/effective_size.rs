@@ -3,8 +3,8 @@
 
 use bioprism_scale::corpus::{content_digest, Corpus, GeneratedItem};
 use bioprism_scale::effective::{
-    cluster_stability, hierarchical_effective_size, EffectiveSize, EffectiveSizeReport,
-    RelationQuality, SimilarityRelation,
+    cluster_stability, hierarchical_effective_size, ClusterStability, EffectiveSize,
+    EffectiveSizeReport, RelationQuality, SimilarityRelation,
 };
 use bioprism_scale::error::ScaleError;
 use serde_json::json;
@@ -73,7 +73,7 @@ fn a_thousand_paraphrases_of_one_parent_are_one_equivalence_class() {
         size.effective, 2,
         "the parent and one class of descendants; a thousand paraphrases add nothing"
     );
-    assert!(size.inflation_ratio > 500.0);
+    assert!(size.inflation_ratio.expect("two classes is a denominator") > 500.0);
     assert!(!EffectiveSize::measure(&corpus, SimilarityRelation::ParentWorld)
         .unwrap()
         .is_publishable_as_a_benchmark());
@@ -87,10 +87,29 @@ fn a_nominal_count_is_never_serialized_without_the_effective_count() {
 
     assert!(encoded.get("nominal").is_some());
     assert!(
-        encoded.get("effective").is_some() && encoded.get("inflation_ratio").is_some(),
+        encoded.get("effective").is_some() && encoded["inflation_ratio"].is_number(),
         "NominalCount has no Serialize impl, so the only route to a published count is this struct"
     );
     assert!(encoded.get("relation").is_some(), "an effective size without its relation is unreadable");
+}
+
+/// An inflation ratio is at least 1 by construction, so the `0.0` an empty corpus used to emit was
+/// not a low inflation but a value the quantity cannot take. The key stays, saying `null`, because
+/// a vanished key and a ratio of zero are both things a reader would have to guess at.
+#[test]
+fn an_empty_corpus_has_no_inflation_ratio_rather_than_a_ratio_of_zero() {
+    let size = EffectiveSize::measure(&Corpus::new(), SimilarityRelation::EquivalenceClass).unwrap();
+
+    assert_eq!(size.nominal, 0);
+    assert_eq!(size.effective, 0);
+    assert_eq!(size.inflation_ratio, None);
+
+    let encoded = serde_json::to_value(&size).unwrap();
+    assert!(
+        encoded["inflation_ratio"].is_null(),
+        "an absent ratio must be visibly absent, not a number outside its own range"
+    );
+    assert!(size.headline().contains("inflation undefined"));
 }
 
 #[test]
@@ -140,7 +159,7 @@ fn independent_parents_have_an_inflation_ratio_of_one() {
     }
     let size = EffectiveSize::measure(&corpus, SimilarityRelation::ParentWorld).unwrap();
     assert_eq!(size.effective, 25);
-    assert_eq!(size.inflation_ratio, 1.0);
+    assert_eq!(size.inflation_ratio, Some(1.0));
     assert_eq!(size.duplicates_collapsed, 0);
 }
 
@@ -195,16 +214,54 @@ fn relation_quality_is_measured_against_labelled_truth() {
 
     let content =
         RelationQuality::evaluate(&corpus, SimilarityRelation::ContentDigest, &truth).unwrap();
-    assert_eq!(content.duplicate_recall, 1.0);
-    assert_eq!(content.false_merge_rate, 0.0);
+    assert!(content.is_measured(), "the labelling holds duplicates and the relation merged pairs");
+    assert_eq!(content.duplicate_recall, Some(1.0));
+    assert_eq!(content.false_merge_rate, Some(0.0));
 
     let parent =
         RelationQuality::evaluate(&corpus, SimilarityRelation::ParentWorld, &truth).unwrap();
-    assert_eq!(parent.duplicate_recall, 1.0);
+    assert_eq!(parent.duplicate_recall, Some(1.0));
     assert!(
-        parent.false_merge_rate > 0.0,
+        parent.false_merge_rate.expect("merging everything merges pairs") > 0.0,
         "merging everything recovers every duplicate and invents many more"
     );
+}
+
+/// A perfect recall and a zero false-merge rate over an empty labelling are the two most
+/// flattering numbers this struct can hold, and neither was a measurement.
+#[test]
+fn a_relation_nobody_could_test_does_not_score_perfectly() {
+    let mut corpus = Corpus::new();
+    for index in 0..4 {
+        corpus
+            .insert(GeneratedItem::parent(
+                format!("p{index}"),
+                format!("d{index}"),
+                format!("digest-{index}"),
+            ))
+            .unwrap();
+    }
+
+    // Every item is its own true class, so there is not one true duplicate pair to recall, and the
+    // content-digest relation merges nothing, so there is not one merged pair to be wrong about.
+    let truth: BTreeMap<String, String> = (0..4)
+        .map(|index| (format!("p{index}"), format!("class-{index}")))
+        .collect();
+
+    let quality =
+        RelationQuality::evaluate(&corpus, SimilarityRelation::ContentDigest, &truth).unwrap();
+
+    assert_eq!(quality.true_duplicate_pairs, 0);
+    assert_eq!(quality.merged_pairs, 0);
+    assert_eq!(
+        quality.duplicate_recall, None,
+        "1.0 said the relation recovered every duplicate it was shown; it was shown none"
+    );
+    assert_eq!(
+        quality.false_merge_rate, None,
+        "0.0 said the relation invented no false merges; it made no merges at all"
+    );
+    assert!(!quality.is_measured());
 }
 
 #[test]
@@ -225,14 +282,75 @@ fn cluster_stability_is_one_when_two_relations_partition_identically() {
         SimilarityRelation::ParentWorld,
     )
     .unwrap();
-    assert_eq!(stability, 1.0);
+    assert_eq!(stability.rand_index(), Some(1.0));
+    assert_eq!(stability, ClusterStability::Measured { agreements: 15, pairs: 15 });
+}
+
+/// The Rand index over zero pairs was 1.0 — two relations reported as agreeing perfectly about a
+/// comparison neither of them was ever asked to make.
+#[test]
+fn nothing_evaluable_is_not_perfect_stability() {
+    let mut corpus = Corpus::new();
+    corpus
+        .insert(GeneratedItem::parent("p0", "d0", "digest-0"))
+        .unwrap();
+
+    let stability = cluster_stability(
+        &corpus,
+        SimilarityRelation::ContentDigest,
+        SimilarityRelation::ParentWorld,
+    )
+    .unwrap();
+
+    assert_eq!(stability, ClusterStability::NoPairs { items: 1 });
+    assert_eq!(stability.rand_index(), None);
+    assert!(!stability.is_measured());
+
+    let report = EffectiveSizeReport::measure(&corpus).unwrap();
+    assert!(
+        !report.cluster_stability.is_measured(),
+        "a one-item corpus cannot demonstrate that two relations mean the same thing"
+    );
+
+    let encoded = serde_json::to_value(stability).unwrap();
+    assert_eq!(encoded["cluster_stability"], "no_pairs");
+    assert!(
+        encoded.get("agreements").is_none() && encoded.get("pairs").is_none(),
+        "a stability with no pairs must carry no counts for a renderer to divide"
+    );
+}
+
+/// Too few pairs to compare and too many to enumerate are different findings, and the older
+/// `Option<f64>` answered both with `None`.
+#[test]
+fn a_corpus_too_small_to_have_pairs_is_not_a_corpus_too_large_to_enumerate() {
+    let mut empty = Corpus::new();
+    empty
+        .insert(GeneratedItem::parent("p0", "d0", "digest-0"))
+        .unwrap();
+    let small = EffectiveSizeReport::measure(&empty).unwrap();
+
+    assert!(matches!(
+        small.cluster_stability,
+        ClusterStability::NoPairs { items: 1 }
+    ));
+    assert_ne!(
+        small.cluster_stability,
+        ClusterStability::NotEnumerated {
+            items: 1,
+            limit: bioprism_scale::STABILITY_PAIR_LIMIT
+        }
+    );
 }
 
 #[test]
 fn cluster_stability_falls_when_relations_disagree() {
     let corpus = paraphrase_corpus(20);
     let report = EffectiveSizeReport::measure(&corpus).unwrap();
-    let stability = report.cluster_stability.expect("small corpus is measurable");
+    let stability = report
+        .cluster_stability
+        .rand_index()
+        .expect("small corpus is measurable");
     assert!(
         stability < 1.0,
         "content digest separates the paraphrases that the class relation merges"

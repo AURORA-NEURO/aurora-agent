@@ -277,6 +277,7 @@ fn observe_refusal(error: &FiberError) -> RefusalObservation {
         }
         FiberError::UnsupportedQuerySchema { .. }
         | FiberError::QueryNotAnObject
+        | FiberError::UnknownQueryFields { .. }
         | FiberError::MissingQueryField(_)
         | FiberError::WrongQueryFieldType { .. }
         | FiberError::InvalidIdentifier(_)

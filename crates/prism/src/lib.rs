@@ -20,4 +20,7 @@ pub use cell::{Acceptance, DecisionCell, InputRef, CELL_SCHEMA_VERSION};
 pub use fork::{
     matched_fork, render_table, Arm, ArmFailure, ForkResult, NotAttemptedReason, Trial,
 };
-pub use minimize::{minimize, minimize_world, preserves, Minimization};
+pub use minimize::{
+    minimize, minimize_world, preserves, MinimizeError, Minimization, Preservation,
+    UnjudgedRemoval,
+};

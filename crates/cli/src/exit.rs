@@ -38,6 +38,7 @@
 
 use bioprism_fiber::{FiberError, PolicyViolation};
 use bioprism_mutation::MutationError;
+use bioprism_prism::MinimizeError;
 use bioprism_store::StoreError;
 use std::fmt;
 
@@ -258,10 +259,15 @@ impl CliError {
     /// order two split groups are three different conversations with the caller. The classification
     /// is written here, against the error type, rather than at each call site, so that a new
     /// variant fails to compile until somebody decides which code it belongs under.
+    ///
+    /// `UnknownQueryFields` is `invalid_input` and not `compile_failed`: nothing was compiled, and
+    /// re-sending the identical command cannot succeed. The operator has to edit the document,
+    /// which is the same conversation as a missing field, one key over.
     pub fn from_compile(error: FiberError) -> Self {
         let code = match &error {
             FiberError::UnsupportedQuerySchema { .. }
             | FiberError::QueryNotAnObject
+            | FiberError::UnknownQueryFields { .. }
             | FiberError::MissingQueryField(_)
             | FiberError::WrongQueryFieldType { .. }
             | FiberError::InvalidIdentifier(_)
@@ -313,6 +319,22 @@ impl CliError {
             }
             MutationError::NotAddressable { .. } => CliError::internal(message),
         }
+    }
+
+    /// Routes a minimization failure to the code carrying its 40.36 class.
+    ///
+    /// [`MinimizeError`] has one variant and it is an oracle that declined to judge the candidate,
+    /// which lands where [`FiberError::UnorderableSplitGroups`] lands: the binary ran correctly and
+    /// the evidence does not decide. Not `compile_failed` — nothing failed to compile — and not
+    /// `invalid_input`, which would tell an operator their world was malformed when the world is
+    /// exactly as supplied and the oracle simply cannot order what it holds. Written against the
+    /// error type rather than at the call site so a second variant fails to compile until somebody
+    /// decides which code it belongs under.
+    pub fn from_minimize(error: MinimizeError) -> Self {
+        let code = match &error {
+            MinimizeError::OracleRefusedCandidate { .. } => ExitCode::Indeterminate,
+        };
+        CliError::new(code, error.to_string())
     }
 
     /// The failure as the `--json` envelope publishes it.

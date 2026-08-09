@@ -3,8 +3,8 @@
 use bioprism_fiber::Query;
 use bioprism_prism::{
     matched_fork, minimize, minimize_world, preserves, render_table, Acceptance, Architecture,
-    Arm, ArmFailure, Attestation, DecisionCell, ForkResult, InputRef, NotAttemptedReason,
-    ResultBundle, StrategySpec,
+    Arm, ArmFailure, Attestation, DecisionCell, ForkResult, InputRef, MinimizeError, Minimization,
+    NotAttemptedReason, Preservation, ResultBundle, StrategySpec, UnjudgedRemoval,
 };
 use bioprism_section::OracleStatus;
 use bioprism_world::World;
@@ -317,7 +317,7 @@ fn minimization_reduces_the_world_and_preserves_the_signature() {
     let (world_json, _) = reference();
     let world = World::from_json(world_json).unwrap();
 
-    let result = minimize_world(&world);
+    let result = minimize_world(&world).expect("the oracle judges the reference world");
 
     assert_eq!(result.started_from, 761);
     assert!(
@@ -328,7 +328,11 @@ fn minimization_reduces_the_world_and_preserves_the_signature() {
     assert_eq!(result.preserved_status, "invalid");
     assert_eq!(result.preserved_witnesses.len(), 4);
     assert!(result.reduction_ratio() < 0.03);
-    assert!(preserves(&world, &result), "minimal set must re-verify");
+    assert!(
+        preserves(&world, &result).is_preserved(),
+        "minimal set must re-verify"
+    );
+    assert!(result.is_fully_judged(), "every removal reached a verdict");
     assert!(result.guarantee.contains("1-minimal"));
     assert!(result.guarantee.contains("Not globally minimal"));
 }
@@ -337,13 +341,13 @@ fn minimization_reduces_the_world_and_preserves_the_signature() {
 fn every_fact_in_the_minimal_set_is_load_bearing() {
     let (world_json, _) = reference();
     let world = World::from_json(world_json).unwrap();
-    let result = minimize_world(&world);
+    let result = minimize_world(&world).expect("the oracle judges the reference world");
 
     let minimal: BTreeSet<String> = result.minimal.iter().cloned().collect();
     for id in &minimal {
         let mut without = minimal.clone();
         without.remove(id);
-        let again = minimize(&world, &without);
+        let again = minimize(&world, &without).expect("the oracle judges every subset here");
         assert_ne!(
             (again.preserved_status.as_str(), again.preserved_witnesses.len()),
             ("invalid", 4),
@@ -356,7 +360,118 @@ fn every_fact_in_the_minimal_set_is_load_bearing() {
 fn minimization_is_deterministic() {
     let (world_json, _) = reference();
     let world = World::from_json(world_json).unwrap();
-    assert_eq!(minimize_world(&world).minimal, minimize_world(&world).minimal);
+    assert_eq!(
+        minimize_world(&world).expect("judged").minimal,
+        minimize_world(&world).expect("judged").minimal
+    );
+}
+
+/// The defect this replaced: the refusal became `OracleVerdict::abstain`, that abstention became
+/// the target, and every removal then matched it — so the minimizer reduced the world towards
+/// nothing while reporting an "underdetermined" verdict the oracle never returned.
+#[test]
+fn a_candidate_the_oracle_refused_is_not_minimized_into_a_preserved_abstention() {
+    let (world_json, _) = unjudgeable();
+    let world = World::from_json(world_json).unwrap();
+
+    match minimize_world(&world) {
+        Err(MinimizeError::OracleRefusedCandidate { facts, detail }) => {
+            assert_eq!(facts, 761, "the size of the candidate is still reported");
+            assert!(
+                detail.contains("ALT-77"),
+                "the oracle's own refusal must survive: {detail}"
+            );
+        }
+        Ok(result) => panic!(
+            "a refused candidate produced a minimization preserving {:?} over {} fact(s)",
+            result.preserved_status,
+            result.minimal.len()
+        ),
+    }
+}
+
+/// The distinction the fix exists for, at the one place it is observable.
+///
+/// A minimization that preserves a genuine `underdetermined` verdict and one that could not judge
+/// a removal are different documents: the first names a status the oracle returned and holds an
+/// empty `unjudged` list, the second names the fact nobody could rule out and narrows its own
+/// guarantee. Nothing about the first can be read as the second.
+#[test]
+fn a_step_whose_oracle_refused_is_not_reported_as_an_abstention() {
+    let abstained = Minimization {
+        started_from: 2,
+        minimal: vec!["fact.a".into()],
+        removed: 1,
+        preserved_status: "underdetermined".into(),
+        preserved_witnesses: vec![],
+        evaluations: 3,
+        unjudged: vec![],
+        guarantee: "1-minimal".into(),
+    };
+    let refused = Minimization {
+        unjudged: vec![UnjudgedRemoval {
+            fact: "fact.a".into(),
+            detail: "the oracle cannot order the groups sharing alias ALT-77".into(),
+        }],
+        ..abstained.clone()
+    };
+
+    assert!(abstained.is_fully_judged());
+    assert!(!refused.is_fully_judged());
+    assert_eq!(refused.unjudged_facts().collect::<Vec<_>>(), vec!["fact.a"]);
+
+    let abstained_json = serde_json::to_value(&abstained).unwrap();
+    let refused_json = serde_json::to_value(&refused).unwrap();
+    assert_ne!(
+        abstained_json, refused_json,
+        "a refusal and an abstention must not serialize to the same document"
+    );
+    assert!(refused_json["unjudged"][0]["detail"]
+        .as_str()
+        .unwrap()
+        .contains("ALT-77"));
+    assert_eq!(
+        serde_json::from_value::<Minimization>(refused_json).unwrap(),
+        refused,
+        "the distinction must round-trip"
+    );
+}
+
+/// An absent `unjudged` list would deserialize as an empty one, which reads as "every removal was
+/// judged" — the optimistic default the whole fix is about. The field carries no serde default, so
+/// a document that does not say cannot be read as a document that said no.
+#[test]
+fn a_minimization_that_omits_its_unjudged_list_does_not_deserialize() {
+    let (world_json, _) = reference();
+    let world = World::from_json(world_json).unwrap();
+    let result = minimize_world(&world).expect("judged");
+
+    let mut document = serde_json::to_value(&result).unwrap();
+    assert!(document["unjudged"].is_array());
+    document.as_object_mut().unwrap().remove("unjudged");
+
+    assert!(serde_json::from_value::<Minimization>(document).is_err());
+}
+
+/// `preserves` re-runs the oracle, and that re-run can fail to happen. Reporting `false` would say
+/// the reduction had been checked and found wanting; it was never checked.
+#[test]
+fn a_minimal_set_the_oracle_refuses_is_unverified_rather_than_refuted() {
+    let (reference_json, _) = reference();
+    let (refusing_json, _) = unjudgeable();
+    let judged = World::from_json(reference_json).unwrap();
+    let refusing = World::from_json(refusing_json).unwrap();
+
+    let result = minimize_world(&judged).expect("judged");
+    assert!(preserves(&judged, &result).is_preserved());
+
+    match preserves(&refusing, &result) {
+        Preservation::Unverifiable { detail } => assert!(
+            detail.contains("ALT-77"),
+            "the refusal itself must reach the caller: {detail}"
+        ),
+        other => panic!("an oracle that refused must not read as a divergence, got {other:?}"),
+    }
 }
 
 #[test]
@@ -367,7 +482,8 @@ fn a_bundle_attests_itself_and_detects_tampering() {
     let query = Query::from_json(query_json).unwrap();
 
     let fork = matched_fork(&cell, &world, &query, &Architecture::default_panel());
-    let bundle = ResultBundle::new(cell, fork).with_minimization(minimize_world(&world));
+    let bundle =
+        ResultBundle::new(cell, fork).with_minimization(minimize_world(&world).expect("judged"));
 
     let attested = bundle.attest();
     assert!(ResultBundle::verify(&attested).is_valid());

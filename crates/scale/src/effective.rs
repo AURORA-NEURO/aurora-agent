@@ -26,6 +26,26 @@
 //! relation's duplicate recall and false merge rate before trusting its effective-size number. An
 //! unmeasured similarity relation would be a licence to report whatever effective size flatters the
 //! release.
+//!
+//! ## Every quotient here can have no denominator, and none of them defaults to a flattering
+//! constant
+//!
+//! Four of the numbers below are ratios, and each once answered an empty denominator with the value
+//! that reads best: cluster stability said the two relations agreed *perfectly* about zero pairs,
+//! duplicate recall said a relation recovered *every* duplicate of the zero it was shown, false
+//! merge rate said it invented *none*, and an inflation ratio that is at least 1 by construction
+//! emitted `0.0` for a corpus with no classes. Every one of those is the same defect this crate
+//! exists to prevent, one layer down from the instance count: a quantity nobody measured, wearing
+//! the appearance of a measurement that went well.
+//!
+//! They are now absences. [`ClusterStability`] has three states because it has three answers — a
+//! measurement, too few items to have pairs, and too many to enumerate — and collapsing "nothing to
+//! compare" into "refused to approximate" would have been the same mistake again; it carries the
+//! agreement counts and derives the index from them, so no document can state a Rand index its own
+//! numbers contradict. The other three have two answers each and are `Option`, kept on the wire
+//! rather than derived because each sits inside an object whose whole contract is that the
+//! flattering number never travels without the honest one beside it — `null` says the denominator
+//! was empty, and a renderer that draws it as zero is visibly wrong rather than quietly so.
 
 use crate::corpus::Corpus;
 use crate::error::ScaleError;
@@ -131,7 +151,11 @@ pub struct EffectiveSize {
     pub effective: usize,
     /// `nominal / effective`. 1.0 means every instance is independent; 134.0 means the headline
     /// number is 134 times larger than the information it carries.
-    pub inflation_ratio: f64,
+    ///
+    /// `None` when there are no classes to divide by. The quantity is at least 1 by construction,
+    /// so the `0.0` this used to emit was not a small inflation but an out-of-range value that no
+    /// enumeration can produce — and `effective` is right here, saying why there is no ratio.
+    pub inflation_ratio: Option<f64>,
     /// Instances removed by merging. `nominal - effective`.
     pub duplicates_collapsed: usize,
     /// Size of the biggest class. A single class holding most of the corpus is the usual shape of
@@ -201,13 +225,16 @@ impl EffectiveSize {
 
     /// The sentence a report leads with.
     pub fn headline(&self) -> String {
+        let inflation = match self.inflation_ratio {
+            Some(ratio) => format!("inflation ×{ratio:.2}"),
+            None => "inflation undefined: no classes to divide by".to_string(),
+        };
         format!(
             "{} nominal instances collapse to {} independent classes under the {} relation \
-             (inflation ×{:.2}, parent concentration {:.2}). Instance count is not benchmark count.",
+             ({inflation}, parent concentration {:.2}). Instance count is not benchmark count.",
             self.nominal,
             self.effective,
             self.relation.as_str(),
-            self.inflation_ratio,
             self.parent_concentration
         )
     }
@@ -221,21 +248,60 @@ impl EffectiveSize {
     }
 }
 
+/// Cluster stability, or the reason there is none.
+///
+/// 35.10 lists cluster stability as a metric without defining it; the measurement here is the Rand
+/// index between two exact relations — the fraction of item pairs they classify identically,
+/// together or apart.
+///
+/// Three states, because the two ways of having no index are not the same finding and must not be
+/// answered by the same value. Above [`STABILITY_PAIR_LIMIT`] the index exists and this crate
+/// declines to approximate it; below two items it does not exist at all, and the `1.0` that case
+/// used to return said two relations agreed perfectly about a comparison neither of them made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "cluster_stability", rename_all = "snake_case")]
+pub enum ClusterStability {
+    /// The two relations classified `agreements` of `pairs` item pairs identically.
+    ///
+    /// Counts rather than the quotient, so [`ClusterStability::rand_index`] is the only way to a
+    /// number and no document can carry an index its own counts contradict.
+    Measured { agreements: usize, pairs: usize },
+    /// Fewer than two items, so there are no pairs for two relations to agree or disagree about.
+    NoPairs { items: usize },
+    /// More items than [`STABILITY_PAIR_LIMIT`]. Refused rather than sampled: a sampled stability
+    /// with no stated sampling error is worse than no stability.
+    NotEnumerated { items: usize, limit: usize },
+}
+
+impl ClusterStability {
+    /// `agreements / pairs`, or `None` where there are no pairs.
+    pub fn rand_index(&self) -> Option<f64> {
+        match self {
+            ClusterStability::Measured { agreements, pairs } if *pairs > 0 => {
+                Some(*agreements as f64 / *pairs as f64)
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether an index exists. Read this before believing a perfect agreement.
+    pub fn is_measured(&self) -> bool {
+        self.rand_index().is_some()
+    }
+}
+
 /// All three relations measured over one corpus, so no single flattering number stands alone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectiveSizeReport {
     pub by_relation: Vec<EffectiveSize>,
-    /// Cluster stability: the fraction of item pairs that content-digest and equivalence-class
-    /// agree about, together or apart. 35.10 lists cluster stability as a metric without defining
-    /// it; this is the Rand index between the two exact relations. `None` when the corpus is too
-    /// large to enumerate pairs, which this deliberately refuses to approximate.
-    pub cluster_stability: Option<f64>,
+    /// How far content-digest and equivalence-class agree about which items are the same, or why
+    /// they were not compared.
+    pub cluster_stability: ClusterStability,
 }
 
 /// Pair enumeration is quadratic, so stability is computed only below this size and reported as
-/// `None` above it rather than sampled. A sampled stability with no stated sampling error is worse
-/// than no stability.
-const STABILITY_PAIR_LIMIT: usize = 2_000;
+/// [`ClusterStability::NotEnumerated`] above it rather than sampled.
+pub const STABILITY_PAIR_LIMIT: usize = 2_000;
 
 impl EffectiveSizeReport {
     pub fn measure(corpus: &Corpus) -> Result<Self, ScaleError> {
@@ -243,18 +309,21 @@ impl EffectiveSizeReport {
         for relation in SimilarityRelation::ALL {
             by_relation.push(EffectiveSize::measure(corpus, relation)?);
         }
-        let cluster_stability = if corpus.len() <= STABILITY_PAIR_LIMIT {
-            Some(cluster_stability(
+        let stability = if corpus.len() <= STABILITY_PAIR_LIMIT {
+            cluster_stability(
                 corpus,
                 SimilarityRelation::ContentDigest,
                 SimilarityRelation::EquivalenceClass,
-            )?)
+            )?
         } else {
-            None
+            ClusterStability::NotEnumerated {
+                items: corpus.len(),
+                limit: STABILITY_PAIR_LIMIT,
+            }
         };
         Ok(EffectiveSizeReport {
             by_relation,
-            cluster_stability,
+            cluster_stability: stability,
         })
     }
 
@@ -277,12 +346,14 @@ impl EffectiveSizeReport {
 
 /// Rand index between two relations: the fraction of item pairs they classify identically.
 ///
-/// Quadratic in corpus size, so callers above a few thousand items should partition first.
+/// Quadratic in corpus size, so callers above a few thousand items should partition first. Returns
+/// [`ClusterStability::NoPairs`] rather than a perfect agreement when there is nothing to agree
+/// about; a corpus of one item does not demonstrate that two relations mean the same thing.
 pub fn cluster_stability(
     corpus: &Corpus,
     left: SimilarityRelation,
     right: SimilarityRelation,
-) -> Result<f64, ScaleError> {
+) -> Result<ClusterStability, ScaleError> {
     let ids: Vec<&str> = corpus.iter().map(|item| item.id.as_str()).collect();
     let left_keys = ids
         .iter()
@@ -304,9 +375,9 @@ pub fn cluster_stability(
         }
     }
     Ok(if pairs == 0 {
-        1.0
+        ClusterStability::NoPairs { items: ids.len() }
     } else {
-        agreements as f64 / pairs as f64
+        ClusterStability::Measured { agreements, pairs }
     })
 }
 
@@ -320,9 +391,17 @@ pub fn cluster_stability(
 pub struct RelationQuality {
     pub relation: SimilarityRelation,
     /// True duplicate pairs the relation merged, over all true duplicate pairs.
-    pub duplicate_recall: f64,
+    ///
+    /// `None` when `true_duplicate_pairs` is zero: a labelling with no duplicates in it cannot
+    /// establish that a relation recovers duplicates, and the `1.0` this used to report said the
+    /// relation had recovered every one of them.
+    pub duplicate_recall: Option<f64>,
     /// Merged pairs that were not true duplicates, over all merged pairs.
-    pub false_merge_rate: f64,
+    ///
+    /// `None` when `merged_pairs` is zero. A relation that merged nothing has invented no false
+    /// merges, but it has not been shown not to invent any either, and `0.0` is how a relation
+    /// nobody exercised passes a false-merge gate.
+    pub false_merge_rate: Option<f64>,
     pub true_duplicate_pairs: usize,
     pub merged_pairs: usize,
 }
@@ -367,28 +446,29 @@ impl RelationQuality {
 
         Ok(RelationQuality {
             relation,
-            duplicate_recall: if true_pairs == 0 {
-                1.0
-            } else {
-                recalled as f64 / true_pairs as f64
-            },
-            false_merge_rate: if merged_pairs == 0 {
-                0.0
-            } else {
-                false_merges as f64 / merged_pairs as f64
-            },
+            duplicate_recall: (true_pairs > 0).then(|| recalled as f64 / true_pairs as f64),
+            false_merge_rate: (merged_pairs > 0)
+                .then(|| false_merges as f64 / merged_pairs as f64),
             true_duplicate_pairs: true_pairs,
             merged_pairs,
         })
     }
+
+    /// Whether this evaluation measured both halves of the relation's quality.
+    ///
+    /// A caller deciding whether to trust a relation's effective-size number needs this before it
+    /// needs either rate: an evaluation reporting perfect recall and no false merges over an empty
+    /// labelling has established nothing about the relation, and it is the shape that most looks
+    /// like it has.
+    pub fn is_measured(&self) -> bool {
+        self.duplicate_recall.is_some() && self.false_merge_rate.is_some()
+    }
 }
 
-fn ratio(nominal: usize, effective: usize) -> f64 {
-    if effective == 0 {
-        0.0
-    } else {
-        nominal as f64 / effective as f64
-    }
+/// `None` where there are no classes to divide by, rather than a ratio outside the range the
+/// quantity can take.
+fn ratio(nominal: usize, effective: usize) -> Option<f64> {
+    (effective > 0).then(|| nominal as f64 / effective as f64)
 }
 
 /// Hierarchical effective sample size under intra-parent correlation.

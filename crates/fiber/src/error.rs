@@ -9,11 +9,40 @@ use thiserror::Error;
 /// that cannot be compiled within budget.
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum FiberError {
-    #[error("unsupported query schema: expected {expected:?}, got {actual:?}")]
-    UnsupportedQuerySchema { expected: &'static str, actual: String },
+    /// The document declares a version outside the accepted set.
+    ///
+    /// `expected` is a list rather than a single string because `fiber-query/0.2` changed only
+    /// what a reader does with an undeclared key, so a 0.1 document whose keys are all declared is
+    /// byte-for-byte a valid 0.2 document and is still read. Naming one version here would tell a
+    /// caller holding a valid 0.1 query that it had to be rewritten.
+    #[error("unsupported query schema: expected one of {expected:?}, got {actual:?}")]
+    UnsupportedQuerySchema {
+        expected: &'static [&'static str],
+        actual: String,
+    },
 
     #[error("query is not a JSON object")]
     QueryNotAnObject,
+
+    /// The query carried a key the wire format does not declare (`fiber-query/0.2`).
+    ///
+    /// Refusing is not pedantry about spelling. Until 0.2 the parser read the keys it knew and
+    /// dropped the rest, and the whole query document is hashed into `source_hashes.query_sha256`
+    /// and thence into the certificate's own digest — so an undeclared key was ignored
+    /// *semantically* and honoured *cryptographically*. Two compiles that selected identical
+    /// facts, made identical omissions and delivered a byte-identical Decision Section carried
+    /// different certificate digests. A caller who believed they had supplied a decision loss got
+    /// no signal that nothing read it, and the artifact's identity moved for a change that
+    /// provably could not affect the answer.
+    ///
+    /// Every offending path is reported, sorted, rather than the first one found: serde_json runs
+    /// with `preserve_order`, so document order is not a stable thing to report, and a caller
+    /// fixing a generator wants the whole list rather than one round trip per key.
+    #[error("query carries undeclared field(s) {fields:?}; fiber-query/0.2 declares exactly {accepted:?}")]
+    UnknownQueryFields {
+        fields: Vec<String>,
+        accepted: &'static [&'static str],
+    },
 
     #[error("missing required query field {0:?}")]
     MissingQueryField(&'static str),

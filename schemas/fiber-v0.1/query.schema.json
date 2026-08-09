@@ -1,7 +1,9 @@
 {
-  "$id": "https://auroraneuro.org/schemas/fiber-query-v0.1.json",
+  "$comment": "This file lives in the fiber-v0.1 bundle directory and describes fiber-query/0.2. The directory names the bundle of schemas shipped alongside the reference fixture set, not a version they all share: fiber-world/0.1 and fiber-context-certificate/0.1 have not moved, and renaming the directory would claim they had. No document declares the bundle name and nothing hashes it.",
+  "$id": "https://auroraneuro.org/schemas/fiber-query-v0.2.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "fiber-query/0.2 differs from 0.1 in exactly one way: a reader refuses a document carrying a key declared nowhere here, rather than dropping it. No field was added, removed or retyped. This file already declared `additionalProperties: false` at 0.1 — the shipped readers were not enforcing it, and 0.2 is that enforcement, so no document that was ever valid under this schema is invalidated. `goal` is newly listed: the compiler has always read it and this schema omitted it, which is the same drift `bioprism-governance` found and repaired on the certificate.",
   "properties": {
     "budgets": {
       "additionalProperties": false,
@@ -27,6 +29,10 @@
       "minimum": 0,
       "type": "number"
     },
+    "goal": {
+      "description": "The decision the section is assembled for, echoed verbatim into the Decision Section. Absent, the compiler substitutes its reference goal string so that sections stay byte-comparable with the CPython reference, which hard-codes one. The reference does not read this key; a query that supplies it compiles to different bytes in the two implementations, which is a defect in the reference recorded at `bioprism_fiber::REFERENCE_GOAL` and older than this version.",
+      "type": "string"
+    },
     "policy": {
       "description": "Policy clauses the caller accepts as obligations, and therefore the grants this compile holds. Must be a subset of the clause list the world's `data_policy` fact declares, where the world declares one; a clause outside it is a policy conflict and the compile refuses. Facts whose `policy` scope names a clause absent from this list are withheld.",
       "items": {
@@ -44,11 +50,15 @@
       "type": "string"
     },
     "role": {
-      "description": "Caller role. Carried by the contract and read by no compiler pass in v0.1; role and visibility filtering is not implemented.",
+      "description": "Caller role. Carried by the contract and read by no compiler pass; role and visibility filtering is not implemented.",
       "type": "string"
     },
     "schema_version": {
-      "const": "fiber-query/0.1"
+      "description": "Both labels are read. 0.2 changed only what a reader does with an undeclared key, so a 0.1 document whose keys are all declared here is byte-for-byte a valid 0.2 document. Re-labelling one would move its `query_sha256` and therefore the digest of every certificate compiled from it — including the frozen reference pair three implementations agree on.",
+      "enum": [
+        "fiber-query/0.1",
+        "fiber-query/0.2"
+      ]
     },
     "targets": {
       "items": {

@@ -138,7 +138,7 @@ pub use interval::{
 };
 pub use ranking::{
     breakdown, compare, compare_under, CapabilityBreakdown, CapabilityVector,
-    CollapsedIncomparability, Dominance, PairRelation, PartialRanking, RankInstability,
+    CollapsedIncomparability, Dominance, Instability, PairRelation, PartialRanking, RankInstability,
     RankedSystem, SystemId, TotalRanking, Unorderable,
 };
 pub use weighting::{DeclaredWeighting, DeclaredWeightingFields};

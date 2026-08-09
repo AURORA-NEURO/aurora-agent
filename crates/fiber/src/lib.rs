@@ -18,7 +18,7 @@
 //!
 //! What this engine does *not* do is as important as what it does. It performs no gluing or
 //! obstruction analysis, no abstract interpretation, no decision-equivalence quotienting and no
-//! rate-distortion optimisation, because `fiber-world/0.1` and `fiber-query/0.1` do not carry the
+//! rate-distortion optimisation, because `fiber-world/0.1` and `fiber-query/0.2` do not carry the
 //! cover, abstract domains, permitted actions or decision loss those passes are defined against.
 //! Every compile reports the gap in [`CompileTrace::deferred_passes`] and on the certificate's
 //! `limitations`.
@@ -40,6 +40,9 @@ pub mod temporal;
 pub use compile::{compile, CompileOutput, CompileTrace, PassReceipt};
 pub use error::FiberError;
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
-pub use qir::{Budgets, Query, QUERY_SCHEMA_VERSION, REFERENCE_GOAL};
+pub use qir::{
+    Budgets, Query, ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_FIELD_PATHS, QUERY_SCHEMA_VERSION,
+    REFERENCE_GOAL,
+};
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};
