@@ -1,0 +1,19 @@
+[package]
+name = "bioprism-oracle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Oracle mesh: provider SDK, the deterministic-to-judge evidence ladder, set-valued combination and disagreement adjudication"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-world = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-worldgen = { workspace = true }
