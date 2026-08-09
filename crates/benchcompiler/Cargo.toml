@@ -1,0 +1,13 @@
+[package]
+name = "bioprism-benchcompiler"
+version = "0.1.0"
+edition = "2021"
+description = "Benchmark compiler: trajectory to decision cell, first causal divergence, minimization, oracle synthesis"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-prism = { workspace = true }
+bioprism-trace = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
