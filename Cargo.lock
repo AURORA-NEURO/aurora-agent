@@ -602,6 +602,7 @@ dependencies = [
  "bioprism-scope",
  "bioprism-stress",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 

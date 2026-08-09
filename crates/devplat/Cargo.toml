@@ -1,0 +1,13 @@
+[package]
+name = "bioprism-devplat"
+version = "0.1.0"
+edition = "2021"
+description = "Developer platform remainder and reference examples: which of them are artifacts this repository can hold, and predicates over the ones that are"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-devx = { workspace = true }
+bioprism-cookbook = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
