@@ -74,8 +74,19 @@ fn collect(directory: &Path, found: &mut BTreeSet<String>) {
     }
 }
 
-/// Find `NN.MM` tokens, requiring a non-digit on each side so that `1.05` inside a float or a
-/// version string does not register as a citation.
+/// Find `NN.MM` tokens, in the sense `tools/coverage.sh` means by
+/// `grep -E '\b(0[1-9]|[1-4][0-9])\.[0-9]{2}\b'`.
+///
+/// A word boundary is the only thing guarding either side, and a full stop is not a word character.
+/// So the script counts `04.04` inside `1.04.04`, and this scanner has to as well.
+///
+/// The first version of this function treated a preceding full stop as blocking, on the reasoning
+/// that a three-part version string is obviously not a citation. That reasoning is about what a
+/// human means, and the coverage number is not computed by a human: a version-shaped string in this
+/// crate's source would have passed this audit and still moved the figure. `crates/residue`
+/// documents the same divergence and resolves it the same way — mirror the tool, because it is the
+/// tool that moves the number. Teaching this audit an exception the script lacks makes it weaker
+/// than the check it imitates, which is the one thing an audit may not be.
 fn scan(text: &str) -> Vec<String> {
     let bytes: Vec<char> = text.chars().collect();
     let mut out = Vec::new();
@@ -89,9 +100,9 @@ fn scan(text: &str) -> Vec<String> {
         if !shaped {
             continue;
         }
-        let before_ok = start == 0 || !is_token_char(bytes[start - 1]);
+        let before_ok = start == 0 || !is_word_char(bytes[start - 1]);
         let after = bytes.get(start + 5).copied();
-        let after_ok = after.is_none_or(|c| !is_token_char(c));
+        let after_ok = after.is_none_or(|c| !is_word_char(c));
         if before_ok && after_ok {
             out.push(window.iter().collect());
         }
@@ -99,8 +110,9 @@ fn scan(text: &str) -> Vec<String> {
     out
 }
 
-fn is_token_char(c: char) -> bool {
-    c.is_ascii_digit() || c == '.'
+/// What `\b` in the coverage script's regex counts as a word character.
+fn is_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
 #[test]
