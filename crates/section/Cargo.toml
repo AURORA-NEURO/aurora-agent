@@ -1,0 +1,14 @@
+[package]
+name = "bioprism-section"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Decision Section IR and Context Certificate: the model-facing context ABI and its omission receipt"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
