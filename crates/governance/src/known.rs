@@ -16,16 +16,20 @@
 //! that merely passed through an older reader), and `certificate_sha256` is the only field with
 //! [`DigestRole::Excluded`].
 //!
-//! # A discrepancy worth naming
+//! # A discrepancy this crate found, and the repair
 //!
-//! The published `schemas/fiber-v0.1/context_certificate.schema.json` declares ten properties. The
-//! Rust and CPython implementations emit twelve: `source_hashes` and `limitations` appear in the
-//! body, are hashed, and are absent from the published schema. The schema sets
-//! `additionalProperties: true`, so nothing is *invalid* — but a reader built from the published
-//! schema alone would treat two hashed fields as unknown, and under any mode but
-//! preserve-and-forward would then compute a different digest. The descriptor below follows the
-//! emitting code, and [`tests::the_published_json_schema_is_a_subset_of_what_the_code_emits`]
-//! records the gap rather than papering over it.
+//! The published `schemas/fiber-v0.1/context_certificate.schema.json` declared ten properties while
+//! the Rust and CPython implementations both emitted twelve: `source_hashes` and `limitations`
+//! appeared in the body and were hashed, but were absent from the published schema. The schema sets
+//! `additionalProperties: true`, so no document was ever *invalid* — the danger was subtler. A
+//! reader built from the published schema alone would have treated two hashed fields as unknown,
+//! and under any mode but preserve-and-forward would then have computed a different digest.
+//!
+//! The schema now describes what the code emits, which is a documentation repair rather than a wire
+//! change: no emitted byte moved and no digest moved, so `fiber-context-certificate/0.1` is
+//! unbumped and correctly so. [`tests::the_published_json_schema_describes_every_field_the_code_emits`]
+//! is the standing guard, and it is an equality rather than a subset check — a field added to the
+//! emitting code without reaching the schema fails it.
 
 use crate::descriptor::{FieldSpec, FieldType, SchemaDescriptor};
 use crate::mode::CompatibilityMode;
@@ -315,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn the_published_json_schema_is_a_subset_of_what_the_code_emits() {
+    fn the_published_json_schema_describes_every_field_the_code_emits() {
         const PUBLISHED: &str =
             include_str!("../../../schemas/fiber-v0.1/context_certificate.schema.json");
         let published: Value = serde_json::from_str(PUBLISHED).expect("the published schema parses");
@@ -339,11 +343,11 @@ mod tests {
             .into_iter()
             .filter(|path| !required.contains(path))
             .collect();
-        assert_eq!(
-            undocumented,
-            ["source_hashes", "limitations"],
-            "these two are emitted and hashed but absent from the published v0.1 schema; a reader \
-             built from that schema alone would treat two hashed fields as unknown"
+        assert!(
+            undocumented.is_empty(),
+            "{undocumented:?} are emitted and hashed but absent from the published v0.1 schema; a \
+             reader built from that schema alone would treat them as unknown fields and, under any \
+             mode but preserve-and-forward, compute a different digest"
         );
     }
 

@@ -7,6 +7,12 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "omissions": {
       "type": "object"
     },
@@ -40,6 +46,29 @@
       },
       "type": "array"
     },
+    "source_hashes": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_section_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "query_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "world_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "world_sha256",
+        "query_sha256",
+        "decision_section_sha256"
+      ],
+      "type": "object"
+    },
     "world_id": {
       "type": "string"
     }
@@ -54,6 +83,8 @@
     "omissions",
     "plan",
     "oracle",
+    "source_hashes",
+    "limitations",
     "certificate_sha256"
   ],
   "title": "AURORA FIBER Context Certificate",
