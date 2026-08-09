@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-hubapi"
+version = "0.1.0"
+edition = "2021"
+description = "Registry and hub surface: discovery, resolution, mirroring, offline operation and trust propagation"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-registry = { workspace = true }
+bioprism-hub = { workspace = true }
+bioprism-governance = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
