@@ -1,7 +1,7 @@
 //! The crate's spine: an unscored dimension is not a zero-scored one (26.17).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use bioprism_bioevalx::error::PlaneError;
 use bioprism_bioevalx::plane::{
@@ -165,28 +165,94 @@ fn recording_that_the_evaluator_broke_keeps_the_dimension_out_of_the_fold() {
     assert!(plane.fold(FoldPolicy::ExcludeInapplicable).is_err());
 }
 
-#[test]
-fn no_source_file_in_this_crate_imputes_a_missing_score() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+/// The three ways a missing score has historically become a zero, as text.
+///
+/// "Unmeasured is not zero" is a rule about code that no type in this crate can carry, because the
+/// offending expression never constructs a [`Score`] — it produces an `f64` that a later step then
+/// treats as one. So it is checked over the source, which makes the check only as good as its
+/// ability to fire. See `the_imputation_scanner_sees_a_planted_violation`.
+fn imputations(file: &str, text: &str) -> Vec<String> {
     let mut offenders = Vec::new();
-    for entry in fs::read_dir(&src).expect("src is readable") {
-        let path = entry.expect("directory entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+    for (number, line) in text.lines().enumerate() {
+        let code = line.trim_start();
+        if code.starts_with("//") {
             continue;
         }
-        let text = fs::read_to_string(&path).expect("source is readable");
-        for (number, line) in text.lines().enumerate() {
-            let code = line.trim_start();
-            if code.starts_with("//") {
-                continue;
-            }
-            for pattern in ["unwrap_or(0.", "unwrap_or_default()", "or_zero"] {
-                if code.contains(pattern) {
-                    offenders.push(format!("{}:{}: {pattern}", path.display(), number + 1));
-                }
+        for pattern in ["unwrap_or(0.", "unwrap_or_default()", "or_zero"] {
+            if code.contains(pattern) {
+                offenders.push(format!("{file}:{}: {pattern}", number + 1));
             }
         }
     }
+    offenders
+}
+
+/// Every `.rs` file under `src`, at any depth.
+///
+/// `read_dir` alone was what this used, and it reads one level. The crate is flat today, so the two
+/// agree today; the day someone adds `src/plane/` the flat version starts reporting a clean bill of
+/// health for files it never opened, and nothing announces that it has stopped checking anything.
+fn source_files() -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    collect_rust_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut found);
+    found.sort();
+    found
+}
+
+fn collect_rust_files(directory: &Path, found: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(directory).expect("directory is readable") {
+        let path = entry.expect("directory entry").path();
+        if path.is_dir() {
+            collect_rust_files(&path, found);
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            found.push(path);
+        }
+    }
+}
+
+#[test]
+fn the_imputation_scanner_sees_a_planted_violation() {
+    // A scanner that detects nothing is worse than no scanner: it certifies the crate clean
+    // forever, including after the rule stops being true.
+    assert_eq!(
+        imputations("plane.rs", "        let value = cell.score().unwrap_or(0.0);").len(),
+        1
+    );
+    assert_eq!(
+        imputations("fold.rs", "    let total: f64 = measured.unwrap_or_default();").len(),
+        1
+    );
+    assert_eq!(
+        imputations("plane.rs", "    fn score_or_zero(&self) -> f64 {").len(),
+        1
+    );
+    assert!(
+        imputations("plane.rs", "    let name = label.unwrap_or(\"unnamed\");").is_empty(),
+        "a defaulted string is not an imputed score"
+    );
+    assert!(
+        imputations("plane.rs", "// never unwrap_or_default() a measurement").is_empty(),
+        "prose about the rule is not a breach of it"
+    );
+}
+
+#[test]
+fn no_source_file_in_this_crate_imputes_a_missing_score() {
+    let files = source_files();
+    assert!(
+        files.len() > 1,
+        "the walk found {} source files; an empty walk and a clean crate look identical from here",
+        files.len()
+    );
+    let offenders: Vec<String> = files
+        .iter()
+        .flat_map(|path| {
+            let text = fs::read_to_string(path).expect("source is readable");
+            imputations(&path.display().to_string(), &text)
+        })
+        .collect();
     assert!(
         offenders.is_empty(),
         "imputation of a missing score has entered the crate: {offenders:?}"

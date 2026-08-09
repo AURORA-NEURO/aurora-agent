@@ -228,6 +228,27 @@ fn an_undeclared_axis_never_contradicts_a_declared_one() {
     assert!(bulk.check_consistent_with(&silent).is_ok());
 }
 
+/// Whether a recorded caller-supplied constant has had a value written into its name.
+///
+/// The entries are supposed to name a quantity section 28 leaves open — "minimum reads per cell" —
+/// not to fix it. A digit anywhere in the string is this crate deciding a number the blueprint
+/// declined to decide, and then recording the decision as if it were a gap.
+fn names_a_number(constant: &str) -> bool {
+    constant.chars().any(|c| c.is_ascii_digit())
+}
+
+#[test]
+fn the_invented_number_predicate_sees_a_planted_violation() {
+    // `crates/oraclex` states the principle: a scanner that detects nothing is worse than no
+    // scanner, because the passing test is what stops anyone from looking again. The check below
+    // runs over a list that is entirely clean, so on its own it cannot distinguish "no constant
+    // names a number" from "the predicate never returns true".
+    assert!(names_a_number("minimum 500 reads per cell"));
+    assert!(names_a_number("a doublet rate of 0.08"));
+    assert!(!names_a_number("minimum reads per cell"));
+    assert!(!names_a_number("acceptable doublet rate"));
+}
+
 #[test]
 fn the_constants_section_28_does_not_supply_are_recorded_rather_than_invented() {
     let recorded: Vec<String> = catalog::all()
@@ -239,12 +260,14 @@ fn the_constants_section_28_does_not_supply_are_recorded_rather_than_invented() 
         "only {} caller-supplied constants are recorded; section 28 leaves more open than that",
         recorded.len()
     );
-    for constant in &recorded {
-        assert!(
-            !constant.chars().any(|c| c.is_ascii_digit()),
-            "{constant:?} contains a number, which would be this crate inventing a threshold"
-        );
-    }
+    let offenders: Vec<&String> = recorded
+        .iter()
+        .filter(|constant| names_a_number(constant))
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "these record a number rather than name the quantity it would fill: {offenders:?}"
+    );
 }
 
 #[test]

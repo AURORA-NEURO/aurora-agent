@@ -171,6 +171,12 @@ pub const BLUEPRINT_SECTION: &str = "23_AGENT_INTERWEAVE_FABRIC";
 /// Every id here is backed by a module above. No id appears anywhere in this crate that is not in
 /// this list or already owned by a sibling, which is the discipline that keeps a coverage
 /// percentage from moving without capability moving with it.
+///
+/// That sentence used to be an assurance. `tests/citations.rs` is the mechanism behind it: it
+/// reproduces `tools/coverage.sh`'s token rule over this crate's own tree, re-derives ownership by
+/// reading every other file the script reads, and fails on any id this crate would be the only
+/// place for. It matters here more than most — this crate names forty-one distinct §23 ids for nine
+/// implemented modules, the widest gap between citation and capability in the workspace.
 pub const IMPLEMENTED_MODULES: [&str; 9] = [
     "23.24", "23.25", "23.27", "23.28", "23.29", "23.31", "23.33", "23.39", "23.47",
 ];

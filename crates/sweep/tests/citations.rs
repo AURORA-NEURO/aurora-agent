@@ -164,9 +164,62 @@ fn the_implemented_set_is_the_fourteen_backlog_modules_minus_the_two_declined() 
 }
 
 #[test]
-fn the_scanner_does_not_mistake_a_version_or_a_float_for_a_citation() {
+fn the_scanner_reproduces_the_coverage_scripts_token_rule() {
     assert_eq!(scan("blueprint 04.04 says"), vec!["04.04".to_string()]);
-    assert!(scan("version 1.04.04").is_empty());
-    assert!(scan("0.04.05").is_empty());
     assert_eq!(scan("(13.11)"), vec!["13.11".to_string()]);
+    assert!(
+        scan("v04.040").is_empty(),
+        "a digit on the right kills the word boundary, so the script finds nothing here"
+    );
+    assert!(
+        scan("104.04").is_empty(),
+        "a digit on the left kills the word boundary too"
+    );
+}
+
+#[test]
+fn a_dotted_version_string_does_count_because_the_coverage_script_counts_it() {
+    // Verified against the tool rather than against a reading of the regex: `\b` sits between the
+    // full stop and the first digit, so `grep -E '\b(0[1-9]|[1-4][0-9])\.[0-9]{2}\b'` reports
+    // `04.04` for the input below. An earlier version of this test asserted the opposite and was
+    // the reason a version-shaped string could have moved the coverage figure while passing here.
+    assert_eq!(scan("version 1.04.04"), vec!["04.04".to_string()]);
+    assert_eq!(scan("0.04.05"), vec!["04.05".to_string()]);
+}
+
+#[test]
+fn the_scanner_sees_a_planted_violation() {
+    // A scanner that detects nothing is worse than no scanner: it certifies the crate clean
+    // forever, including after the rule stops being true. The planted id is assembled from digits
+    // rather than written out, because `tools/coverage.sh` greps this file too and spelling an
+    // out-of-scope id here would be the very defect the audit exists to prevent.
+    let planted = format!("{:02}.{:02}", 44, 21);
+    let allowed: BTreeSet<String> = IMPLEMENTED
+        .iter()
+        .chain(CROSS_REFERENCES.iter())
+        .map(|s| s.to_string())
+        .collect();
+    assert!(!allowed.contains(&planted));
+
+    let found = scan(&format!("as {planted} describes"));
+    assert_eq!(found, vec![planted.clone()]);
+    let cited: BTreeSet<String> = found.into_iter().collect();
+    assert_eq!(
+        cited.difference(&allowed).collect::<Vec<_>>(),
+        vec![&planted],
+        "the difference the crate-level test takes must report the planted id"
+    );
+}
+
+#[test]
+fn the_scan_read_the_crate_rather_than_finding_an_empty_tree() {
+    // An empty tree and a clean crate produce the same verdict from
+    // `every_id_this_crate_cites_is_either_implemented_here_or_owned_by_a_named_sibling`, and only
+    // one of them is good news.
+    let cited = cited_ids();
+    assert!(
+        cited.len() >= IMPLEMENTED.len(),
+        "the walk found only {} ids, which is fewer than this crate implements",
+        cited.len()
+    );
 }
