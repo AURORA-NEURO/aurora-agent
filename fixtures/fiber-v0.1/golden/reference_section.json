@@ -1,0 +1,375 @@
+{
+  "decision_time": "2025-01-01T00:00:00Z",
+  "goal": "Determine whether the proposed radiogenomic split supports a valid external-generalization analysis.",
+  "oracle": {
+    "oracle_kind": "deterministic_split_integrity_v1",
+    "status": "invalid",
+    "witnesses": [
+      {
+        "alias": "ALT-77",
+        "splits": [
+          "test",
+          "train"
+        ],
+        "subjects": [
+          "S001",
+          "S003"
+        ],
+        "type": "identity_leakage"
+      },
+      {
+        "site_by_split": {
+          "test": [
+            "B"
+          ],
+          "train": [
+            "A"
+          ]
+        },
+        "type": "site_leakage"
+      },
+      {
+        "decision_time": "2025-01-01",
+        "future_label_sources": {
+          "S003": "2025-06-01"
+        },
+        "type": "temporal_leakage"
+      },
+      {
+        "detail": "preprocessing fit used all subjects before split",
+        "type": "preprocessing_leakage"
+      }
+    ]
+  },
+  "query_id": "audit-split-integrity-v1",
+  "refinement_frontier": [],
+  "schema_version": "fiber-decision-section/0.1",
+  "selected_evidence": [
+    {
+      "id": "fact.cohort",
+      "provenance": [
+        "manifest/cohort.json"
+      ],
+      "provides": "cohort_id",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "identity"
+      ],
+      "value": "RG-DEMO-001"
+    },
+    {
+      "id": "fact.decision_cut",
+      "provenance": [
+        "run/config.json"
+      ],
+      "provides": "training_decision_time",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "time",
+        "protected"
+      ],
+      "value": "2025-01-01"
+    },
+    {
+      "id": "fact.label_source",
+      "provenance": [
+        "labels/lineage.json"
+      ],
+      "provides": "label_source_time",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "time",
+        "label_lineage",
+        "protected"
+      ],
+      "value": {
+        "S001": "2024-01-01",
+        "S002": "2024-02-01",
+        "S003": "2025-06-01",
+        "S004": "2024-02-15"
+      }
+    },
+    {
+      "id": "fact.negative_duplicates",
+      "provenance": [
+        "qc/duplicate_screen.txt"
+      ],
+      "provides": "declared_duplicate_screen",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "negative_evidence",
+        "identity",
+        "protected"
+      ],
+      "value": "passed_by_filename_only"
+    },
+    {
+      "id": "fact.policy",
+      "provenance": [
+        "governance/policy.json"
+      ],
+      "provides": "data_policy",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "policy",
+        "protected"
+      ],
+      "value": [
+        "research-only",
+        "no-identifiable-export"
+      ]
+    },
+    {
+      "id": "fact.preprocess_fit",
+      "provenance": [
+        "pipeline/preprocess.yaml"
+      ],
+      "provides": "preprocess_fit_scope",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "preprocessing",
+        "protected"
+      ],
+      "value": "all_subjects_before_split"
+    },
+    {
+      "id": "fact.scanner",
+      "provenance": [
+        "imaging/dicom_manifest.csv"
+      ],
+      "provides": "scanner_assignment",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "site",
+        "scanner"
+      ],
+      "value": {
+        "S001": "X1",
+        "S002": "X1",
+        "S003": "Y9",
+        "S004": "Y9"
+      }
+    },
+    {
+      "id": "fact.site",
+      "provenance": [
+        "manifest/site.csv"
+      ],
+      "provides": "site_assignment",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "site",
+        "protected"
+      ],
+      "value": {
+        "S001": "A",
+        "S002": "A",
+        "S003": "B",
+        "S004": "B"
+      }
+    },
+    {
+      "id": "fact.specimen_dates",
+      "provenance": [
+        "specimens/manifest.csv"
+      ],
+      "provides": "specimen_dates",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "specimen",
+        "time",
+        "protected"
+      ],
+      "value": {
+        "S001": "2023-12-01",
+        "S002": "2024-01-15",
+        "S003": "2025-05-20",
+        "S004": "2024-01-20"
+      }
+    },
+    {
+      "id": "fact.split",
+      "provenance": [
+        "analysis/split.json"
+      ],
+      "provides": "split_assignment",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "split",
+        "protected"
+      ],
+      "value": {
+        "S001": "train",
+        "S002": "train",
+        "S003": "test",
+        "S004": "test"
+      }
+    },
+    {
+      "id": "fact.subject_aliases",
+      "provenance": [
+        "manifest/subjects.csv"
+      ],
+      "provides": "subject_aliases",
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "identity",
+        "protected"
+      ],
+      "value": {
+        "S001": [
+          "S001",
+          "ALT-77"
+        ],
+        "S002": [
+          "S002"
+        ],
+        "S003": [
+          "S003",
+          "ALT-77"
+        ]
+      }
+    }
+  ],
+  "selected_factors": [
+    {
+      "cost": 0.2,
+      "id": "factor.claim_support",
+      "inputs": [
+        "identity_leakage",
+        "site_leakage",
+        "temporal_leakage",
+        "preprocessing_leakage",
+        "policy_validity"
+      ],
+      "kind": "decision_rule",
+      "outputs": [
+        "split_integrity_status"
+      ],
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "target"
+      ]
+    },
+    {
+      "cost": 1.0,
+      "id": "factor.identity_check",
+      "inputs": [
+        "cohort_id",
+        "subject_aliases",
+        "split_assignment",
+        "declared_duplicate_screen"
+      ],
+      "kind": "deterministic_rule",
+      "outputs": [
+        "identity_leakage"
+      ],
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "protected"
+      ]
+    },
+    {
+      "cost": 0.2,
+      "id": "factor.policy_check",
+      "inputs": [
+        "data_policy"
+      ],
+      "kind": "deterministic_rule",
+      "outputs": [
+        "policy_validity"
+      ],
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "protected"
+      ]
+    },
+    {
+      "cost": 1.0,
+      "id": "factor.preprocessing_check",
+      "inputs": [
+        "preprocess_fit_scope",
+        "split_assignment"
+      ],
+      "kind": "deterministic_rule",
+      "outputs": [
+        "preprocessing_leakage"
+      ],
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "protected"
+      ]
+    },
+    {
+      "cost": 1.0,
+      "id": "factor.site_check",
+      "inputs": [
+        "site_assignment",
+        "scanner_assignment",
+        "split_assignment"
+      ],
+      "kind": "deterministic_rule",
+      "outputs": [
+        "site_leakage"
+      ],
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "protected"
+      ]
+    },
+    {
+      "cost": 1.0,
+      "id": "factor.temporal_check",
+      "inputs": [
+        "label_source_time",
+        "training_decision_time",
+        "specimen_dates",
+        "split_assignment"
+      ],
+      "kind": "deterministic_rule",
+      "outputs": [
+        "temporal_leakage"
+      ],
+      "scope": {
+        "cohort": "RG-DEMO-001"
+      },
+      "tags": [
+        "protected"
+      ]
+    }
+  ],
+  "unresolved_obligations": [],
+  "world_id": "radiogenomic-integrity-demo-v1"
+}

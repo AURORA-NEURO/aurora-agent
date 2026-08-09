@@ -1,0 +1,103 @@
+{
+  "certificate_sha256": "c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4",
+  "limitations": [
+    "Reference slicer uses dependency reachability and protected tags; it does not yet implement sheaf cohomology, FAQ-width optimization, abstract interpretation, or formal influence bounds."
+  ],
+  "omissions": {
+    "classification": "no_backward_dependency_path_or_temporally_inaccessible",
+    "exploratory_facts": 750,
+    "inaccessible_selected_before_cut": [],
+    "total_facts": 750
+  },
+  "oracle": {
+    "oracle_kind": "deterministic_split_integrity_v1",
+    "status": "invalid",
+    "witnesses": [
+      {
+        "alias": "ALT-77",
+        "splits": [
+          "test",
+          "train"
+        ],
+        "subjects": [
+          "S001",
+          "S003"
+        ],
+        "type": "identity_leakage"
+      },
+      {
+        "site_by_split": {
+          "test": [
+            "B"
+          ],
+          "train": [
+            "A"
+          ]
+        },
+        "type": "site_leakage"
+      },
+      {
+        "decision_time": "2025-01-01",
+        "future_label_sources": {
+          "S003": "2025-06-01"
+        },
+        "type": "temporal_leakage"
+      },
+      {
+        "detail": "preprocessing fit used all subjects before split",
+        "type": "preprocessing_leakage"
+      }
+    ]
+  },
+  "plan": {
+    "backend": "backward_factor_slice_reference",
+    "compiled_fact_count": 11,
+    "compiled_factor_count": 6,
+    "fallback": null,
+    "max_selected_factor_arity": 5,
+    "total_fact_count": 761,
+    "total_factor_count": 756
+  },
+  "protected_closure": [
+    "fact.cohort",
+    "fact.decision_cut",
+    "fact.label_source",
+    "fact.negative_duplicates",
+    "fact.policy",
+    "fact.preprocess_fit",
+    "fact.scanner",
+    "fact.site",
+    "fact.specimen_dates",
+    "fact.split",
+    "fact.subject_aliases"
+  ],
+  "query_id": "audit-split-integrity-v1",
+  "schema_version": "fiber-context-certificate/0.1",
+  "selected_factors": [
+    "factor.claim_support",
+    "factor.identity_check",
+    "factor.policy_check",
+    "factor.preprocessing_check",
+    "factor.site_check",
+    "factor.temporal_check"
+  ],
+  "selected_facts": [
+    "fact.cohort",
+    "fact.decision_cut",
+    "fact.label_source",
+    "fact.negative_duplicates",
+    "fact.policy",
+    "fact.preprocess_fit",
+    "fact.scanner",
+    "fact.site",
+    "fact.specimen_dates",
+    "fact.split",
+    "fact.subject_aliases"
+  ],
+  "source_hashes": {
+    "decision_section_sha256": "7439b2262c52c1c794b59be86d922b723a2ea5646362d529f57fb11b5f7e93ce",
+    "query_sha256": "d06368c62dd878f483d30ebfd56f38426b1234d37e46ca77d4536db81f59c684",
+    "world_sha256": "b3809731cf93040fcd8aef43deb2a552492064b49154e07ea58caa724c10cbb5"
+  },
+  "world_id": "radiogenomic-integrity-demo-v1"
+}

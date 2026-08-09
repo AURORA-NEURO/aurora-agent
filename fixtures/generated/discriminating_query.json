@@ -1,0 +1,29 @@
+{
+  "schema_version": "fiber-query/0.1",
+  "query_id": "generated-discriminating-v1-split-integrity",
+  "targets": [
+    "split_integrity_status"
+  ],
+  "protected_tags": [
+    "identity",
+    "split",
+    "site",
+    "scanner",
+    "time",
+    "specimen",
+    "preprocessing",
+    "policy",
+    "negative_evidence",
+    "protected"
+  ],
+  "decision_time": "2025-01-01T00:00:00Z",
+  "budgets": {
+    "max_facts": 64,
+    "max_tokens": 6000
+  },
+  "role": "research-auditor",
+  "policy": [
+    "research-only"
+  ],
+  "distortion_tolerance": 0.0
+}
