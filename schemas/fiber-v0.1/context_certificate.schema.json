@@ -1,0 +1,61 @@
+{
+  "$id": "https://auroraneuro.org/schemas/fiber-context-certificate-v0.1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "certificate_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "omissions": {
+      "type": "object"
+    },
+    "oracle": {
+      "type": "object"
+    },
+    "plan": {
+      "type": "object"
+    },
+    "protected_closure": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "query_id": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "fiber-context-certificate/0.1"
+    },
+    "selected_factors": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "selected_facts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "world_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "world_id",
+    "query_id",
+    "selected_facts",
+    "selected_factors",
+    "protected_closure",
+    "omissions",
+    "plan",
+    "oracle",
+    "certificate_sha256"
+  ],
+  "title": "AURORA FIBER Context Certificate",
+  "type": "object"
+}

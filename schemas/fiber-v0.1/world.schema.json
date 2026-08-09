@@ -1,0 +1,144 @@
+{
+  "$id": "https://auroraneuro.org/schemas/fiber-world-v0.1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "events": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "availability_time": {
+            "type": "string"
+          },
+          "causal_parents": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "event_time": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "produces": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "event_time",
+          "availability_time"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "factors": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "cost": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "outputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "type": "object"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "inputs",
+          "outputs",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "facts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "provenance": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provides": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "object"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "value": {}
+        },
+        "required": [
+          "id",
+          "provides",
+          "value",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "fiber-world/0.1"
+    },
+    "world_id": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "world_id",
+    "facts",
+    "factors",
+    "events"
+  ],
+  "title": "AURORA FIBER World",
+  "type": "object"
+}

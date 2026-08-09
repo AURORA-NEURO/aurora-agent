@@ -1,0 +1,69 @@
+{
+  "$id": "https://auroraneuro.org/schemas/fiber-query-v0.1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "budgets": {
+      "additionalProperties": false,
+      "properties": {
+        "max_facts": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_tokens": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_facts"
+      ],
+      "type": "object"
+    },
+    "decision_time": {
+      "type": "string"
+    },
+    "distortion_tolerance": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "policy": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "protected_tags": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "query_id": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "fiber-query/0.1"
+    },
+    "targets": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "query_id",
+    "targets",
+    "protected_tags",
+    "decision_time",
+    "budgets"
+  ],
+  "title": "AURORA FIBER Query",
+  "type": "object"
+}
