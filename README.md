@@ -50,7 +50,10 @@ verdict would have crowned the strategy that violated the mandatory closure and 
 This does not show FIBER wins generally: the discriminating world was built to expose these modes,
 just as the reference world was built to expose hub expansion. Both are single points, the full
 sweep is not done, and an embedding retriever and a *directed* dependency walk are still missing
-from the panel. Full analysis: [docs/FINDINGS.md](docs/FINDINGS.md).
+from the panel. Full analysis: [docs/FINDINGS.md](docs/FINDINGS.md). How much of the blueprint the
+workspace actually covers, and which sections have nothing standing in for them:
+[docs/COVERAGE.md](docs/COVERAGE.md). The crate layout and the blueprint path:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Status
 
@@ -308,7 +311,7 @@ crates/           the workspace, bottom of the dependency DAG first
   weave/          the multi-agent microkernel                    (ids, section)
   mutation/       metamorphic instance generation                (fiber, section, world)
   cli/            the bioprism binary                            (all)
-docs/             FINDINGS.md and the generated baseline comparison
+docs/             ARCHITECTURE, FINDINGS, COVERAGE, the ADRs, and generated comparisons
 fixtures/         golden worlds, queries and reference artifacts
 reference/        the CPython reference runtime, vendored as the parity oracle
 schemas/          fiber-world / fiber-query / fiber-context-certificate JSON Schemas

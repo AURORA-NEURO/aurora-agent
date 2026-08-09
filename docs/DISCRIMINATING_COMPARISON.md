@@ -1,4 +1,4 @@
-# Equal-engineering context comparison
+# Equal-engineering context comparison: generated-discriminating-v1
 
 world `generated-discriminating-v1`, query `generated-discriminating-v1-split-integrity`, 762 facts total
 

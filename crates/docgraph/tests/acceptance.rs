@@ -711,8 +711,12 @@ fn a_route_whose_budget_cannot_be_met_is_found_before_an_agent_asks_for_the_bund
 }
 
 #[test]
-fn the_repository_fixture_reports_the_two_docs_that_share_one_heading() {
-    let report = lint(&repository_doc_graph(), &[]);
+fn two_documents_sharing_one_heading_are_reported_with_both_named() {
+    let mut graph = DocGraph::new();
+    graph.insert_node(spec("a.md", "Equal-engineering comparison")).unwrap();
+    graph.insert_node(spec("b.md", "Equal-engineering comparison")).unwrap();
+    graph.insert_edge(DocEdge::new(id("a.md"), id("b.md"), DocEdgeType::References));
+    let report = lint(&graph, &[]);
     let duplicate = report
         .findings
         .iter()
@@ -720,23 +724,44 @@ fn the_repository_fixture_reports_the_two_docs_that_share_one_heading() {
             LintFinding::DuplicateTitle { title, modules } => Some((title.clone(), modules.clone())),
             _ => None,
         })
-        .expect("two comparison documents share an H1 in this repository");
-    assert_eq!(duplicate.0, "Equal-engineering context comparison");
+        .expect("two documents share a heading");
+    assert_eq!(duplicate.0, "Equal-engineering comparison");
     assert_eq!(duplicate.1.len(), 2);
 }
 
 #[test]
-fn the_repository_fixture_reports_the_document_with_no_heading() {
-    let report = lint(&repository_doc_graph(), &[]);
+fn a_document_with_no_heading_is_reported_by_path_since_it_has_no_other_name() {
+    let mut graph = DocGraph::new();
+    graph
+        .insert_node(ModuleNode::new(
+            id("untitled.md"),
+            "untitled.md",
+            "",
+            NodeStatus::Guide,
+        ))
+        .unwrap();
+    let report = lint(&graph, &[]);
     assert!(report.findings.iter().any(|finding| matches!(
         finding,
-        LintFinding::MissingTitle { module } if module == &id("CLAUDE.md")
+        LintFinding::MissingTitle { module } if module == &id("untitled.md")
     )));
 }
 
 #[test]
-fn the_repository_fixture_reports_the_architecture_document_nobody_links_to() {
+fn the_repository_fixture_now_lints_clean_of_the_three_defects_it_first_reported() {
     let report = lint(&repository_doc_graph(), &[]);
+
+    assert_eq!(
+        report.with_code("duplicate_title").count(),
+        0,
+        "the generated comparisons carry their world id in the H1 since 3a2d24c"
+    );
+    assert_eq!(
+        report.with_code("missing_title").count(),
+        0,
+        "CLAUDE.md gained an H1 after this linter reported it had none"
+    );
+
     let orphans: Vec<&ModuleId> = report
         .with_code("orphan_module")
         .filter_map(|finding| match finding {
@@ -745,8 +770,9 @@ fn the_repository_fixture_reports_the_architecture_document_nobody_links_to() {
         })
         .collect();
     assert!(
-        orphans.contains(&&id("docs/ARCHITECTURE.md")),
-        "neither README.md nor AGENTS.md links into docs/, so ARCHITECTURE.md has no inbound edge"
+        !orphans.contains(&&id("docs/COVERAGE.md")) && !orphans.contains(&&id("docs/ARCHITECTURE.md")),
+        "README.md links both since this linter found COVERAGE.md had no inbound edge at all, \
+         and ARCHITECTURE.md only one from a skill file: {orphans:?}"
     );
 }
 

@@ -17,11 +17,19 @@
 //! # What it reports about us
 //!
 //! Three findings here are findings about this repository, reproduced from a
-//! [`crate::scan`] run over the working tree: `CLAUDE.md` has no H1;
-//! `docs/BASELINE_COMPARISON.md` and `docs/DISCRIMINATING_COMPARISON.md` share one; and
-//! `docs/ARCHITECTURE.md` is an orphan, because neither `README.md` nor `AGENTS.md` links to
-//! anything in `docs/`. The absent edges are absent here too — a fixture that quietly added the
-//! link the corpus ought to have would be a fixture that proves nothing.
+//! [`crate::scan`] run over the working tree. When this crate was first built the linter found
+//! three real defects here: `CLAUDE.md` had no H1, `docs/BASELINE_COMPARISON.md` and
+//! `docs/DISCRIMINATING_COMPARISON.md` shared one, and `docs/COVERAGE.md` had no inbound link at
+//! all while `docs/ARCHITECTURE.md` was reachable only from a skill file.
+//!
+//! All three were then repaired in the repository, so this fixture now transcribes a corpus that
+//! lints clean, and the tests that reported those defects have become regression guards. The
+//! linter's ability to *detect* each class is proved on synthetic graphs instead, which is the
+//! right place for it: a detection test that depends on our documentation staying broken would
+//! stop working the moment we fixed it.
+//!
+//! What is still absent is absent here too. A fixture that quietly added a link the corpus does
+//! not have would be a fixture that proves nothing.
 //!
 //! # The contradiction in the fixture is real
 //!
@@ -88,8 +96,13 @@ pub fn repository_doc_graph() -> DocGraph {
 
     graph
         .insert_node(
-            ModuleNode::new(id("CLAUDE.md"), "CLAUDE.md", "", NodeStatus::Guide)
-                .with_brief("Working agreements for agents operating in this workspace."),
+            ModuleNode::new(
+                id("CLAUDE.md"),
+                "CLAUDE.md",
+                "Working in this repository",
+                NodeStatus::Guide,
+            )
+            .with_brief("Working agreements for agents operating in this workspace."),
         )
         .expect("fresh graph");
 
@@ -129,13 +142,13 @@ pub fn repository_doc_graph() -> DocGraph {
         ),
         (
             "docs/BASELINE_COMPARISON.md",
-            "Equal-engineering context comparison",
+            "Equal-engineering context comparison: radiogenomic-integrity-demo-v1",
             NodeStatus::Generated,
             "Baseline world comparison, 761 facts.",
         ),
         (
             "docs/DISCRIMINATING_COMPARISON.md",
-            "Equal-engineering context comparison",
+            "Equal-engineering context comparison: generated-discriminating-v1",
             NodeStatus::Generated,
             "Discriminating world comparison, 762 facts.",
         ),
@@ -220,6 +233,8 @@ pub fn repository_doc_graph() -> DocGraph {
         .expect("fixture paths are unique");
 
     for (from, kind, to) in [
+        ("README.md", DocEdgeType::References, "docs/ARCHITECTURE.md"),
+        ("README.md", DocEdgeType::References, "docs/COVERAGE.md"),
         ("docs/ARCHITECTURE.md", DocEdgeType::References, "docs/ADR-001-language-strategy.md"),
         ("docs/ARCHITECTURE.md", DocEdgeType::References, "docs/FINDINGS.md"),
         ("docs/FINDINGS.md", DocEdgeType::References, "docs/BASELINE_COMPARISON.md"),

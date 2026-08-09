@@ -119,8 +119,8 @@ impl Comparison {
         let mut text = String::new();
         let _ = writeln!(
             text,
-            "# Equal-engineering context comparison\n\nworld `{}`, query `{}`, {} facts total",
-            self.world_id, self.query_id, self.total_facts
+            "# Equal-engineering context comparison: {}\n\nworld `{}`, query `{}`, {} facts total",
+            self.world_id, self.world_id, self.query_id, self.total_facts
         );
         let _ = writeln!(
             text,
