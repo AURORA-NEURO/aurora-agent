@@ -1,0 +1,31 @@
+# The platform's central guarantee is a SHA-256 over canonical bytes. `core.autocrlf` is on for the
+# Windows checkout this repository is developed in, which means without this file the bytes on disk
+# depend on the operating system. Nothing tracked today is hashed raw — `ContentHash::of_bytes` is
+# fed by ingested source files, and no CSV or TSV fixture is committed yet — so this is prevention,
+# not a fix for an observed break.
+#
+# It is worth the file anyway. A CRLF/LF digest mismatch is a bug that reproduces on one machine and
+# not another, and it has already cost a sibling project a ledger that verified 0 of 24 entries.
+
+* text=auto eol=lf
+
+# Certificates, golden fixtures, schemas and the CPython reference all participate in cross-language
+# parity. Their bytes are not allowed to depend on the checkout.
+*.json  text eol=lf
+*.py    text eol=lf
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+
+# Shell scripts must keep LF or the shebang line carries a carriage return and Linux CI reports a
+# missing interpreter.
+*.sh    text eol=lf
+
+# Data formats that reach ContentHash::of_bytes. There is no such file tracked yet; the rule exists
+# so that adding one does not silently make its digest platform-dependent.
+*.csv   text eol=lf
+*.tsv   text eol=lf
+*.jsonl text eol=lf
+
+Cargo.lock text eol=lf
