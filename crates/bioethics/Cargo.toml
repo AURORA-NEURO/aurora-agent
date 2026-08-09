@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-bioethics"
+version = "0.1.0"
+edition = "2021"
+description = "Section 36 remainder: biology security, privacy, ethics and governance beyond policy and safety"
+
+[dependencies]
+bioprism-scope = { workspace = true }
+bioprism-policy = { workspace = true }
+bioprism-safety = { workspace = true }
+bioprism-onco = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
