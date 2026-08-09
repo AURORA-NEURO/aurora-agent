@@ -89,9 +89,9 @@ pub mod pyramid;
 pub mod suite;
 
 pub use case::{
-    CaseBuilder, CaseInput, ConformanceCase, Expectation, Layer, Override, Requirement,
+    CaseBuilder, CaseInput, ConformanceCase, Expectation, Layer, Override, OverrideOp, Requirement,
 };
-pub use error::ConformanceError;
+pub use error::{ConformanceError, InsertObstacle};
 pub use fiber_suite::{
     fiber_suite, shipped_baseline, structural_profile, FiberReference, FIBER_SUITE_ID,
 };

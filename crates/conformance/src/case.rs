@@ -87,6 +87,43 @@ impl Requirement {
     }
 }
 
+/// Whether an override rewrites a location the fixture has, or adds one it does not.
+///
+/// The two are separate operations rather than one "write this pointer" because the mistake they
+/// have to catch is opposite in each direction. A [`Replace`](OverrideOp::Replace) whose pointer is
+/// absent is a typo in the case, and silently creating the location would let the case test a
+/// document the fixture never described — 40.33's "fixture accidentally trivial" arriving by a
+/// different door, which is what [`crate::ConformanceError::PointerNotFound`] exists to stop. An
+/// [`Insert`](OverrideOp::Insert) whose key is *present* is that same defect mirrored: the case
+/// says the baseline lacks the key, the baseline has grown it, and the variant is now identical to
+/// the document it was supposed to differ from.
+///
+/// So neither operation is a superset of the other, and a case picks the one that states what it
+/// means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverrideOp {
+    /// Rewrite the value at an existing location. Absent location is an error.
+    #[default]
+    Replace,
+    /// Add a key to an existing object. Absent parent, non-object parent, or a key that is
+    /// already there is an error.
+    Insert,
+}
+
+impl OverrideOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OverrideOp::Replace => "replace",
+            OverrideOp::Insert => "insert",
+        }
+    }
+
+    fn is_replace(&self) -> bool {
+        matches!(self, OverrideOp::Replace)
+    }
+}
+
 /// A single edit applied to a fixture before compilation.
 ///
 /// This is how a case says "the reference query, but with `max_facts` set to 4" without shipping
@@ -94,10 +131,27 @@ impl Requirement {
 /// adversarial variants of each fixture; expressing them as a pointer and a value keeps the
 /// variant's *difference from the baseline* visible in the case, which is the part a reviewer
 /// needs to read.
+///
+/// # What an override can and cannot express
+///
+/// With [`OverrideOp::Replace`] and [`OverrideOp::Insert`] a case can state any variant that
+/// differs from the baseline by a changed value or an added key, at any depth — including the
+/// undeclared key a `fiber-query/0.2` compiler must refuse, which a pointer alone cannot reach
+/// because a JSON pointer addresses locations that exist.
+///
+/// It cannot remove anything, cannot add a member to an array, and cannot create the intermediate
+/// objects along a path the fixture does not have. A variant that *omits* a required field — the
+/// input a compiler must refuse with `missing_query_field` — is therefore still not expressible
+/// here, and neither is a world holding one fact more or fewer. Those need a fixture, and a
+/// fixture needs a card (40.33).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Override {
     pub pointer: String,
     pub value: Value,
+    /// Defaulted and omitted when it is [`OverrideOp::Replace`], so that a third-party runner
+    /// written against the original two-field shape still reads every case that does not insert.
+    #[serde(default, skip_serializing_if = "OverrideOp::is_replace")]
+    pub op: OverrideOp,
 }
 
 impl Override {
@@ -105,6 +159,15 @@ impl Override {
         Override {
             pointer: pointer.into(),
             value,
+            op: OverrideOp::Replace,
+        }
+    }
+
+    pub fn inserting(pointer: impl Into<String>, value: Value) -> Self {
+        Override {
+            pointer: pointer.into(),
+            value,
+            op: OverrideOp::Insert,
         }
     }
 }
@@ -141,6 +204,18 @@ impl CaseInput {
         self.world_overrides.push(Override::new(pointer, value));
         self
     }
+
+    pub fn inserting_into_query(mut self, pointer: impl Into<String>, value: Value) -> Self {
+        self.query_overrides
+            .push(Override::inserting(pointer, value));
+        self
+    }
+
+    pub fn inserting_into_world(mut self, pointer: impl Into<String>, value: Value) -> Self {
+        self.world_overrides
+            .push(Override::inserting(pointer, value));
+        self
+    }
 }
 
 /// The closed vocabulary of checkable predicates.
@@ -154,12 +229,26 @@ pub enum Expectation {
     /// Compilation succeeds and publishes every named artifact.
     ProducesArtifacts { artifacts: Vec<String> },
 
-    /// Compilation refuses, with this typed failure kind.
+    /// Compilation refuses, with this typed failure kind, quoting every fragment in `naming`.
     ///
     /// The point is the *kind*, not the message. 40.31 requires deterministic negative tests on
     /// high-risk paths, and a negative test that accepts any error would pass against an
     /// implementation that crashed for an unrelated reason.
-    FailsWith { error_kind: String },
+    ///
+    /// `naming` is the only thing a case may say about the message, and it is deliberately narrow:
+    /// every fragment must be a piece of the case's *own input* — a key it inserted, an identifier
+    /// it set — never English prose. That keeps the requirement satisfiable in any language, since
+    /// what has to appear is the caller's own text rather than this crate's wording, while still
+    /// separating a compiler that says which key it rejected from one that says only "invalid
+    /// query" and sends the caller back through the whole document.
+    ///
+    /// It is a floor rather than evidence of a good message: an implementation that echoes its
+    /// entire input into every refusal satisfies it without telling anyone anything.
+    FailsWith {
+        error_kind: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        naming: Vec<String>,
+    },
 
     FieldEquals {
         artifact: String,

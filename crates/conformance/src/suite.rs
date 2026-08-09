@@ -24,8 +24,8 @@
 //! carries caller-supplied `issued_at`/`expires_at` stamps because this crate has no clock and no
 //! key material; nothing here checks that a certificate is still in date.
 
-use crate::case::{ConformanceCase, Expectation, Layer, Requirement};
-use crate::error::ConformanceError;
+use crate::case::{ConformanceCase, Expectation, Layer, OverrideOp, Requirement};
+use crate::error::{ConformanceError, InsertObstacle};
 use crate::fixture::{FixtureDrift, FixtureManifest, FixtureStore};
 use crate::gate::BaselineReference;
 use crate::implementation::{
@@ -222,18 +222,72 @@ fn apply_overrides(
     which: &str,
 ) -> Result<(), ConformanceError> {
     for edit in overrides {
-        match document.pointer_mut(&edit.pointer) {
-            Some(slot) => *slot = edit.value.clone(),
-            None => {
-                return Err(ConformanceError::PointerNotFound {
-                    case: case_id.to_string(),
-                    pointer: edit.pointer.clone(),
-                    document: which.to_string(),
-                })
-            }
+        match edit.op {
+            OverrideOp::Replace => match document.pointer_mut(&edit.pointer) {
+                Some(slot) => *slot = edit.value.clone(),
+                None => {
+                    return Err(ConformanceError::PointerNotFound {
+                        case: case_id.to_string(),
+                        pointer: edit.pointer.clone(),
+                        document: which.to_string(),
+                    })
+                }
+            },
+            OverrideOp::Insert => insert_key(document, edit, case_id, which)?,
         }
     }
     Ok(())
+}
+
+/// Adds one key to an object the document already has.
+///
+/// A JSON pointer addresses a location that exists, so `pointer_mut` can rewrite a value and can
+/// never create one — which is why a negative variant differing from the baseline by an *added*
+/// key was, until this existed, expressible only as a second fixture file. The edit is split into
+/// the parent pointer and the final reference token, the parent is resolved the ordinary way, and
+/// the token becomes a key under it.
+///
+/// Every refusal below is a case that has lost track of its fixture rather than an implementation
+/// defect, which is why they are [`ConformanceError`]s that abort the run and not case failures:
+/// see [`crate::ConformanceError`] on why that distinction is drawn where it is.
+fn insert_key(
+    document: &mut Value,
+    edit: &crate::case::Override,
+    case_id: &str,
+    which: &str,
+) -> Result<(), ConformanceError> {
+    let refuse = |obstacle| ConformanceError::OverrideNotInsertable {
+        case: case_id.to_string(),
+        pointer: edit.pointer.clone(),
+        document: which.to_string(),
+        obstacle,
+    };
+
+    if !edit.pointer.starts_with('/') {
+        return Err(refuse(InsertObstacle::NamesNoParentAndKey));
+    }
+    let (parent_pointer, token) = edit
+        .pointer
+        .rsplit_once('/')
+        .ok_or_else(|| refuse(InsertObstacle::NamesNoParentAndKey))?;
+    let key = unescape_token(token);
+
+    let parent = document
+        .pointer_mut(parent_pointer)
+        .ok_or_else(|| refuse(InsertObstacle::ParentAbsent))?
+        .as_object_mut()
+        .ok_or_else(|| refuse(InsertObstacle::ParentIsNotAnObject))?;
+    if parent.contains_key(&key) {
+        return Err(refuse(InsertObstacle::KeyAlreadyPresent));
+    }
+
+    parent.insert(key, edit.value.clone());
+    Ok(())
+}
+
+/// RFC 6901 reference-token unescaping, `~1` before `~0` so that `~01` decodes to `~1`.
+fn unescape_token(token: &str) -> String {
+    token.replace("~1", "/").replace("~0", "~")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -566,17 +620,31 @@ fn check(
     second: Option<&Result<CompileArtifacts, CompileFailure>>,
     fixtures: &FixtureStore,
 ) -> Result<(), Check> {
-    if let Expectation::FailsWith { error_kind } = expectation {
+    if let Expectation::FailsWith { error_kind, naming } = expectation {
         return match first {
             Ok(artifacts) => Err(Check::Fail(format!(
                 "compilation succeeded and published {:?}; it must refuse with {error_kind:?}",
                 artifacts.names()
             ))),
-            Err(failure) if &failure.kind == error_kind => Ok(()),
-            Err(failure) => Err(Check::Fail(format!(
+            Err(failure) if &failure.kind != error_kind => Err(Check::Fail(format!(
                 "refused with {:?} ({}), expected {error_kind:?}",
                 failure.kind, failure.message
             ))),
+            Err(failure) => {
+                let unnamed: Vec<&str> = naming
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|fragment| !failure.message.contains(fragment))
+                    .collect();
+                if unnamed.is_empty() {
+                    Ok(())
+                } else {
+                    Err(Check::Fail(format!(
+                        "refused with {error_kind:?} but the message ({}) never names {unnamed:?}",
+                        failure.message
+                    )))
+                }
+            }
         };
     }
 

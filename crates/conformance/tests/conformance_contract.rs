@@ -15,8 +15,9 @@ use bioprism_conformance::fiber_suite::{
 use bioprism_conformance::{
     artifact, assess, structural_profile, CaseOutcome, CompileArtifacts, CompileFailure,
     ConformanceCertificate, ConformanceError, FixtureCard, FixtureDrift, FixtureManifest,
-    FixtureRole, FixtureShape, FixtureStore, Implementation, ImplementationIdentity, Layer,
-    PyramidShape, ReleaseGate, Requirement, ShapeChange, Suite, SuiteReport,
+    FixtureRole, FixtureShape, FixtureStore, Implementation, ImplementationIdentity,
+    InsertObstacle, Layer, Override, PyramidShape, ReleaseGate, Requirement, ShapeChange, Suite,
+    SuiteReport,
 };
 use bioprism_worldgen::{generate, WorldSpec};
 use serde_json::{json, Value};
@@ -101,6 +102,21 @@ impl Implementation for NeverRefuses {
 
     fn compile(&self, _world: &Value, _query: &Value) -> Result<CompileArtifacts, CompileFailure> {
         Ok(self.artifacts.clone())
+    }
+}
+
+/// Refuses exactly what the reference refuses, and says only that something was wrong.
+struct VagueRefusal;
+
+impl Implementation for VagueRefusal {
+    fn identity(&self) -> ImplementationIdentity {
+        ImplementationIdentity::new("vague-refusal", "0.0.1", "rust")
+    }
+
+    fn compile(&self, world: &Value, query: &Value) -> Result<CompileArtifacts, CompileFailure> {
+        FiberReference
+            .compile(world, query)
+            .map_err(|failure| CompileFailure::new(failure.kind, "the query is invalid"))
     }
 }
 
@@ -218,6 +234,37 @@ fn the_suite_round_trips_through_json_so_a_third_party_can_run_it() {
         restored.digest().unwrap(),
         suite.digest().unwrap(),
         "a round trip changed the suite digest"
+    );
+}
+
+#[test]
+fn the_published_wire_shape_still_reads_for_a_runner_that_predates_inserts() {
+    let document = fiber_suite().to_json().expect("suite serialises");
+    let cases = document["cases"].as_array().unwrap();
+    let case = |id: &str| {
+        cases
+            .iter()
+            .find(|c| c["id"] == json!(id))
+            .unwrap_or_else(|| panic!("{id} is published"))
+            .clone()
+    };
+
+    let inserting = case("fiber.conformance.an_undeclared_query_field_is_refused");
+    assert_eq!(inserting["input"]["query_overrides"][0]["op"], json!("insert"));
+    assert_eq!(
+        inserting["expect"][0]["naming"],
+        json!(["decision_loss"]),
+        "a third-party runner has to be told which fragment the refusal must quote"
+    );
+
+    let replacing = case("fiber.conformance.a_budget_below_the_protected_closure_is_refused");
+    assert!(
+        replacing["input"]["query_overrides"][0].get("op").is_none(),
+        "an override that replaces must keep the two-field shape it has always had"
+    );
+    assert!(
+        replacing["expect"][0].get("naming").is_none(),
+        "a refusal asserted by kind alone must not start demanding a message fragment"
     );
 }
 
@@ -377,6 +424,71 @@ fn a_case_whose_override_targets_a_missing_location_errors_rather_than_inventing
     }
 }
 
+#[test]
+fn an_insert_override_puts_a_key_into_the_document_the_implementation_actually_reads() {
+    // A JSON pointer addresses locations that exist, so this is the one edit a replace can never
+    // make. Observed through the compiler rather than through the prepared document, because a key
+    // written into a copy the implementation never sees would test nothing.
+    let mut suite = fiber_suite();
+    suite.cases[0]
+        .input
+        .query_overrides
+        .push(Override::inserting("/tenant_hint", json!("acme")));
+
+    let report = suite.run(&FiberReference, &fixtures()).unwrap();
+    match &report.results[0].outcome {
+        CaseOutcome::Failed { detail, .. } => assert!(
+            detail.contains("tenant_hint"),
+            "the inserted key must reach the compiler: {detail}"
+        ),
+        other => panic!("expected the inserted key to provoke a refusal, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_insert_override_the_fixture_cannot_take_errors_and_names_the_obstacle() {
+    for (pointer, obstacle) in [
+        ("/query_id", InsertObstacle::KeyAlreadyPresent),
+        ("/nowhere/deep_key", InsertObstacle::ParentAbsent),
+        ("/targets/0/extra", InsertObstacle::ParentIsNotAnObject),
+        ("decision_loss", InsertObstacle::NamesNoParentAndKey),
+    ] {
+        let mut suite = fiber_suite();
+        suite.cases[0]
+            .input
+            .query_overrides
+            .push(Override::inserting(pointer, json!(1)));
+
+        let report = suite.run(&FiberReference, &fixtures()).unwrap();
+        match &report.results[0].outcome {
+            CaseOutcome::Errored { reason } => assert!(
+                reason.contains(&obstacle.to_string()) && reason.contains(pointer),
+                "inserting {pointer} must say which obstacle stopped it: {reason}"
+            ),
+            other => panic!("expected {pointer} to error, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_case_that_inserts_a_key_the_fixture_already_has_is_not_silently_a_replace() {
+    // The mirror of the missing-pointer error: an insert states that the baseline lacks the key,
+    // and if the baseline grew it the variant stopped differing from the document it is measured
+    // against. Overwriting it instead would leave a green case testing nothing.
+    let mut suite = fiber_suite();
+    suite.cases[0]
+        .input
+        .query_overrides
+        .push(Override::inserting("/role", json!("intruder")));
+
+    let report = suite.run(&FiberReference, &fixtures()).unwrap();
+    assert!(
+        matches!(&report.results[0].outcome, CaseOutcome::Errored { .. }),
+        "got {:?}",
+        report.results[0].outcome
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // The runner distinguishes four outcomes (40.32)
 // ---------------------------------------------------------------------------------------------
@@ -451,6 +563,8 @@ fn an_implementation_that_never_refuses_fails_every_negative_requirement() {
         "fiber.conformance.a_query_on_an_unsupported_schema_is_refused",
         "fiber.conformance.a_world_on_an_unsupported_schema_is_refused",
         "fiber.conformance.an_empty_query_identifier_is_refused",
+        "fiber.conformance.an_undeclared_query_field_is_refused",
+        "fiber.conformance.an_undeclared_field_inside_budgets_is_refused",
     ] {
         let result = report.result(negative).expect("case present");
         assert!(
@@ -460,8 +574,45 @@ fn an_implementation_that_never_refuses_fails_every_negative_requirement() {
         );
     }
     assert!(
-        report.failed() >= 4,
+        report.failed() >= 6,
         "the runner must report every failure, not stop at the first:\n{}",
+        report.summary()
+    );
+}
+
+#[test]
+fn a_refusal_that_names_no_key_fails_the_undeclared_field_requirement() {
+    // Right kind, useless message. The kind alone says the document was rejected as a query; only
+    // the named key says which of its fields to go and fix, and 40.33 exists so that an
+    // implementer is told that rather than left to infer it.
+    let report = fiber_suite().run(&VagueRefusal, &fixtures()).unwrap();
+
+    for (case_id, key) in [
+        (
+            "fiber.conformance.an_undeclared_query_field_is_refused",
+            "decision_loss",
+        ),
+        (
+            "fiber.conformance.an_undeclared_field_inside_budgets_is_refused",
+            "budgets.max_items",
+        ),
+    ] {
+        match &report.result(case_id).expect("case present").outcome {
+            CaseOutcome::Failed { detail, .. } => assert!(
+                detail.contains(key),
+                "the failure must say which key went unnamed: {detail}"
+            ),
+            other => panic!("expected {case_id} to fail, got {other:?}"),
+        }
+    }
+
+    assert!(
+        report
+            .result("fiber.conformance.a_budget_below_the_protected_closure_is_refused")
+            .expect("case present")
+            .outcome
+            .is_pass(),
+        "a case that asserts only a kind must not be dragged down by a vague message:\n{}",
         report.summary()
     );
 }

@@ -30,7 +30,19 @@
 //! No case exercises a plan fallback, an underdetermined oracle verdict, a policy-blocked
 //! omission or a world whose temporal cut actually withholds a selected fact, because the shipped
 //! fixture triggers none of them. Those are gaps in the fixture set, and 40.33 would have them
-//! filled by negative variants rather than left to an implementer to guess at.
+//! filled by negative variants rather than left to an implementer to guess at. Being able to add
+//! a key to a fixture does not shorten that list: not one of the four turns on a key the baseline
+//! is missing, so [`crate::case::OverrideOp::Insert`] leaves all four exactly where they were.
+//!
+//! The refusals are the other half of the same accounting. [`fiber_failure`], [`world_failure`]
+//! and [`policy_failure`] between them name twenty-three failure kinds, of which five have cases:
+//! `budget_exceeded`, `unsupported_query_schema`, `unsupported_world_schema`,
+//! `invalid_identifier`, and — since the query format closed its key set — `undeclared_query_field`,
+//! exercised both at the top level and inside `budgets`. The other eighteen are declared in the
+//! taxonomy and unexercised here, and one of them is not merely unwritten but currently
+//! *inexpressible*: `missing_query_field` needs a variant with a key removed, and an override can
+//! change or add a key but never delete one (see [`crate::Override`]). That one needs a fixture
+//! too.
 
 use crate::case::{CaseBuilder, CaseInput, ConformanceCase, Expectation, Layer};
 use crate::fixture::{FixtureCard, FixtureManifest, FixtureRole, FixtureShape};
@@ -750,9 +762,7 @@ fn conformance_cases() -> Vec<ConformanceCase> {
             baseline_input().overriding_query("/budgets/max_facts", json!(4)),
         )
         .enforcing(&["43.13", "43.25", "40.36"])
-        .expecting(Expectation::FailsWith {
-            error_kind: "budget_exceeded".to_string(),
-        })
+        .expecting(refusal("budget_exceeded"))
         .build(),
         CaseBuilder::new(
             "fiber.conformance.omissions_are_counted_rather_than_hidden",
@@ -915,9 +925,7 @@ fn conformance_cases() -> Vec<ConformanceCase> {
             baseline_input().overriding_query("/schema_version", json!("fiber-query/0.9")),
         )
         .enforcing(&["40.11", "40.36", "40.37"])
-        .expecting(Expectation::FailsWith {
-            error_kind: "unsupported_query_schema".to_string(),
-        })
+        .expecting(refusal("unsupported_query_schema"))
         .build(),
         CaseBuilder::new(
             "fiber.conformance.a_world_on_an_unsupported_schema_is_refused",
@@ -927,9 +935,7 @@ fn conformance_cases() -> Vec<ConformanceCase> {
             baseline_input().overriding_world("/schema_version", json!("fiber-world/0.9")),
         )
         .enforcing(&["40.11", "40.36", "40.37"])
-        .expecting(Expectation::FailsWith {
-            error_kind: "unsupported_world_schema".to_string(),
-        })
+        .expecting(refusal("unsupported_world_schema"))
         .build(),
         CaseBuilder::new(
             "fiber.conformance.an_empty_query_identifier_is_refused",
@@ -940,9 +946,37 @@ fn conformance_cases() -> Vec<ConformanceCase> {
             baseline_input().overriding_query("/query_id", json!("")),
         )
         .enforcing(&["40.05", "40.36"])
-        .expecting(Expectation::FailsWith {
-            error_kind: "invalid_identifier".to_string(),
-        })
+        .expecting(refusal("invalid_identifier"))
+        .build(),
+        CaseBuilder::new(
+            "fiber.conformance.an_undeclared_query_field_is_refused",
+            Layer::Conformance,
+            "A query carrying a key the format does not declare is refused, and the refusal names \
+             the key. The document is hashed whole into the certificate, so a key the compiler \
+             ignores semantically it still honours cryptographically: reading past it would let \
+             the same compiled answer be issued under two different identities. Both \
+             implementations must reject the same documents, or a caller cannot tell which of \
+             them is wrong.",
+            baseline_input().inserting_into_query("/decision_loss", json!({"models": ["m1"]})),
+        )
+        .enforcing(&["40.11", "40.36", "40.37", "40.05"])
+        .expecting(refusal_naming("undeclared_query_field", &["decision_loss"]))
+        .build(),
+        CaseBuilder::new(
+            "fiber.conformance.an_undeclared_field_inside_budgets_is_refused",
+            Layer::Conformance,
+            "The declared set is closed inside the format's one nested object too, and the \
+             refusal names the key by the path it was found at rather than by its bare name. A \
+             compiler that screens only the top level accepts a misspelled budget and then \
+             compiles against a limit the caller never set, which is the failure that screening \
+             undeclared keys exists to prevent.",
+            baseline_input().inserting_into_query("/budgets/max_items", json!(3)),
+        )
+        .enforcing(&["40.11", "40.36", "40.37"])
+        .expecting(refusal_naming(
+            "undeclared_query_field",
+            &["budgets.max_items"],
+        ))
         .build(),
     ]
 }
@@ -1139,6 +1173,25 @@ fn field(artifact: &str, pointer: &str, value: Value) -> Expectation {
         artifact: artifact.to_string(),
         pointer: pointer.to_string(),
         value,
+    }
+}
+
+/// A refusal asserted by kind alone.
+fn refusal(error_kind: &str) -> Expectation {
+    Expectation::FailsWith {
+        error_kind: error_kind.to_string(),
+        naming: Vec::new(),
+    }
+}
+
+/// A refusal that must also quote the part of the input it rejected.
+///
+/// `fragments` are always drawn from the case's own overrides, never from this crate's wording;
+/// see [`Expectation::FailsWith`] for why that is the only form the assertion may take.
+fn refusal_naming(error_kind: &str, fragments: &[&str]) -> Expectation {
+    Expectation::FailsWith {
+        error_kind: error_kind.to_string(),
+        naming: fragments.iter().map(|f| (*f).to_string()).collect(),
     }
 }
 
