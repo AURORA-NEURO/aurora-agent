@@ -166,6 +166,45 @@ repetitive because it contains a lot of repeated text; it is repetitive because 
 stamped many times, and counting distinct shared strings sees that directly while counting
 occurrences sees it through the size of the template.
 
-Two later agents converged on the same ordering of what matters, on different sections: **threshold
-barely matters, unit matters more, definition matters most** (§25: 2.0 / 11 / 22 points; §27: 0 /
-—/ 21 points). Use the distinguishing-lines-per-module column, and treat the percentage as a band.
+## Three disagreements, three distinct causes
+
+Agents measuring the same section disagreed three times, and each was run down to a specific
+methodological choice. None was a mistake; each was a different unstated definition.
+
+| § | figures | cause |
+|---|---|---|
+| 23 | 16.2 / 10.7 / 10.4% | **YAML front matter** — 7 lines × 50 files, worth 4.3 points |
+| 39 | 30.6% vs 6.5% at a higher threshold | **a corpus split at the file level** — 13 of 25 modules use the skeleton, the rest are free prose, so the answer is decided by where the threshold falls relative to 13/25 |
+| 32 | 79.3% vs 73.4% | **blank lines counted as shared content** — §32 has 2,147 raw lines, 1,702 shared by all 23 modules (79.3% exactly), of which **483 are blank** |
+
+The blank-line case is the one to guard against generally: whitespace is identical across every
+file by construction, so counting it inflates any section by its own whitespace density — 22% of
+§32's lines.
+
+## What actually moves these numbers
+
+Threshold, unit and definition, in that order of *usual* importance — but the ordering is not a law,
+and two agents found the exception.
+
+- **Threshold is usually inert.** §27, §28, §26, §07 and five of six sections in `crates/sweep`'s
+  scope move by literally zero between thresholds of 0.3 and 0.9, because their sharing is bimodal:
+  a line is either in one module or in all of them. §39 and §10 are the exceptions, and both are
+  corpora split at the *file* level.
+- **Unit often dominates.** Line versus heading-block costs ~10 points in §31 and §32 and ~20 in
+  `sweep`'s six. §34's character figure is 8 points above its line figure, because what varies
+  between its modules is short bullets while what repeats is an eight-step flow and a JSON object —
+  by weight it is 82% the same document twenty-three times.
+- **Definition matters in proportion to the share of the document the definitional slice covers.**
+  This is `crates/sweep`'s correction and it is arithmetic rather than editorial. Front matter moved
+  §43 by 15.1 points and §23 by 4.3, but only 1.8–2.5 in six sections whose modules run ~70 non-blank
+  lines — seven front-matter lines cannot move that fraction further. It predicts §43's swing from
+  its module length rather than from anything about its content.
+
+**Instances and distinct texts answer different questions.** §11's shared core is 1,125 line
+instances but only **40 distinct texts**, because two lines repeat inside each module. §19's is 66
+instances from **2 distinct texts** — a horizontal rule and a date. §23's is 2.1% of distinct
+strings accounting for 16% of occurrences. A section is repetitive because a small template is
+stamped many times, and the distinct-string count sees that directly.
+
+Use the distinguishing-lines-per-module column, and treat every percentage as a band with its method
+attached.

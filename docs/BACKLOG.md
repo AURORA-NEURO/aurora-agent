@@ -1,7 +1,7 @@
 # Remaining backlog
 
-188 code-bearing blueprint modules are not yet cited by any crate or design note,
-across 23 sections. This is the enumerated form of `docs/COVERAGE.md`'s
+84 code-bearing blueprint modules are not yet cited by any crate or design note,
+across 13 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.
 
 Regenerate with `tools/backlog.sh`. Programme sections are excluded for the same reason they
@@ -11,47 +11,7 @@ A module leaves this list when a crate cites it, which is the same weak criterio
 uses. This file tracks *attention*, not completeness.
 
 
-## §28 Biology Data And Standards — 17 uncovered
-
-- `28.02` Epigenomics And Methylation
-- `28.03` Bulk Transcriptomics
-- `28.04` Single Cell And Multiome
-- `28.05` Spatial Omics
-- `28.06` Proteomics And Proteogenomics
-- `28.07` Metabolomics And Flux
-- `28.08` Perturbation Crispr And Functional Screens
-- `28.09` Protein Structure And Engineering
-- `28.10` Drug Discovery Pharmacology And Pk
-- `28.11` Microbiome And Metagenomics
-- `28.12` Microscopy And High Content Imaging
-- `28.14` Digital Pathology
-- `28.15` Clinical Research Ehr And Clinicogenomics
-- `28.16` Clinical Trials And Real World Evidence
-- `28.17` Literature Knowledge Bases And Citations
-- `28.18` Model Organisms Cross Species And Preclinical Models
-- `28.20` Neuro Oncology Data Atlas And Connectors
-
-## §34 Bioatlas Public Hub And Ecosystem — 17 uncovered
-
-- `34.01` Users Personas And Jobs To Be Done
-- `34.02` Information Architecture And Navigation
-- `34.03` Bioworld Registry And World Cards
-- `34.04` Worldline Timeline And State Explorer
-- `34.05` Biodecision Cell Inference Microscope
-- `34.06` Fork Compare And Counterfactual Lab
-- `34.07` Oracle Evidence And Disagreement Explorer
-- `34.08` Biocapability Atlas
-- `34.09` Failure Atlas And First Divergence Browser
-- `34.10` Value Of Experiment And Active Evaluation Lab
-- `34.11` Architecture And Agent Molecule Registry
-- `34.12` Data Connector And Research Object Registry
-- `34.17` Private Federated And Bring Your Own Data Evaluation
-- `34.19` Notebook Ide Mcp And Agent Integrations
-- `34.20` Github Actions And Research Ci
-- `34.21` No Key Demos And Onboarding
-- `34.22` Open Source Community And Star Flywheel
-
-## §11 Developer Platform — 14 uncovered
+## §11 Developer Platform — 13 uncovered
 
 - `11.04` Python Sdk
 - `11.05` Python Benchmark Authoring Sdk
@@ -66,81 +26,6 @@ uses. This file tracks *attention*, not completeness.
 - `11.20` Capability Dashboard And Query
 - `11.21` Github Action For Consumer Repositories
 - `11.22` Github Action And Ci Integration
-- `11.23` Reporting And Exports
-
-## §40 Build Ready Engineering Contracts — 13 uncovered
-
-- `40.01` Technology Baseline
-- `40.02` Monorepo And Package Layout
-- `40.10` Configuration Secrets And Feature Flags
-- `40.15` Typescript Sdk Contract
-- `40.34` Observability Telemetry And Audit
-- `40.35` Performance Capacity And Load Model
-- `40.38` Deployment Profiles And Infrastructure
-- `40.39` Security Threat Model And Hardening
-- `40.40` Ci Cd And Release Automation
-- `40.41` First 100 Implementation Tickets
-- `40.42` Alpha Acceptance Criteria
-- `40.43` Engineering Adr Register
-- `40.45` Ownership Raci And Maintainer Boundaries
-
-## §26 Bio Evaluation Engine — 12 uncovered
-
-- `26.01` Oracle Mesh And Priority
-- `26.03` Evidence Grounding And Provenance
-- `26.05` Information Acquisition And Context Value
-- `26.06` Tissue Resource And Burden Efficiency
-- `26.07` Temporal Reasoning And Worldline Validity
-- `26.09` Causal And Intervention Evaluation
-- `26.11` Reproducibility And Computational Validity
-- `26.12` Metamorphic Robustness
-- `26.16` Prospective Blind Reveal
-- `26.17` Cross System Evaluation
-- `26.18` Matched Counterfactual Architecture Studies
-- `26.19` Biocapability Atlas
-
-## §32 Biological Mutation And Stress Program — 12 uncovered
-
-- `32.05` Specimen Identity Swap Mixture And Relatedness Mutations
-- `32.10` Modality Missingness Access And Censoring Mutations
-- `32.12` Label Noise Weak Supervision And Oracle Mutations
-- `32.13` Multimodal Contradiction And Partial Alignment Mutations
-- `32.14` Tool Pipeline Dependency And Execution Fault Mutations
-- `32.15` Literature Citation Staleness And Adversarial Evidence Mutations
-- `32.16` Units Scales Normalization And Threshold Mutations
-- `32.17` Causal Intervention And Counterfactual Mutations
-- `32.18` Expert Disagreement And Policy Mutations
-- `32.19` Privacy Permission And Data Locality Mutations
-- `32.20` Mechanistic Simulation And Digital Twin Mutations
-- `32.21` Mutation Composition Interactions And Minimization
-
-## §39 Token Efficient Biological Inference — 11 uncovered
-
-- `39.01` Token Economy Thesis
-- `39.11` Multi Agent Context Projection
-- `39.13` Table Matrix Image And Sequence Summarization
-- `39.14` Literature Claim Context
-- `39.15` Oncoworld Temporal Context
-- `39.18` Staleness Ttl And Recomputation
-- `39.20` Context Compiler Api And Cli
-- `39.21` Context Testing And Golden Fixtures
-- `39.23` Ablations And Experimental Design
-- `39.24` Failure Modes And Recovery
-- `39.25` Implementation Plan
-
-## §43 Fiber Query Compiled Epistemic Calculus — 11 uncovered
-
-- `43.14` Submodular And Coverage Aware Evidence Selection
-- `43.29` Multi Agent Separator Protocol
-- `43.30` Weave Continuations Over Fibers
-- `43.31` Biological Scope And Factor Library
-- `43.32` Oncoworld Neuro Oncology Query Patterns
-- `43.44` Research Paper And Theorem Agenda
-- `43.45` Glossary And Notation
-- `43.46` Primary Source And Implementation Ledger
-- `43.47` Formal Semantics And Theorem Sketches
-- `43.49` Dependent Types Optics And Query Lenses
-- `43.50` Causal Decision Rate Distortion And Value Of Information
 
 ## §33 Biocapability Atlas And Metrics — 10 uncovered
 
@@ -154,6 +39,19 @@ uses. This file tracks *attention*, not completeness.
 - `33.12` Reproducibility Reexecution And Claim Stability
 - `33.13` Translation Spine And Evidence Maturity Metrics
 - `33.14` Multi Agent Coordination And Molecule Value
+
+## §34 Bioatlas Public Hub And Ecosystem — 10 uncovered
+
+- `34.01` Users Personas And Jobs To Be Done
+- `34.02` Information Architecture And Navigation
+- `34.04` Worldline Timeline And State Explorer
+- `34.05` Biodecision Cell Inference Microscope
+- `34.06` Fork Compare And Counterfactual Lab
+- `34.07` Oracle Evidence And Disagreement Explorer
+- `34.11` Architecture And Agent Molecule Registry
+- `34.19` Notebook Ide Mcp And Agent Integrations
+- `34.21` No Key Demos And Onboarding
+- `34.22` Open Source Community And Star Flywheel
 
 ## §14 Governance And Quality — 9 uncovered
 
@@ -179,18 +77,6 @@ uses. This file tracks *attention*, not completeness.
 - `23.39` Weavebench Packs And Microbenchmark Taxonomy
 - `23.47` Human And Organizational Participants
 
-## §31 Biological Oracles And Reference Standards — 9 uncovered
-
-- `31.05` Sample Identity And Lineage Oracles
-- `31.06` Multi Reader Expert And Consensus Oracles
-- `31.07` Orthogonal Assay And Cross Modal Oracles
-- `31.08` Perturbation Rescue And Causal Oracles
-- `31.09` Longitudinal Confirmation And Blind Reveal Oracles
-- `31.10` Imaging Segmentation And Geometric Reference Standards
-- `31.11` Pathology Molecular And Integrated Reference Standards
-- `31.12` Survival Endpoint And Clinical Research Oracles
-- `31.17` Oracle Audit Independence And Quality Management
-
 ## §12 Data And Infrastructure — 7 uncovered
 
 - `12.02` Storage Architecture
@@ -211,14 +97,15 @@ uses. This file tracks *attention*, not completeness.
 - `36.21` Quality Management Validation And Release Gates
 - `36.22` Research Ethics Irb And Human Subject Boundaries
 
-## §19 Reference Examples — 6 uncovered
+## §40 Build Ready Engineering Contracts — 7 uncovered
 
-- `19.01` Decision Cell Example
-- `19.12` Scientific Figure Reproduction Case
-- `19.15` Evaluation Conditioned Routing Example
-- `19.17` Security Exploit Decision Cell
-- `19.21` Reliable Repair Weave Program
-- `19.22` Scientific Reproduction Capability Molecule
+- `40.01` Technology Baseline
+- `40.02` Monorepo And Package Layout
+- `40.15` Typescript Sdk Contract
+- `40.40` Ci Cd And Release Automation
+- `40.41` First 100 Implementation Tickets
+- `40.43` Engineering Adr Register
+- `40.45` Ownership Raci And Maintainer Boundaries
 
 ## §35 Million Scale Benchmark Factory And Infrastructure — 6 uncovered
 
@@ -229,41 +116,20 @@ uses. This file tracks *attention*, not completeness.
 - `35.07` Biodecision Compiler And Boundary Detection
 - `35.13` Distributed Execution Scheduling And Fault Tolerance
 
-## §04 Ingestion And Interop — 5 uncovered
+## §19 Reference Examples — 3 uncovered
 
-- `04.01` Ingestion Pipeline
+- `19.01` Decision Cell Example
+- `19.15` Evaluation Conditioned Routing Example
+- `19.21` Reliable Repair Weave Program
+
+## §04 Ingestion And Interop — 1 uncovered
+
 - `04.02` Opentelemetry Adapter
-- `04.03` Runner And Benchmark Adapters
-- `04.04` Environment And Artifact Capture
-- `04.05` Redaction Privacy And Data Minimization
 
-## §07 Evaluation Engine — 4 uncovered
-
-- `07.02` Deterministic Property And Execution Evaluators
-- `07.03` Trajectory And Decision Evaluators
-- `07.09` Safety Privacy And Permission Metrics
-- `07.13` Release Gates And Ci Policy
-
-## §05 Execution Runtime — 3 uncovered
-
-- `05.10` Distributed Execution Cache And Recovery
-- `05.11` Shepherd And External Fork Runtime Integration
-- `05.12` Runtime Conformance And Microbenchmarks
-
-## §03 Core Specifications — 2 uncovered
-
-- `03.03` World State Ir
-- `03.11` Provenance Identifiers And Versioning
-
-## §10 Registry And Hub — 2 uncovered
+## §10 Registry And Hub — 1 uncovered
 
 - `10.01` Registry Overview
-- `10.14` Trace And Fork Explorer
 
-## §08 Adaptive Evaluation — 1 uncovered
+## §26 Bio Evaluation Engine — 1 uncovered
 
-- `08.06` Regression Focused Scheduling
-
-## §13 Security Privacy And Safety — 1 uncovered
-
-- `13.11` Effects Permissions And Human Approval
+- `26.19` Biocapability Atlas
