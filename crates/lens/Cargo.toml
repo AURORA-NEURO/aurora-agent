@@ -1,0 +1,13 @@
+[package]
+name = "bioprism-lens"
+version = "0.1.0"
+edition = "2021"
+description = "Graph lens grammar: the typed lens catalogue behind the evaluation hub, and the non-visual contract"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-section = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
