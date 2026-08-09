@@ -72,6 +72,11 @@ members = [
     "crates/oraclex",
     "crates/atlasx",
     "crates/sweep",
+    "crates/dataops",
+    "crates/bioethics",
+    "crates/megafactory",
+    "crates/interweave",
+    "crates/residue",
     "crates/cli",
 ]
 
@@ -155,6 +160,11 @@ bioprism-bioevalx = { path = "crates/bioevalx" }
 bioprism-oraclex = { path = "crates/oraclex" }
 bioprism-atlasx = { path = "crates/atlasx" }
 bioprism-sweep = { path = "crates/sweep" }
+bioprism-dataops = { path = "crates/dataops" }
+bioprism-bioethics = { path = "crates/bioethics" }
+bioprism-megafactory = { path = "crates/megafactory" }
+bioprism-interweave = { path = "crates/interweave" }
+bioprism-residue = { path = "crates/residue" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }

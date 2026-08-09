@@ -1,0 +1,11 @@
+[package]
+name = "bioprism-residue"
+version = "0.1.0"
+edition = "2021"
+description = "The explained residue: every uncovered blueprint module with the reason no crate implements it"
+
+[dependencies]
+bioprism-cookbook = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -102,6 +102,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-bioethics"
+version = "0.1.0"
+dependencies = [
+ "bioprism-onco",
+ "bioprism-policy",
+ "bioprism-safety",
+ "bioprism-scope",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-bioeval"
 version = "0.1.0"
 dependencies = [
@@ -234,6 +247,18 @@ dependencies = [
  "bioprism-docgraph",
  "bioprism-ids",
  "bioprism-section",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-dataops"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-infra",
+ "bioprism-ledger",
  "serde",
  "serde_json",
  "thiserror",
@@ -444,6 +469,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-interweave"
+version = "0.1.0"
+dependencies = [
+ "bioprism-choreography",
+ "bioprism-fabric",
+ "bioprism-ids",
+ "bioprism-section",
+ "bioprism-weave",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-lab"
 version = "0.1.0"
 dependencies = [
@@ -490,6 +529,20 @@ dependencies = [
  "bioprism-worldgen",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bioprism-megafactory"
+version = "0.1.0"
+dependencies = [
+ "bioprism-factory",
+ "bioprism-ids",
+ "bioprism-scale",
+ "bioprism-scope",
+ "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -654,6 +707,16 @@ dependencies = [
  "bioprism-prism",
  "bioprism-section",
  "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-residue"
+version = "0.1.0"
+dependencies = [
+ "bioprism-cookbook",
  "serde",
  "serde_json",
  "thiserror",
