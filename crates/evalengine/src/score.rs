@@ -349,7 +349,7 @@ pub enum CreditBasis {
     Capped {
         raw: String,
         ceiling: String,
-        reason: &'static str,
+        reason: String,
     },
     /// No rubric and no full pass: the credit is genuinely unknown.
     NoBasis,
@@ -584,7 +584,7 @@ fn capped(
             basis: CreditBasis::Capped {
                 raw: format!("{raw:.4}"),
                 ceiling: format!("{ceiling:.4}"),
-                reason,
+                reason: reason.to_string(),
             },
         },
         None => Credit {
@@ -593,7 +593,7 @@ fn capped(
             basis: CreditBasis::Capped {
                 raw: "unknown".to_string(),
                 ceiling: format!("{ceiling:.4}"),
-                reason,
+                reason: reason.to_string(),
             },
         },
     }

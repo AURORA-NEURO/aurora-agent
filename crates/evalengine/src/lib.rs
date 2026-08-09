@@ -37,12 +37,14 @@
 //! the invariant is stated and the measurement is left to the caller.
 
 pub mod attribution;
+pub mod bridge;
 pub mod cluster;
 pub mod error;
 pub mod ladder;
 pub mod posterior;
 pub mod score;
 
+pub use bridge::{contribution_from_verdict, digest, Provenance};
 pub use attribution::{
     attribute, ArmSpec, Attribution, AttributionClaim, AttributionReport, ComponentEffect,
     EffectDirection, MatchedFork, RefusalReason,
@@ -54,8 +56,8 @@ pub use ladder::{
     SuppressedRaise, UnknownPolicy,
 };
 pub use posterior::{
-    CapabilityEstimate, CapabilityPosterior, CoverageFloor, Dominance, GateScalar, Observation,
-    ReleaseGate,
+    unprovenanced, CapabilityEstimate, CapabilityPosterior, CoverageFloor, Dominance, GateScalar,
+    Observation, ReleaseGate,
 };
 pub use score::{
     credit_for, Conclusion, Constraint, Credit, CreditBasis, CreditPolicy, Justification, Outcome,

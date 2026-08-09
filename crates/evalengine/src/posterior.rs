@@ -54,6 +54,11 @@ pub struct Observation {
     /// The parent task. Instances sharing one are not independent — see [`crate::cluster`].
     pub parent: String,
     pub result: ScoredResult,
+    /// The immutable objects this observation points back at. Optional in the type and mandatory
+    /// in a published report: [`unprovenanced`] finds the ones that are missing it rather than
+    /// letting them through quietly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::bridge::Provenance>,
 }
 
 impl Observation {
@@ -66,8 +71,26 @@ impl Observation {
             capability: capability.into(),
             parent: parent.into(),
             result,
+            provenance: None,
         }
     }
+
+    pub fn with_provenance(mut self, provenance: crate::bridge::Provenance) -> Self {
+        self.provenance = Some(provenance);
+        self
+    }
+}
+
+/// Observations that cannot be linked back to an immutable run.
+///
+/// 07.01's first invariant requires the link; this crate cannot enforce it at construction without
+/// making every test fixture carry three identifiers, so it enforces it at publication time
+/// instead — a caller running a release gate is expected to check this is empty.
+pub fn unprovenanced(observations: &[Observation]) -> Vec<&Observation> {
+    observations
+        .iter()
+        .filter(|observation| observation.provenance.is_none())
+        .collect()
 }
 
 /// Everything known about one capability, with the two score axes kept apart.

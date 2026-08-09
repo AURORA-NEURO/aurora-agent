@@ -29,6 +29,10 @@ pub enum EvalError {
     #[error("rubric constraint `{name}` is declared more than once")]
     DuplicateConstraint { name: String },
 
+    /// A report could not be reduced to canonical bytes, so it cannot be content-addressed.
+    #[error("value could not be canonicalized for content addressing: {detail}")]
+    NotCanonicalizable { detail: String },
+
     /// A clustered estimate was requested over an empty sample.
     #[error("clustered estimate `{label}` has no observations")]
     EmptySample { label: String },
