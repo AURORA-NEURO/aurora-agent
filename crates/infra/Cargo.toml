@@ -1,0 +1,15 @@
+[package]
+name = "bioprism-infra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Data infrastructure: provable cache hits, invalidation that reports its completeness, quality gates, tiering, lifecycle and storage quota"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-ledger = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -234,6 +234,7 @@ dependencies = [
 name = "bioprism-fiber"
 version = "0.1.0"
 dependencies = [
+ "bioprism-governance",
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-section",
