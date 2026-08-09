@@ -244,8 +244,6 @@ dependencies = [
  "bioprism-fiber",
  "bioprism-ids",
  "bioprism-scope",
- "bioprism-section",
- "bioprism-world",
  "serde",
  "serde_json",
  "thiserror",
