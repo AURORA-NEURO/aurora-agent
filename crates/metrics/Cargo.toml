@@ -1,0 +1,12 @@
+[package]
+name = "bioprism-metrics"
+version = "0.1.0"
+edition = "2021"
+description = "BioCapability metrics: aggregation rules, comparability of scores, and what a capability number may not claim"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-atlas = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

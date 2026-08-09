@@ -1,0 +1,439 @@
+//! A ranking over partially-ordered capability vectors is allowed to refuse to totally order them.
+
+mod common;
+
+use bioprism_atlas::UnmeasuredReason;
+use bioprism_metrics::{
+    breakdown, compare, CapabilityGrid, CapabilityVector, DeclaredWeighting, Dominance, GridCell,
+    MetricsError, PartialRanking, RankInstability, SystemId, Unorderable,
+};
+use common::{cap, grid_of, lower_is_better, point_cell, recorded, unrecorded};
+
+fn system(name: &str, grid: CapabilityGrid) -> CapabilityVector {
+    CapabilityVector::new(SystemId::parse(name).expect("named system"), grid)
+}
+
+fn two_cell_grid(label: &str, verify: f64, safety: f64) -> CapabilityGrid {
+    grid_of(
+        label,
+        recorded("comparison"),
+        vec![
+            ("verify.oracle", point_cell(verify, 12)),
+            ("safety.escalation", point_cell(safety, 12)),
+        ],
+    )
+}
+
+#[test]
+fn a_trade_off_is_incomparable_and_no_tiebreak_collapses_it() {
+    let left = system("a", two_cell_grid("a", 0.9, 0.4));
+    let right = system("b", two_cell_grid("b", 0.4, 0.9));
+
+    match compare(&left, &right) {
+        Dominance::Incomparable {
+            because:
+                Unorderable::TradeOff {
+                    left_better_on,
+                    right_better_on,
+                },
+        } => {
+            assert_eq!(left_better_on, vec![cap("verify.oracle")]);
+            assert_eq!(right_better_on, vec![cap("safety.escalation")]);
+        }
+        other => panic!("expected a trade-off, got {other:?}"),
+    }
+}
+
+#[test]
+fn dominance_requires_being_at_least_as_good_everywhere() {
+    let strong = system("a", two_cell_grid("a", 0.9, 0.9));
+    let weak = system("b", two_cell_grid("b", 0.4, 0.4));
+    assert!(matches!(compare(&strong, &weak), Dominance::LeftDominates));
+    assert!(matches!(compare(&weak, &strong), Dominance::RightDominates));
+}
+
+#[test]
+fn two_identical_vectors_are_equivalent_rather_than_arbitrarily_ordered() {
+    let left = system("a", two_cell_grid("a", 0.7, 0.7));
+    let right = system("b", two_cell_grid("b", 0.7, 0.7));
+    assert!(matches!(compare(&left, &right), Dominance::Equivalent));
+}
+
+#[test]
+fn dominance_respects_a_lower_is_better_direction() {
+    let fast = system(
+        "a",
+        grid_of(
+            "a",
+            lower_is_better("latency"),
+            vec![("tooluse.route", point_cell(100.0, 6))],
+        ),
+    );
+    let slow = system(
+        "b",
+        grid_of(
+            "b",
+            lower_is_better("latency"),
+            vec![("tooluse.route", point_cell(900.0, 6))],
+        ),
+    );
+    assert!(matches!(compare(&fast, &slow), Dominance::LeftDominates));
+}
+
+#[test]
+fn an_unmeasured_axis_makes_a_system_incomparable_however_good_its_other_cells() {
+    let complete = system("a", two_cell_grid("a", 0.4, 0.4));
+    let holed = system(
+        "b",
+        grid_of(
+            "b",
+            recorded("comparison"),
+            vec![
+                ("verify.oracle", point_cell(0.99, 12)),
+                (
+                    "safety.escalation",
+                    GridCell::unmeasured(UnmeasuredReason::NotAttempted),
+                ),
+            ],
+        ),
+    );
+
+    match compare(&complete, &holed) {
+        Dominance::Incomparable {
+            because:
+                Unorderable::UnmeasuredAxis {
+                    system, capability, ..
+                },
+        } => {
+            assert_eq!(system.as_str(), "b");
+            assert_eq!(capability, cap("safety.escalation"));
+        }
+        other => panic!("a hole cannot be dominated, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_system_with_a_hole_stays_in_the_maximal_set() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.9, 0.9)),
+        system(
+            "b",
+            grid_of(
+                "b",
+                recorded("comparison"),
+                vec![
+                    ("verify.oracle", point_cell(0.1, 12)),
+                    (
+                        "safety.escalation",
+                        GridCell::unmeasured(UnmeasuredReason::NotAttempted),
+                    ),
+                ],
+            ),
+        ),
+    ])
+    .expect("two systems");
+
+    let maximal = ranking.maximal();
+    assert_eq!(maximal.len(), 2);
+    assert!(!ranking.is_total());
+    assert_eq!(ranking.unresolved().len(), 1);
+}
+
+#[test]
+fn grids_under_different_conditions_are_incomparable_rather_than_ordered() {
+    let left = system("a", two_cell_grid("a", 0.9, 0.9));
+    let right = system(
+        "b",
+        grid_of(
+            "b",
+            unrecorded("comparison"),
+            vec![
+                ("verify.oracle", point_cell(0.1, 12)),
+                ("safety.escalation", point_cell(0.1, 12)),
+            ],
+        ),
+    );
+
+    assert!(matches!(
+        compare(&left, &right),
+        Dominance::Incomparable {
+            because: Unorderable::ConditionsDiffer { .. }
+        }
+    ));
+}
+
+#[test]
+fn vectors_over_different_capability_sets_are_incomparable() {
+    let left = system("a", two_cell_grid("a", 0.9, 0.9));
+    let right = system(
+        "b",
+        grid_of(
+            "b",
+            recorded("comparison"),
+            vec![("verify.oracle", point_cell(0.9, 12))],
+        ),
+    );
+
+    match compare(&left, &right) {
+        Dominance::Incomparable {
+            because: Unorderable::DifferentCapabilitySets { only_left, .. },
+        } => assert_eq!(only_left, vec![cap("safety.escalation")]),
+        other => panic!("expected a set mismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_ranking_needs_two_systems_and_refuses_a_duplicated_identifier() {
+    assert!(matches!(
+        PartialRanking::over(vec![system("a", two_cell_grid("a", 0.5, 0.5))]),
+        Err(MetricsError::RankingTooSmall(1))
+    ));
+    assert!(matches!(
+        PartialRanking::over(vec![
+            system("a", two_cell_grid("a", 0.5, 0.5)),
+            system("a", two_cell_grid("a", 0.6, 0.6)),
+        ]),
+        Err(MetricsError::DuplicateSystem(_))
+    ));
+}
+
+#[test]
+fn totalising_records_every_incomparability_it_overwrote() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.9, 0.4)),
+        system("b", two_cell_grid("b", 0.4, 0.9)),
+    ])
+    .expect("two systems");
+    let weighting = DeclaredWeighting::declare(
+        "verification-led triage",
+        vec![(cap("verify.oracle"), 3.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+
+    let total = ranking.totalise(&weighting).expect("both cells measured");
+    assert_eq!(total.leaders(), vec![&SystemId::parse("a").unwrap()]);
+    assert!(total.overwrote_a_refusal());
+    assert_eq!(total.collapsed.len(), 1);
+    assert!(matches!(
+        total.collapsed[0].dominance,
+        Dominance::Incomparable {
+            because: Unorderable::TradeOff { .. }
+        }
+    ));
+    assert!(total.headline().contains("incomparable before weighting"));
+}
+
+#[test]
+fn a_total_ranking_records_the_weighting_and_its_digest() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.9, 0.4)),
+        system("b", two_cell_grid("b", 0.4, 0.9)),
+    ])
+    .expect("two systems");
+    let weighting = DeclaredWeighting::declare(
+        "verification-led triage",
+        vec![(cap("verify.oracle"), 3.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+
+    let total = ranking.totalise(&weighting).expect("measured");
+    assert_eq!(total.weighting_digest, weighting.digest().as_str());
+    assert_eq!(total.weighting.intended_use(), "verification-led triage");
+}
+
+#[test]
+fn every_row_of_a_total_ranking_carries_its_coverage_rather_than_a_bare_number() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.9, 0.4)),
+        system("b", two_cell_grid("b", 0.4, 0.9)),
+    ])
+    .expect("two systems");
+    let weighting = DeclaredWeighting::declare(
+        "balanced",
+        vec![(cap("verify.oracle"), 1.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+
+    let total = ranking.totalise(&weighting).expect("measured");
+    let encoded = serde_json::to_value(&total).expect("serializable");
+    for row in encoded["order"].as_array().expect("rows") {
+        assert!(row["aggregate"]["coverage"]["contributed"].is_array());
+        assert!(row["aggregate"]["coverage"].get("blocking_holes").is_some());
+    }
+}
+
+#[test]
+fn tied_systems_share_a_rank_and_no_tiebreak_is_applied() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.7, 0.7)),
+        system("b", two_cell_grid("b", 0.7, 0.7)),
+    ])
+    .expect("two systems");
+    let weighting = DeclaredWeighting::declare(
+        "balanced",
+        vec![(cap("verify.oracle"), 1.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+
+    let total = ranking.totalise(&weighting).expect("measured");
+    assert_eq!(total.leaders().len(), 2);
+    assert!(total.order.iter().all(|row| row.rank == 1));
+}
+
+#[test]
+fn totalising_refuses_when_a_weighted_capability_is_unmeasured_for_any_system() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.9, 0.9)),
+        system(
+            "b",
+            grid_of(
+                "b",
+                recorded("comparison"),
+                vec![
+                    ("verify.oracle", point_cell(0.9, 12)),
+                    (
+                        "safety.escalation",
+                        GridCell::unmeasured(UnmeasuredReason::InaccessibleByPolicy),
+                    ),
+                ],
+            ),
+        ),
+    ])
+    .expect("two systems");
+    let weighting = DeclaredWeighting::declare(
+        "balanced",
+        vec![(cap("verify.oracle"), 1.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+
+    assert!(matches!(
+        ranking.totalise(&weighting),
+        Err(MetricsError::WeightedCapabilityUnmeasured { .. })
+    ));
+}
+
+#[test]
+fn rank_instability_names_the_capability_whose_removal_flips_the_leader() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.90, 0.10)),
+        system("b", two_cell_grid("b", 0.20, 0.95)),
+    ])
+    .expect("two systems");
+    let weighting = DeclaredWeighting::declare(
+        "verification-led triage",
+        vec![(cap("verify.oracle"), 3.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+
+    let instability = RankInstability::measure(&ranking, &weighting).expect("measurable");
+    assert_eq!(instability.perturbations, 2);
+    assert!(instability.instability > 0.0);
+    assert!(instability
+        .flipping_capabilities
+        .contains(&cap("verify.oracle")));
+    assert!(!instability.leader_is_robust());
+}
+
+#[test]
+fn a_leader_that_wins_on_every_capability_reports_zero_instability() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.90, 0.90)),
+        system("b", two_cell_grid("b", 0.10, 0.10)),
+    ])
+    .expect("two systems");
+    let weighting = DeclaredWeighting::declare(
+        "balanced",
+        vec![(cap("verify.oracle"), 1.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+
+    let instability = RankInstability::measure(&ranking, &weighting).expect("measurable");
+    assert_eq!(instability.top_changed_in, 0);
+    assert_eq!(instability.instability, 0.0);
+    assert!(instability.leader_is_robust());
+}
+
+#[test]
+fn leave_one_out_perturbations_are_deterministic_and_reproducible_from_the_declaration() {
+    let weighting = DeclaredWeighting::declare(
+        "balanced",
+        vec![
+            (cap("verify.oracle"), 1.0),
+            (cap("safety.escalation"), 1.0),
+            (cap("memory.recall"), 1.0),
+        ],
+    )
+    .expect("valid weighting");
+
+    let first = weighting.leave_one_out().expect("perturbable");
+    let second = weighting.leave_one_out().expect("perturbable");
+    assert_eq!(first.len(), 3);
+    assert_eq!(
+        first.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>(),
+        second.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>()
+    );
+    assert!(first
+        .iter()
+        .all(|(dropped, perturbed)| !perturbed.capabilities().any(|c| c == dropped)));
+}
+
+#[test]
+fn a_single_capability_weighting_has_no_leave_one_out_perturbation_left() {
+    let weighting =
+        DeclaredWeighting::declare("verification only", vec![(cap("verify.oracle"), 1.0)])
+            .expect("valid weighting");
+    assert!(weighting.leave_one_out().expect("perturbable").is_empty());
+    assert!(weighting
+        .without(&cap("verify.oracle"))
+        .expect("no error")
+        .is_none());
+}
+
+#[test]
+fn the_per_capability_breakdown_separates_leading_from_never_measured() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.90, 0.10)),
+        system(
+            "b",
+            grid_of(
+                "b",
+                recorded("comparison"),
+                vec![
+                    ("verify.oracle", point_cell(0.20, 12)),
+                    (
+                        "safety.escalation",
+                        GridCell::unmeasured(UnmeasuredReason::NotAttempted),
+                    ),
+                ],
+            ),
+        ),
+    ])
+    .expect("two systems");
+
+    let rows = breakdown(&ranking);
+    let safety = rows
+        .iter()
+        .find(|row| row.capability == cap("safety.escalation"))
+        .expect("present");
+    assert_eq!(safety.best, vec![SystemId::parse("a").unwrap()]);
+    assert_eq!(safety.unmeasured_for, vec![SystemId::parse("b").unwrap()]);
+
+    let verify = rows
+        .iter()
+        .find(|row| row.capability == cap("verify.oracle"))
+        .expect("present");
+    assert!(verify.unmeasured_for.is_empty());
+}
+
+#[test]
+fn a_deserialized_weighting_cannot_claim_a_digest_it_does_not_have() {
+    let weighting = DeclaredWeighting::declare(
+        "balanced",
+        vec![(cap("verify.oracle"), 1.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+    let mut document = serde_json::to_value(&weighting).expect("serializable");
+    document["digest"] = serde_json::Value::String("0".repeat(64));
+
+    assert!(serde_json::from_value::<DeclaredWeighting>(document).is_err());
+}
