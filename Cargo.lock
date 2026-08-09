@@ -171,6 +171,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-cookbook"
+version = "0.1.0"
+dependencies = [
+ "bioprism-docgraph",
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-devx"
 version = "0.1.0"
 dependencies = [
@@ -681,6 +694,21 @@ version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-scope",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-worldfactory"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-mutation",
+ "bioprism-scale",
+ "bioprism-scope",
+ "bioprism-world",
+ "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",

@@ -1,0 +1,14 @@
+[package]
+name = "bioprism-devx"
+version = "0.1.0"
+edition = "2021"
+description = "Developer platform: machine-actionable diagnostics, compile introspection, the local-loop invalidation contract and the 23.32 debugger surface model"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-sdk = { workspace = true }
+bioprism-docgraph = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
