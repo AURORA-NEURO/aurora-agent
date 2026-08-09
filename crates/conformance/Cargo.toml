@@ -1,0 +1,20 @@
+[package]
+name = "bioprism-conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Conformance suites, the test pyramid and release quality gates"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-world = { workspace = true }
+bioprism-fiber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-worldgen = { workspace = true }
