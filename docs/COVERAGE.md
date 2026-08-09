@@ -149,24 +149,23 @@ count and a rare-term count answer different questions, and no agent was given a
 Read the column as evidence that a section is repetitive or is not, and distrust small differences
 between rows.
 
-There is now a measured instance of exactly that hazard. Two agents independently measured §23's
-verbatim duplication over the same 6,001 non-blank lines, both describing the metric as lines
-appearing in another module, and got **16.2%** and **10.7%**. Recomputing it settles the discrepancy:
-974 of 6,001 line *occurrences* sit in a string that appears in more than one module, so 16.2% is
-right for that definition and 10.7% counts something narrower.
+There is now a measured instance of exactly that hazard, and it has been **resolved**. Three agents
+independently measured §23's verbatim duplication over the same 6,001 lines, all describing the
+metric the same way, and reported **16.2%**, **10.7%** and **10.4%**. A fourth found the cause: the
+YAML front matter. Seven lines per file across fifty files, five of them byte-identical, contributes
+250 duplicated line occurrences and **4.3 points**. Counting it gives ~16%; stripping it gives ~12%.
+Both are right about different corpora.
 
-The recomputation also produces the sharper number. Only **2.1% of distinct line-strings** (108 of
-5,078) are shared at all, and those 108 strings account for the whole 16.2% of occurrences. A section
-is not repetitive because it has a lot of repeated content; it is repetitive because a small template
-is stamped many times. That is the shape every high-boilerplate section in the table has, and it is
-why "distinguishing lines per module" is the more useful column.
+Recomputed independently, as written and front-matter-stripped: **967 of 6,001 (16.1%)** and
+**667 of 5,651 (11.8%)**. Nobody was wrong; the corpus was never agreed.
 
-What survives every method: section size predicts *reading* cost and not *implementation* cost, so a
-coverage percentage weighted by module count overstates how much real design surface remains.
+The number that does *not* move under any preprocessing is the sharper one. Only **2.1% of distinct
+line-strings** are shared at all — stable at 1.6–2.1% across four filters — and those few strings
+account for the whole 16%. §23's modules share *formatting*, not content. A section is not
+repetitive because it contains a lot of repeated text; it is repetitive because a small template is
+stamped many times, and counting distinct shared strings sees that directly while counting
+occurrences sees it through the size of the template.
 
-Three findings are worth quoting exactly. In §14 one mitigation sentence appears **125 times** across
-the section, under different failure modes. In §32 every one of the 23 modules carries an identical
-transformation-contract YAML in which all four `changes:` flags are `false` — including modules that
-obviously change observation — and `expected_relation.type` is a six-way pipe union that is never
-resolved to a selection. In §42 every module's "Required API objects" list is identical, and none of
-the seven objects is defined anywhere in the section.
+Two later agents converged on the same ordering of what matters, on different sections: **threshold
+barely matters, unit matters more, definition matters most** (§25: 2.0 / 11 / 22 points; §27: 0 /
+—/ 21 points). Use the distinguishing-lines-per-module column, and treat the percentage as a band.
