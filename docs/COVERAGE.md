@@ -16,6 +16,36 @@ The table below is a snapshot; the script is the live source.
 BLUEPRINT=/path/to/distribution/root tools/coverage.sh
 ```
 
+## The end state, and what is left
+
+Coverage is **92.6%** — 703 of 759 code-bearing modules. The remaining **57 are enumerated in
+`docs/BACKLOG.md` and explained in `crates/residue`**, which holds one typed verdict per module
+saying why no crate implements it, anchored to a sentence a classifying crate actually wrote. Its
+reconciliation against the backlog is a test, so the two cannot drift apart silently.
+
+The distribution over the 57: **37 process, 10 foreign artifact, 10 discharged elsewhere, and 1
+genuinely uncovered.** That last one is deliberate. `crates/bioethics` discharges §36's sandboxing
+module and in the same paragraph records that all thirteen of its required controls need a process
+boundary, a network stack or a scanner, none of which exists here — so the register carries a second
+verdict saying the control exists nowhere. A register reporting zero work remaining while the
+workspace has no sandbox would be the flattering answer, and this file's own rule forbids it.
+
+Three categories in that table were discovered rather than planned, each by a crate that read its
+section and refused to pad:
+
+- **Process** — describes what people do. `crates/stewardship` found 12 of §14's 18.
+- **Foreign artifact** — code-bearing, precise, testable, and not Rust and not in this repository.
+  `crates/devplat` found 7 of 20 in §11 and §19, including both GitHub Action modules and the Python
+  and TypeScript SDKs. The consequence is worth stating: the only two onboarding documents §11
+  actually writes out are entirely outside this repository.
+- **Discharged elsewhere** — the content exists under a different section's id. **11 verdicts name
+  their own author as the discharger**, a crate that built the capability without ever citing the
+  module, which a token scan structurally cannot see.
+
+Ten modules are **contested** — `atlasx` says §33's remainder defines nothing once the shared blocks
+are stripped, `metrics` says the buildable part is already built — and the register keeps both
+readings rather than adjudicating.
+
 ## Where the 973 modules are
 
 Ten sections are programme documents rather than specifications of behaviour: start-here material,
@@ -46,13 +76,13 @@ state is a backlog whose residue is explained rather than empty.
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 567 |
-| **code-bearing coverage** | **74.7%** |
+| cited | 703 |
+| **code-bearing coverage** | **92.6%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 74.7% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 92.6% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 
