@@ -1,0 +1,12 @@
+[package]
+name = "bioprism-worldfactory"
+version = "0.1.0"
+edition = "2021"
+description = "Parent bioworld authoring and the biomutator: observed, semi-synthetic and mechanistic worlds, assay-fault and contradiction programs"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
