@@ -101,6 +101,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-choreography"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-section",
+ "bioprism-weave",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-cli"
 version = "0.1.0"
 dependencies = [
@@ -255,7 +267,6 @@ name = "bioprism-lab"
 version = "0.1.0"
 dependencies = [
  "bioprism-atlas",
- "bioprism-ids",
  "bioprism-obligation",
  "bioprism-scope",
  "serde",
@@ -333,6 +344,18 @@ dependencies = [
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-world",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-oncoworlds"
+version = "0.1.0"
+dependencies = [
+ "bioprism-onco",
+ "bioprism-scope",
+ "bioprism-standards",
  "serde",
  "serde_json",
  "thiserror",
@@ -485,6 +508,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-services"
+version = "0.1.0"
+dependencies = [
+ "bioprism-governance",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-standards"
 version = "0.1.0"
 dependencies = [
@@ -539,6 +572,17 @@ version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-section",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-weavelang"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-weave",
  "serde",
  "serde_json",
  "thiserror",

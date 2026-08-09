@@ -38,6 +38,13 @@ pub enum SpaceError {
     #[error("candidate `{candidate}` omits a required component kind: {kind}")]
     MissingRequiredComponent { candidate: String, kind: String },
 
+    #[error("candidate `{candidate}` declares {cost_units} cost units against a ceiling of {ceiling}")]
+    CostCeilingExceeded {
+        candidate: String,
+        cost_units: u64,
+        ceiling: u64,
+    },
+
     #[error("lineage of `{0}` is cyclic; a configuration cannot be its own ancestor")]
     LineageCycle(String),
 

@@ -1,14 +1,18 @@
-    [package]
-    name = "bioprism-lab"
-    version = "0.1.0"
-    edition = "2021"
-    description = "Inference Lab: hypothesis separation, architecture search, Pareto fronts, evolution cards, holdout and rollback policy"
+[package]
+name = "bioprism-lab"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Inference Lab: hypothesis separation, architecture search, Pareto fronts, evolution cards, holdout and rollback policy"
 
-    [dependencies]
-    bioprism-ids = { workspace = true }
-bioprism-scope = { workspace = true }
-bioprism-obligation = { workspace = true }
+[dependencies]
 bioprism-atlas = { workspace = true }
-    serde = { workspace = true }
-    serde_json = { workspace = true }
-    thiserror = { workspace = true }
+bioprism-obligation = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-scope = { workspace = true }
+serde_json = { workspace = true }
