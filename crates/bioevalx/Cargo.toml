@@ -1,0 +1,14 @@
+[package]
+name = "bioprism-bioevalx"
+version = "0.1.0"
+edition = "2021"
+description = "Bio evaluation engine remainder: scoring planes, reader models, adjudication and the evaluation contract"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-bioeval = { workspace = true }
+bioprism-evalengine = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
