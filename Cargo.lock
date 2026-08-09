@@ -176,7 +176,6 @@ version = "0.1.0"
 dependencies = [
  "bioprism-docgraph",
  "bioprism-ids",
- "bioprism-scope",
  "bioprism-section",
  "serde",
  "serde_json",
@@ -704,11 +703,7 @@ name = "bioprism-worldfactory"
 version = "0.1.0"
 dependencies = [
  "bioprism-ids",
- "bioprism-mutation",
- "bioprism-scale",
  "bioprism-scope",
- "bioprism-world",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",

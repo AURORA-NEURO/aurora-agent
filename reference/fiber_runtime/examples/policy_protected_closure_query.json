@@ -1,0 +1,23 @@
+{
+  "budgets": {
+    "max_facts": 64,
+    "max_tokens": 6000
+  },
+  "decision_time": "2025-01-01T00:00:00Z",
+  "distortion_tolerance": 0.0,
+  "policy": [
+    "research-only"
+  ],
+  "protected_tags": [
+    "identity",
+    "policy",
+    "protected",
+    "split"
+  ],
+  "query_id": "audit-with-identity-protected-v1",
+  "role": "research-auditor",
+  "schema_version": "fiber-query/0.1",
+  "targets": [
+    "split_integrity_status"
+  ]
+}

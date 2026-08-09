@@ -83,6 +83,14 @@ pub enum RefusalCode {
     MalformedQuery,
     /// The world document is not a well-formed `fiber-world/0.1` document.
     MalformedWorld,
+    /// Policy refused the compile: a clause the corpus never granted, a malformed or
+    /// uninterpretable policy declaration, or a protected fact the caller cannot unlock
+    /// (43.33, 40.25).
+    ///
+    /// This is one code rather than four because the taxonomy lives in
+    /// `bioprism_fiber::PolicyViolation`. Splitting it here would duplicate a distinction the
+    /// compiler already draws.
+    PolicyRefused,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

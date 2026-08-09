@@ -7,11 +7,20 @@
 //! rather than pretending they ran.
 //!
 //! Pass order is normative, not incidental: closure is computed *before* slicing so that
-//! protected evidence enters the selection whether or not a dependency path reaches it.
+//! protected evidence enters the selection whether or not a dependency path reaches it, and the
+//! policy screen runs *after* both so that a collision between "mandatory" and "forbidden" is
+//! visible rather than pre-filtered away. [`crate::policy::screen`] carries that argument in full.
+//!
+//! The one gate that runs ahead of every pass is [`crate::policy::PolicyEnvelope::resolve`]. It
+//! needs no evidence — one `data_policy` lookup — so a query whose declared clauses conflict with
+//! the corpus is refused before any closure, slice or materialisation happens. It emits no pass
+//! receipt because it selects nothing; it is an admission check on the query-world pair, in the
+//! same family as the schema-version check in [`Query::from_json`].
 
 use crate::closure::{dropped_protected, protected_closure, unmatched_tags};
 use crate::error::FiberError;
 use crate::oracle;
+use crate::policy::{self, PolicyEnvelope, PolicyOutcome, PolicyScreen, POLICY_REFINEMENT_ACTION};
 use crate::qir::Query;
 use crate::slice::{backward_slice, max_selected_arity};
 use crate::temporal::{temporal_cut, TemporalCut};
@@ -45,8 +54,13 @@ pub struct CompileTrace {
     pub unmatched_protected_tags: Vec<String>,
     /// Protected facts the temporal cut removed. Non-empty means the mandatory closure was not
     /// delivered and the consumer must refine or abstain.
+    ///
+    /// Policy never contributes to this list: a policy exclusion inside the closure is refused
+    /// outright, so a compile that returns at all has a closure policy left intact.
     pub dropped_protected: Vec<String>,
     pub temporal_cut: TemporalCut,
+    /// What the policy screen held and what it withheld (43.33).
+    pub policy: PolicyOutcome,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +75,11 @@ impl CompileOutput {
     pub fn protected_closure_satisfied(&self) -> bool {
         self.trace.dropped_protected.is_empty()
     }
+
+    /// Whether the policy screen released every candidate the slice and closure asked for.
+    pub fn policy_released_everything(&self) -> bool {
+        self.trace.policy.released_everything_requested()
+    }
 }
 
 pub fn compile<S: WorldSource + ?Sized>(
@@ -68,6 +87,8 @@ pub fn compile<S: WorldSource + ?Sized>(
     query: &Query,
 ) -> Result<CompileOutput, FiberError> {
     let mut passes = Vec::new();
+
+    let envelope = PolicyEnvelope::resolve(source, query)?;
 
     let protected = protected_closure(source, &query.protected_tags);
     passes.push(PassReceipt {
@@ -99,6 +120,22 @@ pub fn compile<S: WorldSource + ?Sized>(
             resolved.insert(id.clone(), fact);
         }
     }
+
+    let screen = policy::screen(&envelope, &resolved, &protected)?;
+    let withheld_by_policy = screen.withheld_ids();
+    for id in &withheld_by_policy {
+        selected_facts.remove(id);
+    }
+    passes.push(PassReceipt {
+        name: "policy",
+        retained: selected_facts.len(),
+        note: format!(
+            "{} clause(s) in force, {} candidate(s) declared a requirement, {} withheld",
+            envelope.in_force().len(),
+            screen.requirements_seen(),
+            withheld_by_policy.len()
+        ),
+    });
 
     let cut = temporal_cut(source, query.decision_time);
     let inaccessible: Vec<String> = selected_facts
@@ -153,18 +190,36 @@ pub fn compile<S: WorldSource + ?Sized>(
         .map(|factor| factor.raw().clone())
         .collect();
 
-    let unresolved: Vec<UnresolvedObligation> = inaccessible
+    // Obligations and refinements are listed in pass order, so a reader walking the section meets
+    // the exclusions in the order the compiler decided them.
+    let mut unresolved: Vec<UnresolvedObligation> = withheld_by_policy
         .iter()
-        .map(|id| UnresolvedObligation::InaccessibleAtCut { fact_id: id.clone() })
+        .map(|id| UnresolvedObligation::PolicyBlocked {
+            detail: PolicyScreen::obligation_detail(
+                id,
+                screen.missing_for(id).expect("withheld ids carry their clauses"),
+            ),
+        })
         .collect();
-    let frontier = if inaccessible.is_empty() {
-        Vec::new()
-    } else {
-        vec![RefinementOption {
+    unresolved.extend(
+        inaccessible
+            .iter()
+            .map(|id| UnresolvedObligation::InaccessibleAtCut { fact_id: id.clone() }),
+    );
+
+    let mut frontier = Vec::new();
+    if !withheld_by_policy.is_empty() {
+        frontier.push(RefinementOption {
+            action: POLICY_REFINEMENT_ACTION.into(),
+            facts: withheld_by_policy.clone(),
+        });
+    }
+    if !inaccessible.is_empty() {
+        frontier.push(RefinementOption {
             action: RETROSPECTIVE_ACTION.into(),
             facts: inaccessible.clone(),
-        }]
-    };
+        });
+    }
 
     let section = DecisionSection {
         world_id: source.world_id().to_string(),
@@ -208,7 +263,12 @@ pub fn compile<S: WorldSource + ?Sized>(
         ),
     });
 
-    let manifest = build_manifest(omitted_total, &inaccessible, omitted_exploratory);
+    let manifest = build_manifest(
+        omitted_total,
+        &inaccessible,
+        &withheld_by_policy,
+        omitted_exploratory,
+    );
 
     let certificate = ContextCertificate {
         world_id: source.world_id().to_string(),
@@ -249,6 +309,7 @@ pub fn compile<S: WorldSource + ?Sized>(
             unmatched_protected_tags: unmatched_tags(source, &query.protected_tags),
             dropped_protected: dropped_protected(&protected, &selected_facts),
             temporal_cut: cut,
+            policy: PolicyOutcome::new(&envelope, &screen),
         },
     })
 }
@@ -260,13 +321,25 @@ pub fn compile<S: WorldSource + ?Sized>(
 /// an incomplete factor graph would turn a zero-influence claim into an unknown-influence one.
 /// Temporally withheld facts are [`InfluenceClass::DeferredAcquisition`], never zero: they might
 /// well change the decision, they are simply not readable yet.
+///
+/// Policy-withheld facts get [`InfluenceClass::InaccessibleByPolicy`] and are counted out of the
+/// structural group before it is formed. The three classes are kept apart deliberately. Zero says
+/// the omission provably cannot matter; deferred says it may matter and will be readable later;
+/// policy says it may matter and no amount of waiting will produce it. Folding policy into
+/// deferred would promise a retry that cannot succeed, and folding it into zero would assert a
+/// bound nobody computed. Because the class does not support a sufficiency claim, one withheld
+/// fact is enough to make [`OmissionManifest::supports_sufficiency_claim`] false — which is the
+/// honest reading, since the oracle then ran on a value map missing evidence it asked for.
 fn build_manifest(
     omitted_total: usize,
     inaccessible: &[String],
+    withheld_by_policy: &[String],
     exploratory: usize,
 ) -> OmissionManifest {
     let mut manifest = OmissionManifest::default();
-    let unreachable = omitted_total.saturating_sub(inaccessible.len());
+    let unreachable = omitted_total
+        .saturating_sub(inaccessible.len())
+        .saturating_sub(withheld_by_policy.len());
 
     if unreachable > 0 {
         manifest.push(OmissionGroup {
@@ -276,6 +349,16 @@ fn build_manifest(
             count: unreachable,
             bound: Some(0.0),
             examples: Vec::new(),
+        });
+    }
+    if !withheld_by_policy.is_empty() {
+        manifest.push(OmissionGroup {
+            reason: "withheld by the world's data policy: the query does not hold the clauses the fact requires"
+                .into(),
+            influence: InfluenceClass::InaccessibleByPolicy,
+            count: withheld_by_policy.len(),
+            bound: None,
+            examples: withheld_by_policy.iter().take(3).cloned().collect(),
         });
     }
     if !inaccessible.is_empty() {
@@ -291,6 +374,11 @@ fn build_manifest(
     manifest
 }
 
+/// Passes the wire formats cannot support, each with the field that is missing.
+///
+/// The two policy entries are the half of 43.33 [`crate::policy`] enforces nothing of. Declaring
+/// them here rather than only in prose is the difference between a consumer being able to check
+/// that role filtering did not happen and having to read the source to find out.
 fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
     let mut deferred = vec![
         (
@@ -300,6 +388,14 @@ fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
         (
             "abstract_interpretation",
             "43.11 requires an abstract-domain registry absent from fiber-world/0.1",
+        ),
+        (
+            "role_and_purpose_filter",
+            "43.33 binds role and purpose to the query before selection; fiber-query/0.1 carries a role string and no purpose, and no pass reads either",
+        ),
+        (
+            "information_flow_export",
+            "43.33 orders outputs by policy label; fiber-world/0.1 declares no labels and no rules attached at scopes, so only read access is decided",
         ),
     ];
     if query.missing_contract_fields().contains(&"decision_loss") {

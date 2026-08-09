@@ -1,0 +1,111 @@
+{
+  "description": "A four-fact world whose identity evidence is released only under the no-identifiable-export clause. Compiled by both the CPython reference and crates/fiber, from these bytes, to prove the policy pass has cross-language parity.",
+  "events": [],
+  "factors": [
+    {
+      "id": "factor.claim_support",
+      "inputs": [
+        "identity_leakage_flag",
+        "cohort_id"
+      ],
+      "kind": "rule",
+      "outputs": [
+        "split_integrity_status"
+      ],
+      "scope": {
+        "cohort": "PR-DEMO-001"
+      }
+    },
+    {
+      "id": "factor.identity_check",
+      "inputs": [
+        "subject_aliases",
+        "split_assignment"
+      ],
+      "kind": "rule",
+      "outputs": [
+        "identity_leakage_flag"
+      ],
+      "scope": {
+        "cohort": "PR-DEMO-001"
+      }
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact.policy",
+      "provenance": [
+        "governance/policy.json"
+      ],
+      "provides": "data_policy",
+      "scope": {
+        "cohort": "PR-DEMO-001"
+      },
+      "tags": [
+        "policy",
+        "protected"
+      ],
+      "value": [
+        "research-only",
+        "no-identifiable-export"
+      ]
+    },
+    {
+      "id": "fact.cohort",
+      "provenance": [
+        "registry/cohort.json"
+      ],
+      "provides": "cohort_id",
+      "scope": {
+        "cohort": "PR-DEMO-001"
+      },
+      "tags": [
+        "identity",
+        "protected"
+      ],
+      "value": "PR-DEMO-001"
+    },
+    {
+      "id": "fact.split",
+      "provenance": [
+        "registry/split.json"
+      ],
+      "provides": "split_assignment",
+      "scope": {
+        "cohort": "PR-DEMO-001"
+      },
+      "tags": [
+        "protected",
+        "split"
+      ],
+      "value": {
+        "S001": "train",
+        "S002": "test"
+      }
+    },
+    {
+      "id": "fact.subject_aliases",
+      "provenance": [
+        "registry/aliases.json"
+      ],
+      "provides": "subject_aliases",
+      "scope": {
+        "cohort": "PR-DEMO-001",
+        "policy": "no-identifiable-export"
+      },
+      "tags": [
+        "identity"
+      ],
+      "value": {
+        "S001": [
+          "ALT-77"
+        ],
+        "S002": [
+          "ALT-77"
+        ]
+      }
+    }
+  ],
+  "schema_version": "fiber-world/0.1",
+  "world_id": "policy-restricted-demo-v1"
+}

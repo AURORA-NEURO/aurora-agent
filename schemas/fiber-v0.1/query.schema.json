@@ -28,6 +28,7 @@
       "type": "number"
     },
     "policy": {
+      "description": "Policy clauses the caller accepts as obligations, and therefore the grants this compile holds. Must be a subset of the clause list the world's `data_policy` fact declares, where the world declares one; a clause outside it is a policy conflict and the compile refuses. Facts whose `policy` scope names a clause absent from this list are withheld.",
       "items": {
         "type": "string"
       },
@@ -43,6 +44,7 @@
       "type": "string"
     },
     "role": {
+      "description": "Caller role. Carried by the contract and read by no compiler pass in v0.1; role and visibility filtering is not implemented.",
       "type": "string"
     },
     "schema_version": {

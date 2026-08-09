@@ -15,3 +15,8 @@ bioprism-world = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+# Tests only. The policy pass is classified by bioprism-governance rather than by assertion, and
+# the crate that owns the rule is the one that must answer.
+bioprism-governance = { workspace = true }

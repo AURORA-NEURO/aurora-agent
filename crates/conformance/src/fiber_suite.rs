@@ -39,7 +39,7 @@ use crate::implementation::{
     artifact, CompileArtifacts, CompileFailure, Implementation, ImplementationIdentity,
 };
 use crate::suite::Suite;
-use bioprism_fiber::{compile, CompileOutput, FiberError, Query};
+use bioprism_fiber::{compile, CompileOutput, FiberError, PolicyViolation, Query};
 use bioprism_section::CertificateProfile;
 use bioprism_world::{World, WorldError};
 use serde_json::{json, Value};
@@ -840,10 +840,11 @@ fn conformance_cases() -> Vec<ConformanceCase> {
             Layer::Conformance,
             "The pipeline reports the passes it ran, in order. Order is normative: the protected \
              closure is computed before slicing, so that mandatory evidence enters the selection \
-             whether or not a dependency path reaches it.",
+             whether or not a dependency path reaches it, and the policy screen runs after it so \
+             that a policy withholding a mandatory fact is observable rather than invisible.",
             baseline_input(),
         )
-        .enforcing(&["43.16", "43.13"])
+        .enforcing(&["43.16", "43.13", "43.33"])
         .expecting(Expectation::ArrayProjectionEquals {
             artifact: artifact::REPORT.to_string(),
             pointer: "/passes".to_string(),
@@ -851,6 +852,7 @@ fn conformance_cases() -> Vec<ConformanceCase> {
             values: [
                 "protected_closure",
                 "backward_slice",
+                "policy",
                 "temporal_cut",
                 "oracle",
                 "plan_selection",
@@ -1093,6 +1095,24 @@ fn fiber_failure(error: FiberError) -> CompileFailure {
         FiberError::BudgetExceeded { .. } => "budget_exceeded",
         FiberError::UnorderableSplitGroups { .. } => "unorderable_split_groups",
         FiberError::World(inner) => return world_failure(inner.clone()),
+        FiberError::Policy(inner) => return policy_failure(inner.clone()),
+    };
+    CompileFailure::new(kind, error.to_string())
+}
+
+/// Names a policy refusal (43.33, 40.25).
+///
+/// Kept separate from [`fiber_failure`] for the same reason [`world_failure`] is: the four kinds
+/// are decisions the compiler already distinguishes, and collapsing them here would tell a
+/// conformance consumer less than the compiler knows. `protected_closure_withheld_by_policy` in
+/// particular is not interchangeable with the other three — it is 43.13's mandatory closure
+/// failing, which no grant obtained later can turn into a partial answer.
+fn policy_failure(error: PolicyViolation) -> CompileFailure {
+    let kind = match &error {
+        PolicyViolation::Conflict { .. } => "policy_conflict",
+        PolicyViolation::MalformedDataPolicy { .. } => "malformed_data_policy",
+        PolicyViolation::UninterpretableRequirement { .. } => "uninterpretable_policy_requirement",
+        PolicyViolation::ProtectedClosureWithheld { .. } => "protected_closure_withheld_by_policy",
     };
     CompileFailure::new(kind, error.to_string())
 }

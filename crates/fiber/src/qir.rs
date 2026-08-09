@@ -10,6 +10,12 @@
 //! (43.12) are both defined relative to `A` and `ℓ`, so neither can be implemented against v0.1
 //! without extending the schema. [`Query::missing_contract_fields`] reports the gap rather than
 //! letting a later pass quietly substitute a default.
+//!
+//! Of the role/policy pair `ω`, only [`Query::policy`] is read — by [`crate::policy`], as the set
+//! of obligations the caller accepts. [`Query::role`] is still parsed and discarded: 43.33 binds
+//! role and purpose to the query at step 1, `bioprism-scope` registers `role` and `visibility` as
+//! policy-class dimensions, and no pass in this crate consults either. That is the same defect the
+//! §40 audit found in `policy`, one field over, and it is recorded here rather than fixed silently.
 
 use crate::error::FiberError;
 use bioprism_ids::{QueryId, VariableName};

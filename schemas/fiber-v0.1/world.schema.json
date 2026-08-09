@@ -101,9 +101,11 @@
             "type": "array"
           },
           "provides": {
+            "description": "Variable this section supplies to the factor calculus. The variable `data_policy` is reserved: its value is the clause list the corpus was released under, and a query declaring a clause outside it is a policy conflict.",
             "type": "string"
           },
           "scope": {
+            "description": "Validity scope of this local section, as a map from dimension name to constraint. The `policy` dimension is an access-control input, not evidence: it names the clause or clauses a reader must have accepted before the fact may be released, read as a conjunction. A compiler screens facts against the clauses a query declares and withholds those it cannot unlock.",
             "type": "object"
           },
           "tags": {

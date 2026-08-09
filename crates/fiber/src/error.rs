@@ -1,3 +1,4 @@
+use crate::policy::PolicyViolation;
 use bioprism_world::WorldError;
 use thiserror::Error;
 
@@ -40,6 +41,15 @@ pub enum FiberError {
     /// agreement about which worlds compile.
     #[error("subjects sharing alias {alias:?} have a missing split assignment alongside {present:?}; the split-integrity oracle cannot order the groups")]
     UnorderableSplitGroups { alias: String, present: Vec<String> },
+
+    /// The policy pass refused (43.33), including 40.25's named `policy conflict` failure.
+    ///
+    /// Carried transparently, exactly as [`FiberError::World`] carries `WorldError`. Policy has a
+    /// taxonomy of its own and it belongs in [`PolicyViolation`]; giving the compiler's error type
+    /// one variant per policy rule would spread that taxonomy across two enums and force every
+    /// consumer classifying compiler failures to re-derive it.
+    #[error(transparent)]
+    Policy(#[from] PolicyViolation),
 
     #[error(transparent)]
     World(#[from] WorldError),

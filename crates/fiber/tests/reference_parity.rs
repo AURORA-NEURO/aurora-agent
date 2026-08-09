@@ -246,6 +246,8 @@ fn the_compiler_reports_the_passes_it_could_not_run() {
     for expected in [
         "obstruction_tests",
         "abstract_interpretation",
+        "role_and_purpose_filter",
+        "information_flow_export",
         "decision_quotient",
         "rate_distortion",
     ] {
@@ -261,6 +263,7 @@ fn the_compiler_reports_the_passes_it_could_not_run() {
         vec![
             "protected_closure",
             "backward_slice",
+            "policy",
             "temporal_cut",
             "oracle",
             "plan_selection"

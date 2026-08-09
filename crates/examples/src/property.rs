@@ -295,7 +295,7 @@ impl Property {
                 "OracleVerdict::abstain exists in bioprism-section but no path in bioprism-fiber constructs it; the v0.1 oracle derives status solely from whether the witness list is empty",
             ),
             Property::PolicyBlockedOmission => Some(
-                "policy is carried as a fact value (data_policy) rather than as an access-control input, so no compile path can emit InfluenceClass::InaccessibleByPolicy",
+                "bioprism-fiber now screens facts by their policy scope dimension and emits InfluenceClass::InaccessibleByPolicy, but WorldSpec has no knob that binds that dimension, so every world this crate can generate declares no policy requirement and the pass withholds nothing",
             ),
             Property::BoundedInfluenceOmission => Some(
                 "bioprism-fiber emits only InfluenceClass::Zero and DeferredAcquisition; nothing computes a numeric influence bound, so no group is ever Bounded",
