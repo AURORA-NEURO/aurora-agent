@@ -266,7 +266,8 @@ fn the_compiler_reports_the_passes_it_could_not_run() {
             "policy",
             "temporal_cut",
             "oracle",
-            "plan_selection"
+            "plan_selection",
+            "influence_bounds"
         ]
     );
 }

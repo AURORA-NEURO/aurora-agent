@@ -1,0 +1,334 @@
+{
+  "description": "A world whose compiled region no physical backend can cost: one rule over twelve ten-valued inputs. Bucket elimination declines on peak memory and direct materialisation declines on work, so bioprism_backends::Portfolio::select returns Declined rather than a plan. Used by crates/fiber to show that an infeasible costing is reported on the compile trace and does not fail the compile, and that the certificate's plan block is unchanged by it.",
+  "events": [],
+  "factors": [
+    {
+      "id": "factor.wide_rule",
+      "inputs": [
+        "v01",
+        "v02",
+        "v03",
+        "v04",
+        "v05",
+        "v06",
+        "v07",
+        "v08",
+        "v09",
+        "v10",
+        "v11",
+        "v12"
+      ],
+      "kind": "rule",
+      "outputs": [
+        "split_integrity_status"
+      ],
+      "scope": {
+        "cohort": "WIDE-001"
+      }
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact.v01",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v01",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v02",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v02",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v03",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v03",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v04",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v04",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v05",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v05",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v06",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v06",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v07",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v07",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v08",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v08",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v09",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v09",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v10",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v10",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v11",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v11",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    },
+    {
+      "id": "fact.v12",
+      "provenance": [
+        "registry/wide.json"
+      ],
+      "provides": "v12",
+      "scope": {
+        "cohort": "WIDE-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "level-5",
+        "level-6",
+        "level-7",
+        "level-8",
+        "level-9"
+      ]
+    }
+  ],
+  "schema_version": "fiber-world/0.1",
+  "world_id": "wide-region-demo-v1"
+}

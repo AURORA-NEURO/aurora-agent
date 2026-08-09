@@ -138,4 +138,47 @@ class PolicyPassTests(unittest.TestCase):
         cert=compile_fiber(self.world,self.query).certificate
         self.assertEqual(cert['selected_factors'],['factor.claim_support','factor.identity_check'])
 
+
+class PlanBlockParityTests(unittest.TestCase):
+    """The plan block, on the two worlds where the Rust engine's new passes actually do something.
+
+    crates/fiber now consults bioprism_backends::Portfolio on every compile and runs
+    bioprism_influence over every fact the temporal cut withheld. Neither result reaches the
+    certificate: the portfolio costs a sum-product evaluation the compiler does not perform and,
+    because fiber-world/0.1 declares no factor potentials, could not perform; and the analyser
+    returns unknown for the same missing potentials. This file has no portfolio and no analyser and
+    must nonetheless keep emitting the same bytes, so these two fixtures are where a divergence
+    would show up first. The mirror of these assertions is crates/fiber/tests/plan_portfolio.rs and
+    crates/fiber/tests/influence_pass.rs.
+    """
+    @classmethod
+    def setUpClass(cls):
+        cls.wide_world=json.loads((HERE/'examples/wide_region_world.json').read_text())
+        cls.wide_query=json.loads((HERE/'examples/wide_region_query.json').read_text())
+        cls.deferred_world=json.loads((HERE/'examples/deferred_evidence_world.json').read_text())
+        cls.deferred_query=json.loads((HERE/'examples/deferred_evidence_query.json').read_text())
+
+    def test_a_region_no_backend_can_cost_still_reports_the_delivering_backend(self):
+        cert=compile_fiber(self.wide_world,self.wide_query).certificate
+        self.assertEqual(cert['plan'],{
+            'backend':'backward_factor_slice_reference',
+            'compiled_factor_count':1,
+            'compiled_fact_count':12,
+            'total_factor_count':1,
+            'total_fact_count':12,
+            'max_selected_factor_arity':12,
+            'fallback':None,
+        })
+
+    def test_withheld_evidence_is_named_and_the_plan_block_is_untouched_by_the_analysis(self):
+        result=compile_fiber(self.deferred_world,self.deferred_query)
+        cert=result.certificate
+        self.assertEqual(cert['omissions']['inaccessible_selected_before_cut'],
+                         ['fact.aside','fact.future_marker'])
+        self.assertEqual(cert['plan']['backend'],'backward_factor_slice_reference')
+        self.assertIsNone(cert['plan']['fallback'])
+        self.assertEqual(result.decision_section['refinement_frontier'],
+                         [{'action':'advance_time_cut_or_use_retrospective_mode',
+                           'facts':['fact.aside','fact.future_marker']}])
+
 if __name__=='__main__': unittest.main()

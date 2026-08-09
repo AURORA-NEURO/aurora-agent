@@ -442,7 +442,8 @@ fn the_policy_pass_runs_after_the_closure_and_before_the_temporal_cut() {
             "policy",
             "temporal_cut",
             "oracle",
-            "plan_selection"
+            "plan_selection",
+            "influence_bounds"
         ]
     );
 

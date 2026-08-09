@@ -1,0 +1,92 @@
+{
+  "description": "A world with two facts withheld at the decision cut for different structural reasons. fact.future_marker provides a variable the compiled region's rule consumes; fact.aside provides one no factor mentions and enters only through the protected closure. Used by crates/fiber to show that the influence pass classifies both as deferred rather than zero, and names a different obstacle for each.",
+  "events": [
+    {
+      "availability_time": "2025-06-01T00:00:00Z",
+      "causal_parents": [],
+      "event_time": "2025-03-01T00:00:00Z",
+      "id": "event.marker_release",
+      "produces": [
+        "future_marker"
+      ]
+    },
+    {
+      "availability_time": "2025-06-01T00:00:00Z",
+      "causal_parents": [],
+      "event_time": "2025-03-01T00:00:00Z",
+      "id": "event.aside_release",
+      "produces": [
+        "aside_marker"
+      ]
+    }
+  ],
+  "factors": [
+    {
+      "id": "factor.claim_support",
+      "inputs": [
+        "future_marker",
+        "cohort_id"
+      ],
+      "kind": "rule",
+      "outputs": [
+        "split_integrity_status"
+      ],
+      "scope": {
+        "cohort": "DEF-001"
+      }
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact.cohort",
+      "provenance": [
+        "registry/cohort.json"
+      ],
+      "provides": "cohort_id",
+      "scope": {
+        "cohort": "DEF-001"
+      },
+      "tags": [
+        "identity",
+        "protected"
+      ],
+      "value": "DEF-001"
+    },
+    {
+      "id": "fact.future_marker",
+      "provenance": [
+        "assay/marker.json"
+      ],
+      "provides": "future_marker",
+      "scope": {
+        "cohort": "DEF-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "absent",
+        "present"
+      ]
+    },
+    {
+      "id": "fact.aside",
+      "provenance": [
+        "assay/aside.json"
+      ],
+      "provides": "aside_marker",
+      "scope": {
+        "cohort": "DEF-001"
+      },
+      "tags": [
+        "protected"
+      ],
+      "value": [
+        "absent",
+        "present"
+      ]
+    }
+  ],
+  "schema_version": "fiber-world/0.1",
+  "world_id": "deferred-evidence-demo-v1"
+}

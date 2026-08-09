@@ -19,15 +19,17 @@
 
 use crate::closure::{dropped_protected, protected_closure, unmatched_tags};
 use crate::error::FiberError;
+use crate::influence::{self, WithheldSplit};
 use crate::oracle;
+use crate::plan::{self, PlanEvaluation};
 use crate::policy::{self, PolicyEnvelope, PolicyOutcome, PolicyScreen, POLICY_REFINEMENT_ACTION};
 use crate::qir::Query;
 use crate::slice::{backward_slice, max_selected_arity};
 use crate::temporal::{temporal_cut, TemporalCut};
+use bioprism_influence::summarise;
 use bioprism_section::{
-    Backend, ContextCertificate, DecisionSection, EvidenceCapsule, InfluenceClass, OmissionGroup,
-    OmissionManifest, PlanDescriptor, ReferenceOmissions, RefinementOption, SourceHashes,
-    UnresolvedObligation,
+    ContextCertificate, DecisionSection, EvidenceCapsule, InfluenceClass, OmissionGroup,
+    OmissionManifest, ReferenceOmissions, RefinementOption, SourceHashes, UnresolvedObligation,
 };
 use bioprism_ids::ContentHash;
 use bioprism_world::{Fact, WorldSource};
@@ -61,6 +63,15 @@ pub struct CompileTrace {
     pub temporal_cut: TemporalCut,
     /// What the policy screen held and what it withheld (43.33).
     pub policy: PolicyOutcome,
+    /// What the physical backend portfolio said about the compiled region (43.36, 43.37).
+    ///
+    /// Off the wire for the reason [`crate::plan`] argues at length: the portfolio costs a
+    /// sum-product evaluation the compiler did not perform and, on any world `fiber-world/0.1` can
+    /// state, could not have performed. A certificate naming that plan would name an engine that
+    /// never ran.
+    pub plan: PlanEvaluation,
+    /// Influence bounds on the temporally withheld facts, and the split they license (43.28).
+    pub withheld_influence: WithheldSplit,
 }
 
 #[derive(Debug, Clone)]
@@ -244,31 +255,47 @@ pub fn compile<S: WorldSource + ?Sized>(
         .count_with_tag("exploratory")
         .saturating_sub(selected_exploratory);
 
-    let plan = PlanDescriptor {
-        backend: Backend::BackwardFactorSliceReference,
-        compiled_factor_count: slice.selected_factors.len(),
-        compiled_fact_count: selected_facts.len(),
-        total_factor_count: source.total_factors(),
-        total_fact_count: source.total_facts(),
-        max_selected_factor_arity: max_selected_arity(source, &slice.selected_factors),
-        fallback: None,
-    };
+    let region = plan::compile_region(
+        source,
+        query.query_id.as_str(),
+        query.targets.iter().map(|t| t.as_str()),
+    );
+    let evaluation = plan::evaluate(region.as_ref());
+    let plan = evaluation.descriptor(
+        slice.selected_factors.len(),
+        selected_facts.len(),
+        source.total_factors(),
+        source.total_facts(),
+        max_selected_arity(source, &slice.selected_factors),
+    );
     passes.push(PassReceipt {
         name: "plan_selection",
         retained: plan.compiled_fact_count,
-        note: format!(
-            "backend {} retained {:.4} of facts",
-            plan.backend.as_str(),
-            plan.fact_selection_ratio()
-        ),
+        note: evaluation.receipt_note(plan.fact_selection_ratio()),
     });
 
+    let withheld_influence =
+        influence::split_withheld(source, region.as_ref().ok(), &inaccessible, &cut);
     let manifest = build_manifest(
         omitted_total,
-        &inaccessible,
+        &withheld_influence,
         &withheld_by_policy,
         omitted_exploratory,
     );
+    let bounded = summarise(manifest.groups.iter());
+    passes.push(PassReceipt {
+        name: "influence_bounds",
+        retained: bounded.bounded_groups,
+        note: format!(
+            "{} of {} withheld fact(s) bounded, {} group(s) informative, worst informative bound {}",
+            withheld_influence.promoted(),
+            inaccessible.len(),
+            bounded.informative_groups,
+            bounded
+                .worst_informative_bound
+                .map_or_else(|| "none".to_string(), |value| format!("{value}"))
+        ),
+    });
 
     let certificate = ContextCertificate {
         world_id: source.world_id().to_string(),
@@ -310,6 +337,8 @@ pub fn compile<S: WorldSource + ?Sized>(
             dropped_protected: dropped_protected(&protected, &selected_facts),
             temporal_cut: cut,
             policy: PolicyOutcome::new(&envelope, &screen),
+            plan: evaluation,
+            withheld_influence,
         },
     })
 }
@@ -330,15 +359,21 @@ pub fn compile<S: WorldSource + ?Sized>(
 /// bound nobody computed. Because the class does not support a sufficiency claim, one withheld
 /// fact is enough to make [`OmissionManifest::supports_sufficiency_claim`] false — which is the
 /// honest reading, since the oracle then ran on a value map missing evidence it asked for.
+///
+/// The withheld population arrives already split by [`crate::influence`] into a bounded part and a
+/// still-deferred part, and both are emitted: a withheld fact whose influence is bounded is *both*
+/// bounded and deferred, and this shape has one class per group. The refinement frontier is built
+/// from the unsplit list, so a promoted member keeps its entry there.
 fn build_manifest(
     omitted_total: usize,
-    inaccessible: &[String],
+    withheld: &WithheldSplit,
     withheld_by_policy: &[String],
     exploratory: usize,
 ) -> OmissionManifest {
     let mut manifest = OmissionManifest::default();
     let unreachable = omitted_total
-        .saturating_sub(inaccessible.len())
+        .saturating_sub(withheld.bounded.len())
+        .saturating_sub(withheld.deferred.len())
         .saturating_sub(withheld_by_policy.len());
 
     if unreachable > 0 {
@@ -361,13 +396,16 @@ fn build_manifest(
             examples: withheld_by_policy.iter().take(3).cloned().collect(),
         });
     }
-    if !inaccessible.is_empty() {
+    if let Some(group) = withheld.bounded_group() {
+        manifest.push(group);
+    }
+    if !withheld.deferred.is_empty() {
         manifest.push(OmissionGroup {
             reason: "governed by an event not yet available at the decision cut".into(),
             influence: InfluenceClass::DeferredAcquisition,
-            count: inaccessible.len(),
+            count: withheld.deferred.len(),
             bound: None,
-            examples: inaccessible.iter().take(3).cloned().collect(),
+            examples: withheld.deferred.iter().take(3).cloned().collect(),
         });
     }
     let _ = exploratory;

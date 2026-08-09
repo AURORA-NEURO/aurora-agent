@@ -2,8 +2,9 @@
 //!
 //! Implements blueprint 43.13 (protected closure), 43.17 (dependency slicing and obligation
 //! closure), 43.09 (temporal accessibility), 43.16 (the compiler pipeline), the fragment of 43.33
-//! (policy fibers) the v0.1 wire formats can state, and the deterministic oracle of 43.41,
-//! emitting the Decision Section and Context Certificate defined in `bioprism-section`.
+//! (policy fibers) the v0.1 wire formats can state, the portfolio consultation of 43.36 and 43.37,
+//! the influence bounds of 43.28, and the deterministic oracle of 43.41, emitting the Decision
+//! Section and Context Certificate defined in `bioprism-section`.
 //!
 //! ```no_run
 //! use bioprism_fiber::{compile, Query};
@@ -27,11 +28,22 @@
 //! the clause grants the wire formats *can* express and names, in its module documentation, the
 //! six 43.33 mechanisms they cannot. `bioprism-policy` is where the full fiber lives, and this
 //! crate deliberately does not depend on it.
+//!
+//! [`plan`] and [`influence`] are the same shape again, and both come out against the engine. The
+//! backend portfolio of `bioprism-backends` is now consulted on every compile and its argmin is
+//! real — 1737x predicted on the reference world — but no member can *execute* a region whose
+//! factors carry no potential, so the certificate keeps naming the backward slice that produced
+//! the section. The influence bounds of `bioprism-influence` are computed on every compile and
+//! return `Unknown` for the same reason. Both report their finding on [`CompileTrace`]; neither
+//! changes a byte of the certificate on any world `fiber-world/0.1` can state, and the modules say
+//! so rather than leaving a reader to infer it from a digest that did not move.
 
 pub mod closure;
 pub mod compile;
 pub mod error;
+pub mod influence;
 pub mod oracle;
+pub mod plan;
 pub mod policy;
 pub mod qir;
 pub mod slice;
@@ -39,6 +51,8 @@ pub mod temporal;
 
 pub use compile::{compile, CompileOutput, CompileTrace, PassReceipt};
 pub use error::FiberError;
+pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
+pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
 pub use qir::{
     Budgets, Query, ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_FIELD_PATHS, QUERY_SCHEMA_VERSION,

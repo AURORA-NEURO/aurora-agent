@@ -8,7 +8,9 @@ repository.workspace = true
 description = "The FIBER query compiler: protected closure, dependency slicing, temporal cut and certificate emission"
 
 [dependencies]
+bioprism-backends = { workspace = true }
 bioprism-ids = { workspace = true }
+bioprism-influence = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-world = { workspace = true }

@@ -851,10 +851,13 @@ fn conformance_cases() -> Vec<ConformanceCase> {
             "The pipeline reports the passes it ran, in order. Order is normative: the protected \
              closure is computed before slicing, so that mandatory evidence enters the selection \
              whether or not a dependency path reaches it, and the policy screen runs after it so \
-             that a policy withholding a mandatory fact is observable rather than invisible.",
+             that a policy withholding a mandatory fact is observable rather than invisible. \
+             influence_bounds runs last because it classifies what the earlier passes removed: it \
+             takes the temporal cut's withheld list and the plan's compiled region as inputs, per \
+             bioprism_fiber::influence.",
             baseline_input(),
         )
-        .enforcing(&["43.16", "43.13", "43.33"])
+        .enforcing(&["43.16", "43.13", "43.33", "43.28"])
         .expecting(Expectation::ArrayProjectionEquals {
             artifact: artifact::REPORT.to_string(),
             pointer: "/passes".to_string(),
@@ -866,6 +869,7 @@ fn conformance_cases() -> Vec<ConformanceCase> {
                 "temporal_cut",
                 "oracle",
                 "plan_selection",
+                "influence_bounds",
             ]
             .iter()
             .map(|s| (*s).to_string())
