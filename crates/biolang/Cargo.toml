@@ -1,0 +1,21 @@
+[package]
+name = "bioprism-biolang"
+version = "0.1.0"
+edition = "2021"
+description = "The biological IR family and BioQL: typed world, state, intervention, worldline, oracle, mutation and bundle representations"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-bioir = { workspace = true }
+bioprism-standards = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-weave = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-oracle = { workspace = true }
+bioprism-mutation = { workspace = true }
+bioprism-bundle = { workspace = true }

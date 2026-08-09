@@ -44,6 +44,17 @@ golden fixtures will not catch it**, because they contain no such values. The re
 runs with `preserve_order`. Canonical output sorts keys regardless, so digests are unaffected — but
 witness *list* order is not.
 
+**Non-finite floats, which are a hole rather than a fixed behaviour.** `CanonicalError::NonFiniteNumber`
+exists and cannot fire on the path every producer uses: `serde_json::to_value` maps `NaN`, `+inf`
+and `-inf` to `Value::Null` before the encoder sees a number, so all three hash as a stated null.
+They do *not* collide with an absent key — that distinction survives — but a corrupt number is
+silently laundered into a stated null, which is the wrong direction to fail in here. CPython's
+`json.dumps` meanwhile emits the bare token `NaN`, which is not JSON and which serde would refuse to
+parse, so the two languages disagree about what a non-finite float is and agree today only because
+no producer emits one. `crates/ids/tests/non_finite_floats.rs` pins all of it. **If you add a float
+field to a hashed format, validate it at the producer** — `bioprism_biolang::BioState::validate` is
+the worked example.
+
 ## If a digest changed
 
 Do not update the expected constant to make the test pass. A changed digest means either a real bug

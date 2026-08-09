@@ -110,6 +110,7 @@ dependencies = [
  "bioprism-mutation",
  "bioprism-oracle",
  "bioprism-scope",
+ "bioprism-section",
  "bioprism-standards",
  "bioprism-weave",
  "serde",
