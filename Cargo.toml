@@ -62,6 +62,11 @@ members = [
     "crates/fabric",
     "crates/biolang",
     "crates/stewardship",
+    "crates/modalities",
+    "crates/atlashub",
+    "crates/epistemic",
+    "crates/tokens",
+    "crates/ops",
     "crates/cli",
 ]
 
@@ -135,6 +140,11 @@ bioprism-cookbook = { path = "crates/cookbook" }
 bioprism-fabric = { path = "crates/fabric" }
 bioprism-biolang = { path = "crates/biolang" }
 bioprism-stewardship = { path = "crates/stewardship" }
+bioprism-modalities = { path = "crates/modalities" }
+bioprism-atlashub = { path = "crates/atlashub" }
+bioprism-epistemic = { path = "crates/epistemic" }
+bioprism-tokens = { path = "crates/tokens" }
+bioprism-ops = { path = "crates/ops" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }

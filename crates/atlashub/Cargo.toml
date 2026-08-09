@@ -1,0 +1,14 @@
+[package]
+name = "bioprism-atlashub"
+version = "0.1.0"
+edition = "2021"
+description = "BioAtlas surfaces: world cards, connector registry, value-of-experiment, federated evaluation, research CI"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-hub = { workspace = true }
+bioprism-hubapi = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
