@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: format
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+
+  parity:
+    name: cross-language parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # The certificate digest must match across CPython, the eager path and the indexed store.
+      # A divergence here means a certificate produced by one implementation cannot be replayed
+      # by another, which is the guarantee the whole scheme rests on.
+      - name: regenerate golden artifacts from the CPython reference
+        run: python tools/regenerate_golden.py
+      - name: fail if the reference output drifted
+        run: git diff --exit-code fixtures/
+      - name: rust must reproduce them byte for byte
+        run: cargo test -p bioprism-ids -p bioprism-fiber -p bioprism-store
