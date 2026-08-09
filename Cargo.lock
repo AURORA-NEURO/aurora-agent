@@ -101,6 +101,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-biolang"
+version = "0.1.0"
+dependencies = [
+ "bioprism-bioir",
+ "bioprism-bundle",
+ "bioprism-ids",
+ "bioprism-mutation",
+ "bioprism-oracle",
+ "bioprism-scope",
+ "bioprism-standards",
+ "bioprism-weave",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-bioworlds"
 version = "0.1.0"
 dependencies = [
@@ -226,6 +243,18 @@ dependencies = [
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-fabric"
+version = "0.1.0"
+dependencies = [
+ "bioprism-choreography",
+ "bioprism-ids",
+ "bioprism-weave",
  "serde",
  "serde_json",
  "thiserror",
@@ -622,6 +651,19 @@ version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-scope",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-stewardship"
+version = "0.1.0"
+dependencies = [
+ "bioprism-atlas",
+ "bioprism-governance",
+ "bioprism-ids",
+ "bioprism-registry",
  "serde",
  "serde_json",
  "thiserror",

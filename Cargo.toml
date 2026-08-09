@@ -59,6 +59,9 @@ members = [
     "crates/metrics",
     "crates/worldfactory",
     "crates/cookbook",
+    "crates/fabric",
+    "crates/biolang",
+    "crates/stewardship",
     "crates/cli",
 ]
 
@@ -129,6 +132,9 @@ bioprism-devx = { path = "crates/devx" }
 bioprism-metrics = { path = "crates/metrics" }
 bioprism-worldfactory = { path = "crates/worldfactory" }
 bioprism-cookbook = { path = "crates/cookbook" }
+bioprism-fabric = { path = "crates/fabric" }
+bioprism-biolang = { path = "crates/biolang" }
+bioprism-stewardship = { path = "crates/stewardship" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }

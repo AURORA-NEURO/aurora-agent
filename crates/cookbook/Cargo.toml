@@ -1,0 +1,13 @@
+[package]
+name = "bioprism-cookbook"
+version = "0.1.0"
+edition = "2021"
+description = "Reference examples: worked recipes with the claim each one demonstrates and the property a reader can check"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-docgraph = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
