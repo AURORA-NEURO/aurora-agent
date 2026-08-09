@@ -1,0 +1,15 @@
+[package]
+name = "bioprism-bioworlds"
+version = "0.1.0"
+edition = "2021"
+description = "Reference bioworlds and vertical slices: worlds built to make blocked platform claims exercisable"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-world = { workspace = true }
+bioprism-worldgen = { workspace = true }
+bioprism-onco = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,26 @@
+{
+  "schema_version": "fiber-query/0.1",
+  "query_id": "onco-world-post-treatment-resolved-control-v1-change-assessment",
+  "targets": [
+    "change_assessment_status"
+  ],
+  "protected_tags": [
+    "clinical",
+    "criterion",
+    "discriminating_evidence",
+    "measurement",
+    "negative_evidence",
+    "protected",
+    "treatment"
+  ],
+  "decision_time": "2025-04-24T00:00:00Z",
+  "budgets": {
+    "max_facts": 64,
+    "max_tokens": 6000
+  },
+  "role": "research-auditor",
+  "policy": [
+    "research-only"
+  ],
+  "distortion_tolerance": 0.0
+}

@@ -1,0 +1,7625 @@
+{
+  "schema_version": "fiber-world/0.1",
+  "world_id": "onco-world-post-treatment-resolved-control-v1",
+  "description": "Longitudinal post-treatment uncertainty (38.02): relay_depth=3, attachment=NearTarget, tags=Camouflaged, distractors=120, subjects=96, collected_discriminating_evidence=1. Every hypothesis-support input is present and readable at the cut; what is absent is declared absent, so the evidence is complete and still does not settle the verdict.",
+  "facts": [
+    {
+      "id": "fact.response_criterion",
+      "provides": "response_criterion",
+      "value": {
+        "id": "rano-hgg",
+        "version": "2010",
+        "compartment": "contrast_enhancing",
+        "progression_increase": 0.25,
+        "confirmation_interval_days": 28
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion",
+        "protected"
+      ],
+      "provenance": [
+        "criteria/response_criteria.json"
+      ]
+    },
+    {
+      "id": "fact.baseline_measurement",
+      "provides": "baseline_enhancing_diameter_product",
+      "value": {
+        "S001": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S002": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S003": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S004": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S005": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S006": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S007": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S008": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S009": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S010": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S011": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S012": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S013": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S014": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S015": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S016": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S017": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S018": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S019": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S020": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S021": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S022": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S023": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S024": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S025": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S026": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S027": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S028": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S029": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S030": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S031": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S032": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S033": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S034": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S035": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S036": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S037": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S038": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S039": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S040": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S041": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S042": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S043": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S044": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S045": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S046": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S047": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S048": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S049": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S050": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S051": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S052": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S053": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S054": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S055": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S056": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S057": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S058": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S059": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S060": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S061": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S062": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S063": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S064": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S065": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S066": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S067": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S068": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S069": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S070": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S071": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S072": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S073": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S074": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S075": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S076": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S077": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S078": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S079": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S080": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S081": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S082": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S083": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S084": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S085": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S086": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S087": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        },
+        "S088": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 440
+        },
+        "S089": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 450
+        },
+        "S090": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 460
+        },
+        "S091": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 380
+        },
+        "S092": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 390
+        },
+        "S093": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 400
+        },
+        "S094": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 410
+        },
+        "S095": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 420
+        },
+        "S096": {
+          "acquired": "2025-03-05",
+          "bidimensional_product_mm2": 430
+        }
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement",
+        "protected"
+      ],
+      "provenance": [
+        "imaging/baseline_report.json"
+      ]
+    },
+    {
+      "id": "fact.index_measurement",
+      "provides": "index_enhancing_diameter_product",
+      "value": {
+        "S001": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S002": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S003": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S004": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S005": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S006": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S007": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S008": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S009": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S010": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S011": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S012": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S013": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S014": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S015": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S016": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S017": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S018": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S019": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S020": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S021": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S022": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S023": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S024": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S025": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S026": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S027": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S028": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S029": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S030": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S031": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S032": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S033": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S034": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S035": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S036": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S037": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S038": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S039": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S040": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S041": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S042": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S043": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S044": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S045": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S046": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S047": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S048": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S049": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S050": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S051": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S052": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S053": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S054": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S055": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S056": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S057": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S058": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S059": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S060": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S061": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S062": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S063": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S064": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S065": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S066": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S067": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S068": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S069": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S070": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S071": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S072": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S073": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S074": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S075": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S076": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S077": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S078": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S079": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S080": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S081": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S082": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S083": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S084": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S085": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S086": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S087": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        },
+        "S088": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 620
+        },
+        "S089": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 630
+        },
+        "S090": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 640
+        },
+        "S091": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 560
+        },
+        "S092": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 570
+        },
+        "S093": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 580
+        },
+        "S094": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 590
+        },
+        "S095": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 600
+        },
+        "S096": {
+          "acquired": "2025-04-24",
+          "bidimensional_product_mm2": 610
+        }
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement",
+        "protected"
+      ],
+      "provenance": [
+        "imaging/index_report.json"
+      ]
+    },
+    {
+      "id": "fact.new_lesion_status",
+      "provides": "new_lesion_status",
+      "value": {
+        "S001": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S002": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S003": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S004": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S005": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S006": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S007": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S008": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S009": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S010": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S011": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S012": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S013": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S014": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S015": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S016": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S017": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S018": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S019": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S020": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S021": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S022": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S023": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S024": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S025": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S026": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S027": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S028": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S029": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S030": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S031": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S032": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S033": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S034": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S035": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S036": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S037": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S038": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S039": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S040": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S041": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S042": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S043": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S044": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S045": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S046": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S047": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S048": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S049": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S050": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S051": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S052": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S053": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S054": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S055": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S056": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S057": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S058": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S059": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S060": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S061": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S062": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S063": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S064": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S065": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S066": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S067": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S068": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S069": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S070": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S071": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S072": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S073": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S074": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S075": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S076": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S077": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S078": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S079": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S080": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S081": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S082": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S083": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S084": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S085": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S086": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S087": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S088": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S089": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S090": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S091": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S092": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S093": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S094": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S095": {
+          "observed": true,
+          "new_lesion_present": false
+        },
+        "S096": {
+          "observed": true,
+          "new_lesion_present": false
+        }
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement",
+        "protected"
+      ],
+      "provenance": [
+        "imaging/index_report.json"
+      ]
+    },
+    {
+      "id": "fact.treatment_timeline",
+      "provides": "treatment_timeline",
+      "value": {
+        "S001": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S002": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S003": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S004": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S005": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S006": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S007": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S008": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S009": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S010": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S011": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S012": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S013": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S014": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S015": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S016": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S017": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S018": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S019": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S020": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S021": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S022": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S023": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S024": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S025": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S026": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S027": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S028": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S029": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S030": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S031": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S032": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S033": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S034": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S035": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S036": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S037": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S038": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S039": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S040": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S041": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S042": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S043": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S044": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S045": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S046": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S047": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S048": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S049": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S050": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S051": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S052": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S053": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S054": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S055": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S056": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S057": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S058": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S059": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S060": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S061": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S062": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S063": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S064": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S065": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S066": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S067": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S068": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S069": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S070": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S071": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S072": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S073": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S074": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S075": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S076": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S077": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S078": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S079": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S080": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S081": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S082": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S083": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S084": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S085": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S086": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S087": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S088": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S089": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S090": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S091": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S092": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S093": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S094": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S095": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        },
+        "S096": {
+          "modality": "chemo_radiotherapy",
+          "completed": "2025-03-11"
+        }
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment",
+        "protected"
+      ],
+      "provenance": [
+        "timeline/treatment.json"
+      ]
+    },
+    {
+      "id": "fact.days_since_treatment",
+      "provides": "days_since_treatment_end",
+      "value": {
+        "S001": 44,
+        "S002": 44,
+        "S003": 44,
+        "S004": 44,
+        "S005": 44,
+        "S006": 44,
+        "S007": 44,
+        "S008": 44,
+        "S009": 44,
+        "S010": 44,
+        "S011": 44,
+        "S012": 44,
+        "S013": 44,
+        "S014": 44,
+        "S015": 44,
+        "S016": 44,
+        "S017": 44,
+        "S018": 44,
+        "S019": 44,
+        "S020": 44,
+        "S021": 44,
+        "S022": 44,
+        "S023": 44,
+        "S024": 44,
+        "S025": 44,
+        "S026": 44,
+        "S027": 44,
+        "S028": 44,
+        "S029": 44,
+        "S030": 44,
+        "S031": 44,
+        "S032": 44,
+        "S033": 44,
+        "S034": 44,
+        "S035": 44,
+        "S036": 44,
+        "S037": 44,
+        "S038": 44,
+        "S039": 44,
+        "S040": 44,
+        "S041": 44,
+        "S042": 44,
+        "S043": 44,
+        "S044": 44,
+        "S045": 44,
+        "S046": 44,
+        "S047": 44,
+        "S048": 44,
+        "S049": 44,
+        "S050": 44,
+        "S051": 44,
+        "S052": 44,
+        "S053": 44,
+        "S054": 44,
+        "S055": 44,
+        "S056": 44,
+        "S057": 44,
+        "S058": 44,
+        "S059": 44,
+        "S060": 44,
+        "S061": 44,
+        "S062": 44,
+        "S063": 44,
+        "S064": 44,
+        "S065": 44,
+        "S066": 44,
+        "S067": 44,
+        "S068": 44,
+        "S069": 44,
+        "S070": 44,
+        "S071": 44,
+        "S072": 44,
+        "S073": 44,
+        "S074": 44,
+        "S075": 44,
+        "S076": 44,
+        "S077": 44,
+        "S078": 44,
+        "S079": 44,
+        "S080": 44,
+        "S081": 44,
+        "S082": 44,
+        "S083": 44,
+        "S084": 44,
+        "S085": 44,
+        "S086": 44,
+        "S087": 44,
+        "S088": 44,
+        "S089": 44,
+        "S090": 44,
+        "S091": 44,
+        "S092": 44,
+        "S093": 44,
+        "S094": 44,
+        "S095": 44,
+        "S096": 44
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment",
+        "protected"
+      ],
+      "provenance": [
+        "timeline/treatment.json"
+      ]
+    },
+    {
+      "id": "fact.post_treatment_window",
+      "provides": "post_treatment_window_days",
+      "value": 84,
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment",
+        "protected"
+      ],
+      "provenance": [
+        "criteria/post_treatment_window.md"
+      ]
+    },
+    {
+      "id": "fact.corticosteroid",
+      "provides": "corticosteroid_dose_trend",
+      "value": {
+        "S001": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S002": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S003": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S004": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S005": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S006": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S007": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S008": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S009": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S010": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S011": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S012": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S013": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S014": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S015": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S016": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S017": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S018": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S019": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S020": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S021": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S022": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S023": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S024": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S025": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S026": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S027": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S028": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S029": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S030": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S031": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S032": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S033": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S034": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S035": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S036": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S037": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S038": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S039": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S040": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S041": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S042": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S043": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S044": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S045": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S046": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S047": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S048": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S049": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S050": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S051": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S052": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S053": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S054": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S055": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S056": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S057": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S058": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S059": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S060": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S061": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S062": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S063": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S064": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S065": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S066": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S067": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S068": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S069": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S070": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S071": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S072": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S073": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S074": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S075": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S076": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S077": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S078": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S079": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S080": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S081": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S082": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S083": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S084": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S085": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S086": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S087": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S088": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S089": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S090": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S091": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S092": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S093": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S094": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S095": {
+          "observed": true,
+          "trend": "unchanged"
+        },
+        "S096": {
+          "observed": true,
+          "trend": "unchanged"
+        }
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment",
+        "protected"
+      ],
+      "provenance": [
+        "timeline/corticosteroid.json"
+      ]
+    },
+    {
+      "id": "fact.clinical_trend",
+      "provides": "clinical_trend",
+      "value": {
+        "S001": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S002": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S003": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S004": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S005": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S006": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S007": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S008": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S009": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S010": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S011": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S012": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S013": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S014": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S015": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S016": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S017": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S018": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S019": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S020": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S021": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S022": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S023": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S024": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S025": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S026": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S027": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S028": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S029": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S030": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S031": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S032": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S033": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S034": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S035": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S036": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S037": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S038": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S039": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S040": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S041": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S042": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S043": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S044": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S045": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S046": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S047": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S048": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S049": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S050": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S051": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S052": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S053": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S054": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S055": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S056": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S057": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S058": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S059": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S060": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S061": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S062": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S063": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S064": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S065": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S066": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S067": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S068": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S069": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S070": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S071": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S072": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S073": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S074": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S075": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S076": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S077": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S078": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S079": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S080": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S081": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S082": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S083": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S084": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S085": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S086": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S087": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S088": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S089": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S090": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S091": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S092": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S093": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S094": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S095": {
+          "observed": true,
+          "trend": "stable"
+        },
+        "S096": {
+          "observed": true,
+          "trend": "stable"
+        }
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical",
+        "protected"
+      ],
+      "provenance": [
+        "timeline/clinical_assessment.json"
+      ]
+    },
+    {
+      "id": "fact.declared_sampling_limitation",
+      "provides": "declared_sampling_limitation",
+      "value": "single_region_sampling_would_not_exclude_a_mixed_process",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "negative_evidence",
+        "protected"
+      ],
+      "provenance": [
+        "limitations/sampling.md"
+      ]
+    },
+    {
+      "id": "fact.perfusion_mri",
+      "provides": "perfusion_mri",
+      "value": {
+        "observed": true,
+        "acquired": "2025-04-24",
+        "reading": "recorded"
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_evidence",
+        "protected"
+      ],
+      "provenance": [
+        "imaging/advanced_study_ledger.json"
+      ]
+    },
+    {
+      "id": "fact.amino_acid_pet",
+      "provides": "amino_acid_pet",
+      "value": {
+        "observed": false,
+        "status": "not_collected"
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_evidence",
+        "protected"
+      ],
+      "provenance": [
+        "imaging/advanced_study_ledger.json"
+      ]
+    },
+    {
+      "id": "fact.histopathology",
+      "provides": "histopathology",
+      "value": {
+        "observed": false,
+        "status": "not_collected"
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_evidence",
+        "protected"
+      ],
+      "provenance": [
+        "imaging/advanced_study_ledger.json"
+      ]
+    },
+    {
+      "id": "fact.interval_follow_up",
+      "provides": "interval_follow_up",
+      "value": {
+        "observed": false,
+        "status": "not_collected"
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_evidence",
+        "protected"
+      ],
+      "provenance": [
+        "imaging/advanced_study_ledger.json"
+      ]
+    },
+    {
+      "id": "fact.confirmation",
+      "provides": "confirmation_measurement",
+      "value": {
+        "S001": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S002": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S003": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S004": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S005": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S006": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S007": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S008": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S009": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S010": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S011": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S012": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S013": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S014": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S015": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S016": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S017": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S018": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S019": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S020": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S021": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S022": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S023": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S024": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S025": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S026": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S027": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S028": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S029": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S030": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S031": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S032": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S033": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S034": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S035": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S036": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S037": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S038": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S039": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S040": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S041": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S042": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S043": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S044": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S045": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S046": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S047": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S048": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S049": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S050": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S051": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S052": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S053": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S054": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S055": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S056": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S057": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S058": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S059": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S060": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S061": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S062": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S063": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S064": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S065": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S066": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S067": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S068": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S069": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S070": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S071": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S072": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S073": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S074": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S075": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S076": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S077": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S078": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S079": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S080": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S081": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S082": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S083": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S084": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S085": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S086": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S087": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S088": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S089": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S090": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S091": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S092": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S093": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S094": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S095": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        },
+        "S096": {
+          "scheduled": "2025-05-12",
+          "bidimensional_product_mm2": null
+        }
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "confirmation"
+      ],
+      "provenance": [
+        "imaging/confirmation_schedule.json"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0000",
+      "provides": "discriminating_summary_block_0000",
+      "value": {
+        "subject": "S037",
+        "score": 0.995
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0001",
+      "provides": "evidence_summary_block_0001",
+      "value": {
+        "subject": "S066",
+        "score": 0.935
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0002",
+      "provides": "measurement_summary_block_0002",
+      "value": {
+        "subject": "S056",
+        "score": 0.161
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0003",
+      "provides": "criterion_summary_block_0003",
+      "value": {
+        "subject": "S021",
+        "score": 0.552
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0004",
+      "provides": "criterion_summary_block_0004",
+      "value": {
+        "subject": "S010",
+        "score": 0.519
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0005",
+      "provides": "clinical_summary_block_0005",
+      "value": {
+        "subject": "S024",
+        "score": 0.833
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0006",
+      "provides": "measurement_summary_block_0006",
+      "value": {
+        "subject": "S055",
+        "score": 0.962
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0007",
+      "provides": "discriminating_summary_block_0007",
+      "value": {
+        "subject": "S003",
+        "score": 0.076
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0008",
+      "provides": "treatment_summary_block_0008",
+      "value": {
+        "subject": "S076",
+        "score": 0.325
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0009",
+      "provides": "evidence_summary_block_0009",
+      "value": {
+        "subject": "S093",
+        "score": 0.864
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0010",
+      "provides": "treatment_summary_block_0010",
+      "value": {
+        "subject": "S060",
+        "score": 0.842
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0011",
+      "provides": "discriminating_summary_block_0011",
+      "value": {
+        "subject": "S037",
+        "score": 0.122
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0012",
+      "provides": "evidence_summary_block_0012",
+      "value": {
+        "subject": "S072",
+        "score": 0.626
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0013",
+      "provides": "evidence_summary_block_0013",
+      "value": {
+        "subject": "S047",
+        "score": 0.312
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0014",
+      "provides": "clinical_summary_block_0014",
+      "value": {
+        "subject": "S050",
+        "score": 0.247
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0015",
+      "provides": "criterion_summary_block_0015",
+      "value": {
+        "subject": "S056",
+        "score": 0.813
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0016",
+      "provides": "measurement_summary_block_0016",
+      "value": {
+        "subject": "S026",
+        "score": 0.351
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0017",
+      "provides": "evidence_summary_block_0017",
+      "value": {
+        "subject": "S065",
+        "score": 0.084
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0018",
+      "provides": "discriminating_summary_block_0018",
+      "value": {
+        "subject": "S086",
+        "score": 0.024
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0019",
+      "provides": "criterion_summary_block_0019",
+      "value": {
+        "subject": "S032",
+        "score": 0.195
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0020",
+      "provides": "measurement_summary_block_0020",
+      "value": {
+        "subject": "S095",
+        "score": 0.691
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0021",
+      "provides": "clinical_summary_block_0021",
+      "value": {
+        "subject": "S039",
+        "score": 0.417
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0022",
+      "provides": "discriminating_summary_block_0022",
+      "value": {
+        "subject": "S047",
+        "score": 0.871
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0023",
+      "provides": "discriminating_summary_block_0023",
+      "value": {
+        "subject": "S064",
+        "score": 0.549
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0024",
+      "provides": "clinical_summary_block_0024",
+      "value": {
+        "subject": "S011",
+        "score": 0.893
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0025",
+      "provides": "discriminating_summary_block_0025",
+      "value": {
+        "subject": "S014",
+        "score": 0.79
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0026",
+      "provides": "discriminating_summary_block_0026",
+      "value": {
+        "subject": "S072",
+        "score": 0.46
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0027",
+      "provides": "treatment_summary_block_0027",
+      "value": {
+        "subject": "S090",
+        "score": 0.966
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0028",
+      "provides": "measurement_summary_block_0028",
+      "value": {
+        "subject": "S035",
+        "score": 0.069
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0029",
+      "provides": "criterion_summary_block_0029",
+      "value": {
+        "subject": "S018",
+        "score": 0.255
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0030",
+      "provides": "evidence_summary_block_0030",
+      "value": {
+        "subject": "S005",
+        "score": 0.9
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0031",
+      "provides": "measurement_summary_block_0031",
+      "value": {
+        "subject": "S049",
+        "score": 0.293
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0032",
+      "provides": "discriminating_summary_block_0032",
+      "value": {
+        "subject": "S016",
+        "score": 0.822
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0033",
+      "provides": "criterion_summary_block_0033",
+      "value": {
+        "subject": "S033",
+        "score": 0.233
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0034",
+      "provides": "criterion_summary_block_0034",
+      "value": {
+        "subject": "S038",
+        "score": 0.912
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0035",
+      "provides": "measurement_summary_block_0035",
+      "value": {
+        "subject": "S056",
+        "score": 0.758
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0036",
+      "provides": "measurement_summary_block_0036",
+      "value": {
+        "subject": "S019",
+        "score": 0.576
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0037",
+      "provides": "treatment_summary_block_0037",
+      "value": {
+        "subject": "S022",
+        "score": 0.641
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0038",
+      "provides": "treatment_summary_block_0038",
+      "value": {
+        "subject": "S019",
+        "score": 0.049
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0039",
+      "provides": "evidence_summary_block_0039",
+      "value": {
+        "subject": "S070",
+        "score": 0.689
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0040",
+      "provides": "measurement_summary_block_0040",
+      "value": {
+        "subject": "S047",
+        "score": 0.739
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0041",
+      "provides": "discriminating_summary_block_0041",
+      "value": {
+        "subject": "S005",
+        "score": 0.657
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0042",
+      "provides": "discriminating_summary_block_0042",
+      "value": {
+        "subject": "S030",
+        "score": 0.882
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0043",
+      "provides": "clinical_summary_block_0043",
+      "value": {
+        "subject": "S041",
+        "score": 0.113
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0044",
+      "provides": "treatment_summary_block_0044",
+      "value": {
+        "subject": "S090",
+        "score": 0.018
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0045",
+      "provides": "evidence_summary_block_0045",
+      "value": {
+        "subject": "S042",
+        "score": 0.068
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0046",
+      "provides": "evidence_summary_block_0046",
+      "value": {
+        "subject": "S038",
+        "score": 0.061
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0047",
+      "provides": "discriminating_summary_block_0047",
+      "value": {
+        "subject": "S007",
+        "score": 0.412
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0048",
+      "provides": "criterion_summary_block_0048",
+      "value": {
+        "subject": "S073",
+        "score": 0.633
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0049",
+      "provides": "criterion_summary_block_0049",
+      "value": {
+        "subject": "S065",
+        "score": 0.437
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0050",
+      "provides": "evidence_summary_block_0050",
+      "value": {
+        "subject": "S056",
+        "score": 0.253
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0051",
+      "provides": "treatment_summary_block_0051",
+      "value": {
+        "subject": "S082",
+        "score": 0.793
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0052",
+      "provides": "treatment_summary_block_0052",
+      "value": {
+        "subject": "S065",
+        "score": 0.984
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0053",
+      "provides": "evidence_summary_block_0053",
+      "value": {
+        "subject": "S041",
+        "score": 0.225
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0054",
+      "provides": "discriminating_summary_block_0054",
+      "value": {
+        "subject": "S043",
+        "score": 0.406
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0055",
+      "provides": "evidence_summary_block_0055",
+      "value": {
+        "subject": "S033",
+        "score": 0.637
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0056",
+      "provides": "discriminating_summary_block_0056",
+      "value": {
+        "subject": "S066",
+        "score": 0.287
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0057",
+      "provides": "measurement_summary_block_0057",
+      "value": {
+        "subject": "S047",
+        "score": 0.785
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0058",
+      "provides": "discriminating_summary_block_0058",
+      "value": {
+        "subject": "S065",
+        "score": 0.134
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0059",
+      "provides": "criterion_summary_block_0059",
+      "value": {
+        "subject": "S028",
+        "score": 0.183
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0060",
+      "provides": "measurement_summary_block_0060",
+      "value": {
+        "subject": "S009",
+        "score": 0.998
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0061",
+      "provides": "evidence_summary_block_0061",
+      "value": {
+        "subject": "S060",
+        "score": 0.636
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0062",
+      "provides": "evidence_summary_block_0062",
+      "value": {
+        "subject": "S007",
+        "score": 0.173
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0063",
+      "provides": "discriminating_summary_block_0063",
+      "value": {
+        "subject": "S037",
+        "score": 0.635
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0064",
+      "provides": "discriminating_summary_block_0064",
+      "value": {
+        "subject": "S040",
+        "score": 0.199
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0065",
+      "provides": "measurement_summary_block_0065",
+      "value": {
+        "subject": "S041",
+        "score": 0.103
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0066",
+      "provides": "evidence_summary_block_0066",
+      "value": {
+        "subject": "S048",
+        "score": 0.386
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0067",
+      "provides": "measurement_summary_block_0067",
+      "value": {
+        "subject": "S055",
+        "score": 0.657
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0068",
+      "provides": "criterion_summary_block_0068",
+      "value": {
+        "subject": "S056",
+        "score": 0.878
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0069",
+      "provides": "discriminating_summary_block_0069",
+      "value": {
+        "subject": "S007",
+        "score": 0.611
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0070",
+      "provides": "clinical_summary_block_0070",
+      "value": {
+        "subject": "S042",
+        "score": 0.223
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0071",
+      "provides": "discriminating_summary_block_0071",
+      "value": {
+        "subject": "S072",
+        "score": 0.736
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0072",
+      "provides": "evidence_summary_block_0072",
+      "value": {
+        "subject": "S062",
+        "score": 0.391
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0073",
+      "provides": "clinical_summary_block_0073",
+      "value": {
+        "subject": "S036",
+        "score": 0.822
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0074",
+      "provides": "evidence_summary_block_0074",
+      "value": {
+        "subject": "S072",
+        "score": 0.802
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0075",
+      "provides": "measurement_summary_block_0075",
+      "value": {
+        "subject": "S003",
+        "score": 0.368
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0076",
+      "provides": "clinical_summary_block_0076",
+      "value": {
+        "subject": "S034",
+        "score": 0.89
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0077",
+      "provides": "criterion_summary_block_0077",
+      "value": {
+        "subject": "S072",
+        "score": 0.699
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0078",
+      "provides": "measurement_summary_block_0078",
+      "value": {
+        "subject": "S062",
+        "score": 0.342
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0079",
+      "provides": "treatment_summary_block_0079",
+      "value": {
+        "subject": "S048",
+        "score": 0.202
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0080",
+      "provides": "discriminating_summary_block_0080",
+      "value": {
+        "subject": "S044",
+        "score": 0.281
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0081",
+      "provides": "treatment_summary_block_0081",
+      "value": {
+        "subject": "S039",
+        "score": 0.667
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0082",
+      "provides": "evidence_summary_block_0082",
+      "value": {
+        "subject": "S049",
+        "score": 0.871
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0083",
+      "provides": "clinical_summary_block_0083",
+      "value": {
+        "subject": "S082",
+        "score": 0.713
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0084",
+      "provides": "clinical_summary_block_0084",
+      "value": {
+        "subject": "S025",
+        "score": 0.151
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0085",
+      "provides": "criterion_summary_block_0085",
+      "value": {
+        "subject": "S059",
+        "score": 0.068
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0086",
+      "provides": "measurement_summary_block_0086",
+      "value": {
+        "subject": "S041",
+        "score": 0.053
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0087",
+      "provides": "treatment_summary_block_0087",
+      "value": {
+        "subject": "S077",
+        "score": 0.785
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0088",
+      "provides": "clinical_summary_block_0088",
+      "value": {
+        "subject": "S032",
+        "score": 0.603
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0089",
+      "provides": "treatment_summary_block_0089",
+      "value": {
+        "subject": "S068",
+        "score": 0.151
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0090",
+      "provides": "evidence_summary_block_0090",
+      "value": {
+        "subject": "S043",
+        "score": 0.043
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0091",
+      "provides": "discriminating_summary_block_0091",
+      "value": {
+        "subject": "S011",
+        "score": 0.357
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0092",
+      "provides": "treatment_summary_block_0092",
+      "value": {
+        "subject": "S041",
+        "score": 0.398
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0093",
+      "provides": "discriminating_summary_block_0093",
+      "value": {
+        "subject": "S043",
+        "score": 0.828
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0094",
+      "provides": "clinical_summary_block_0094",
+      "value": {
+        "subject": "S011",
+        "score": 0.115
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0095",
+      "provides": "clinical_summary_block_0095",
+      "value": {
+        "subject": "S093",
+        "score": 0.123
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0096",
+      "provides": "treatment_summary_block_0096",
+      "value": {
+        "subject": "S034",
+        "score": 0.774
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0097",
+      "provides": "evidence_summary_block_0097",
+      "value": {
+        "subject": "S021",
+        "score": 0.231
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0098",
+      "provides": "criterion_summary_block_0098",
+      "value": {
+        "subject": "S037",
+        "score": 0.175
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0099",
+      "provides": "criterion_summary_block_0099",
+      "value": {
+        "subject": "S059",
+        "score": 0.243
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0100",
+      "provides": "treatment_summary_block_0100",
+      "value": {
+        "subject": "S062",
+        "score": 0.746
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0101",
+      "provides": "evidence_summary_block_0101",
+      "value": {
+        "subject": "S009",
+        "score": 0.837
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0102",
+      "provides": "criterion_summary_block_0102",
+      "value": {
+        "subject": "S080",
+        "score": 0.796
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0103",
+      "provides": "evidence_summary_block_0103",
+      "value": {
+        "subject": "S026",
+        "score": 0.942
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0104",
+      "provides": "discriminating_summary_block_0104",
+      "value": {
+        "subject": "S041",
+        "score": 0.695
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.treatment_summary.0105",
+      "provides": "treatment_summary_block_0105",
+      "value": {
+        "subject": "S022",
+        "score": 0.08
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "treatment_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0106",
+      "provides": "measurement_summary_block_0106",
+      "value": {
+        "subject": "S077",
+        "score": 0.496
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0107",
+      "provides": "criterion_summary_block_0107",
+      "value": {
+        "subject": "S083",
+        "score": 0.679
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0108",
+      "provides": "evidence_summary_block_0108",
+      "value": {
+        "subject": "S068",
+        "score": 0.435
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0109",
+      "provides": "measurement_summary_block_0109",
+      "value": {
+        "subject": "S028",
+        "score": 0.51
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0110",
+      "provides": "evidence_summary_block_0110",
+      "value": {
+        "subject": "S093",
+        "score": 0.26
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.measurement_summary.0111",
+      "provides": "measurement_summary_block_0111",
+      "value": {
+        "subject": "S065",
+        "score": 0.974
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "measurement_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.evidence_summary.0112",
+      "provides": "evidence_summary_block_0112",
+      "value": {
+        "subject": "S059",
+        "score": 0.838
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "evidence_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.discriminating_summary.0113",
+      "provides": "discriminating_summary_block_0113",
+      "value": {
+        "subject": "S044",
+        "score": 0.645
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "discriminating_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0114",
+      "provides": "clinical_summary_block_0114",
+      "value": {
+        "subject": "S014",
+        "score": 0.388
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0115",
+      "provides": "criterion_summary_block_0115",
+      "value": {
+        "subject": "S073",
+        "score": 0.291
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0116",
+      "provides": "clinical_summary_block_0116",
+      "value": {
+        "subject": "S083",
+        "score": 0.461
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.clinical_summary.0117",
+      "provides": "clinical_summary_block_0117",
+      "value": {
+        "subject": "S032",
+        "score": 0.001
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "clinical_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0118",
+      "provides": "criterion_summary_block_0118",
+      "value": {
+        "subject": "S095",
+        "score": 0.753
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    },
+    {
+      "id": "fact.criterion_summary.0119",
+      "provides": "criterion_summary_block_0119",
+      "value": {
+        "subject": "S091",
+        "score": 0.639
+      },
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "criterion_summary",
+        "exploratory"
+      ],
+      "provenance": [
+        "analysis/longitudinal_exploratory.ipynb"
+      ]
+    }
+  ],
+  "factors": [
+    {
+      "id": "factor.measurement_delta",
+      "inputs": [
+        "baseline_enhancing_diameter_product",
+        "index_enhancing_diameter_product",
+        "response_criterion"
+      ],
+      "outputs": [
+        "enhancing_change_fraction"
+      ],
+      "kind": "deterministic_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "protected"
+      ],
+      "cost": 1.0
+    },
+    {
+      "id": "factor.progression_support",
+      "inputs": [
+        "enhancing_change_fraction",
+        "response_criterion",
+        "new_lesion_status",
+        "perfusion_mri",
+        "amino_acid_pet"
+      ],
+      "outputs": [
+        "hypothesis_progression_support"
+      ],
+      "kind": "hypothesis_support_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "hypothesis"
+      ],
+      "cost": 1.0
+    },
+    {
+      "id": "factor.treatment_effect_support",
+      "inputs": [
+        "enhancing_change_fraction",
+        "days_since_treatment_end",
+        "post_treatment_window_days",
+        "treatment_timeline",
+        "corticosteroid_dose_trend",
+        "perfusion_mri",
+        "histopathology"
+      ],
+      "outputs": [
+        "hypothesis_treatment_effect_support"
+      ],
+      "kind": "hypothesis_support_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "hypothesis"
+      ],
+      "cost": 1.0
+    },
+    {
+      "id": "factor.mixed_process_support",
+      "inputs": [
+        "enhancing_change_fraction",
+        "days_since_treatment_end",
+        "clinical_trend",
+        "histopathology",
+        "declared_sampling_limitation"
+      ],
+      "outputs": [
+        "hypothesis_mixed_process_support"
+      ],
+      "kind": "hypothesis_support_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "hypothesis"
+      ],
+      "cost": 1.0
+    },
+    {
+      "id": "factor.hypothesis_exclusion",
+      "inputs": [
+        "hypothesis_progression_support",
+        "hypothesis_treatment_effect_support",
+        "hypothesis_mixed_process_support"
+      ],
+      "outputs": [
+        "live_hypothesis_set_r0"
+      ],
+      "kind": "mutual_exclusion_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "protected"
+      ],
+      "cost": 0.5
+    },
+    {
+      "id": "factor.relay.live_hypothesis_set.1",
+      "inputs": [
+        "live_hypothesis_set_r0"
+      ],
+      "outputs": [
+        "live_hypothesis_set_r1"
+      ],
+      "kind": "relay_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "relay"
+      ],
+      "cost": 0.05
+    },
+    {
+      "id": "factor.relay.live_hypothesis_set.2",
+      "inputs": [
+        "live_hypothesis_set_r1"
+      ],
+      "outputs": [
+        "live_hypothesis_set_r2"
+      ],
+      "kind": "relay_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "relay"
+      ],
+      "cost": 0.05
+    },
+    {
+      "id": "factor.relay.live_hypothesis_set.3",
+      "inputs": [
+        "live_hypothesis_set_r2"
+      ],
+      "outputs": [
+        "live_hypothesis_set"
+      ],
+      "kind": "relay_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "relay"
+      ],
+      "cost": 0.05
+    },
+    {
+      "id": "factor.discrimination_request",
+      "inputs": [
+        "perfusion_mri",
+        "amino_acid_pet",
+        "histopathology",
+        "interval_follow_up",
+        "live_hypothesis_set"
+      ],
+      "outputs": [
+        "discriminating_evidence_request"
+      ],
+      "kind": "evidence_request_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "protected"
+      ],
+      "cost": 0.3
+    },
+    {
+      "id": "factor.confirmation_check",
+      "inputs": [
+        "confirmation_measurement",
+        "response_criterion",
+        "index_enhancing_diameter_product"
+      ],
+      "outputs": [
+        "confirmation_status"
+      ],
+      "kind": "deterministic_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "protected"
+      ],
+      "cost": 1.0
+    },
+    {
+      "id": "factor.change_assessment",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_evidence_request",
+        "confirmation_status",
+        "days_since_treatment_end",
+        "post_treatment_window_days"
+      ],
+      "outputs": [
+        "change_assessment_status"
+      ],
+      "kind": "decision_rule",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "target"
+      ],
+      "cost": 0.2
+    },
+    {
+      "id": "factor.summary.0000",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0000"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0000_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0001",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0001"
+      ],
+      "outputs": [
+        "evidence_summary_block_0001_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0002",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0002"
+      ],
+      "outputs": [
+        "measurement_summary_block_0002_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0003",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0003"
+      ],
+      "outputs": [
+        "criterion_summary_block_0003_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0004",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0004"
+      ],
+      "outputs": [
+        "criterion_summary_block_0004_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0005",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0005"
+      ],
+      "outputs": [
+        "clinical_summary_block_0005_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0006",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0006"
+      ],
+      "outputs": [
+        "measurement_summary_block_0006_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0007",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0007"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0007_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0008",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0008"
+      ],
+      "outputs": [
+        "treatment_summary_block_0008_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0009",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0009"
+      ],
+      "outputs": [
+        "evidence_summary_block_0009_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0010",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0010"
+      ],
+      "outputs": [
+        "treatment_summary_block_0010_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0011",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0011"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0011_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0012",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0012"
+      ],
+      "outputs": [
+        "evidence_summary_block_0012_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0013",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0013"
+      ],
+      "outputs": [
+        "evidence_summary_block_0013_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0014",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0014"
+      ],
+      "outputs": [
+        "clinical_summary_block_0014_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0015",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0015"
+      ],
+      "outputs": [
+        "criterion_summary_block_0015_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0016",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0016"
+      ],
+      "outputs": [
+        "measurement_summary_block_0016_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0017",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0017"
+      ],
+      "outputs": [
+        "evidence_summary_block_0017_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0018",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0018"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0018_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0019",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0019"
+      ],
+      "outputs": [
+        "criterion_summary_block_0019_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0020",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0020"
+      ],
+      "outputs": [
+        "measurement_summary_block_0020_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0021",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0021"
+      ],
+      "outputs": [
+        "clinical_summary_block_0021_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0022",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0022"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0022_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0023",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0023"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0023_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0024",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0024"
+      ],
+      "outputs": [
+        "clinical_summary_block_0024_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0025",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0025"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0025_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0026",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0026"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0026_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0027",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0027"
+      ],
+      "outputs": [
+        "treatment_summary_block_0027_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0028",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0028"
+      ],
+      "outputs": [
+        "measurement_summary_block_0028_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0029",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0029"
+      ],
+      "outputs": [
+        "criterion_summary_block_0029_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0030",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0030"
+      ],
+      "outputs": [
+        "evidence_summary_block_0030_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0031",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0031"
+      ],
+      "outputs": [
+        "measurement_summary_block_0031_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0032",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0032"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0032_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0033",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0033"
+      ],
+      "outputs": [
+        "criterion_summary_block_0033_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0034",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0034"
+      ],
+      "outputs": [
+        "criterion_summary_block_0034_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0035",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0035"
+      ],
+      "outputs": [
+        "measurement_summary_block_0035_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0036",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0036"
+      ],
+      "outputs": [
+        "measurement_summary_block_0036_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0037",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0037"
+      ],
+      "outputs": [
+        "treatment_summary_block_0037_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0038",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0038"
+      ],
+      "outputs": [
+        "treatment_summary_block_0038_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0039",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0039"
+      ],
+      "outputs": [
+        "evidence_summary_block_0039_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0040",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0040"
+      ],
+      "outputs": [
+        "measurement_summary_block_0040_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0041",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0041"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0041_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0042",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0042"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0042_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0043",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0043"
+      ],
+      "outputs": [
+        "clinical_summary_block_0043_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0044",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0044"
+      ],
+      "outputs": [
+        "treatment_summary_block_0044_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0045",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0045"
+      ],
+      "outputs": [
+        "evidence_summary_block_0045_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0046",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0046"
+      ],
+      "outputs": [
+        "evidence_summary_block_0046_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0047",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0047"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0047_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0048",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0048"
+      ],
+      "outputs": [
+        "criterion_summary_block_0048_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0049",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0049"
+      ],
+      "outputs": [
+        "criterion_summary_block_0049_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0050",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0050"
+      ],
+      "outputs": [
+        "evidence_summary_block_0050_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0051",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0051"
+      ],
+      "outputs": [
+        "treatment_summary_block_0051_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0052",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0052"
+      ],
+      "outputs": [
+        "treatment_summary_block_0052_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0053",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0053"
+      ],
+      "outputs": [
+        "evidence_summary_block_0053_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0054",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0054"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0054_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0055",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0055"
+      ],
+      "outputs": [
+        "evidence_summary_block_0055_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0056",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0056"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0056_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0057",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0057"
+      ],
+      "outputs": [
+        "measurement_summary_block_0057_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0058",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0058"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0058_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0059",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0059"
+      ],
+      "outputs": [
+        "criterion_summary_block_0059_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0060",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0060"
+      ],
+      "outputs": [
+        "measurement_summary_block_0060_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0061",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0061"
+      ],
+      "outputs": [
+        "evidence_summary_block_0061_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0062",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0062"
+      ],
+      "outputs": [
+        "evidence_summary_block_0062_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0063",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0063"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0063_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0064",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0064"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0064_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0065",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0065"
+      ],
+      "outputs": [
+        "measurement_summary_block_0065_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0066",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0066"
+      ],
+      "outputs": [
+        "evidence_summary_block_0066_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0067",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0067"
+      ],
+      "outputs": [
+        "measurement_summary_block_0067_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0068",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0068"
+      ],
+      "outputs": [
+        "criterion_summary_block_0068_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0069",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0069"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0069_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0070",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0070"
+      ],
+      "outputs": [
+        "clinical_summary_block_0070_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0071",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0071"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0071_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0072",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0072"
+      ],
+      "outputs": [
+        "evidence_summary_block_0072_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0073",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0073"
+      ],
+      "outputs": [
+        "clinical_summary_block_0073_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0074",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0074"
+      ],
+      "outputs": [
+        "evidence_summary_block_0074_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0075",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0075"
+      ],
+      "outputs": [
+        "measurement_summary_block_0075_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0076",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0076"
+      ],
+      "outputs": [
+        "clinical_summary_block_0076_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0077",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0077"
+      ],
+      "outputs": [
+        "criterion_summary_block_0077_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0078",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0078"
+      ],
+      "outputs": [
+        "measurement_summary_block_0078_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0079",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0079"
+      ],
+      "outputs": [
+        "treatment_summary_block_0079_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0080",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0080"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0080_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0081",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0081"
+      ],
+      "outputs": [
+        "treatment_summary_block_0081_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0082",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0082"
+      ],
+      "outputs": [
+        "evidence_summary_block_0082_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0083",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0083"
+      ],
+      "outputs": [
+        "clinical_summary_block_0083_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0084",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0084"
+      ],
+      "outputs": [
+        "clinical_summary_block_0084_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0085",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0085"
+      ],
+      "outputs": [
+        "criterion_summary_block_0085_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0086",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0086"
+      ],
+      "outputs": [
+        "measurement_summary_block_0086_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0087",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0087"
+      ],
+      "outputs": [
+        "treatment_summary_block_0087_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0088",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0088"
+      ],
+      "outputs": [
+        "clinical_summary_block_0088_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0089",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0089"
+      ],
+      "outputs": [
+        "treatment_summary_block_0089_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0090",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0090"
+      ],
+      "outputs": [
+        "evidence_summary_block_0090_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0091",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0091"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0091_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0092",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0092"
+      ],
+      "outputs": [
+        "treatment_summary_block_0092_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0093",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0093"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0093_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0094",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0094"
+      ],
+      "outputs": [
+        "clinical_summary_block_0094_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0095",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0095"
+      ],
+      "outputs": [
+        "clinical_summary_block_0095_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0096",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0096"
+      ],
+      "outputs": [
+        "treatment_summary_block_0096_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0097",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0097"
+      ],
+      "outputs": [
+        "evidence_summary_block_0097_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0098",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0098"
+      ],
+      "outputs": [
+        "criterion_summary_block_0098_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0099",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0099"
+      ],
+      "outputs": [
+        "criterion_summary_block_0099_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0100",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0100"
+      ],
+      "outputs": [
+        "treatment_summary_block_0100_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0101",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0101"
+      ],
+      "outputs": [
+        "evidence_summary_block_0101_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0102",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0102"
+      ],
+      "outputs": [
+        "criterion_summary_block_0102_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0103",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0103"
+      ],
+      "outputs": [
+        "evidence_summary_block_0103_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0104",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0104"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0104_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0105",
+      "inputs": [
+        "live_hypothesis_set",
+        "treatment_summary_block_0105"
+      ],
+      "outputs": [
+        "treatment_summary_block_0105_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0106",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0106"
+      ],
+      "outputs": [
+        "measurement_summary_block_0106_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0107",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0107"
+      ],
+      "outputs": [
+        "criterion_summary_block_0107_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0108",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0108"
+      ],
+      "outputs": [
+        "evidence_summary_block_0108_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0109",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0109"
+      ],
+      "outputs": [
+        "measurement_summary_block_0109_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0110",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0110"
+      ],
+      "outputs": [
+        "evidence_summary_block_0110_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0111",
+      "inputs": [
+        "live_hypothesis_set",
+        "measurement_summary_block_0111"
+      ],
+      "outputs": [
+        "measurement_summary_block_0111_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0112",
+      "inputs": [
+        "live_hypothesis_set",
+        "evidence_summary_block_0112"
+      ],
+      "outputs": [
+        "evidence_summary_block_0112_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0113",
+      "inputs": [
+        "live_hypothesis_set",
+        "discriminating_summary_block_0113"
+      ],
+      "outputs": [
+        "discriminating_summary_block_0113_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0114",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0114"
+      ],
+      "outputs": [
+        "clinical_summary_block_0114_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0115",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0115"
+      ],
+      "outputs": [
+        "criterion_summary_block_0115_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0116",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0116"
+      ],
+      "outputs": [
+        "clinical_summary_block_0116_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0117",
+      "inputs": [
+        "live_hypothesis_set",
+        "clinical_summary_block_0117"
+      ],
+      "outputs": [
+        "clinical_summary_block_0117_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0118",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0118"
+      ],
+      "outputs": [
+        "criterion_summary_block_0118_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    },
+    {
+      "id": "factor.summary.0119",
+      "inputs": [
+        "live_hypothesis_set",
+        "criterion_summary_block_0119"
+      ],
+      "outputs": [
+        "criterion_summary_block_0119_summary"
+      ],
+      "kind": "exploratory_summary",
+      "scope": {
+        "cohort": "PT-UNCERTAINTY-001"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "cost": 0.1
+    }
+  ],
+  "events": [
+    {
+      "id": "event.baseline_study",
+      "event_time": "2025-03-05T00:00:00Z",
+      "availability_time": "2025-03-06T00:00:00Z",
+      "causal_parents": [],
+      "produces": [
+        "baseline_enhancing_diameter_product"
+      ]
+    },
+    {
+      "id": "event.treatment_completion",
+      "event_time": "2025-03-11T00:00:00Z",
+      "availability_time": "2025-03-11T00:00:00Z",
+      "causal_parents": [
+        "event.baseline_study"
+      ],
+      "produces": [
+        "treatment_timeline",
+        "days_since_treatment_end"
+      ]
+    },
+    {
+      "id": "event.index_study",
+      "event_time": "2025-04-24T00:00:00Z",
+      "availability_time": "2025-04-24T00:00:00Z",
+      "causal_parents": [
+        "event.treatment_completion"
+      ],
+      "produces": [
+        "index_enhancing_diameter_product",
+        "new_lesion_status"
+      ]
+    },
+    {
+      "id": "event.confirmation_study",
+      "event_time": "2025-05-12T00:00:00Z",
+      "availability_time": "2025-05-19T00:00:00Z",
+      "causal_parents": [
+        "event.index_study"
+      ],
+      "produces": [
+        "confirmation_measurement"
+      ]
+    }
+  ]
+}
