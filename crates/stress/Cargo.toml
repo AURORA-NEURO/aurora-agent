@@ -1,0 +1,15 @@
+[package]
+name = "bioprism-stress"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Biological stress program: prevalence shift, batch and site effects, assay uncertainty"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-worldgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
