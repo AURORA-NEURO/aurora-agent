@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-trace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Trajectory ingestion, decision segmentation, first-divergence localization and Decision Cell compilation"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-prism = { workspace = true }
+bioprism-section = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
