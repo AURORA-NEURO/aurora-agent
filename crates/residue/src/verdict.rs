@@ -357,7 +357,7 @@ pub enum Classification {
     /// The content is implemented under a different section's id, by a crate that never names this
     /// one.
     ///
-    /// `crates/worldfactory` found §27 modules discharged by five siblings, none of which cites a
+    /// `crates/worldfactory` found §27 modules discharged by six siblings, none of which cites a
     /// §27 id. That is a finding rather than a gap, and it is invisible to a coverage script that
     /// matches tokens.
     DischargedElsewhere { by: Dischargers },

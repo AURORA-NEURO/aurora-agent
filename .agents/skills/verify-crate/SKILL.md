@@ -49,15 +49,49 @@ cargo test -p bioprism-<crate> --offline
 If a per-crate count looks lower than expected, check for `never executed` before concluding
 anything about the code.
 
-## Verifying the whole workspace
+### It bites the workspace sum harder than any single crate
+
+This is the part that keeps costing time. **A blocked binary makes `cargo test --workspace` lose
+every test after it, silently** — the run reports `error: test failed`, cargo moves on, and the sum
+you take at the end is short by an amount nothing on screen tells you.
+
+It has now hit five recorded times in this repository:
+
+| Where | Reported | True |
+|---|---:|---:|
+| workspace, Batch I (`3a5bae2`) | 344 | 4,327 |
+| workspace, `fiber` batch (`0f5b53b`) — three binaries blocked | short by 66 | 6,171 |
+| `crates/fabric` (`18c5475`) | 130 | 176 |
+| `crates/bioevalx` (`9a04c8b`) — one blocked, three later never ran | — | 113 |
+| the original per-crate case in this skill | 27 | 75 |
+
+The 344-against-4,327 run is the one to keep in mind: the shortfall is not a rounding error, and the
+number looked plausible enough to be written down.
+
+### Relink and recount
+
+Touch every test source first, then run with `--no-fail-fast`, then **count the blocked binaries as
+well as the tests**:
 
 ```bash
-cargo test --workspace --offline 2>&1 | grep -E "^test result: ok" | awk '{s+=$4} END {print s}'
+find crates -name '*.rs' -path '*/tests/*' -exec touch {} +
+cargo test --workspace --offline --no-fail-fast 2>&1 | grep -c 'never executed'
+cargo test --workspace --offline --no-fail-fast 2>&1 \
+  | grep -E '^test result: ok' | awk '{s+=$4} END {print s}'
 ```
 
-Do **not** run this while agents are concurrently writing crates — a crate mid-edit will not
-compile and will fail the whole invocation for reasons that have nothing to do with your change.
-Use `-p` per crate in that situation.
+A non-zero first number invalidates the second. `tools/status.sh --tests` does exactly this and
+prints a warning naming the shortfall, which is why the README's test count is generated rather than
+typed.
+
+**Do not trust the sum alone.** Check the per-binary `Running ...` lines against the crate list —
+`ls crates | wc -l` is 77 — rather than accepting a total that has no way to tell you what is missing
+from it. A crate whose binaries are all absent from the output looks identical to a crate with no
+tests.
+
+Do **not** run the workspace suite while agents are concurrently writing crates — a crate mid-edit
+will not compile and will fail the whole invocation for reasons that have nothing to do with your
+change. Use `-p` per crate in that situation.
 
 ## What a real test looks like here
 

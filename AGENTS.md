@@ -124,7 +124,24 @@ compiled context without linking the engine that produced it.
   are hand-rolled for this reason: the CSV reader, the arg parser, JSON-RPC, log-gamma, RFC 3339.
 - Windows Application Control sometimes blocks a freshly linked test binary with `os error 4551`
   ("never executed"). `cargo test` reports `error: test failed` and moves on, so **a suite that
-  never ran looks like a suite that failed**. Touch a test file to force a relink.
+  never ran looks like a suite that failed**, and a `--workspace` sum silently loses every test
+  after it — one run reported 344 where the true figure was 4,327. Touch a test file to force a
+  relink; `tools/status.sh --tests` does that and warns if any binary still refuses to run.
+
+### Skills
+
+`.agents/skills/` holds what agents working here have had to relearn. Read the relevant one before
+starting, not after.
+
+| Skill | For |
+|---|---|
+| `add-module` | starting a crate against a blueprint section |
+| `classify-blueprint-modules` | deciding which modules are code at all, and citing ids without inflating coverage |
+| `measure-section-boilerplate` | reporting how repetitive a section is, reproducibly |
+| `keep-a-claim-honest` | the recurring defect: an error swallowed into a benign default |
+| `prove-a-scanner-fires` | any test that greps the crate's own text |
+| `verify-crate` | green means green, and the failures that are not failures |
+| `check-parity` | anything touching canonical bytes, hashing or the store |
 
 ## Commit discipline
 
