@@ -1,0 +1,15 @@
+[package]
+name = "bioprism-factory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Job, worker, lease and recovery lifecycle with idempotency-aware retry"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
