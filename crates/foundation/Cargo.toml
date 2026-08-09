@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-foundation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "BioPRISM foundation objects: the executable-biology thesis made typed"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-world = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
