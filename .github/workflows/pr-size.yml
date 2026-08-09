@@ -1,0 +1,21 @@
+name: pr-size
+
+on: pull_request
+
+# Small semantic commits are the house style (see AGENTS.md). This does not block; it comments,
+# so a genuinely large mechanical change can still land with a reason stated.
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: report diff size
+        run: |
+          base=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          changed=$(git diff --shortstat "$base"...HEAD)
+          echo "diff vs base: $changed"
+          added=$(git diff --numstat "$base"...HEAD | awk '{s+=$1} END {print s+0}')
+          if [ "$added" -gt 2000 ]; then
+            echo "::warning::$added lines added. Consider splitting; AGENTS.md asks for one concern per commit."
+          fi
