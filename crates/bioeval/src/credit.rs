@@ -229,13 +229,18 @@ impl Credit {
         &self.digest
     }
 
-    /// Re-derives the digest from the rule and evidence and compares it to the recorded one.
+    /// Re-runs the rule on the evidence and compares the whole award.
+    ///
+    /// Not just the digest. The digest covers the *inputs*, which is what makes it a stable name
+    /// for them, but a serialised award can have had its `fraction` edited without disturbing it.
+    /// Recomputing catches that, and it is cheap: the rule is a pure function of its inputs, which
+    /// is the property the whole module exists to guarantee.
     ///
     /// A `false` here means the credit was not produced by that rule on that evidence, whatever
     /// its `rule_id` says.
     pub fn verify(&self, rule: &CreditRule, evidence: &CreditEvidence) -> bool {
-        match digest_of(rule, evidence) {
-            Ok(expected) => expected == self.digest && rule.rule_id == self.rule_id,
+        match rule.award(evidence) {
+            Ok(recomputed) => recomputed == *self,
             Err(_) => false,
         }
     }

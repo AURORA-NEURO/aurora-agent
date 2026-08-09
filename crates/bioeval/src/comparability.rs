@@ -126,9 +126,7 @@ pub struct MeasurementFrame {
 }
 
 impl MeasurementFrame {
-    pub fn declaring(
-        entries: impl IntoIterator<Item = (FrameDimension, String)>,
-    ) -> Self {
+    pub fn declaring(entries: impl IntoIterator<Item = (FrameDimension, String)>) -> Self {
         MeasurementFrame {
             declared: entries.into_iter().collect(),
         }
@@ -336,7 +334,10 @@ pub fn gate(
                 reconciled.insert(dimension, left.to_string());
             }
             (Some(left), Some(right)) => {
-                match bridges.iter().find(|b| b.applies_to(dimension, left, right)) {
+                match bridges
+                    .iter()
+                    .find(|b| b.applies_to(dimension, left, right))
+                {
                     Some(bridge) if bridge.loss <= requirement.loss_tolerance => {
                         reconciled.insert(dimension, right.to_string());
                         applied.push(AppliedBridge {

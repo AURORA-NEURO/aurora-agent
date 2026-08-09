@@ -123,7 +123,9 @@ pub struct Veto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "consensus", rename_all = "snake_case")]
 pub enum ConsensusState {
-    Unanimous { position: String },
+    Unanimous {
+        position: String,
+    },
     /// A position cleared the threshold, and the dissenters are named. Not "the answer" — the
     /// answer is still the distribution.
     Majority {
@@ -133,9 +135,13 @@ pub enum ConsensusState {
     },
     /// At least one rater flagged a safety-reaching class. Numerically the panel may be lopsided;
     /// it does not matter.
-    Vetoed { by: Vec<Veto> },
+    Vetoed {
+        by: Vec<Veto>,
+    },
     /// No position cleared the threshold.
-    None { modal_share: f64 },
+    None {
+        modal_share: f64,
+    },
 }
 
 impl ConsensusState {
@@ -345,10 +351,7 @@ impl PooledScore {
             return Err(AggregationError::EmptyPanel);
         };
         let requirement_id = first.requirement_id().to_string();
-        if let Some(odd) = scores
-            .iter()
-            .find(|s| s.requirement_id() != requirement_id)
-        {
+        if let Some(odd) = scores.iter().find(|s| s.requirement_id() != requirement_id) {
             return Err(AggregationError::MixedRequirements {
                 expected: requirement_id,
                 found: odd.requirement_id().to_string(),
@@ -381,7 +384,10 @@ impl PooledScore {
     /// Reported alongside any collapsed mean, never inside it. A pool whose mean is 0.9 and whose
     /// critical count is 3 is not a 0.9.
     pub fn critical_error_count(&self) -> usize {
-        self.scores.iter().filter(|s| s.has_critical_error()).count()
+        self.scores
+            .iter()
+            .filter(|s| s.has_critical_error())
+            .count()
     }
 
     pub fn clean_pass_count(&self) -> usize {
@@ -397,6 +403,31 @@ impl PooledScore {
         let lo: f64 = self.scores.iter().map(|s| s.interval().lo()).sum::<f64>() / n;
         let hi: f64 = self.scores.iter().map(|s| s.interval().hi()).sum::<f64>() / n;
         (lo, hi)
+    }
+
+    /// The number of independent observations in the pool, or `None` when it cannot be known.
+    ///
+    /// 26.02: "Generated descendants cannot be treated as independent observations merely because
+    /// they have different identifiers." Ten mutants of one BioWorld are one observation with ten
+    /// correlated readings, and reporting `n = 10` narrows every interval computed downstream by
+    /// roughly a factor of three for free. So this counts *distinct parent worlds*, and returns
+    /// `None` the moment any pooled score failed to declare one — an undeclared parent cannot be
+    /// shown to be distinct from the others, and guessing that it is always inflates `n`.
+    pub fn effective_n(&self) -> Option<usize> {
+        let mut worlds = std::collections::BTreeSet::new();
+        for score in &self.scores {
+            worlds.insert(score.parent_world()?.clone());
+        }
+        Some(worlds.len())
+    }
+
+    /// Whether the pool's nominal size overstates its independent size.
+    ///
+    /// `true` when the parents are declared and there are fewer of them than there are scores.
+    /// A caller that reports the mean without reporting this has published a narrower interval
+    /// than the evidence supports.
+    pub fn is_clustered(&self) -> bool {
+        self.effective_n().is_some_and(|n| n < self.scores.len())
     }
 
     /// The case whose reference was least able to decide. Worth looking at before any headline.
@@ -417,12 +448,13 @@ impl PooledScore {
     pub fn collapse(&self, policy: &CollapsePolicy) -> Result<f64, AggregationError> {
         let mut total = 0.0;
         for score in &self.scores {
-            let value = score.collapse(policy).map_err(|e| {
-                AggregationError::CaseNotCollapsible {
-                    subject: score.subject().to_string(),
-                    detail: e.to_string(),
-                }
-            })?;
+            let value =
+                score
+                    .collapse(policy)
+                    .map_err(|e| AggregationError::CaseNotCollapsible {
+                        subject: score.subject().to_string(),
+                        detail: e.to_string(),
+                    })?;
             total += value;
         }
         Ok(total / self.scores.len() as f64)

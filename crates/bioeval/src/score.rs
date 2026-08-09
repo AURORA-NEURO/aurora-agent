@@ -46,10 +46,13 @@
 
 use std::collections::BTreeMap;
 
+use bioprism_ids::WorldId;
 use bioprism_section::OracleStatus;
 use serde::{Deserialize, Serialize};
 
-use crate::comparability::{ComparabilityRequirement, ComparabilityWitness};
+use crate::comparability::{
+    gate, Bridge, ComparabilityRequirement, ComparabilityWitness, MeasurementFrame,
+};
 use crate::credit::Credit;
 use crate::error::{CollapseError, PredictionError, ScoreError};
 use crate::layer::ClassifiedError;
@@ -85,9 +88,7 @@ pub struct PredictedDistribution {
 }
 
 impl PredictedDistribution {
-    pub fn new(
-        mass: impl IntoIterator<Item = (String, f64)>,
-    ) -> Result<Self, PredictionError> {
+    pub fn new(mass: impl IntoIterator<Item = (String, f64)>) -> Result<Self, PredictionError> {
         let mut table: BTreeMap<String, f64> = BTreeMap::new();
         for (state, m) in mass {
             if !m.is_finite() {
@@ -315,6 +316,8 @@ pub struct BioScore {
     dispersion: Dispersion,
     reference_entropy_bits: f64,
     bridge_loss: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parent_world: Option<WorldId>,
     errors: Vec<ClassifiedError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     credit: Option<Credit>,
@@ -371,6 +374,23 @@ impl BioScore {
 
     pub fn credit(&self) -> Option<&Credit> {
         self.credit.as_ref()
+    }
+
+    /// The BioWorld this case was generated from, when the caller declared it.
+    ///
+    /// 26.02's statistical-analysis clause: "Generated descendants cannot be treated as
+    /// independent observations merely because they have different identifiers." Scores that do
+    /// not carry a parent cannot be checked for that, which is why
+    /// [`crate::aggregate::PooledScore::effective_n`] returns `None` rather than a count when any
+    /// member is undeclared.
+    pub fn parent_world(&self) -> Option<&WorldId> {
+        self.parent_world.as_ref()
+    }
+
+    /// Declares which BioWorld this case descends from.
+    pub fn from_world(mut self, world: WorldId) -> Self {
+        self.parent_world = Some(world);
+        self
     }
 
     /// Attaches classified errors. Kept separate from grading because classification is a
@@ -519,6 +539,31 @@ impl Grader {
         &self.requirement
     }
 
+    /// Gates two measurement frames and grades in one step.
+    ///
+    /// The ergonomic entry point, and the one that shows what the gate buys: an incomparable pair
+    /// comes back as [`ScoreError::Incomparable`] carrying every failing dimension, not as a
+    /// number with a caveat attached. Callers holding a witness already — because they are grading
+    /// many predictions under one frame pair — should use [`Grader::grade`] directly.
+    pub fn gate_and_grade(
+        &self,
+        prediction_frame: &MeasurementFrame,
+        reference_frame: &MeasurementFrame,
+        bridges: &[Bridge],
+        subject: impl Into<String>,
+        prediction: &Prediction,
+        reference: &ReferenceStandard,
+    ) -> Result<Grade, ScoreError> {
+        let witness = gate(
+            &self.requirement,
+            prediction_frame,
+            reference_frame,
+            bridges,
+        )
+        .map_err(ScoreError::Incomparable)?;
+        self.grade(&witness, subject, prediction, reference)
+    }
+
     /// Grades one prediction.
     ///
     /// The [`ComparabilityWitness`] is a required argument, not an option. Obtaining one means
@@ -540,9 +585,9 @@ impl Grader {
         }
 
         if let Prediction::Abstained { reason } = prediction {
-            return Ok(Grade::Abstained(self.grade_abstention(
-                subject, reason, reference,
-            )));
+            return Ok(Grade::Abstained(
+                self.grade_abstention(subject, reason, reference),
+            ));
         }
 
         let distribution = match reference {
@@ -612,6 +657,7 @@ impl Grader {
             dispersion: distribution.dispersion(),
             reference_entropy_bits: distribution.entropy_bits(),
             bridge_loss: witness.total_bridge_loss(),
+            parent_world: None,
             errors: Vec::new(),
             credit: None,
         })))

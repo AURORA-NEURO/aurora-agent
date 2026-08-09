@@ -149,7 +149,9 @@ pub enum AggregationError {
     /// 26.15 failure mode: "reviewers see different evidence", generalised to scores. Results
     /// that passed different comparability gates are not results about the same thing, and
     /// 26.20 permits normalising only "within defensible groups".
-    #[error("pooled scores mix comparability requirements: expected {expected:?}, found {found:?}")]
+    #[error(
+        "pooled scores mix comparability requirements: expected {expected:?}, found {found:?}"
+    )]
     MixedRequirements { expected: String, found: String },
 
     /// One case refused to collapse and the pool refused with it, rather than quietly averaging

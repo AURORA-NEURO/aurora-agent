@@ -138,7 +138,9 @@ pub enum LayerVerdict {
     Failed(ClassifiedError),
     /// Undefined because an upstream critical failure removed the ground it stands on. Assigned
     /// by [`LayeredOutcome`], never by the caller.
-    Void { blocked_by: CorrectnessLayer },
+    Void {
+        blocked_by: CorrectnessLayer,
+    },
     /// Nobody looked. Distinct from [`LayerVerdict::Correct`] in exactly the way an unrun test is
     /// distinct from a passing one.
     NotAssessed,

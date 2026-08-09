@@ -238,8 +238,13 @@ impl ReferenceDistribution {
             > 1
     }
 
+    /// Whether the reference actually decides the case.
+    ///
+    /// Counts states carrying mass, not states enumerated. A reference that lists three
+    /// possibilities and puts all the mass on one has decided; listing the alternatives it ruled
+    /// out is good practice and must not be punished as if it were hedging.
     pub fn resolution(&self) -> Resolution {
-        if self.mass.len() == 1 {
+        if self.mass.values().filter(|&&m| m > 0.0).count() == 1 {
             Resolution::Categorical
         } else {
             Resolution::Distributed {

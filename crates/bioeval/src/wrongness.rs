@@ -147,6 +147,7 @@ impl BiologicalErrorClass {
             BiologicalErrorClass::AssociationAsMechanism
             | BiologicalErrorClass::ScopeViolation
             | BiologicalErrorClass::DirectionReversed
+            | BiologicalErrorClass::CoordinateFrame
             | BiologicalErrorClass::UnsupportedCitation => Severity::Material,
             BiologicalErrorClass::Units | BiologicalErrorClass::MagnitudeRightDirection => {
                 Severity::Benign
@@ -169,7 +170,14 @@ impl BiologicalErrorClass {
     /// Whether a failure of this class can reach a patient or a specimen without passing another
     /// check first.
     ///
-    /// Used by [`crate::panel`] to give a lone dissenter a veto: 26.20 requires "task-specific
+    /// Deliberately orthogonal to [`Self::severity`], and the orthogonality is the interesting
+    /// part. [`Self::Units`] is [`Severity::Benign`] — the conclusion survives a unit slip, you
+    /// multiply by a thousand and carry on — and it is safety-reaching, because a thousandfold
+    /// dose is what leaves the building. Severity asks whether the remaining conclusion is
+    /// meaningful; this asks whether being wrong is survivable. Collapsing them into one number
+    /// loses one of the two questions.
+    ///
+    /// Used by [`crate::aggregate`] to give a lone dissenter a veto: 26.20 requires "task-specific
     /// vetoes", and a single reader calling laterality is the canonical case where the minority
     /// must not be averaged away.
     pub fn is_safety_reaching(self) -> bool {
