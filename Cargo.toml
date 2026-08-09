@@ -53,6 +53,9 @@ members = [
     "crates/influence",
     "crates/bundle",
     "crates/bioworlds",
+    "crates/hubapi",
+    "crates/infra",
+    "crates/devx",
     "crates/cli",
 ]
 
@@ -117,6 +120,9 @@ bioprism-oncoworlds = { path = "crates/oncoworlds" }
 bioprism-influence = { path = "crates/influence" }
 bioprism-bundle = { path = "crates/bundle" }
 bioprism-bioworlds = { path = "crates/bioworlds" }
+bioprism-hubapi = { path = "crates/hubapi" }
+bioprism-infra = { path = "crates/infra" }
+bioprism-devx = { path = "crates/devx" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }

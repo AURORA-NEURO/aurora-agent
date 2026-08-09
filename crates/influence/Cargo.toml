@@ -1,0 +1,13 @@
+[package]
+name = "bioprism-influence"
+version = "0.1.0"
+edition = "2021"
+description = "Sound numeric influence bounds: the formal influence bounds the reference slicer's limitation string says it lacks"
+
+[dependencies]
+bioprism-world = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-backends = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

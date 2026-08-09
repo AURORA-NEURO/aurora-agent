@@ -171,6 +171,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-devx"
+version = "0.1.0"
+dependencies = [
+ "bioprism-docgraph",
+ "bioprism-ids",
+ "bioprism-sdk",
+ "bioprism-section",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-docgraph"
 version = "0.1.0"
 dependencies = [
@@ -279,6 +292,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-hubapi"
+version = "0.1.0"
+dependencies = [
+ "bioprism-governance",
+ "bioprism-hub",
+ "bioprism-ids",
+ "bioprism-registry",
+ "bioprism-scope",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-ids"
 version = "0.1.0"
 dependencies = [
@@ -294,6 +321,20 @@ version = "0.1.0"
 dependencies = [
  "bioprism-backends",
  "bioprism-section",
+ "bioprism-world",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-infra"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-ledger",
+ "bioprism-scope",
+ "bioprism-store",
  "bioprism-world",
  "serde",
  "serde_json",
