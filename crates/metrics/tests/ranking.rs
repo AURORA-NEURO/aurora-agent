@@ -523,6 +523,97 @@ fn the_per_capability_breakdown_separates_leading_from_never_measured() {
     assert!(verify.unmeasured_for.is_empty());
 }
 
+/// The second reading of the same defect: `best` is a claim about strength, and the row it ships in
+/// could not say whether the leader beat the field or stood in it alone. A system that measured the
+/// capability and lost is in neither `best` nor `unmeasured_for`, so the two lists cannot be
+/// differenced against anything.
+#[test]
+fn a_lead_over_a_capability_nobody_else_measured_cannot_read_as_beating_the_field() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.90, 0.10)),
+        system(
+            "b",
+            grid_of(
+                "b",
+                recorded("comparison"),
+                vec![
+                    ("verify.oracle", point_cell(0.20, 12)),
+                    (
+                        "safety.escalation",
+                        GridCell::unmeasured(UnmeasuredReason::NotAttempted),
+                    ),
+                ],
+            ),
+        ),
+    ])
+    .expect("two systems");
+
+    let rows = breakdown(&ranking);
+    let safety = rows
+        .iter()
+        .find(|row| row.capability == cap("safety.escalation"))
+        .expect("present");
+    assert_eq!(
+        safety.measured_for,
+        vec![SystemId::parse("a").unwrap()],
+        "only one system carried a value, so the lead was taken over a field of one"
+    );
+    assert!(
+        safety.lead_is_uncontested(),
+        "a leader nobody could be compared against has not beaten anyone"
+    );
+
+    let verify = rows
+        .iter()
+        .find(|row| row.capability == cap("verify.oracle"))
+        .expect("present");
+    assert_eq!(
+        verify.measured_for,
+        vec![SystemId::parse("a").unwrap(), SystemId::parse("b").unwrap()],
+        "the field includes the system that measured the capability and lost"
+    );
+    assert!(!verify.lead_is_uncontested());
+    assert_eq!(
+        verify.best,
+        vec![SystemId::parse("a").unwrap()],
+        "the loser is in the field and not in the lead"
+    );
+}
+
+/// `best` on a capability every system left unmeasured names nobody, rather than promoting an
+/// arbitrary system to the best of nothing — the rule `crate`-wide that unmeasured is not a score.
+#[test]
+fn a_capability_nobody_measured_has_no_leader_and_an_empty_field() {
+    let unmeasured_everywhere = |label: &str| {
+        grid_of(
+            label,
+            recorded("comparison"),
+            vec![
+                ("verify.oracle", point_cell(0.5, 12)),
+                (
+                    "safety.escalation",
+                    GridCell::unmeasured(UnmeasuredReason::NotAttempted),
+                ),
+            ],
+        )
+    };
+    let ranking = PartialRanking::over(vec![
+        system("a", unmeasured_everywhere("a")),
+        system("b", unmeasured_everywhere("b")),
+    ])
+    .expect("two systems");
+
+    let rows = breakdown(&ranking);
+    let safety = rows
+        .iter()
+        .find(|row| row.capability == cap("safety.escalation"))
+        .expect("present");
+    assert!(safety.best.is_empty(), "nobody led a capability nobody ran");
+    assert!(safety.measured_for.is_empty());
+    assert_eq!(safety.unmeasured_for.len(), 2);
+    assert!(safety.lead_is_uncontested());
+}
+
 #[test]
 fn a_deserialized_weighting_cannot_claim_a_digest_it_does_not_have() {
     let weighting = DeclaredWeighting::declare(

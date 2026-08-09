@@ -613,11 +613,17 @@ pub struct RankInstability {
     /// weighting over a capability some system never measured. Reported rather than counted as
     /// stable, because an unevaluable perturbation is not evidence of stability.
     ///
-    /// No perturbation currently lands here: every one is a *subset* of a weighting that already
-    /// totalised, and the refusals [`PartialRanking::totalise`] can raise are all about a weighted
-    /// capability being absent or unmeasured, which dropping weights cannot cause. The branch is
-    /// kept because that is a property of today's refusals rather than of leave-one-out, and the
-    /// denominator must not silently reabsorb these the day it stops holding.
+    /// No perturbation currently lands here, for a narrower reason than "totalise only refuses
+    /// absent or unmeasured capabilities" — it can also raise
+    /// [`MetricsError::IntervalExcludesEstimate`] and [`MetricsError::CoverageAccountingMismatch`].
+    /// What holds is that every perturbation is a *subset* of a weighting that already totalised:
+    /// [`MetricsError::WeightedCapabilityAbsent`] and [`MetricsError::WeightedCapabilityUnmeasured`]
+    /// name a weighted capability, so a subset cannot raise one the whole did not; dropping a
+    /// weight moves a cell from `contributed` to `measured_but_excluded` and leaves the coverage
+    /// accounting balanced; and a weighted mean cannot escape the weighted mean of intervals that
+    /// each contain their own term, up to rounding. The branch is kept because that is a property
+    /// of today's refusals rather than of leave-one-out, and the denominator must not silently
+    /// reabsorb these the day it stops holding.
     pub unevaluable: Vec<CapabilityId>,
 }
 
@@ -686,18 +692,48 @@ impl RankInstability {
     }
 }
 
-/// Per-capability wins and losses across a ranking, for the heatmap 33.01's public card asks for.
+/// Which systems lead on one capability, and the field the lead was taken over — 33.01's public
+/// card asks for a per-capability heatmap.
 ///
-/// Counts only pairs the order could resolve on that capability; a capability one system never
-/// measured contributes to neither column and appears in `unmeasured_for`.
+/// The doc this replaced promised "wins and losses" counted over "pairs the order could resolve",
+/// and no such tally is computed or ever was: [`breakdown`] reads each system's cell directly and
+/// never consults [`PartialRanking::relations`]. It also said a system that never measured the
+/// capability "contributes to neither column", which understates what its absence does. Removing
+/// it from the comparison is precisely what promotes whoever remains into `best`.
+///
+/// So the row carries the population it was chosen from, for the reason [`Instability::Measured`]
+/// carries `evaluated` and [`crate::aggregate::CoveredAggregate`] carries its
+/// [`crate::aggregate::Coverage`]. `best` and `unmeasured_for` alone cannot answer it: a system
+/// that measured the capability and lost appears in neither list, so a row showing one leader and
+/// one hole is the same shape whether the leader beat three systems or none. A heatmap cell
+/// rendered from `best` is a claim about a system's strength, and that claim travels with the
+/// number of systems anyone was able to check it against.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityBreakdown {
     pub capability: CapabilityId,
+    /// The systems tied at the best value among `measured_for`. Empty when nobody measured it,
+    /// rather than naming an arbitrary system as the best of nothing.
     pub best: Vec<SystemId>,
+    /// Every system whose cell carried a value, `best` included. The field `best` won.
+    pub measured_for: Vec<SystemId>,
+    /// Systems with no value here. Not scored as zero, and not counted as losses either.
     pub unmeasured_for: Vec<SystemId>,
 }
 
-/// Which systems lead on each capability, and which never measured it.
+impl CapabilityBreakdown {
+    /// Whether `best` names a lead that no other system could be compared against.
+    ///
+    /// True is not a finding about the system; it is a finding about the evaluation, and a card
+    /// that renders `best` without consulting this reports a win nobody contested.
+    pub fn lead_is_uncontested(&self) -> bool {
+        self.measured_for.len() < 2
+    }
+}
+
+/// Which systems lead on each capability, over which field, and which never measured it.
+///
+/// One row per capability appearing in any system's grid, so a capability only one system declared
+/// is visible as a row where everyone else is unmeasured rather than absent from the card.
 pub fn breakdown(ranking: &PartialRanking) -> Vec<CapabilityBreakdown> {
     let mut capabilities: BTreeSet<&CapabilityId> = BTreeSet::new();
     for vector in ranking.vectors() {
@@ -711,7 +747,7 @@ pub fn breakdown(ranking: &PartialRanking) -> Vec<CapabilityBreakdown> {
 
     let mut out = Vec::new();
     for capability in capabilities {
-        let mut best: BTreeMap<SystemId, f64> = BTreeMap::new();
+        let mut measured: BTreeMap<SystemId, f64> = BTreeMap::new();
         let mut leader: Option<f64> = None;
         let mut unmeasured_for = Vec::new();
         for vector in ranking.vectors() {
@@ -721,7 +757,7 @@ pub fn breakdown(ranking: &PartialRanking) -> Vec<CapabilityBreakdown> {
                 .and_then(crate::grid::GridCell::value)
             {
                 Some(value) => {
-                    best.insert(vector.system.clone(), value);
+                    measured.insert(vector.system.clone(), value);
                     if leader.is_none_or(|current| direction.is_better(value, current)) {
                         leader = Some(value);
                     }
@@ -731,7 +767,8 @@ pub fn breakdown(ranking: &PartialRanking) -> Vec<CapabilityBreakdown> {
         }
         let winners = leader
             .map(|target| {
-                best.iter()
+                measured
+                    .iter()
                     .filter(|(_, value)| {
                         !direction.is_better(target, **value)
                             && !direction.is_better(**value, target)
@@ -743,6 +780,7 @@ pub fn breakdown(ranking: &PartialRanking) -> Vec<CapabilityBreakdown> {
         out.push(CapabilityBreakdown {
             capability: capability.clone(),
             best: winners,
+            measured_for: measured.into_keys().collect(),
             unmeasured_for,
         });
     }
