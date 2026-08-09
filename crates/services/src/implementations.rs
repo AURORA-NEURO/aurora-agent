@@ -201,7 +201,11 @@ pub fn mutation_runtime() -> ServiceReport {
     .delivered(Delivery::Immediate, Idempotency::ContentAddressed)
     .enforcing(&[2, 3, 4])
     .noting(
-        "FIXED since this audit named it. The entry point returned `Result<Family, String>` and          erased the typed ApplyError underneath — the workspace's clearest breach of 40.36's first          invariant, at the boundary a caller actually uses. It now returns `MutationError`, whose          variants each name the world they are about and carry the underlying typed error as a          source, and `Rejection.reason` is a typed `RejectionReason` rather than prose.",
+        "FIXED since this audit named it. The entry point returned `Result<Family, String>` and \
+         erased the typed ApplyError underneath — the workspace's clearest breach of 40.36's \
+         first invariant, at the boundary a caller actually uses. It now returns `MutationError`, \
+         whose variants each name the world they are about and carry the underlying typed error \
+         as a source, and `Rejection.reason` is a typed `RejectionReason` rather than prose.",
     )
     .noting(
         "Invariant 1 is half enforced. Instance carries parent_id and mutation_id, so parents are \
@@ -228,7 +232,7 @@ pub fn mutation_runtime() -> ServiceReport {
 pub fn matched_evaluator() -> ServiceReport {
     ServiceReport::new(
         ContractId::MatchedEvaluator,
-        "bioprism_prism::fork::matched_fork(&DecisionCell, &World, &Query, &[Architecture]) -> ForkResult",
+        "bioprism_prism::fork::matched_fork(&DecisionCell, &World, &Query, &[Architecture]) -> ForkResult { arms: Vec<Arm> }",
     )
     .in_crates(&["bioprism-prism", "bioprism-evalengine"])
     .accepting(&["biodecision_cell", "architecture_manifests", "oracle_and_metric_plan"])
@@ -253,7 +257,13 @@ pub fn matched_evaluator() -> ServiceReport {
          record because there is no randomness.",
     )
     .noting(
-        "FIXED since this audit named it, and not the way the finding implied. matched_fork was          infallible, so a trial that could not run was indistinguishable from one that ran and          failed. The remedy is a state rather than a Result: an arm is Judged, Unjudged with a          typed failure, or NotAttempted with a reason — an Err would have answered an arm-level          question by discarding the arms that did run. The bug underneath was an oracle refusal          swallowed into an abstention. `provider drift` still has no representation.",
+        "FIXED since this audit named it, and not the way the finding implied. matched_fork was \
+         infallible, so a trial that could not run was indistinguishable from one that ran and \
+         failed. The remedy is a state rather than a Result: an arm is Judged, Unjudged with a \
+         typed failure, or NotAttempted with a reason — an Err would have answered an arm-level \
+         question by discarding the arms that did run. The bug underneath was an oracle refusal \
+         swallowed into an abstention, the same swallow minimize.rs has since had removed. \
+         `provider drift` still has no representation.",
     )
     .noting(
         "The bundle is attested, not signed. bundle::Attestation is Valid/Mismatch/Malformed over \

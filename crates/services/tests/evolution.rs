@@ -8,7 +8,9 @@
 //!
 //! The point of these tests is that there is no second classifier to disagree with the first.
 
-use bioprism_governance::{CompatibilityClass, CompatibilityMode, FieldSpec, FieldType, VersionBump};
+use bioprism_governance::{
+    CompatibilityClass, CompatibilityMode, FieldSpec, FieldType, VersionBump,
+};
 use bioprism_services::catalog;
 use bioprism_services::contract::{descriptor, required, ContractId, VERSION_FIELD};
 use bioprism_services::error::{ErrorClass, Retryability};
@@ -116,9 +118,7 @@ fn every_error_class_a_contract_can_raise_carries_a_retry_decision() {
             assert!(
                 matches!(
                     decision,
-                    Retryability::Never
-                        | Retryability::OnlyAfterCallerChange
-                        | Retryability::Safe
+                    Retryability::Never | Retryability::OnlyAfterCallerChange | Retryability::Safe
                 ),
                 "{}: {class}",
                 contract.id
