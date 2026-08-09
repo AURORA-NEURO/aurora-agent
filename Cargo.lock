@@ -52,6 +52,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-atlasx"
+version = "0.1.0"
+dependencies = [
+ "bioprism-atlas",
+ "bioprism-hub",
+ "bioprism-ids",
+ "bioprism-metrics",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-backends"
 version = "0.1.0"
 dependencies = [
@@ -95,6 +108,19 @@ dependencies = [
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-section",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-bioevalx"
+version = "0.1.0"
+dependencies = [
+ "bioprism-bioeval",
+ "bioprism-evalengine",
+ "bioprism-ids",
+ "bioprism-scope",
  "serde",
  "serde_json",
  "thiserror",
@@ -208,6 +234,18 @@ dependencies = [
  "bioprism-docgraph",
  "bioprism-ids",
  "bioprism-section",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-devplat"
+version = "0.1.0"
+dependencies = [
+ "bioprism-cookbook",
+ "bioprism-devx",
+ "bioprism-ids",
  "serde",
  "serde_json",
  "thiserror",
@@ -555,6 +593,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-oraclex"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-mutation",
+ "bioprism-oracle",
+ "bioprism-scope",
+ "bioprism-stress",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-packs"
 version = "0.1.0"
 dependencies = [
@@ -742,6 +793,16 @@ version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-sweep"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
  "serde",
  "serde_json",
  "thiserror",

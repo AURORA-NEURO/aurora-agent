@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-atlasx"
+version = "0.1.0"
+edition = "2021"
+description = "Capability atlas and public-hub remainder: coverage debt as a derived claim, and the failure-atlas browsing surface"
+
+[dependencies]
+bioprism-atlas = { workspace = true }
+bioprism-hub = { workspace = true }
+bioprism-metrics = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-ids = { workspace = true }
+serde_json = { workspace = true }

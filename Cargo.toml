@@ -67,6 +67,11 @@ members = [
     "crates/epistemic",
     "crates/tokens",
     "crates/ops",
+    "crates/devplat",
+    "crates/bioevalx",
+    "crates/oraclex",
+    "crates/atlasx",
+    "crates/sweep",
     "crates/cli",
 ]
 
@@ -145,6 +150,11 @@ bioprism-atlashub = { path = "crates/atlashub" }
 bioprism-epistemic = { path = "crates/epistemic" }
 bioprism-tokens = { path = "crates/tokens" }
 bioprism-ops = { path = "crates/ops" }
+bioprism-devplat = { path = "crates/devplat" }
+bioprism-bioevalx = { path = "crates/bioevalx" }
+bioprism-oraclex = { path = "crates/oraclex" }
+bioprism-atlasx = { path = "crates/atlasx" }
+bioprism-sweep = { path = "crates/sweep" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }
