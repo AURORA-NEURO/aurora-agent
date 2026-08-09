@@ -64,6 +64,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-benchcompiler"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-prism",
+ "bioprism-trace",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-bioeval"
 version = "0.1.0"
 dependencies = [
@@ -115,6 +127,17 @@ dependencies = [
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-docgraph"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-section",
  "serde",
  "serde_json",
  "thiserror",
@@ -233,6 +256,18 @@ version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-scope",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-lens"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
  "serde",
  "serde_json",
  "thiserror",
@@ -377,6 +412,29 @@ dependencies = [
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-world",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-safety"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-scope",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-scale"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-store",
+ "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",

@@ -40,6 +40,11 @@ members = [
     "crates/governance",
     "crates/standards",
     "crates/stress",
+    "crates/safety",
+    "crates/benchcompiler",
+    "crates/scale",
+    "crates/docgraph",
+    "crates/lens",
     "crates/cli",
 ]
 
@@ -91,6 +96,11 @@ bioprism-sdk = { path = "crates/sdk" }
 bioprism-governance = { path = "crates/governance" }
 bioprism-standards = { path = "crates/standards" }
 bioprism-stress = { path = "crates/stress" }
+bioprism-safety = { path = "crates/safety" }
+bioprism-benchcompiler = { path = "crates/benchcompiler" }
+bioprism-scale = { path = "crates/scale" }
+bioprism-docgraph = { path = "crates/docgraph" }
+bioprism-lens = { path = "crates/lens" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }
