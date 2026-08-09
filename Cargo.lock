@@ -119,7 +119,6 @@ name = "bioprism-bundle"
 version = "0.1.0"
 dependencies = [
  "bioprism-ids",
- "bioprism-scope",
  "bioprism-section",
  "serde",
  "serde_json",
