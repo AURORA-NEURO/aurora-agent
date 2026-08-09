@@ -33,6 +33,7 @@ fn spec(n: usize) -> WorldSpec {
         tag_style: TagStyle::Distinct,
         leakage: LeakageMechanism::ALL.to_vec(),
         seed: 20_260_808 + n as u64,
+        ..WorldSpec::reference_like(3 + n)
     }
 }
 

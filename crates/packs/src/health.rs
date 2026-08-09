@@ -355,6 +355,12 @@ impl PackAssessment {
 ///
 /// The checks are ordered so that the most disqualifying appear first in the finding list, which
 /// is what a truncated table will show.
+///
+/// The degeneracy check needs a measured best system and is skipped when there is not one. Reading
+/// an absent best rate as zero would make every trivial baseline degenerate by arithmetic and would
+/// publish `best_system_pass_rate: 0.0` as though a system had been run and had failed everything;
+/// a pack nobody has run yet is [`HealthFinding::NotYetCharacterised`], which the discrimination
+/// check above has already recorded.
 pub fn assess(
     pack: &PackIr,
     observations: &Observations,
@@ -384,21 +390,18 @@ pub fn assess(
         Discrimination::Discriminating { .. } => {}
     }
 
-    let best = observations
-        .calibration
-        .best()
-        .and_then(|o| o.pass_rate())
-        .unwrap_or(0.0);
-    for baseline in &observations.trivial_baselines {
-        let Some(rate) = baseline.observation.pass_rate() else {
-            continue;
-        };
-        if rate >= policy.degenerate_absolute || rate + policy.degenerate_margin >= best {
-            findings.push(HealthFinding::Degenerate {
-                baseline: baseline.name.clone(),
-                baseline_pass_rate: rate,
-                best_system_pass_rate: best,
-            });
+    if let Some(best) = observations.calibration.best().and_then(|o| o.pass_rate()) {
+        for baseline in &observations.trivial_baselines {
+            let Some(rate) = baseline.observation.pass_rate() else {
+                continue;
+            };
+            if rate >= policy.degenerate_absolute || rate + policy.degenerate_margin >= best {
+                findings.push(HealthFinding::Degenerate {
+                    baseline: baseline.name.clone(),
+                    baseline_pass_rate: rate,
+                    best_system_pass_rate: best,
+                });
+            }
         }
     }
 

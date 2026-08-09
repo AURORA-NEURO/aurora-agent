@@ -17,5 +17,7 @@ pub mod minimize;
 pub use architecture::{Architecture, StrategySpec};
 pub use bundle::{Attestation, Reproduction, ResultBundle, BUNDLE_SCHEMA_VERSION};
 pub use cell::{Acceptance, DecisionCell, InputRef, CELL_SCHEMA_VERSION};
-pub use fork::{matched_fork, render_table, ForkResult, Trial};
+pub use fork::{
+    matched_fork, render_table, Arm, ArmFailure, ForkResult, NotAttemptedReason, Trial,
+};
 pub use minimize::{minimize, minimize_world, preserves, Minimization};

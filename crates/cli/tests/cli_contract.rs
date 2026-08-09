@@ -70,9 +70,42 @@ fn help_exits_zero_and_publishes_the_exit_code_matrix() {
         "3  invalid_input",
         "4  compile_failed",
         "5  io",
+        "6  conflict",
+        "7  policy_denied",
+        "8  indeterminate",
+        "9  stale",
         "Not a medical device",
     ] {
         assert!(text.contains(expected), "help must document {expected:?}");
+    }
+}
+
+#[test]
+fn help_publishes_a_retry_decision_against_every_failure_code_and_none_against_the_two_verdicts() {
+    let text = stdout(&run(&["--help"]));
+    let table: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            line.starts_with("  ") && line.trim_start().chars().next().is_some_and(|c| c.is_ascii_digit())
+        })
+        .collect();
+    assert_eq!(table.len(), 10, "the help table lost or gained a row: {table:?}");
+
+    for line in &table[..2] {
+        for decision in ["terminal", "retryable_after_change", "retryable_as_is"] {
+            assert!(
+                !line.contains(decision),
+                "a verdict code publishes a retry decision: {line:?}"
+            );
+        }
+    }
+    for line in &table[2..] {
+        assert!(
+            ["terminal", "retryable_after_change", "retryable_as_is"]
+                .iter()
+                .any(|decision| line.ends_with(decision)),
+            "a failure code publishes no retry decision, so a script cannot branch on it: {line:?}"
+        );
     }
 }
 
@@ -234,11 +267,79 @@ fn a_malformed_world_exits_three_and_a_missing_file_exits_five() {
     assert_eq!(code(&output), 5, "an unreadable file is an io error");
     let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(parsed["error"]["retryable"], Value::Bool(true));
+    assert_eq!(
+        parsed["error"]["retryability"],
+        Value::String("retryable_as_is".into())
+    );
 
     let not_json = directory.join("not.json");
     std::fs::write(&not_json, "this is not json").unwrap();
     let output = run(&["world", "validate", "--world", &not_json.display().to_string()]);
     assert_eq!(code(&output), 3);
+}
+
+#[test]
+fn indexing_a_second_world_into_an_occupied_store_exits_six_and_says_it_is_terminal() {
+    let directory = scratch("store-identity");
+    let store = directory.join("index");
+
+    let first = run(&["world", "index", "--world", &world(), "--store", &store.display().to_string()]);
+    assert_eq!(code(&first), 0, "{}", String::from_utf8_lossy(&first.stderr));
+
+    let again = run(&["world", "index", "--world", &world(), "--store", &store.display().to_string()]);
+    assert_eq!(
+        code(&again),
+        0,
+        "re-indexing the same world is the operation this command is for"
+    );
+
+    let other = directory.join("other.json");
+    std::fs::write(
+        &other,
+        r#"{"schema_version":"fiber-world/0.1","world_id":"world.somebody_elses","facts":[],"factors":[],"events":[]}"#,
+    )
+    .unwrap();
+    let rebind = run(&[
+        "--json", "world", "index",
+        "--world", &other.display().to_string(),
+        "--store", &store.display().to_string(),
+    ]);
+    assert_eq!(code(&rebind), 6, "rebinding a store to a second world is a conflict");
+    let parsed: Value = serde_json::from_str(&stdout(&rebind)).unwrap();
+    assert_eq!(parsed["error"]["kind"], Value::String("conflict".into()));
+    assert_eq!(parsed["error"]["retryable"], Value::Bool(false));
+    assert_eq!(
+        parsed["error"]["retryability"],
+        Value::String("terminal".into())
+    );
+}
+
+#[test]
+fn a_store_written_under_another_schema_exits_nine_and_says_the_identical_command_may_be_resent() {
+    let directory = scratch("stale-store");
+    let store = directory.join("index");
+    let built = run(&["world", "index", "--world", &world(), "--store", &store.display().to_string()]);
+    assert_eq!(code(&built), 0, "{}", String::from_utf8_lossy(&built.stderr));
+
+    let manifest_path = store.join("manifest.json");
+    let mut manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["schema_version"] = Value::String("bioprism-store/0.0".into());
+    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+
+    let output = run(&[
+        "--json", "context", "explain",
+        "--world", &store.display().to_string(),
+        "--query", &query(),
+    ]);
+    assert_eq!(code(&output), 9, "an index built under another schema is stale, not malformed");
+    let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(parsed["error"]["kind"], Value::String("stale".into()));
+    assert_eq!(
+        parsed["error"]["retryable"],
+        Value::Bool(true),
+        "the caller re-indexes and re-sends the identical command, so the code must not say terminal"
+    );
 }
 
 #[test]

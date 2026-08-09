@@ -61,7 +61,12 @@ fn nothing_this_crate_can_emit_fails_a_structural_lint_rule() {
         "structural lint errors: {:?}",
         report.errors()
     );
-    assert!(diagnostics.len() >= 30);
+    assert!(
+        diagnostics.len() > catalogue().len(),
+        "a lint graded over the catalogue alone is a lint for one module; the audit, the compile \
+         record and the SDK conversions must all be in the set"
+    );
+    assert!(diagnostics.len() >= 25);
 }
 
 #[test]

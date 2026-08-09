@@ -1,9 +1,9 @@
 //! The exit-code audit: what `bioprism-cli` ships versus what the taxonomy needs.
 //!
 //! Blueprint 11.03 (CLI specification) and 40.13 both require errors to map to documented exit
-//! codes, and 40.36 requires the retry classification to survive that mapping. `bioprism-cli`
-//! ships six codes. [`crate::taxonomy`] has nine classes. Six into nine does not go, and this
-//! module says exactly where it fails and what it costs.
+//! codes, and 40.36 requires the retry classification to survive that mapping. This module holds
+//! the shipped registry against that requirement and says exactly where it fails and what it
+//! costs.
 //!
 //! # Why the registry is transcribed rather than imported
 //!
@@ -17,21 +17,32 @@
 //!
 //! # The findings, in short
 //!
-//! Two defects and five imprecisions. The defects:
+//! **Both defects are fixed.** The registry now ships ten codes, and every failure code carries
+//! exactly one [`Retryability`]:
 //!
-//! - **Exit 4 carries five classes.** `Stale`, `Conflict`, `PolicyDenied`, `ContractViolation` and
-//!   `Indeterminate` all exit 4. A CI script branching on the exit code cannot tell a policy
-//!   refusal from an oracle abstention from a snapshot that moved under it, and those three want
-//!   three different next actions.
-//! - **`Stale` is advertised as terminal and is not.** Exit 4's `is_retryable()` is `false`, but a
-//!   stale precondition is [`Retryability::RetryableAsIs`] after a re-read. A client that trusts
-//!   the code stops when it should have re-read and re-sent; this is the only place in the
-//!   registry where the advertised retry decision is the *opposite* of the true one, rather than
-//!   merely coarser.
+//! - **Exit 4 no longer carries five classes.** `Conflict`, `PolicyDenied` and `Indeterminate` were
+//!   split out to codes 6, 7 and 8, and `Stale` to 9, leaving 4 to mean `ContractViolation` and
+//!   nothing else. A CI script can now tell a policy refusal from an oracle abstention from a
+//!   snapshot that moved under it, which is what those three different next actions require.
+//! - **`Stale` is no longer advertised as terminal.** Exit 9's `is_retryable()` is `true`, matching
+//!   [`Retryability::RetryableAsIs`]. This was the only place in the registry where the advertised
+//!   retry decision was the *opposite* of the true one rather than merely coarser, and it is the
+//!   reason `Stale` got a code of its own rather than being folded in beside `Unavailable`.
 //!
-//! Both were first named by `bioprism-services`. This module reproduces them from an independent
-//! table, adds the four narrowing findings and one note, and states each as a [`Diagnostic`] with
-//! a remedy, so that the audit is actionable rather than a complaint.
+//! Both were first named by `bioprism-services`, reproduced here from an independent table, and
+//! fixed in `bioprism-cli`. The rows that reported them are not deleted — they are computed from
+//! the two tables below and simply no longer fire, which is the only form of "fixed" this module
+//! can honestly report. [`registry_before_the_split`] retains the registry that *did* fire them, so
+//! the detector is still exercised against a known positive rather than only against a clean input.
+//!
+//! **Two imprecision rows are left, and they are two views of one fact.** `Internal` shares exit 5
+//! with `Unavailable`, which the audit reports once as a collision on the code and once as a
+//! meaning too narrow for the class — a fault of this binary described as a dependency that could
+//! not be read. The two classes agree on the retry decision and on the paging decision, so nothing
+//! a caller acts on is lost; what is lost is the ability to say which of them happened. Giving
+//! `Internal` a code of its own is a judgement about whether an unclassified fault of the binary
+//! deserves to be distinguishable at the process boundary, and this module reports it rather than
+//! deciding it.
 //!
 //! # What is deliberately not claimed
 //!
@@ -39,9 +50,6 @@
 //! **note, not a defect**. 40.36 classifies failures; exit 1 is a completed run whose checked
 //! property did not hold, which is a verdict. Filing it as a taxonomy gap would be a fabricated
 //! finding, and an audit that inflates its own count is one nobody reads twice.
-//!
-//! Nothing here proposes new numeric codes. Choosing them is `bioprism-cli`'s call and this crate
-//! cannot edit that file; what it can do is state the distinctions any replacement must preserve.
 
 use crate::diagnostic::{Certainty, Diagnostic, DiagnosticCode, Remedy, Site};
 use crate::taxonomy::{ChangeRequired, DiagnosticClass, Retryability};
@@ -51,23 +59,212 @@ use serde::{Deserialize, Serialize};
 pub const SHIPPED_REGISTRY_SOURCE: &str = "crates/cli/src/exit.rs";
 
 /// The fields copied out of that file. Anything else about the CLI is not modelled here.
-pub const SHIPPED_REGISTRY_TRANSCRIBED_FIELDS: [&str; 3] =
-    ["ExitCode discriminant", "ExitCode::slug", "ExitCode::is_retryable"];
+pub const SHIPPED_REGISTRY_TRANSCRIBED_FIELDS: [&str; 5] = [
+    "ExitCode discriminant",
+    "ExitCode::slug",
+    "ExitCode::summary",
+    "ExitCode::is_retryable",
+    "ExitCode::retryability",
+];
 
-/// One row of `bioprism-cli`'s shipped registry, transcribed.
+/// One row of an exit-code registry, transcribed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShippedExitCode {
     pub code: u8,
     /// `ExitCode::slug`.
     pub slug: String,
-    /// The doc comment's meaning, condensed. What a reader of the CLI would believe the code says.
+    /// `ExitCode::summary`: the line `bioprism --help` prints for the code.
+    ///
+    /// Deliberately the string a user reads rather than the doc comment above it, because
+    /// [`code_meaning_covers`] asks whether somebody who has only seen the code's stated meaning
+    /// would describe the run correctly, and what they will have seen is `--help`.
+    /// [`registry_before_the_split`] predates that accessor and transcribes doc comments instead.
     pub meaning: String,
-    /// `ExitCode::is_retryable`, which is `true` for code 5 alone.
+    /// `ExitCode::is_retryable`, which is `true` for codes 5 and 9.
     pub advertised_retryable: bool,
+    /// `ExitCode::retryability`, the three-valued decision the code publishes.
+    ///
+    /// `None` means the registry publishes no decision for this code. For codes 0 and 1 that is
+    /// correct and intended — they report a verdict, not a failure. A registry with no such
+    /// accessor at all, as [`registry_before_the_split`] had none, is `None` throughout, and
+    /// [`audit_registry`] falls back to the boolean for it rather than counting every code as a
+    /// finding; the boolean is what that registry actually published and it is what its consumers
+    /// actually read.
+    pub advertised_retryability: Option<Retryability>,
 }
 
-/// The six codes `bioprism-cli` ships.
+/// The ten codes `bioprism-cli` ships.
 pub fn shipped_exit_codes() -> Vec<ShippedExitCode> {
+    let terminal = Some(Retryability::Terminal);
+    let after_change = Some(Retryability::RetryableAfterChange);
+    let as_is = Some(Retryability::RetryableAsIs);
+    let rows: [(u8, &str, &str, bool, Option<Retryability>); 10] = [
+        (
+            0,
+            "ok",
+            "the command completed and its assertion held",
+            false,
+            None,
+        ),
+        (
+            1,
+            "assertion_failed",
+            "completed, but the checked property does not hold",
+            false,
+            None,
+        ),
+        (2, "usage", "bad invocation", false, terminal),
+        (
+            3,
+            "invalid_input",
+            "input failed its schema or could not be parsed",
+            false,
+            terminal,
+        ),
+        (
+            4,
+            "compile_failed",
+            "no result satisfies the declared contract",
+            false,
+            after_change,
+        ),
+        (
+            5,
+            "io",
+            "a declared dependency could not be read or written",
+            true,
+            as_is,
+        ),
+        (
+            6,
+            "conflict",
+            "contradicts state already committed under this id",
+            false,
+            terminal,
+        ),
+        (
+            7,
+            "policy_denied",
+            "policy refused; the platform behaved correctly",
+            false,
+            after_change,
+        ),
+        (
+            8,
+            "indeterminate",
+            "ran correctly; the evidence does not decide",
+            false,
+            after_change,
+        ),
+        (
+            9,
+            "stale",
+            "a precondition was superseded; re-read and re-send",
+            true,
+            as_is,
+        ),
+    ];
+    rows.into_iter()
+        .map(
+            |(code, slug, meaning, retryable, retryability)| ShippedExitCode {
+                code,
+                slug: slug.to_string(),
+                meaning: meaning.to_string(),
+                advertised_retryable: retryable,
+                advertised_retryability: retryability,
+            },
+        )
+        .collect()
+}
+
+/// The code `bioprism-cli` returns for a diagnostic class.
+///
+/// Eight failure codes for nine classes, so exactly one code carries two: `Unavailable` and
+/// `Internal` share 5. They agree on the retry decision, which is why the sharing is survivable and
+/// why this table does not force a tenth code to make the count come out even.
+pub fn shipped_code_for(class: DiagnosticClass) -> u8 {
+    match class {
+        DiagnosticClass::Usage => 2,
+        DiagnosticClass::InvalidInput => 3,
+        DiagnosticClass::ContractViolation => 4,
+        DiagnosticClass::Unavailable | DiagnosticClass::Internal => 5,
+        DiagnosticClass::Conflict => 6,
+        DiagnosticClass::PolicyDenied => 7,
+        DiagnosticClass::Indeterminate => 8,
+        DiagnosticClass::Stale => 9,
+    }
+}
+
+/// Whether the code's stated meaning actually covers the class, or merely absorbs it.
+///
+/// This is the judgement in the module, and it is written where a reader can disagree with it. The
+/// question asked of each pair is narrow: *would a developer reading only the code's doc comment
+/// correctly describe what happened?* Eight of the nine now answer yes, because eight classes have
+/// a code whose documented meaning is theirs alone.
+///
+/// `Internal` is the one that does not. An unclassified fault of the binary reported as "a declared
+/// dependency could not be read or written" sends the reader to look at the filesystem for a bug in
+/// the tool.
+pub fn code_meaning_covers(class: DiagnosticClass) -> bool {
+    match class {
+        DiagnosticClass::Usage
+        | DiagnosticClass::InvalidInput
+        | DiagnosticClass::Stale
+        | DiagnosticClass::Conflict
+        | DiagnosticClass::PolicyDenied
+        | DiagnosticClass::ContractViolation
+        | DiagnosticClass::Indeterminate
+        | DiagnosticClass::Unavailable => true,
+        DiagnosticClass::Internal => false,
+    }
+}
+
+/// Where one class lands, and whether the code it lands on says what happened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClassRouting {
+    pub class: DiagnosticClass,
+    pub code: u8,
+    pub meaning_covers: bool,
+}
+
+/// A registry and its class routing, as one auditable value.
+///
+/// [`audit_registry`] takes this rather than reading the shipped tables directly, so that the
+/// detector can be pointed at a registry the workspace does not ship. Without that, every
+/// assertion about the audit after a clean result is an assertion that a function returned an empty
+/// list, which a function that had stopped working would also satisfy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegistryUnderAudit {
+    /// The document a reviewer opens to check the rows.
+    pub source: String,
+    pub codes: Vec<ShippedExitCode>,
+    pub classification: Vec<ClassRouting>,
+}
+
+/// The registry `bioprism-cli` ships today, assembled from the two tables above.
+pub fn shipped_registry() -> RegistryUnderAudit {
+    RegistryUnderAudit {
+        source: SHIPPED_REGISTRY_SOURCE.to_string(),
+        codes: shipped_exit_codes(),
+        classification: DiagnosticClass::ALL
+            .into_iter()
+            .map(|class| ClassRouting {
+                class,
+                code: shipped_code_for(class),
+                meaning_covers: code_meaning_covers(class),
+            })
+            .collect(),
+    }
+}
+
+/// The registry as it shipped before exit 4 was split, retained as the detector's known positive.
+///
+/// Six codes, of which four carried failures, and no three-valued accessor at all — every row's
+/// `advertised_retryability` is `None` because `ExitCode` had only `is_retryable`. Auditing it must
+/// still produce the two defects `bioprism-services` first named, and a test says so. Keeping the
+/// pre-fix registry is what separates *the defect is fixed* from *the detector stopped looking*;
+/// deleting it would leave the clean result on the shipped registry unfalsifiable.
+pub fn registry_before_the_split() -> RegistryUnderAudit {
     let rows: [(u8, &str, &str, bool); 6] = [
         (0, "ok", "the command completed and its assertion held", false),
         (
@@ -91,22 +288,7 @@ pub fn shipped_exit_codes() -> Vec<ShippedExitCode> {
         ),
         (5, "io", "a file could not be read or written", true),
     ];
-    rows.into_iter()
-        .map(|(code, slug, meaning, retryable)| ShippedExitCode {
-            code,
-            slug: slug.to_string(),
-            meaning: meaning.to_string(),
-            advertised_retryable: retryable,
-        })
-        .collect()
-}
-
-/// The code `bioprism-cli` would return for a diagnostic class, given only the codes it has.
-///
-/// This is a description of a forced choice, not a proposal. Five classes land on 4 because 4 is
-/// the only code left that means "the run did not produce a result".
-pub fn shipped_code_for(class: DiagnosticClass) -> u8 {
-    match class {
+    let collapsed = |class: DiagnosticClass| match class {
         DiagnosticClass::Usage => 2,
         DiagnosticClass::InvalidInput => 3,
         DiagnosticClass::Stale
@@ -115,28 +297,36 @@ pub fn shipped_code_for(class: DiagnosticClass) -> u8 {
         | DiagnosticClass::ContractViolation
         | DiagnosticClass::Indeterminate => 4,
         DiagnosticClass::Unavailable | DiagnosticClass::Internal => 5,
-    }
-}
-
-/// Whether the code's stated meaning actually covers the class, or merely absorbs it.
-///
-/// This is the judgement in the module, and it is written where a reader can disagree with it. The
-/// question asked of each pair is narrow: *would a developer reading only the code's doc comment
-/// correctly describe what happened?* For `ContractViolation` at code 4 the answer is yes — the
-/// doc comment's own example is a budget smaller than the protected closure. For `Indeterminate`
-/// it is no: an oracle that ran correctly and returned "the evidence does not decide this" has not
-/// suffered a compile failure, and 40.36 invariant 4 exists precisely to stop that conflation.
-pub fn code_meaning_covers(class: DiagnosticClass) -> bool {
-    match class {
-        DiagnosticClass::Usage => true,
-        DiagnosticClass::InvalidInput => true,
-        DiagnosticClass::Stale => false,
-        DiagnosticClass::Conflict => false,
-        DiagnosticClass::PolicyDenied => false,
-        DiagnosticClass::ContractViolation => true,
-        DiagnosticClass::Indeterminate => false,
-        DiagnosticClass::Unavailable => true,
-        DiagnosticClass::Internal => false,
+    };
+    let covered = |class: DiagnosticClass| {
+        matches!(
+            class,
+            DiagnosticClass::Usage
+                | DiagnosticClass::InvalidInput
+                | DiagnosticClass::ContractViolation
+                | DiagnosticClass::Unavailable
+        )
+    };
+    RegistryUnderAudit {
+        source: format!("{SHIPPED_REGISTRY_SOURCE}@before-the-split"),
+        codes: rows
+            .into_iter()
+            .map(|(code, slug, meaning, retryable)| ShippedExitCode {
+                code,
+                slug: slug.to_string(),
+                meaning: meaning.to_string(),
+                advertised_retryable: retryable,
+                advertised_retryability: None,
+            })
+            .collect(),
+        classification: DiagnosticClass::ALL
+            .into_iter()
+            .map(|class| ClassRouting {
+                class,
+                code: collapsed(class),
+                meaning_covers: covered(class),
+            })
+            .collect(),
     }
 }
 
@@ -210,6 +400,12 @@ pub struct ExitCodeAudit {
     pub registry_source: String,
     pub shipped_code_count: usize,
     pub class_count: usize,
+    /// Whether every failure code carries exactly one retry decision.
+    ///
+    /// The property the split was for, recorded as a field rather than left to be re-derived by
+    /// each reader of [`ExitCodeAudit::divergences`]. It is the audit's headline: a caller holding
+    /// nothing but the process status can decide whether to re-send.
+    pub retry_decision_recoverable_from_the_code_alone: bool,
     pub divergences: Vec<Divergence>,
 }
 
@@ -238,12 +434,14 @@ impl ExitCodeAudit {
         self.divergences
             .iter()
             .enumerate()
-            .map(|(index, divergence)| divergence_to_diagnostic(index, divergence))
+            .map(|(index, divergence)| {
+                divergence_to_diagnostic(index, divergence, &self.registry_source)
+            })
             .collect()
     }
 }
 
-fn divergence_to_diagnostic(index: usize, divergence: &Divergence) -> Diagnostic {
+fn divergence_to_diagnostic(index: usize, divergence: &Divergence, source: &str) -> Diagnostic {
     let code = DiagnosticCode::parse(format!("DEVX-9{:03}", index + 1))
         .expect("audit codes are generated in range");
     let class = match divergence.severity {
@@ -254,6 +452,10 @@ fn divergence_to_diagnostic(index: usize, divergence: &Divergence) -> Diagnostic
         DivergenceKind::MeaningNarrowerThanClass => Certainty::Inferred,
         _ => Certainty::Observed,
     };
+    let site = || Site::Source {
+        document: source.to_string(),
+        span: None,
+    };
     let mut diagnostic = Diagnostic::new(
         code,
         class,
@@ -262,10 +464,7 @@ fn divergence_to_diagnostic(index: usize, divergence: &Divergence) -> Diagnostic
             divergence.kind.as_str()
         ),
         divergence.finding.clone(),
-        Site::Source {
-            document: SHIPPED_REGISTRY_SOURCE.to_string(),
-            span: None,
-        },
+        site(),
     )
     .with_certainty(certainty)
     .with_context("exit_code", divergence.code.to_string())
@@ -283,10 +482,7 @@ fn divergence_to_diagnostic(index: usize, divergence: &Divergence) -> Diagnostic
     .citing("11.03")
     .with_remedy(Remedy::new(
         divergence.required_distinction.clone(),
-        Site::Source {
-            document: SHIPPED_REGISTRY_SOURCE.to_string(),
-            span: None,
-        },
+        site(),
         format!(
             "bioprism_devx::exitaudit::audit() no longer reports a {} row for exit {}",
             divergence.kind.as_str(),
@@ -301,37 +497,52 @@ fn divergence_to_diagnostic(index: usize, divergence: &Divergence) -> Diagnostic
     diagnostic
 }
 
-/// Run the audit.
-///
-/// Derived from [`shipped_code_for`] and [`code_meaning_covers`] rather than written out, so a
-/// change to either table changes the report. Each class contributes at most one row, taking the
-/// worst finding, because counting `Stale` twice would inflate the report without adding a fact.
+/// Run the audit against the shipped registry.
 pub fn audit() -> ExitCodeAudit {
-    let shipped = shipped_exit_codes();
+    audit_registry(&shipped_registry())
+}
+
+/// Run the audit against any registry.
+///
+/// Derived from the registry's own rows rather than written out, so a change to either table
+/// changes the report and a synthetic registry is audited by exactly the code that audits the
+/// shipped one. Each class contributes at most one row, taking the worst finding, because counting
+/// a class twice would inflate the report without adding a fact.
+pub fn audit_registry(registry: &RegistryUnderAudit) -> ExitCodeAudit {
     let mut divergences = Vec::new();
 
-    for class in DiagnosticClass::ALL {
-        let code = shipped_code_for(class);
-        let row = shipped
+    for routing in &registry.classification {
+        let class = routing.class;
+        let code = routing.code;
+        let row = registry
+            .codes
             .iter()
             .find(|row| row.code == code)
-            .expect("every mapped code is in the shipped registry");
-        let advertised_retryable = row.advertised_retryable;
-        let truly_retryable = class.retryability() == Retryability::RetryableAsIs;
+            .expect("every routed code is in the registry");
+        let truly = class.retryability();
+        let advertised_permits_retry = row.advertised_retryable;
+        let boolean_inverted = advertised_permits_retry != truly.permits_automatic_retry();
+        let decision_disagrees = matches!(row.advertised_retryability, Some(a) if a != truly);
 
-        if advertised_retryable != truly_retryable {
+        if boolean_inverted || decision_disagrees {
             divergences.push(Divergence {
                 kind: DivergenceKind::RetryabilityInverted,
                 severity: AuditSeverity::Defect,
                 code,
                 classes: vec![class],
-                finding: format!(
-                    "{class} maps to exit {code} ({}), whose is_retryable() is {advertised_retryable}, \
-                     but {class} is {}",
-                    row.slug,
-                    class.retryability()
-                ),
-                consequence: if truly_retryable {
+                finding: match row.advertised_retryability {
+                    Some(advertised) => format!(
+                        "{class} maps to exit {code} ({}), which advertises {advertised}, but \
+                         {class} is {truly}",
+                        row.slug
+                    ),
+                    None => format!(
+                        "{class} maps to exit {code} ({}), which publishes no retry decision and \
+                         whose is_retryable() is {advertised_permits_retry}, but {class} is {truly}",
+                        row.slug
+                    ),
+                },
+                consequence: if truly.permits_automatic_retry() {
                     format!(
                         "a client stops on a condition that would have cleared: {class} needs only \
                          {} before the identical request succeeds",
@@ -345,14 +556,14 @@ pub fn audit() -> ExitCodeAudit {
                     )
                 },
                 required_distinction: format!(
-                    "give {class} a code whose is_retryable() is {truly_retryable}, or carry the \
-                     retry decision in the JSON envelope rather than deriving it from the code"
+                    "give {class} a code that publishes {truly}, or carry the retry decision in \
+                     the JSON envelope rather than deriving it from the code"
                 ),
             });
             continue;
         }
 
-        if !code_meaning_covers(class) {
+        if !routing.meaning_covers {
             divergences.push(Divergence {
                 kind: DivergenceKind::MeaningNarrowerThanClass,
                 severity: AuditSeverity::Imprecision,
@@ -374,15 +585,20 @@ pub fn audit() -> ExitCodeAudit {
         }
     }
 
-    for row in &shipped {
-        let classes: Vec<DiagnosticClass> = DiagnosticClass::ALL
-            .into_iter()
-            .filter(|class| shipped_code_for(*class) == row.code)
+    for row in &registry.codes {
+        let classes: Vec<DiagnosticClass> = registry
+            .classification
+            .iter()
+            .filter(|routing| routing.code == row.code)
+            .map(|routing| routing.class)
             .collect();
         if classes.len() > 1 {
-            let retry_decisions: Vec<Retryability> =
-                classes.iter().map(|c| c.retryability()).collect();
-            let loses_retry_decision = retry_decisions.windows(2).any(|w| w[0] != w[1]);
+            let loses_retry_decision = classes
+                .windows(2)
+                .any(|w| w[0].retryability() != w[1].retryability());
+            let loses_paging_decision = classes
+                .windows(2)
+                .any(|w| w[0].is_system_failure() != w[1].is_system_failure());
             divergences.push(Divergence {
                 kind: DivergenceKind::ClassCollision,
                 severity: if loses_retry_decision {
@@ -407,9 +623,13 @@ pub fn audit() -> ExitCodeAudit {
                     "a script branching on the exit code cannot recover the retry decision, \
                      because the classes sharing this code do not agree on one"
                         .to_string()
-                } else {
+                } else if loses_paging_decision {
                     "the retry decision survives, but the operator-paging decision does not: the \
                      classes sharing this code disagree on is_system_failure()"
+                        .to_string()
+                } else {
+                    "the retry decision and the paging decision both survive; what is lost is \
+                     which of the classes occurred, so a failure report cannot attribute the run"
                         .to_string()
                 },
                 required_distinction: format!(
@@ -441,11 +661,31 @@ pub fn audit() -> ExitCodeAudit {
     }
 
     ExitCodeAudit {
-        registry_source: SHIPPED_REGISTRY_SOURCE.to_string(),
-        shipped_code_count: shipped.len(),
-        class_count: DiagnosticClass::ALL.len(),
+        registry_source: registry.source.clone(),
+        shipped_code_count: registry.codes.len(),
+        class_count: registry.classification.len(),
+        retry_decision_recoverable_from_the_code_alone: retry_decision_is_recoverable(registry),
         divergences,
     }
+}
+
+/// Whether every code in the registry carries exactly one retry decision.
+///
+/// The property is over *codes*, not over classes: a caller holding a process status has the code
+/// and nothing else, so two classes sharing a code are indistinguishable to it. The decision
+/// survives the sharing only when the classes sharing it agree.
+pub fn retry_decision_is_recoverable(registry: &RegistryUnderAudit) -> bool {
+    registry.codes.iter().all(|row| {
+        let mut decisions = registry
+            .classification
+            .iter()
+            .filter(|routing| routing.code == row.code)
+            .map(|routing| routing.class.retryability());
+        let Some(first) = decisions.next() else {
+            return true;
+        };
+        decisions.all(|decision| decision == first)
+    })
 }
 
 #[cfg(test)]
@@ -453,50 +693,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_shipped_registry_has_six_codes_and_only_code_five_advertises_a_retry() {
+    fn the_shipped_registry_has_ten_codes_and_the_two_retryable_ones_are_io_and_stale() {
         let shipped = shipped_exit_codes();
-        assert_eq!(shipped.len(), 6);
+        assert_eq!(shipped.len(), 10);
         let retryable: Vec<u8> = shipped
             .iter()
             .filter(|row| row.advertised_retryable)
             .map(|row| row.code)
             .collect();
-        assert_eq!(retryable, vec![5]);
+        assert_eq!(retryable, vec![5, 9]);
     }
 
     #[test]
-    fn five_of_the_nine_classes_collapse_onto_exit_four() {
+    fn no_two_classes_that_disagree_on_retryability_share_a_shipped_code() {
+        assert!(retry_decision_is_recoverable(&shipped_registry()));
+        assert!(audit().retry_decision_recoverable_from_the_code_alone);
+    }
+
+    #[test]
+    fn exit_four_carries_one_class_where_it_used_to_carry_five() {
         let on_four: Vec<DiagnosticClass> = DiagnosticClass::ALL
             .into_iter()
             .filter(|c| shipped_code_for(*c) == 4)
             .collect();
-        assert_eq!(on_four.len(), 5);
-        assert!(on_four.contains(&DiagnosticClass::Stale));
-        assert!(on_four.contains(&DiagnosticClass::Indeterminate));
-    }
+        assert_eq!(on_four, vec![DiagnosticClass::ContractViolation]);
 
-    #[test]
-    fn stale_is_the_only_class_whose_advertised_retryability_is_inverted() {
-        let inverted: Vec<DiagnosticClass> = audit()
-            .divergences
-            .iter()
-            .filter(|d| d.kind == DivergenceKind::RetryabilityInverted)
-            .flat_map(|d| d.classes.clone())
+        let was_on_four: Vec<DiagnosticClass> = registry_before_the_split()
+            .classification
+            .into_iter()
+            .filter(|routing| routing.code == 4)
+            .map(|routing| routing.class)
             .collect();
-        assert_eq!(inverted, vec![DiagnosticClass::Stale]);
+        assert_eq!(was_on_four.len(), 5);
     }
 
     #[test]
-    fn the_audit_finds_exactly_two_defects() {
-        let audit = audit();
-        let defects = audit.defects();
+    fn stale_has_a_code_of_its_own_and_that_code_advertises_a_retry() {
+        assert_eq!(shipped_code_for(DiagnosticClass::Stale), 9);
+        let row = shipped_exit_codes()
+            .into_iter()
+            .find(|row| row.code == 9)
+            .expect("exit 9 is in the registry");
+        assert!(row.advertised_retryable);
         assert_eq!(
-            defects.len(),
-            2,
-            "unexpected defect set: {:?}",
-            defects.iter().map(|d| &d.finding).collect::<Vec<_>>()
+            row.advertised_retryability,
+            Some(DiagnosticClass::Stale.retryability())
         );
-        assert!(!audit.is_clean());
+    }
+
+    #[test]
+    fn the_audit_finds_no_defects_on_the_shipped_registry() {
+        let audit = audit();
+        assert!(
+            audit.is_clean(),
+            "unexpected defect set: {:?}",
+            audit
+                .defects()
+                .iter()
+                .map(|d| &d.finding)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn the_audit_still_finds_both_defects_in_the_registry_that_had_them() {
+        let audit = audit_registry(&registry_before_the_split());
+        assert_eq!(audit.defects().len(), 2);
+        assert!(!audit.retry_decision_recoverable_from_the_code_alone);
     }
 
     #[test]
@@ -528,22 +791,24 @@ mod tests {
 
     #[test]
     fn no_class_contributes_two_rows_of_the_per_class_findings() {
-        let audit = audit();
-        let mut per_class: Vec<DiagnosticClass> = audit
-            .divergences
-            .iter()
-            .filter(|d| {
-                matches!(
-                    d.kind,
-                    DivergenceKind::RetryabilityInverted | DivergenceKind::MeaningNarrowerThanClass
-                )
-            })
-            .flat_map(|d| d.classes.clone())
-            .collect();
-        let before = per_class.len();
-        per_class.sort();
-        per_class.dedup();
-        assert_eq!(before, per_class.len());
+        for registry in [shipped_registry(), registry_before_the_split()] {
+            let mut per_class: Vec<DiagnosticClass> = audit_registry(&registry)
+                .divergences
+                .iter()
+                .filter(|d| {
+                    matches!(
+                        d.kind,
+                        DivergenceKind::RetryabilityInverted
+                            | DivergenceKind::MeaningNarrowerThanClass
+                    )
+                })
+                .flat_map(|d| d.classes.clone())
+                .collect();
+            let before = per_class.len();
+            per_class.sort();
+            per_class.dedup();
+            assert_eq!(before, per_class.len());
+        }
     }
 
     #[test]

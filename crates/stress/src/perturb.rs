@@ -119,7 +119,7 @@ pub fn postconditions(
         }
         Knob::BatchEffect { batch, offset_sd } => {
             require_batch(cohort, batch)?;
-            let spread = cohort.pooled_within_sd().unwrap_or(0.0);
+            let spread = pooled_spread(cohort)?;
             declared.push(CohortInvariant::WeightsUnchanged);
             declared.push(CohortInvariant::VolumesUnchanged);
             declared.push(CohortInvariant::BatchMembershipUnchanged);
@@ -185,7 +185,7 @@ pub fn apply(cohort: &Cohort, stress: &Stress) -> Result<Cohort, StressError> {
         }
         Knob::BatchEffect { batch, offset_sd } => {
             require_batch(cohort, batch)?;
-            let spread = cohort.pooled_within_sd().unwrap_or(0.0);
+            let spread = pooled_spread(cohort)?;
             let offset = fraction * offset_sd * spread;
             for subject in stressed.subjects.iter_mut() {
                 if &subject.batch == batch {
@@ -331,6 +331,31 @@ fn check_reproducibility(cv: f64) -> Result<(), StressError> {
         Err(StressError::ReproducibilityOutOfRange {
             cv: format!("{cv}"),
         })
+    }
+}
+
+/// The pooled within-class spread a batch offset is expressed in, or a refusal naming the class
+/// that has no resolved subjects.
+///
+/// [`Cohort::pooled_within_sd`] is an `Option` because a class whose measurements all fell below
+/// the limit of detection has no estimable spread. Reading that as zero scales the offset to zero,
+/// so a stress that could not be applied is applied as nothing and then declares
+/// `OffsetConfinedToBatch { offset: 0.0 }` — an invariant that holds trivially. An unmeasurable
+/// spread is not a spread of zero, and the family reports it rather than running a null stress.
+fn pooled_spread(cohort: &Cohort) -> Result<f64, StressError> {
+    match cohort.pooled_within_sd() {
+        Some(spread) => Ok(spread),
+        None => {
+            let class = if cohort.class_sd(true).is_none() {
+                "resolved positive"
+            } else {
+                "resolved negative"
+            };
+            Err(StressError::ClassAbsent {
+                cohort: cohort.id.clone(),
+                class: class.to_string(),
+            })
+        }
     }
 }
 

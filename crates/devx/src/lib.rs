@@ -45,12 +45,21 @@
 //!
 //! # The exit-code audit
 //!
-//! `bioprism-cli` ships six exit codes; the taxonomy has nine classes. [`exitaudit::audit`]
-//! reports **two defects and five imprecisions**, the defects being that exit 4 carries five
-//! classes and that `Stale` is advertised as terminal when it is safe to retry after a re-read.
-//! Both were first found by `bioprism-services`; this crate reproduces them from an independent
-//! table and states each as a diagnostic with a remedy. See [`exitaudit`] for the full finding
-//! list and for why the registry is transcribed rather than imported.
+//! `bioprism-cli` ships ten exit codes; the taxonomy has nine classes. [`exitaudit::audit`]
+//! reports **no defects, two imprecisions and one note**. The two defects it used to report — exit
+//! 4 carrying five classes, and `Stale` advertised as terminal when it is safe to retry after a
+//! re-read — were fixed in the registry by splitting exit 4 into codes 4, 6, 7 and 8 and giving
+//! `Stale` code 9. Both were first found by `bioprism-services`; this crate reproduced them from an
+//! independent table, and the rows that reported them are computed from that table rather than
+//! written out, so they stopped firing when the registry changed rather than being deleted. What
+//! survives is `Internal` sharing exit 5 with `Unavailable`, reported twice — once as a collision
+//! on the code and once as a meaning too narrow for the class — because the two classes retry and
+//! page alike, so the sharing costs attribution rather than a decision.
+//!
+//! The detector is still held against a registry that fails: [`exitaudit::registry_before_the_split`]
+//! retains the pre-fix table, and auditing it must still produce both defects. A clean result on
+//! the shipped registry means nothing unless a dirty one is still reachable. See [`exitaudit`] for
+//! the surviving imprecision and for why the registry is transcribed rather than imported.
 //!
 //! # Section 11 measured
 //!
@@ -154,7 +163,8 @@ pub use diagnostic::{
 };
 pub use error::{CatalogueError, CodeError, DevxError, IntrospectError, LoopError};
 pub use exitaudit::{
-    audit, AuditSeverity, Divergence, DivergenceKind, ExitCodeAudit, ShippedExitCode,
+    audit, audit_registry, registry_before_the_split, shipped_registry, AuditSeverity, ClassRouting,
+    Divergence, DivergenceKind, ExitCodeAudit, RegistryUnderAudit, ShippedExitCode,
     SHIPPED_REGISTRY_SOURCE,
 };
 pub use introspect::{

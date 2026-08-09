@@ -33,14 +33,25 @@ grep -rhoE '\b(0[1-9]|[1-4][0-9])\.[0-9]{2}\b' "$repo/crates" "$repo/docs" \
 comm -12 "$work/all" "$work/cited" > "$work/covered"
 
 total=$(wc -l < "$work/all")
-covered=$(wc -l < "$work/covered")
-
 # Programme sections describe no behaviour; counting them would flatter the denominator.
 prose="00 01 02 16 17 18 20 21 22 37"
 prose_n=0
 for s in $prose; do
   prose_n=$(( prose_n + $(grep -c "^$s\." "$work/all" || true) ))
 done
+
+# The numerator has to drop them too, and for a long time it did not. A single prose module was
+# cited — 21.07, in crates/bundle, for the sentence deferring the signing scheme to an ADR nobody
+# wrote — so it sat in `covered` while all twelve of section 21 were removed from the denominator.
+# That overstated coverage by one module, and the evidence was already in docs/COVERAGE.md: it said
+# 703 of 759 and "the remaining 57" in the same paragraph, where 759 - 703 is 56. tools/backlog.sh
+# strips prose from the uncovered list before counting, which is why its figure was the right one.
+cp "$work/covered" "$work/covered.all"
+for s in $prose; do
+  grep -v "^$s\." "$work/covered" > "$work/tmp" || true
+  mv "$work/tmp" "$work/covered"
+done
+covered=$(wc -l < "$work/covered")
 
 printf '%-4s %-50s %5s %5s\n' 'sec' 'section' 'cited' 'total'
 ( cd "$BLUEPRINT" && ls -d [0-9][0-9]_*/ ) | sed 's#/##' | while read -r dir; do

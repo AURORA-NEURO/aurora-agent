@@ -11,12 +11,14 @@
 
 pub mod apply;
 pub mod diversity;
+pub mod error;
 pub mod lineage;
 
 pub mod relation;
 
 pub use apply::{apply, ApplyError, Mutation, MutationKind};
 pub use diversity::{measure, Diversity};
+pub use error::{MutationError, RejectionReason};
 pub use lineage::{generate, verdict_of, Family, Instance, Rejection};
 pub use relation::{Mechanism, PostconditionResult, Relation};
 

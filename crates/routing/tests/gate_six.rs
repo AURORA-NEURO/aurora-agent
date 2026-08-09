@@ -74,6 +74,7 @@ fn panel() -> &'static [Task] {
                                 tag_style,
                                 leakage,
                                 seed: 20_260_808,
+                                ..WorldSpec::reference_like(distractors)
                             };
                             tasks.push(task(&task_id, &spec));
                         }

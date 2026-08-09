@@ -4,10 +4,38 @@
 //! exit-code matrix and a `--json` mode with no stray bytes on stdout; owning the parser keeps
 //! all three exactly specified and keeps the binary dependency-free.
 
-use crate::exit::{CliError, CliResult, ExitCode};
+use crate::exit::{CliError, CliResult, ExitCode, Retryability};
+use std::fmt::Write;
 use std::path::PathBuf;
 
-pub const HELP: &str = "\
+/// The help text, with the exit-code table rendered from the registry itself.
+///
+/// 40.13 asks for golden help output and a stable exit-code matrix, and the two pull against each
+/// other the moment the matrix is typed out by hand: a code added to [`ExitCode`] without a
+/// matching line here leaves the binary documenting a registry it no longer has.
+/// `bioprism-devx`'s exit-code audit exists because exactly that kind of hand copy drifts, so this
+/// one is generated instead — over [`ExitCode::ALL`], so a new code appears here whether or not
+/// anybody remembers it should.
+pub fn help() -> String {
+    let mut text = String::from(HELP_HEAD);
+    for code in ExitCode::ALL {
+        let decision = code
+            .retryability()
+            .map(Retryability::as_str)
+            .unwrap_or_default();
+        let row = format!(
+            "  {}  {:<17} {:<51} {decision}",
+            code.as_i32(),
+            code.slug(),
+            code.summary()
+        );
+        let _ = writeln!(text, "{}", row.trim_end());
+    }
+    text.push_str(HELP_TAIL);
+    text
+}
+
+const HELP_HEAD: &str = "\
 bioprism — query-compiled inference for executable biology
 
 Compiles a typed decision query against a FIBER world into the smallest decision-sufficient
@@ -60,13 +88,13 @@ GLOBAL OPTIONS
   -V, --version     Show the version.
 
 EXIT CODES
-  0  ok                the command completed and its assertion held
-  1  assertion_failed  completed, but the checked property does not hold
-  2  usage             bad invocation (never retryable)
-  3  invalid_input     input failed its schema (never retryable)
-  4  compile_failed    no sound result within the declared contract (never retryable)
-  5  io                a file could not be read or written (may be retryable)
+  Every failure code carries exactly one 40.36 retry decision, so a script can recover the
+  decision from the status alone. Codes 0 and 1 report a verdict rather than a failure and
+  publish no retry decision.
 
+";
+
+const HELP_TAIL: &str = "
 Research and developer infrastructure. Not a medical device: it does not diagnose, recommend
 treatment, or triage care.
 ";

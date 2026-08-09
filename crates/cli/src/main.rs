@@ -37,7 +37,7 @@ fn main() {
 
     let invocation = match parsed {
         Parsed::Help => {
-            print!("{}", args::HELP);
+            print!("{}", args::help());
             std::process::exit(ExitCode::Ok.as_i32());
         }
         Parsed::Version => {
@@ -290,6 +290,7 @@ Next: bioprism context compare --world <world.json> --query <query.json>
 
 fn world_index(world_path: &Path, store_path: &Path, dry_run: bool) -> CliResult<Outcome> {
     let raw = io::read_json(world_path)?;
+    io::refuse_to_rebind_store(store_path, &raw)?;
 
     if dry_run {
         return Ok(Outcome::ok(
@@ -300,7 +301,7 @@ fn world_index(world_path: &Path, store_path: &Path, dry_run: bool) -> CliResult
     }
 
     let manifest = bioprism_store::build(&raw, store_path)
-        .map_err(|e| CliError::new(ExitCode::Io, e.to_string()).about(store_path.display().to_string()))?;
+        .map_err(|e| CliError::from_store(store_path, e))?;
 
     let document = json!({
         "ok": true,
@@ -338,13 +339,12 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         Profile::Extended => CertificateProfile::Extended,
     };
 
-    let out = compile(world.as_ref(), &query)
-        .map_err(|e| CliError::new(ExitCode::CompileFailed, e.to_string()))?;
+    let out = compile(world.as_ref(), &query).map_err(CliError::from_compile)?;
 
     let certificate_document = out
         .certificate
         .to_json(profile)
-        .map_err(|e| CliError::new(ExitCode::CompileFailed, e.to_string()))?;
+        .map_err(|e| CliError::internal(e.to_string()))?;
     let section_document = out.section.to_json();
 
     let mut written = Vec::new();
@@ -429,8 +429,7 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
 fn context_explain(world_path: &Path, query_path: &Path) -> CliResult<Outcome> {
     let world = io::load_source(world_path)?;
     let query = io::load_query(query_path)?;
-    let out = compile(world.as_ref(), &query)
-        .map_err(|e| CliError::new(ExitCode::CompileFailed, e.to_string()))?;
+    let out = compile(world.as_ref(), &query).map_err(CliError::from_compile)?;
 
     let document = json!({
         "ok": true,
@@ -514,8 +513,7 @@ fn prism_fork(
 
     // Freeze the cell from the full-context verdict, so the acceptance contract is derived from
     // evidence rather than asserted by the operator.
-    let reference = compile(&world, &query)
-        .map_err(|e| CliError::new(ExitCode::CompileFailed, e.to_string()))?;
+    let reference = compile(&world, &query).map_err(CliError::from_compile)?;
     let mut cell = DecisionCell::new(
         format!("dc_{}", query.query_id.as_str()),
         "context policy under a frozen world and query",
@@ -547,8 +545,10 @@ fn prism_fork(
         "cell_id": fork.cell_id,
         "passing": fork.passing,
         "failing": fork.failing,
+        "unjudged": fork.unjudged,
+        "not_attempted": fork.not_attempted,
         "attribution": fork.attribution,
-        "trials": fork.trials,
+        "arms": fork.arms,
         "bundle_sha256": attested["bundle_sha256"],
     });
     if let Some(map) = document.as_object_mut() {
@@ -581,8 +581,7 @@ fn mutate_family(world_path: &Path, out_dir: Option<&Path>) -> CliResult<Outcome
     use bioprism_mutation::{generate, measure, standard_suite};
 
     let world_raw = io::read_json(world_path)?;
-    let family = generate(&world_raw, &standard_suite())
-        .map_err(|e| CliError::new(ExitCode::CompileFailed, e))?;
+    let family = generate(&world_raw, &standard_suite()).map_err(CliError::from_mutation)?;
     let diversity = measure(std::slice::from_ref(&family));
 
     let mut written = Vec::new();

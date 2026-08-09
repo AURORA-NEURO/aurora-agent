@@ -18,7 +18,16 @@ BLUEPRINT=/path/to/distribution/root tools/coverage.sh
 
 ## The end state, and what is left
 
-Coverage is **92.6%** — 703 of 759 code-bearing modules. The remaining **57 are enumerated in
+**The figure was 92.6% until an audit found an off-by-one in `tools/coverage.sh`.** The numerator
+counted every cited module while the denominator excluded the ten programme sections, so a single
+cited prose module — `21.07`, in `crates/bundle`, for the sentence deferring the signing scheme to
+an ADR nobody wrote — inflated the count by one. The evidence was already in this file: it said 703
+of 759 and "the remaining 57" in the same paragraph, and 759 − 703 is 56. `tools/backlog.sh` strips
+prose from the uncovered list before counting, which is why its figure was the correct one all
+along. 702 + 57 = 759 now reconciles.
+
+
+Coverage is **92.5%** — 702 of 759 code-bearing modules. The remaining **57 are enumerated in
 `docs/BACKLOG.md` and explained in `crates/residue`**, which holds one typed verdict per module
 saying why no crate implements it, anchored to a sentence a classifying crate actually wrote. Its
 reconciliation against the backlog is a test, so the two cannot drift apart silently.
@@ -76,13 +85,13 @@ state is a backlog whose residue is explained rather than empty.
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 703 |
-| **code-bearing coverage** | **92.6%** |
+| cited | 702 |
+| **code-bearing coverage** | **92.5%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 92.6% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 92.5% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 

@@ -3,7 +3,8 @@
 use bioprism_fiber::Query;
 use bioprism_prism::{
     matched_fork, minimize, minimize_world, preserves, render_table, Acceptance, Architecture,
-    Attestation, DecisionCell, InputRef, ResultBundle, StrategySpec,
+    Arm, ArmFailure, Attestation, DecisionCell, ForkResult, InputRef, NotAttemptedReason,
+    ResultBundle, StrategySpec,
 };
 use bioprism_section::OracleStatus;
 use bioprism_world::World;
@@ -164,6 +165,151 @@ fn on_the_discriminating_world_context_policy_explains_the_difference() {
     let table = render_table(&result);
     assert!(table.contains("| fiber |"));
     assert!(table.contains("**fail**"));
+}
+
+/// The reference world with one aliased subject's split arm removed.
+///
+/// `S001` and `S003` share alias `ALT-77`; with `S003` unassigned the split-integrity oracle has a
+/// group it cannot order, so any arm selecting both the alias table and the split table gets no
+/// verdict at all. An arm selecting neither is unaffected, which is what makes the two states
+/// observable in one panel.
+fn unjudgeable() -> (Value, Value) {
+    let (mut world_json, query_json) = reference();
+    world_json["facts"]
+        .as_array_mut()
+        .expect("facts")
+        .iter_mut()
+        .find(|fact| fact["id"] == Value::String("fact.split".into()))
+        .expect("the split fact")["value"]
+        .as_object_mut()
+        .expect("split assignments")
+        .remove("S003")
+        .expect("S003 shares ALT-77 with S001");
+    (world_json, query_json)
+}
+
+fn fork_over(world_json: Value, query_json: Value, panel: &[Architecture]) -> ForkResult {
+    let cell = leakage_cell(&world_json, &query_json);
+    let world = World::from_json(world_json).unwrap();
+    let query = Query::from_json(query_json).unwrap();
+    matched_fork(&cell, &world, &query, panel)
+}
+
+#[test]
+fn an_arm_that_failed_is_not_reported_as_an_arm_that_never_ran() {
+    let (world_json, query_json) = unjudgeable();
+    let panel = [
+        Architecture::new("full-context", StrategySpec::FullContext),
+        Architecture::new("lexical-top-1", StrategySpec::LexicalTopK { k: 1 }),
+        Architecture::new("full-context", StrategySpec::LexicalTopK { k: 2 }),
+    ];
+    let result = fork_over(world_json, query_json, &panel);
+
+    match &result.arms[..] {
+        [Arm::Unjudged { architecture, reason }, Arm::Judged(trial), Arm::NotAttempted { reason: skipped, .. }] =>
+        {
+            assert_eq!(architecture, "full-context");
+            let ArmFailure::OracleRefused { facts_exposed, detail } = reason;
+            assert_eq!(*facts_exposed, 761, "the cost of the attempt is still reported");
+            assert!(
+                detail.contains("ALT-77"),
+                "the oracle's own refusal must survive: {detail}"
+            );
+            assert!(!trial.passed, "one fact cannot satisfy a four-witness cell");
+            assert_eq!(*skipped, NotAttemptedReason::DuplicateArchitectureName);
+        }
+        other => panic!("expected one arm of each state, got {other:?}"),
+    }
+
+    assert_eq!(
+        result.failing,
+        vec!["lexical-top-1".to_string()],
+        "an arm the oracle refused is not an arm that failed the cell"
+    );
+    assert_eq!(result.unjudged, vec!["full-context".to_string()]);
+    assert_eq!(result.not_attempted, vec!["full-context".to_string()]);
+    assert!(result.passing.is_empty());
+    assert!(!result.is_regression_free());
+
+    assert!(
+        result.attribution.contains("produced no verdict at all"),
+        "an arm with no verdict must appear in the sentence: {}",
+        result.attribution
+    );
+    assert!(
+        result.attribution.contains("never attempted"),
+        "an arm nobody ran must appear in the sentence: {}",
+        result.attribution
+    );
+
+    let table = render_table(&result);
+    assert!(table.contains("**unjudged**"));
+    assert!(table.contains("*not attempted*"));
+}
+
+/// The panel is what the fork was asked to check, so an arm missing from it cannot pass silently.
+#[test]
+fn an_arm_that_never_ran_is_not_counted_towards_a_clean_panel() {
+    let (world_json, query_json) = reference();
+    let mut panel = Architecture::default_panel();
+    panel.push(Architecture::new("fiber", StrategySpec::FullContext));
+
+    let result = fork_over(world_json, query_json, &panel);
+
+    assert_eq!(result.arms.len(), 6, "every architecture asked for gets an arm");
+    assert_eq!(result.passing.len(), 5);
+    assert_eq!(
+        result.passing.iter().filter(|name| *name == "fiber").count(),
+        1,
+        "a name cannot appear twice on the passing side"
+    );
+    assert_eq!(result.not_attempted, vec!["fiber".to_string()]);
+    assert!(result.failing.is_empty());
+    assert!(
+        !result.is_regression_free(),
+        "an arm nobody ran leaves the panel unchecked, whatever the other five did"
+    );
+}
+
+#[test]
+fn a_fork_with_no_arms_does_not_report_itself_regression_free() {
+    let (world_json, query_json) = reference();
+    let result = fork_over(world_json, query_json, &[]);
+
+    assert!(result.arms.is_empty());
+    assert!(
+        !result.is_regression_free(),
+        "checking nothing is not the same as finding nothing"
+    );
+    assert!(result.attribution.contains("establishes nothing"));
+}
+
+#[test]
+fn every_arm_state_survives_serialization_and_only_a_judged_arm_carries_numbers() {
+    let (world_json, query_json) = unjudgeable();
+    let panel = [
+        Architecture::new("full-context", StrategySpec::FullContext),
+        Architecture::new("lexical-top-1", StrategySpec::LexicalTopK { k: 1 }),
+        Architecture::new("full-context", StrategySpec::LexicalTopK { k: 2 }),
+    ];
+    let result = fork_over(world_json, query_json, &panel);
+
+    let encoded = serde_json::to_value(&result).unwrap();
+    let arms = encoded["arms"].as_array().unwrap();
+    assert_eq!(arms[0]["state"], Value::String("unjudged".into()));
+    assert_eq!(arms[1]["state"], Value::String("judged".into()));
+    assert_eq!(arms[2]["state"], Value::String("not_attempted".into()));
+
+    for absent in ["passed", "facts_exposed", "status", "protected_recall"] {
+        assert!(
+            arms[0].get(absent).is_none() && arms[2].get(absent).is_none(),
+            "an arm with no verdict must not carry {absent} for a renderer to coerce"
+        );
+        assert!(arms[1].get(absent).is_some(), "a judged arm carries {absent}");
+    }
+
+    let decoded: ForkResult = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, result, "the three states must round-trip");
 }
 
 #[test]
