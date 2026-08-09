@@ -31,13 +31,15 @@ citing it, so excluding it slightly understates coverage rather than overstating
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 308 |
-| **code-bearing coverage** | **40.6%** |
+| cited | 448 |
+| **code-bearing coverage** | **59.0%** |
 
 ## Per section
 
-Worst-covered code-bearing sections first, as of the batch that added `ledger`, `sdk`,
-`governance`, `standards` and `stress`.
+Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
+now stale** — headline coverage has moved from 40.6% to 59.0% since it was taken. Regenerate with
+`tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
+because the *shape* they show is still the argument, and the shape has not changed.
 
 | § | section | cited | total | crate |
 |---|---|---:|---:|---|
@@ -93,11 +95,12 @@ than planned: frozen contracts, not design prose. 24 of its 45 modules are untou
 that worked from a §40 module had an easier time than the ones working from `Planned` text, so at
 equal size an uncovered §40 module should be preferred over an uncovered module anywhere else.
 
-**Whole capability areas have no crate at all.** §13 security and safety (26), §42 graph-native
-evaluation and UI (31), §35 million-scale infrastructure (18), §41 graph-first navigation (16), §06
-benchmark compiler (15), §09 inference lab (11). That is 117 modules — 15% of the code-bearing
-blueprint — with nothing standing in for them. It is where the batches after the current five
-should go.
+**Whole capability areas had no crate at all, and now all six do.** §13 security and safety (26),
+§42 graph-native evaluation and UI (31), §35 million-scale infrastructure (18), §41 graph-first
+navigation (16), §06 benchmark compiler (15) and §09 inference lab (11) were 117 modules — 15% of
+the code-bearing blueprint — with nothing standing in for them. `safety`, `lens`, `scale`,
+`docgraph`, `benchcompiler` and `lab` closed that set. The remaining gaps are depth inside sections
+that already have a crate, which is a different and easier problem than a blank area.
 
 ## Boilerplate, and why the numbers are not strictly comparable
 
@@ -130,6 +133,18 @@ measured three ways, and its own two headline numbers differ by 35 points. A ver
 count and a rare-term count answer different questions, and no agent was given a common definition.
 Read the column as evidence that a section is repetitive or is not, and distrust small differences
 between rows.
+
+There is now a measured instance of exactly that hazard. Two agents independently measured §23's
+verbatim duplication over the same 6,001 non-blank lines, both describing the metric as lines
+appearing in another module, and got **16.2%** and **10.7%**. Recomputing it settles the discrepancy:
+974 of 6,001 line *occurrences* sit in a string that appears in more than one module, so 16.2% is
+right for that definition and 10.7% counts something narrower.
+
+The recomputation also produces the sharper number. Only **2.1% of distinct line-strings** (108 of
+5,078) are shared at all, and those 108 strings account for the whole 16.2% of occurrences. A section
+is not repetitive because it has a lot of repeated content; it is repetitive because a small template
+is stamped many times. That is the shape every high-boilerplate section in the table has, and it is
+why "distinguishing lines per module" is the more useful column.
 
 What survives every method: section size predicts *reading* cost and not *implementation* cost, so a
 coverage percentage weighted by module count overstates how much real design surface remains.
