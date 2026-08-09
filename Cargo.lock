@@ -251,6 +251,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-lab"
+version = "0.1.0"
+dependencies = [
+ "bioprism-atlas",
+ "bioprism-ids",
+ "bioprism-obligation",
+ "bioprism-scope",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-ledger"
 version = "0.1.0"
 dependencies = [

@@ -45,6 +45,7 @@ members = [
     "crates/scale",
     "crates/docgraph",
     "crates/lens",
+    "crates/lab",
     "crates/cli",
 ]
 
@@ -101,6 +102,7 @@ bioprism-benchcompiler = { path = "crates/benchcompiler" }
 bioprism-scale = { path = "crates/scale" }
 bioprism-docgraph = { path = "crates/docgraph" }
 bioprism-lens = { path = "crates/lens" }
+bioprism-lab = { path = "crates/lab" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }
