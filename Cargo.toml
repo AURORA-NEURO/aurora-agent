@@ -1,0 +1,91 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ids",
+    "crates/scope",
+    "crates/world",
+    "crates/section",
+    "crates/fiber",
+    "crates/baseline",
+    "crates/worldgen",
+    "crates/store",
+    "crates/mcp",
+    "crates/prism",
+    "crates/weave",
+    "crates/mutation",
+    "crates/bioir",
+    "crates/onco",
+    "crates/oracle",
+    "crates/adapter",
+    "crates/registry",
+    "crates/runtime",
+    "crates/obligation",
+    "crates/adaptive",
+    "crates/policy",
+    "crates/graph",
+    "crates/atlas",
+    "crates/packs",
+    "crates/routing",
+    "crates/conformance",
+    "crates/backends",
+    "crates/trace",
+    "crates/factory",
+    "crates/bioeval",
+    "crates/foundation",
+    "crates/examples",
+    "crates/hub",
+    "crates/evalengine",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/MurariAmbati/bioprism"
+
+[workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["preserve_order", "float_roundtrip"] }
+sha2 = "=0.10.9"
+thiserror = "=2.0.19"
+
+bioprism-ids = { path = "crates/ids" }
+bioprism-scope = { path = "crates/scope" }
+bioprism-world = { path = "crates/world" }
+bioprism-section = { path = "crates/section" }
+bioprism-fiber = { path = "crates/fiber" }
+bioprism-baseline = { path = "crates/baseline" }
+bioprism-worldgen = { path = "crates/worldgen" }
+bioprism-store = { path = "crates/store" }
+bioprism-mcp = { path = "crates/mcp" }
+bioprism-prism = { path = "crates/prism" }
+bioprism-weave = { path = "crates/weave" }
+bioprism-mutation = { path = "crates/mutation" }
+bioprism-bioir = { path = "crates/bioir" }
+bioprism-onco = { path = "crates/onco" }
+bioprism-oracle = { path = "crates/oracle" }
+bioprism-adapter = { path = "crates/adapter" }
+bioprism-registry = { path = "crates/registry" }
+bioprism-runtime = { path = "crates/runtime" }
+bioprism-obligation = { path = "crates/obligation" }
+bioprism-adaptive = { path = "crates/adaptive" }
+bioprism-policy = { path = "crates/policy" }
+bioprism-graph = { path = "crates/graph" }
+bioprism-atlas = { path = "crates/atlas" }
+bioprism-packs = { path = "crates/packs" }
+bioprism-routing = { path = "crates/routing" }
+bioprism-conformance = { path = "crates/conformance" }
+bioprism-backends = { path = "crates/backends" }
+bioprism-trace = { path = "crates/trace" }
+bioprism-factory = { path = "crates/factory" }
+bioprism-bioeval = { path = "crates/bioeval" }
+bioprism-foundation = { path = "crates/foundation" }
+bioprism-examples = { path = "crates/examples" }
+bioprism-hub = { path = "crates/hub" }
+bioprism-evalengine = { path = "crates/evalengine" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
