@@ -35,6 +35,11 @@ members = [
     "crates/examples",
     "crates/hub",
     "crates/evalengine",
+    "crates/ledger",
+    "crates/sdk",
+    "crates/governance",
+    "crates/standards",
+    "crates/stress",
     "crates/cli",
 ]
 
@@ -81,6 +86,11 @@ bioprism-backends = { path = "crates/backends" }
 bioprism-trace = { path = "crates/trace" }
 bioprism-factory = { path = "crates/factory" }
 bioprism-bioeval = { path = "crates/bioeval" }
+bioprism-ledger = { path = "crates/ledger" }
+bioprism-sdk = { path = "crates/sdk" }
+bioprism-governance = { path = "crates/governance" }
+bioprism-standards = { path = "crates/standards" }
+bioprism-stress = { path = "crates/stress" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }
