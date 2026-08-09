@@ -1,7 +1,7 @@
 # Remaining backlog
 
-287 code-bearing blueprint modules are not yet cited by any crate or design note,
-across 25 sections. This is the enumerated form of `docs/COVERAGE.md`'s
+193 code-bearing blueprint modules are not yet cited by any crate or design note,
+across 23 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.
 
 Regenerate with `tools/backlog.sh`. Programme sections are excluded for the same reason they
@@ -10,120 +10,6 @@ are excluded from the coverage denominator — they specify no behaviour.
 A module leaves this list when a crate cites it, which is the same weak criterion coverage
 uses. This file tracks *attention*, not completeness.
 
-
-## §23 Agent Interweave Fabric — 23 uncovered
-
-- `23.00` Interweave Overview And Thesis
-- `23.01` Layered Protocol Stack
-- `23.11` Capability Molecules And Virtual Agents
-- `23.14` Effect Types Permissions And Information Flow
-- `23.15` Negotiation Bidding And Service Contracts
-- `23.17` Shared Memory Blackboard And Replicated State
-- `23.24` Protocol Adapters A2A Mcp Otel And Cloudevents
-- `23.25` Component Runtime Wasm Wit And Sandbox Composition
-- `23.27` Interweave Evaluation And Microbenchmark Generation
-- `23.28` Orchestration Learning And Credit Assignment
-- `23.29` Security Threat Model And Trust Boundaries
-- `23.31` Governance Versioning And Conformance
-- `23.33` Reference Interweave Workflows
-- `23.35` Implementation Roadmap And Vertical Slices
-- `23.36` Open Research Program
-- `23.39` Weavebench Packs And Microbenchmark Taxonomy
-- `23.40` Novelty Boundary And Ecosystem Positioning
-- `23.41` Agent Composition Algebra And Substitution Laws
-- `23.42` Goal To Molecule Compiler And Team Synthesis
-- `23.44` Distributed Epistemic Crdt And Common Ground
-- `23.46` Agent Identity Attested Capability And Contextual Reputation
-- `23.47` Human And Organizational Participants
-- `23.48` Semantic Lifecycle Compaction And Garbage Collection
-
-## §11 Developer Platform — 20 uncovered
-
-- `11.02` Cli
-- `11.03` Cli Specification
-- `11.04` Python Sdk
-- `11.05` Python Benchmark Authoring Sdk
-- `11.06` Typescript Sdk
-- `11.07` Rest And Streaming Api
-- `11.08` Rest Grpc And Event Apis
-- `11.09` Event Stream And Webhooks
-- `11.10` Mcp Server
-- `11.15` Evaluator Oracle And Mutation Sdk
-- `11.16` Environment And Pack Authoring Sdk
-- `11.17` Authoring Studio
-- `11.18` Authoring Studio And Notebook Workflow
-- `11.19` Trace Fork And Diff Viewer
-- `11.20` Capability Dashboard And Query
-- `11.21` Github Action For Consumer Repositories
-- `11.22` Github Action And Ci Integration
-- `11.23` Reporting And Exports
-- `11.24` Scaffolding Templates And Conformance
-- `11.25` Local Development Documentation And Telemetry
-
-## §27 Benchmark Factory And Hub — 20 uncovered
-
-- `27.01` Parent Bioworld Authoring
-- `27.02` Observed Real Data Worlds
-- `27.03` Semi Synthetic Worlds
-- `27.04` Mechanistic And Simulated Worlds
-- `27.05` Prospective Escrow And Holdout Vault
-- `27.06` Trajectory Mining And Decision Compilation
-- `27.07` Biomutator Engine
-- `27.08` Semantics Preserving Mutations
-- `27.09` Controlled Semantic Mutations
-- `27.10` Assay Fault And Preanalytic Mutations
-- `27.11` Specimen Lineage And Identity Mutations
-- `27.12` Site Batch Platform And Population Mutations
-- `27.13` Temporal And Treatment History Mutations
-- `27.14` Multimodal Contradiction Programs
-- `27.15` Deduplication Diversity And Effective Size
-- `27.17` Hub Domain Model
-- `27.19` World Pack Oracle And Result Cards
-- `27.20` Submissions Challenges And Reproduction
-- `27.21` Private And Federated Evaluation
-- `27.22` Hub Apis Sdk And Visualization
-
-## §14 Governance And Quality — 18 uncovered
-
-- `14.01` Project Governance
-- `14.02` Open Governance And Rfc Process
-- `14.03` Roles Ownership And Maintainer Model
-- `14.04` Contributor Model And Code Ownership
-- `14.05` Rfc Adr And Technical Decision Process
-- `14.07` Benchmark Governance And Stewardship
-- `14.08` Pack Review And Acceptance
-- `14.09` Oracle And Evaluator Review
-- `14.10` Metric Score And Statistical Governance
-- `14.11` Result Claims And Leaderboard Governance
-- `14.13` Benchmark Ethics Fairness And Conflicts
-- `14.14` Medical And Neuroscience Boundary
-- `14.15` Data Governance Federation And Access
-- `14.18` Conflicts Of Interest And Sponsorship
-- `14.22` Documentation Information Architecture And Review
-- `14.23` Community Conduct Inclusion And Appeals
-- `14.24` Sustainability Finance And Public Benefit
-- `14.25` Periodic Program Review
-
-## §19 Reference Examples — 18 uncovered
-
-- `19.01` Decision Cell Example
-- `19.02` Agent Architecture Ir Example
-- `19.03` Benchmark Pack Manifest Example
-- `19.04` Oracle Example
-- `19.07` Capability Profile Example
-- `19.08` Github Action Example
-- `19.10` Pack Directory Reference
-- `19.11` Duplicate Payment Vertical Slice
-- `19.12` Scientific Figure Reproduction Case
-- `19.13` Neuro Oncology Research Workflow Case
-- `19.14` Adaptive Scheduler Worked Example
-- `19.15` Evaluation Conditioned Routing Example
-- `19.17` Security Exploit Decision Cell
-- `19.18` Private Incident To Public Derivative
-- `19.19` Local Cli Session
-- `19.20` Federated Registry Flow
-- `19.21` Reliable Repair Weave Program
-- `19.22` Scientific Reproduction Capability Molecule
 
 ## §28 Biology Data And Standards — 17 uncovered
 
@@ -165,74 +51,39 @@ uses. This file tracks *attention*, not completeness.
 - `34.21` No Key Demos And Onboarding
 - `34.22` Open Source Community And Star Flywheel
 
-## §12 Data And Infrastructure — 16 uncovered
+## §11 Developer Platform — 14 uncovered
 
-- `12.01` Data Architecture Overview
-- `12.02` Storage Architecture
-- `12.03` Relational Catalog Schema
-- `12.05` Content Addressed Object Storage
-- `12.06` Result Lake And Analytical Model
-- `12.07` Search Graph And Vector Projections
-- `12.08` Search Cache And Queue
-- `12.09` Workflow Queue And Operation Engine
-- `12.11` Evaluation Telemetry And Provenance Signals
-- `12.12` Observability And Slos
-- `12.13` Compute Provider And Kubernetes
-- `12.14` Distributed Compute And Placement
-- `12.15` Local First Deployment
-- `12.16` Cloud And Federated Deployment
-- `12.18` Backup Disaster Recovery And Retention
-- `12.20` Cost Model And Capacity Plan
+- `11.04` Python Sdk
+- `11.05` Python Benchmark Authoring Sdk
+- `11.06` Typescript Sdk
+- `11.08` Rest Grpc And Event Apis
+- `11.09` Event Stream And Webhooks
+- `11.10` Mcp Server
+- `11.15` Evaluator Oracle And Mutation Sdk
+- `11.16` Environment And Pack Authoring Sdk
+- `11.17` Authoring Studio
+- `11.18` Authoring Studio And Notebook Workflow
+- `11.20` Capability Dashboard And Query
+- `11.21` Github Action For Consumer Repositories
+- `11.22` Github Action And Ci Integration
+- `11.23` Reporting And Exports
 
-## §33 Biocapability Atlas And Metrics — 15 uncovered
+## §23 Agent Interweave Fabric — 14 uncovered
 
-- `33.02` Biological Correctness Decomposition
-- `33.03` Evidence Grounding Provenance And Claim Support
-- `33.05` Information Acquisition And Context Value
-- `33.06` Value Of Experiment Assay Selection And Active Discovery
-- `33.07` Tissue Sample Time And Resource Efficiency
-- `33.08` Temporal Validity And Evidence Firewall Metrics
-- `33.09` Cross Modal Consistency And Contradiction Metrics
-- `33.10` Causal Identification Intervention And Mechanism Metrics
-- `33.11` Site Batch Population And Temporal Generalization
-- `33.12` Reproducibility Reexecution And Claim Stability
-- `33.13` Translation Spine And Evidence Maturity Metrics
-- `33.14` Multi Agent Coordination And Molecule Value
-- `33.15` Safety Privacy Dual Use And Boundary Metrics
-- `33.16` Cost Latency Energy And Operational Reliability
-- `33.17` Matched Counterfactual Architecture Attribution
-
-## §10 Registry And Hub — 13 uncovered
-
-- `10.01` Registry Overview
-- `10.03` Registry Entity And Metadata Model
-- `10.06` Submission Review And Maintenance
-- `10.09` Result Ingestion And Attestation
-- `10.10` Catalog Search And Recommendation
-- `10.11` Search Discovery And Recommendation
-- `10.12` Benchmark Cards Health And Disclosure
-- `10.14` Trace And Fork Explorer
-- `10.15` Capability Atlas And Failure Explorer
-- `10.16` Comparison And Leaderboard Policy
-- `10.17` Hub Api And Leaderboard Policy
-- `10.21` Web Ux Accessibility And Internationalization
-- `10.22` Moderation Abuse And Content Policy
-
-## §25 Biological Ir And Language — 13 uncovered
-
-- `25.01` Bioworld Ir
-- `25.02` Biostate Ir
-- `25.06` Intervention And Action Ir
-- `25.07` Fbc Ir
-- `25.09` Bioworldline Ir
-- `25.14` Model Pipeline Agent Ir
-- `25.15` Bioweave Role And Act Ir
-- `25.16` Bio Context Capsule Ir
-- `25.17` Bio Capability Molecule Ir
-- `25.18` Biooracle Ir
-- `25.19` Biomutation Ir
-- `25.20` Bioresult Bundle Ir
-- `25.21` Bioql Query Language
+- `23.00` Interweave Overview And Thesis
+- `23.24` Protocol Adapters A2A Mcp Otel And Cloudevents
+- `23.25` Component Runtime Wasm Wit And Sandbox Composition
+- `23.27` Interweave Evaluation And Microbenchmark Generation
+- `23.28` Orchestration Learning And Credit Assignment
+- `23.29` Security Threat Model And Trust Boundaries
+- `23.31` Governance Versioning And Conformance
+- `23.33` Reference Interweave Workflows
+- `23.35` Implementation Roadmap And Vertical Slices
+- `23.36` Open Research Program
+- `23.39` Weavebench Packs And Microbenchmark Taxonomy
+- `23.40` Novelty Boundary And Ecosystem Positioning
+- `23.42` Goal To Molecule Compiler And Team Synthesis
+- `23.47` Human And Organizational Participants
 
 ## §40 Build Ready Engineering Contracts — 13 uncovered
 
@@ -308,6 +159,31 @@ uses. This file tracks *attention*, not completeness.
 - `43.49` Dependent Types Optics And Query Lenses
 - `43.50` Causal Decision Rate Distortion And Value Of Information
 
+## §33 Biocapability Atlas And Metrics — 10 uncovered
+
+- `33.03` Evidence Grounding Provenance And Claim Support
+- `33.05` Information Acquisition And Context Value
+- `33.06` Value Of Experiment Assay Selection And Active Discovery
+- `33.07` Tissue Sample Time And Resource Efficiency
+- `33.08` Temporal Validity And Evidence Firewall Metrics
+- `33.09` Cross Modal Consistency And Contradiction Metrics
+- `33.10` Causal Identification Intervention And Mechanism Metrics
+- `33.12` Reproducibility Reexecution And Claim Stability
+- `33.13` Translation Spine And Evidence Maturity Metrics
+- `33.14` Multi Agent Coordination And Molecule Value
+
+## §14 Governance And Quality — 9 uncovered
+
+- `14.01` Project Governance
+- `14.02` Open Governance And Rfc Process
+- `14.04` Contributor Model And Code Ownership
+- `14.05` Rfc Adr And Technical Decision Process
+- `14.18` Conflicts Of Interest And Sponsorship
+- `14.22` Documentation Information Architecture And Review
+- `14.23` Community Conduct Inclusion And Appeals
+- `14.24` Sustainability Finance And Public Benefit
+- `14.25` Periodic Program Review
+
 ## §31 Biological Oracles And Reference Standards — 9 uncovered
 
 - `31.05` Sample Identity And Lineage Oracles
@@ -320,6 +196,16 @@ uses. This file tracks *attention*, not completeness.
 - `31.12` Survival Endpoint And Clinical Research Oracles
 - `31.17` Oracle Audit Independence And Quality Management
 
+## §12 Data And Infrastructure — 7 uncovered
+
+- `12.02` Storage Architecture
+- `12.03` Relational Catalog Schema
+- `12.12` Observability And Slos
+- `12.13` Compute Provider And Kubernetes
+- `12.14` Distributed Compute And Placement
+- `12.15` Local First Deployment
+- `12.16` Cloud And Federated Deployment
+
 ## §36 Biology Security Privacy Ethics And Governance — 7 uncovered
 
 - `36.07` Sandboxing Untrusted Code And Research Artifacts
@@ -329,6 +215,15 @@ uses. This file tracks *attention*, not completeness.
 - `36.19` Security Privacy Safety Red Team Program
 - `36.21` Quality Management Validation And Release Gates
 - `36.22` Research Ethics Irb And Human Subject Boundaries
+
+## §19 Reference Examples — 6 uncovered
+
+- `19.01` Decision Cell Example
+- `19.12` Scientific Figure Reproduction Case
+- `19.15` Evaluation Conditioned Routing Example
+- `19.17` Security Exploit Decision Cell
+- `19.21` Reliable Repair Weave Program
+- `19.22` Scientific Reproduction Capability Molecule
 
 ## §35 Million Scale Benchmark Factory And Infrastructure — 6 uncovered
 
@@ -364,6 +259,11 @@ uses. This file tracks *attention*, not completeness.
 
 - `03.03` World State Ir
 - `03.11` Provenance Identifiers And Versioning
+
+## §10 Registry And Hub — 2 uncovered
+
+- `10.01` Registry Overview
+- `10.14` Trace And Fork Explorer
 
 ## §08 Adaptive Evaluation — 1 uncovered
 

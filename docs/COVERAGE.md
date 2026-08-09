@@ -26,18 +26,33 @@ Counting them in a coverage denominator would be flattering and meaningless.
 §02 is the borderline call. It is architecture narrative the crate layout already reflects without
 citing it, so excluding it slightly understates coverage rather than overstating it.
 
+**The section boundary is the wrong granularity, and §14 proved it.** `crates/stewardship` read all
+eighteen of §14's uncovered modules and classified twelve as process rather than code — councils,
+recusal, cadence, budgets, appeals — using the test *"is the detailed design a set of predicates
+over an artifact, or a description of what people do?"*. Those twelve are counted in the 759 and
+will never be covered by anything, because a `Council::vote()` would assert only that a council met.
+Two of them do carry one code-bearing clause each, and both were already implemented elsewhere:
+14.07's "repeated queries reduce holdout status" is `lab`'s exposure ledger, and 14.13's "authors do
+not solely certify their own systems" is `registry`'s reviewer-independence rule.
+
+The denominator is not being adjusted for this. Twelve modules out of 759 is inside the noise of the
+citation criterion itself, and hand-tuning a denominator downward until the number looks better is
+exactly the move this file exists to avoid. What it does mean is that **100% is not the target and
+never was** — some remaining modules are prose that no crate should implement, and the honest end
+state is a backlog whose residue is explained rather than empty.
+
 | | modules |
 |---|---|
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 448 |
-| **code-bearing coverage** | **59.0%** |
+| cited | 567 |
+| **code-bearing coverage** | **74.7%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 59.0% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 74.7% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 
