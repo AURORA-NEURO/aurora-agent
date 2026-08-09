@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-interweave"
+version = "0.1.0"
+edition = "2021"
+description = "Section 23 remainder: interweave modules weave, fabric, choreography and weavelang did not claim"
+
+[dependencies]
+bioprism-section = { workspace = true }
+bioprism-weave = { workspace = true }
+bioprism-fabric = { workspace = true }
+bioprism-choreography = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
