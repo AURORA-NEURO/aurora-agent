@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "aurora-agent": {
+      "command": "./target/release/bioprism-mcp",
+      "args": ["--root", "."],
+      "env": {}
+    }
+  }
+}
