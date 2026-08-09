@@ -25,7 +25,9 @@ trap 'rm -rf "$work"' EXIT
   | sed -E 's#^([0-9]{2})_[^/]*/([0-9]{2})_.*#\1.\2#' \
   | sort -u > "$work/all"
 
-grep -rhoE '\b(0[1-9]|[1-4][0-9])\.[0-9]{2}\b' "$repo/crates" "$repo/docs" 2>/dev/null \
+# docs/BACKLOG.md enumerates the *uncovered* ids, so counting it would report 100% coverage.
+grep -rhoE '\b(0[1-9]|[1-4][0-9])\.[0-9]{2}\b' "$repo/crates" "$repo/docs" \
+  --exclude=BACKLOG.md 2>/dev/null \
   | sort -u > "$work/cited"
 
 comm -12 "$work/all" "$work/cited" > "$work/covered"
