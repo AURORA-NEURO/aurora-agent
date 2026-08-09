@@ -51,6 +51,8 @@ members = [
     "crates/services",
     "crates/oncoworlds",
     "crates/influence",
+    "crates/bundle",
+    "crates/bioworlds",
     "crates/cli",
 ]
 
@@ -113,6 +115,8 @@ bioprism-choreography = { path = "crates/choreography" }
 bioprism-services = { path = "crates/services" }
 bioprism-oncoworlds = { path = "crates/oncoworlds" }
 bioprism-influence = { path = "crates/influence" }
+bioprism-bundle = { path = "crates/bundle" }
+bioprism-bioworlds = { path = "crates/bioworlds" }
 bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }

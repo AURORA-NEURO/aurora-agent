@@ -101,6 +101,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-bioworlds"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-onco",
+ "bioprism-scope",
+ "bioprism-world",
+ "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-bundle"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-choreography"
 version = "0.1.0"
 dependencies = [
@@ -267,8 +295,6 @@ name = "bioprism-influence"
 version = "0.1.0"
 dependencies = [
  "bioprism-backends",
- "bioprism-ids",
- "bioprism-scope",
  "bioprism-section",
  "bioprism-world",
  "serde",

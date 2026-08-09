@@ -1,0 +1,14 @@
+[package]
+name = "bioprism-services"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Build-ready service contracts: request/response shapes, error taxonomy, versioning, the process graph"
+
+[dependencies]
+bioprism-governance = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
