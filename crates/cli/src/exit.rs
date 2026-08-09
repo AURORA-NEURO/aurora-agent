@@ -36,6 +36,7 @@
 //! asked. [`ExitCode::retryability`] returns `None` for both rather than inventing a third state
 //! that consumers would have to special-case anyway.
 
+use bioprism_baseline::CompareError;
 use bioprism_fiber::{FiberError, PolicyViolation};
 use bioprism_mutation::MutationError;
 use bioprism_prism::MinimizeError;
@@ -335,6 +336,27 @@ impl CliError {
             MinimizeError::OracleRefusedCandidate { .. } => ExitCode::Indeterminate,
         };
         CliError::new(code, error.to_string())
+    }
+
+    /// Routes a comparison failure to the code carrying its 40.36 class.
+    ///
+    /// [`CompareError`] has one variant and it is the oracle declining to judge the full-context
+    /// reference, which lands where [`CliError::from_minimize`] lands for the same reason: the
+    /// binary ran correctly and the evidence does not decide. Not `compile_failed` — every strategy
+    /// compiled — and not `invalid_input`, which would tell an operator their world was malformed
+    /// when the world is exactly as supplied and the oracle simply cannot order what it holds.
+    ///
+    /// The classification defers to [`CliError::from_compile`] rather than naming a code, so the
+    /// paths that surface the same [`FiberError`] cannot drift apart. Written against the error type
+    /// rather than at the call site so a second variant fails to compile until somebody decides
+    /// which code it belongs under.
+    pub fn from_compare(error: CompareError) -> Self {
+        let message = error.to_string();
+        match error {
+            CompareError::OracleRefusedReference { source, .. } => {
+                CliError::new(CliError::from_compile(source).code, message)
+            }
+        }
     }
 
     /// The failure as the `--json` envelope publishes it.

@@ -472,7 +472,8 @@ fn context_compare(world_path: &Path, query_path: &Path, markdown: bool) -> CliR
     let panel = bioprism_baseline::default_panel();
     let borrowed: Vec<&dyn bioprism_baseline::ContextStrategy> =
         panel.iter().map(|boxed| boxed.as_ref()).collect();
-    let comparison = bioprism_baseline::compare(&world, &query, &borrowed);
+    let comparison = bioprism_baseline::compare(&world, &query, &borrowed)
+        .map_err(|error| CliError::from_compare(error).about(world_path.display().to_string()))?;
 
     let mut human = comparison.to_markdown();
     if !markdown {
@@ -485,8 +486,9 @@ Next: bioprism context explain --world {} --query {}
         ));
     }
 
-    // 43.41 stop rule: FIBER dropping a decisive witness, or failing to deliver the mandatory
-    // protected closure, blocks advancement.
+    // 43.41 stop rule: FIBER dropping a decisive witness, failing to deliver the mandatory
+    // protected closure, or offering a selection the oracle would not judge, blocks advancement.
+    // A row that established nothing is not a row that passed.
     let fiber_inadmissible = comparison
         .results
         .iter()

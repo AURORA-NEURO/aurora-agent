@@ -8,12 +8,21 @@
 //! reference-like corner reproduces the tie; the discriminating corner separates the strategies
 //! cleanly. Both are asserted, so neither result can quietly drift.
 
-use bioprism_baseline::{compare, ContextStrategy, FiberCompiled, KHopIncidence, LexicalTopK};
+use bioprism_baseline::{
+    compare, Comparison, ContextStrategy, FiberCompiled, KHopIncidence, LexicalTopK,
+};
 use bioprism_fiber::Query;
 use bioprism_world::{validate, World};
 use bioprism_worldgen::{generate, DistractorAttachment, LeakageMechanism, TagStyle, WorldSpec};
 
 const MAX_DEPTH: usize = 16;
+
+/// Every generated world assigns a split arm to every subject, so the oracle reaches a
+/// full-context verdict on all of them and a test that does not say otherwise is entitled to a
+/// table rather than an error.
+fn compared(world: &World, query: &Query, panel: &[&dyn ContextStrategy]) -> Comparison {
+    compare(world, query, panel).expect("a generated world reaches a full-context verdict")
+}
 
 fn build(spec: &WorldSpec) -> (World, Query) {
     let generated = generate(spec);
@@ -28,8 +37,9 @@ fn sound_and_compact_depths(world: &World, query: &Query) -> Vec<usize> {
             let strategy = KHopIncidence { depth: *depth };
             let selection = strategy.select(world, query);
             let panel: Vec<&dyn ContextStrategy> = vec![&strategy];
-            let result = &compare(world, query, &panel).results[0];
-            result.verdict_preserving && selection.facts.len() < world.facts.len() - 1
+            let result = &compared(world, query, &panel).results[0];
+            result.verdict_preserving() == Some(true)
+                && selection.facts.len() < world.facts.len() - 1
         })
         .collect()
 }
@@ -92,16 +102,20 @@ fn the_discriminating_corner_leaves_no_usable_graph_depth() {
     let mid = KHopIncidence { depth: 7 };
     let selection = mid.select(&world, &query);
     let panel: Vec<&dyn ContextStrategy> = vec![&mid];
-    let result = &compare(&world, &query, &panel).results[0];
+    let result = &compared(&world, &query, &panel).results[0];
     assert_eq!(selection.facts.len(), 750);
-    assert!(
-        !result.verdict_preserving,
+    assert_eq!(
+        result.verdict_preserving(),
+        Some(false),
         "depth 7 takes every distractor and still misses decisive evidence"
     );
 
     let deep = KHopIncidence { depth: 11 };
     let deep_panel: Vec<&dyn ContextStrategy> = vec![&deep];
-    assert!(compare(&world, &query, &deep_panel).results[0].verdict_preserving);
+    assert_eq!(
+        compared(&world, &query, &deep_panel).results[0].verdict_preserving(),
+        Some(true)
+    );
     assert_eq!(deep.select(&world, &query).facts.len(), world.facts.len() - 1);
 }
 
@@ -118,7 +132,7 @@ fn lexical_retrieval_silently_breaks_protected_closure() {
     for k in [11, 12, 15, 20, 50] {
         let strategy = LexicalTopK { k };
         let panel: Vec<&dyn ContextStrategy> = vec![&strategy];
-        let result = &compare(&world, &query, &panel).results[0];
+        let result = &compared(&world, &query, &panel).results[0];
         assert!(
             result.protected_recall < 1.0,
             "BM25 at k={k} should not achieve full protected closure here, got {}",
@@ -127,9 +141,9 @@ fn lexical_retrieval_silently_breaks_protected_closure() {
     }
 
     let panel: Vec<&dyn ContextStrategy> = vec![&FiberCompiled];
-    let fiber = &compare(&world, &query, &panel).results[0];
+    let fiber = &compared(&world, &query, &panel).results[0];
     assert_eq!(fiber.protected_recall, 1.0);
-    assert!(fiber.verdict_preserving);
+    assert_eq!(fiber.verdict_preserving(), Some(true));
     assert_eq!(fiber.facts_exposed, 11);
 }
 
@@ -153,12 +167,12 @@ fn fiber_is_uniquely_sound_compact_and_closed_on_the_discriminating_world() {
     }
     panel.push(&FiberCompiled);
 
-    let comparison = compare(&world, &query, &panel);
+    let comparison = compared(&world, &query, &panel);
     let qualifying: Vec<&str> = comparison
         .results
         .iter()
         .filter(|r| {
-            r.verdict_preserving
+            r.verdict_preserving() == Some(true)
                 && r.protected_recall == 1.0
                 && r.facts_exposed < world.facts.len() / 2
         })
@@ -237,7 +251,7 @@ fn the_structural_knobs_are_independent() {
     let recall = |world: &World, query: &Query| {
         let strategy = LexicalTopK { k: 11 };
         let panel: Vec<&dyn ContextStrategy> = vec![&strategy];
-        compare(world, query, &panel).results[0].protected_recall
+        compared(world, query, &panel).results[0].protected_recall
     };
     let distinct = recall(&world_a, &query_a);
     let camouflaged = recall(&world_b, &query_b);

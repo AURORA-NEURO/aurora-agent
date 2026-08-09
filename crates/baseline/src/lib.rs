@@ -13,7 +13,10 @@ pub mod incidence;
 pub mod lexical;
 pub mod strategy;
 
-pub use compare::{compare, default_panel, Comparison, StrategyResult};
+pub use compare::{
+    compare, default_panel, Comparison, CompareError, Judgement, RowRefusal, RowVerdict,
+    StrategyResult,
+};
 pub use incidence::{ConnectedComponent, KHopIncidence, QueryGraph};
 pub use lexical::LexicalTopK;
 pub use strategy::{ContextStrategy, FiberCompiled, FullContext, Selection};

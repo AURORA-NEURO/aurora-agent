@@ -6,12 +6,15 @@
 //! the one where a lexical retriever ties the compiler.
 
 use bioprism_baseline::{
-    compare, default_panel, ConnectedComponent, ContextStrategy, FiberCompiled, KHopIncidence,
-    LexicalTopK, QueryGraph,
+    compare, default_panel, CompareError, Comparison, ConnectedComponent, ContextStrategy,
+    FiberCompiled, Judgement, KHopIncidence, LexicalTopK, QueryGraph, RowRefusal, RowVerdict,
+    Selection,
 };
-use bioprism_fiber::Query;
+use bioprism_fiber::{FiberError, Query};
+use bioprism_section::OracleStatus;
 use bioprism_world::World;
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> Value {
@@ -37,13 +40,19 @@ fn query() -> Query {
     Query::from_json(fixture("leakage_query.json")).unwrap()
 }
 
+/// Every shipped world reaches a full-context verdict, so a test that does not say otherwise is
+/// entitled to a table rather than an error.
+fn compared(world: &World, query: &Query, panel: &[&dyn ContextStrategy]) -> Comparison {
+    compare(world, query, panel).expect("the shipped world reaches a full-context verdict")
+}
+
 #[test]
 fn the_full_panel_agrees_with_the_reference_baseline_script() {
     let world = world();
     let query = query();
     let panel = default_panel();
     let borrowed: Vec<&dyn ContextStrategy> = panel.iter().map(|b| b.as_ref()).collect();
-    let comparison = compare(&world, &query, &borrowed);
+    let comparison = compared(&world, &query, &borrowed);
 
     let by_name = |name: &str| {
         comparison
@@ -100,7 +109,7 @@ fn a_correctly_tuned_graph_walk_matches_fiber_exactly() {
         .filter(|depth| {
             let strategy = KHopIncidence { depth: *depth };
             let panel: Vec<&dyn ContextStrategy> = vec![&strategy];
-            compare(&world, &query, &panel).results[0].verdict_preserving
+            compared(&world, &query, &panel).results[0].verdict_preserving() == Some(true)
         })
         .collect();
     assert_eq!(
@@ -127,7 +136,7 @@ fn shallow_graph_selections_are_unsound_not_merely_small() {
     let query = query();
     let shallow = KHopIncidence { depth: 2 };
     let panel: Vec<&dyn ContextStrategy> = vec![&shallow, &QueryGraph, &FiberCompiled];
-    let comparison = compare(&world, &query, &panel);
+    let comparison = compared(&world, &query, &panel);
 
     let graph = comparison
         .results
@@ -135,12 +144,12 @@ fn shallow_graph_selections_are_unsound_not_merely_small() {
         .find(|r| r.name == "graph-2-hop")
         .unwrap();
     assert_eq!(graph.facts_exposed, 0);
-    assert!(!graph.verdict_preserving);
-    assert_eq!(graph.missing_witnesses.len(), 4);
+    assert_eq!(graph.verdict_preserving(), Some(false));
+    assert_eq!(graph.judgement().unwrap().missing_witnesses.len(), 4);
     assert_eq!(graph.protected_recall, 0.0);
 
     let fiber = comparison.results.iter().find(|r| r.name == "fiber").unwrap();
-    assert!(fiber.verdict_preserving);
+    assert_eq!(fiber.verdict_preserving(), Some(true));
     assert_eq!(fiber.protected_recall, 1.0);
 
     assert_eq!(
@@ -174,8 +183,11 @@ fn a_lexical_retriever_ties_fiber_on_this_world() {
     );
 
     let panel: Vec<&dyn ContextStrategy> = vec![&lexical, &FiberCompiled];
-    let comparison = compare(&world, &query, &panel);
-    assert!(comparison.results.iter().all(|r| r.verdict_preserving));
+    let comparison = compared(&world, &query, &panel);
+    assert!(comparison
+        .results
+        .iter()
+        .all(|r| r.verdict_preserving() == Some(true)));
 }
 
 /// Widening the lexical budget stops being free once it must guess.
@@ -195,7 +207,7 @@ fn lexical_retrieval_cannot_tell_when_to_stop() {
     assert_eq!(wide.facts.len(), 50);
 
     let panel: Vec<&dyn ContextStrategy> = vec![&LexicalTopK { k: 50 }, &FiberCompiled];
-    let comparison = compare(&world, &query, &panel);
+    let comparison = compared(&world, &query, &panel);
     let lexical = comparison
         .results
         .iter()
@@ -203,7 +215,8 @@ fn lexical_retrieval_cannot_tell_when_to_stop() {
         .unwrap();
     let fiber = comparison.results.iter().find(|r| r.name == "fiber").unwrap();
 
-    assert!(lexical.verdict_preserving && fiber.verdict_preserving);
+    assert_eq!(lexical.verdict_preserving(), Some(true));
+    assert_eq!(fiber.verdict_preserving(), Some(true));
     assert!(lexical.facts_exposed > fiber.facts_exposed);
 }
 
@@ -235,7 +248,7 @@ fn the_comparison_serialises_for_ci_consumption() {
     let query = query();
     let panel = default_panel();
     let borrowed: Vec<&dyn ContextStrategy> = panel.iter().map(|b| b.as_ref()).collect();
-    let comparison = compare(&world, &query, &borrowed);
+    let comparison = compared(&world, &query, &borrowed);
 
     let document = comparison.to_json();
     assert_eq!(document["total_facts"], Value::from(761));
@@ -252,4 +265,235 @@ fn the_connected_component_is_the_whole_world() {
     let world = world();
     let query = query();
     assert_eq!(ConnectedComponent.select(&world, &query).facts.len(), 761);
+}
+
+/// A strategy that selects exactly what a test tells it to.
+///
+/// Needed because the shipped panel cannot reach a refusal on any shipped world, and a state that
+/// only ever exists in prose is a state nobody has checked.
+struct Fixed {
+    label: &'static str,
+    facts: BTreeSet<String>,
+}
+
+impl Fixed {
+    fn of(label: &'static str, ids: &[&str]) -> Self {
+        Fixed {
+            label,
+            facts: ids.iter().map(|id| (*id).to_string()).collect(),
+        }
+    }
+}
+
+impl ContextStrategy for Fixed {
+    fn name(&self) -> String {
+        self.label.into()
+    }
+
+    fn method(&self) -> String {
+        "a fixed selection supplied by the test".into()
+    }
+
+    fn select(&self, _world: &World, _query: &Query) -> Selection {
+        Selection::new(self.facts.clone())
+    }
+}
+
+/// The shipped fixture with one subject's split arm deleted.
+///
+/// `ALT-77` then spans a subject assigned to `train` and a subject assigned to nothing, which is
+/// the condition `bioprism_fiber::oracle` refuses on. It is the same edit `crates/mutation` makes
+/// to build a parent nobody can judge.
+fn world_the_oracle_refuses() -> World {
+    let mut raw = fixture("radiogenomic_world.json");
+    for fact in raw["facts"].as_array_mut().expect("facts are an array") {
+        if fact["id"] == "fact.split" {
+            fact["value"]
+                .as_object_mut()
+                .expect("split assignments are an object")
+                .remove("S003");
+        }
+    }
+    World::from_json(raw).expect("a world the oracle refuses still loads")
+}
+
+/// The same fixture, with a complete second `split_assignment` sorting after the broken one.
+///
+/// The last fact wins when two provide the same variable, so full-context reads the complete
+/// assignment and reaches a verdict while a selection holding only the broken one is refused. That
+/// is the sole shape in which a row can refuse under a reference that did not, and it is why
+/// `compare` keeps a row-level state as well as an error.
+fn world_where_only_a_subset_is_refused() -> World {
+    let mut raw = fixture("radiogenomic_world.json");
+    let facts = raw["facts"].as_array_mut().expect("facts are an array");
+    let mut complete = facts
+        .iter()
+        .find(|fact| fact["id"] == "fact.split")
+        .cloned()
+        .expect("the fixture assigns splits");
+    complete["id"] = json!("fact.split.repaired");
+    for fact in facts.iter_mut() {
+        if fact["id"] == "fact.split" {
+            fact["value"]
+                .as_object_mut()
+                .expect("split assignments are an object")
+                .remove("S003");
+        }
+    }
+    facts.push(complete);
+    World::from_json(raw).expect("a world with a shadowed variable still loads")
+}
+
+/// The defect, stated as the thing that can no longer happen.
+///
+/// The reference and every strategy used to collapse to `abstain` with an empty witness list,
+/// compare equal, and be published as a panel of verdict-preserving admissible strategies. There is
+/// now no table at all: the type says a comparison needs a reference verdict, and none was obtained.
+#[test]
+fn two_refused_verdicts_do_not_compare_equal() {
+    let world = world_the_oracle_refuses();
+    let query = query();
+    let panel = default_panel();
+    let borrowed: Vec<&dyn ContextStrategy> = panel.iter().map(|b| b.as_ref()).collect();
+
+    match compare(&world, &query, &borrowed) {
+        Err(CompareError::OracleRefusedReference { facts, source }) => {
+            assert_eq!(facts, 761);
+            assert!(
+                matches!(source, FiberError::UnorderableSplitGroups { .. }),
+                "the oracle's own error must survive, got {source:?}"
+            );
+        }
+        Ok(comparison) => panic!(
+            "a comparison was published against a reference nobody obtained: cheapest admissible \
+             was {:?}",
+            comparison.cheapest_admissible().map(|r| r.name.clone())
+        ),
+    }
+}
+
+/// The row-level half, and every derived field that used to read as a measurement.
+#[test]
+fn a_refused_row_is_neither_sound_nor_admissible() {
+    let world = world_where_only_a_subset_is_refused();
+    let query = query();
+    let broken = Fixed::of("broken-split", &["fact.subject_aliases", "fact.split"]);
+    let panel: Vec<&dyn ContextStrategy> = vec![&FiberCompiled, &broken];
+    let comparison = compared(&world, &query, &panel);
+
+    assert_eq!(comparison.reference_status, OracleStatus::Invalid);
+
+    let row = comparison
+        .results
+        .iter()
+        .find(|r| r.name == "broken-split")
+        .expect("the fixed strategy has a row");
+
+    assert!(row.judgement().is_none());
+    assert_eq!(row.verdict_preserving(), None);
+    assert_eq!(row.status(), None);
+    assert!(!row.admissible());
+    assert!(matches!(
+        row.refusal(),
+        Some(RowRefusal::OracleRefused {
+            facts_exposed: 2,
+            ..
+        })
+    ));
+
+    assert!(
+        !comparison.unsound().any(|r| r.name == "broken-split"),
+        "a refusal is not a refutation, so an unexamined row must not be reported as unsound"
+    );
+    assert!(!comparison.lucky().any(|r| r.name == "broken-split"));
+    assert_eq!(comparison.refused().count(), 1);
+    assert!(!comparison.is_fully_judged());
+    assert_eq!(
+        comparison.cheapest_admissible().map(|r| r.name.as_str()),
+        Some("fiber"),
+        "a row nobody judged must never win the cost ranking"
+    );
+}
+
+/// A refusal must not reach a reader as a blank, a zero or a `false`.
+#[test]
+fn a_refused_row_renders_as_refused_in_both_the_table_and_the_json() {
+    let world = world_where_only_a_subset_is_refused();
+    let query = query();
+    let broken = Fixed::of("broken-split", &["fact.subject_aliases", "fact.split"]);
+    let panel: Vec<&dyn ContextStrategy> = vec![&FiberCompiled, &broken];
+    let comparison = compared(&world, &query, &panel);
+
+    let markdown = comparison.to_markdown();
+    let row = markdown
+        .lines()
+        .find(|line| line.starts_with("| broken-split |"))
+        .expect("the refused strategy has a table row");
+    assert!(row.contains("**refused**"), "table row was {row:?}");
+    assert!(
+        !row.contains("underdetermined") && !row.contains("yes"),
+        "a refused row must not borrow a verdict it never received: {row:?}"
+    );
+    assert!(markdown.contains("`broken-split` was **not judged**"));
+    assert!(markdown.contains("cannot be admissible"));
+
+    let document = comparison.to_json();
+    let rows = document["results"].as_array().expect("results are an array");
+    let refused = rows
+        .iter()
+        .find(|row| row["name"] == "broken-split")
+        .expect("the refused strategy has a JSON row");
+
+    assert_eq!(refused["judged"], Value::from(false));
+    assert!(refused["refusal"]
+        .as_str()
+        .expect("the refusal is reported verbatim")
+        .contains("ALT-77"));
+    for absent in [
+        "status",
+        "verdict_preserving",
+        "missing_witnesses",
+        "spurious_witnesses",
+        "witnesses",
+        "admissible",
+    ] {
+        assert!(
+            refused.get(absent).is_none(),
+            "a refused row must carry no {absent:?} key for a reader to default or count"
+        );
+    }
+
+    let judged = rows
+        .iter()
+        .find(|row| row["name"] == "fiber")
+        .expect("fiber has a JSON row");
+    assert_eq!(judged["judged"], Value::from(true));
+    assert_eq!(judged["verdict_preserving"], Value::from(true));
+    assert!(judged.get("refusal").is_none());
+}
+
+/// An abstention and a refusal are two values, not one.
+///
+/// Constructed rather than measured, because `bioprism_fiber::oracle::evaluate` builds its verdict
+/// with `OracleVerdict::new`, which returns only `valid` or `invalid` — the shipped oracle never
+/// abstains, so `underdetermined` in a published comparison table could only ever have been a
+/// refusal wearing an abstention's clothes. The distinction is pinned here so that an oracle which
+/// does abstain cannot silently re-merge the two.
+#[test]
+fn an_abstention_and_a_refusal_do_not_share_a_representation() {
+    let abstained = RowVerdict::Judged(Judgement {
+        status: OracleStatus::Underdetermined,
+        witnesses: Vec::new(),
+        verdict_preserving: true,
+        missing_witnesses: Vec::new(),
+        spurious_witnesses: Vec::new(),
+    });
+    let refused = RowVerdict::Refused(RowRefusal::OracleRefused {
+        facts_exposed: 0,
+        source: FiberError::UnorderableSplitGroups {
+            alias: "ALT-77".into(),
+            present: vec!["train".into()],
+        },
+    });
+    assert_ne!(abstained, refused);
 }

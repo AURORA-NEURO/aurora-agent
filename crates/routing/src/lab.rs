@@ -136,6 +136,11 @@ impl LabSettings {
 /// This is the expensive, offline half. It is also the half that must never reach the router:
 /// the ledger it returns contains each task's own answer, which is precisely what makes it usable
 /// as the oracle bound and unusable as routing input.
+///
+/// An outcome the deterministic oracle would not judge is refused rather than recorded, in either
+/// of the two shapes `bioprism_baseline::compare` reports it. The ledger's whole value is that
+/// every row in it was measured; an unobserved outcome entered as `verdict_preserving: false`
+/// would be indistinguishable from a demonstrated failure and would move the router's regret.
 pub fn observe(tasks: &[Task], approved: &ApprovedSet) -> Result<EvidenceLedger, RoutingError> {
     if tasks.is_empty() {
         return Err(RoutingError::NoTasks);
@@ -150,7 +155,12 @@ pub fn observe(tasks: &[Task], approved: &ApprovedSet) -> Result<EvidenceLedger,
         let owned: Vec<Box<dyn ContextStrategy>> =
             approved.iter().map(Architecture::strategy).collect();
         let borrowed: Vec<&dyn ContextStrategy> = owned.iter().map(AsRef::as_ref).collect();
-        let comparison = compare(&task.world, &task.query, &borrowed);
+        let comparison = compare(&task.world, &task.query, &borrowed).map_err(|error| {
+            RoutingError::TaskNotComparable {
+                task: task.task_id.clone(),
+                detail: error.to_string(),
+            }
+        })?;
 
         for (architecture, result) in approved.iter().zip(comparison.results.iter()) {
             if result.name != architecture.label() {
@@ -160,13 +170,23 @@ pub fn observe(tasks: &[Task], approved: &ApprovedSet) -> Result<EvidenceLedger,
                     actual: result.name.clone(),
                 });
             }
+            let Some(judgement) = result.judgement() else {
+                return Err(RoutingError::UnjudgedObservation {
+                    task: task.task_id.clone(),
+                    architecture: architecture.label(),
+                    detail: result
+                        .refusal()
+                        .expect("a row with no judgement carries its refusal")
+                        .to_string(),
+                });
+            };
             observations.push(Observation {
                 task_id: task.task_id.clone(),
                 fingerprint: fingerprint.clone(),
                 architecture: architecture.clone(),
-                verdict_preserving: result.verdict_preserving,
+                verdict_preserving: judgement.verdict_preserving,
                 closure_complete: result.closure_complete(),
-                status: result.status,
+                status: judgement.status,
                 facts_exposed: result.facts_exposed,
                 total_facts: comparison.total_facts,
             });

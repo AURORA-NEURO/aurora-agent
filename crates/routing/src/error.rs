@@ -59,4 +59,33 @@ pub enum RoutingError {
         expected: String,
         actual: String,
     },
+
+    /// The comparison harness had no reference verdict to measure this task against.
+    ///
+    /// Nothing about the task's outcomes is observable, so no row of the ledger can be filled. The
+    /// alternative — recording every architecture as failing — would teach the router that they all
+    /// lose on this structural regime, which is a claim the evidence does not make.
+    #[error(
+        "task `{task}` has no full-context reference verdict, so none of its architectures can be \
+         observed: {detail}"
+    )]
+    TaskNotComparable { task: String, detail: String },
+
+    /// The oracle refused one architecture's selection on an otherwise comparable task.
+    ///
+    /// A ledger row is a *measured* outcome, and there is no honest value for
+    /// [`crate::evidence::Observation::verdict_preserving`] here. `false` would enter the router's
+    /// training evidence as a demonstrated failure of an architecture nobody evaluated, which is
+    /// exactly the "unmeasured is not zero" collapse the utility encoding exists to prevent;
+    /// dropping the row instead would surface later as [`RoutingError::IncompleteEvidence`] with
+    /// the cause erased.
+    #[error(
+        "the oracle refused architecture `{architecture}`'s selection on task `{task}`, and an \
+         unobserved outcome must not enter the ledger as a measured one: {detail}"
+    )]
+    UnjudgedObservation {
+        task: String,
+        architecture: String,
+        detail: String,
+    },
 }
