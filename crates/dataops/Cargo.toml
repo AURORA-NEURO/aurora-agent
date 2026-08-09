@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-dataops"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Section 12 remainder: storage topology, relational catalog, SLOs, compute placement and federated deployment, each answer carrying the basis it was known from"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-infra = { workspace = true }
+bioprism-ledger = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

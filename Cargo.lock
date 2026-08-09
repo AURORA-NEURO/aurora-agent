@@ -474,7 +474,6 @@ version = "0.1.0"
 dependencies = [
  "bioprism-choreography",
  "bioprism-fabric",
- "bioprism-ids",
  "bioprism-section",
  "bioprism-weave",
  "serde",
