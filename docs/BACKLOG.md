@@ -1,6 +1,6 @@
 # Remaining backlog
 
-193 code-bearing blueprint modules are not yet cited by any crate or design note,
+188 code-bearing blueprint modules are not yet cited by any crate or design note,
 across 23 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.
 
@@ -67,23 +67,6 @@ uses. This file tracks *attention*, not completeness.
 - `11.21` Github Action For Consumer Repositories
 - `11.22` Github Action And Ci Integration
 - `11.23` Reporting And Exports
-
-## §23 Agent Interweave Fabric — 14 uncovered
-
-- `23.00` Interweave Overview And Thesis
-- `23.24` Protocol Adapters A2A Mcp Otel And Cloudevents
-- `23.25` Component Runtime Wasm Wit And Sandbox Composition
-- `23.27` Interweave Evaluation And Microbenchmark Generation
-- `23.28` Orchestration Learning And Credit Assignment
-- `23.29` Security Threat Model And Trust Boundaries
-- `23.31` Governance Versioning And Conformance
-- `23.33` Reference Interweave Workflows
-- `23.35` Implementation Roadmap And Vertical Slices
-- `23.36` Open Research Program
-- `23.39` Weavebench Packs And Microbenchmark Taxonomy
-- `23.40` Novelty Boundary And Ecosystem Positioning
-- `23.42` Goal To Molecule Compiler And Team Synthesis
-- `23.47` Human And Organizational Participants
 
 ## §40 Build Ready Engineering Contracts — 13 uncovered
 
@@ -183,6 +166,18 @@ uses. This file tracks *attention*, not completeness.
 - `14.23` Community Conduct Inclusion And Appeals
 - `14.24` Sustainability Finance And Public Benefit
 - `14.25` Periodic Program Review
+
+## §23 Agent Interweave Fabric — 9 uncovered
+
+- `23.24` Protocol Adapters A2A Mcp Otel And Cloudevents
+- `23.25` Component Runtime Wasm Wit And Sandbox Composition
+- `23.27` Interweave Evaluation And Microbenchmark Generation
+- `23.28` Orchestration Learning And Credit Assignment
+- `23.29` Security Threat Model And Trust Boundaries
+- `23.31` Governance Versioning And Conformance
+- `23.33` Reference Interweave Workflows
+- `23.39` Weavebench Packs And Microbenchmark Taxonomy
+- `23.47` Human And Organizational Participants
 
 ## §31 Biological Oracles And Reference Standards — 9 uncovered
 
