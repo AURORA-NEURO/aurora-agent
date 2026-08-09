@@ -99,28 +99,44 @@ benchmark compiler (15), §09 inference lab (11). That is 117 modules — 15% of
 blueprint — with nothing standing in for them. It is where the batches after the current five
 should go.
 
-## The boilerplate correction
+## Boilerplate, and why the numbers are not strictly comparable
 
-Ten sections have now been measured independently, each by the agent that built against it, and each
-reported the same thing. §07, §08, §31, §33 and §34 were estimated at roughly 15 distinguishing
-lines per module. Five later measurements put numbers on it:
+Sixteen sections have now been measured, each by the agent that built against it. Most are heavily
+repetitive; one is not, and the exception matters more than the average.
 
-| § | distinguishing lines per module | boilerplate |
-|---|---|---|
-| 32 | 19 (median), 2,147 lines over 23 modules | 79.3% |
-| 14 | 19.4 of ~65 non-blank | 70% |
-| 28 | 34.5 of 71.5 non-blank | 52% |
-| 12 | ~15 per 100-line file | — |
-| 11 | 18 unique lines in a 93-line module, frontmatter and title included | — |
+| § | boilerplate | distinguishing lines per module |
+|---|---:|---|
+| 42 | 93.6% | 5 — title, module id, H1, one outcome sentence, one diagram label |
+| 35 | 82.3% | 14–16 |
+| 32 | 79.3% | 19 median |
+| 41 | 72.6% | 14.1 mean |
+| 06 | 70.8% | 17–25 |
+| 14 | 70% | 19.4 of ~65 non-blank |
+| 09 | 68.8% | 17–31, median 19 |
+| 13 | 67.5% | 19–32, median 21 |
+| 28 | 52% | 34.5 of 71.5 non-blank |
+| **23** | **16.2% verbatim / 51.2% rare-term** | **~54 median** |
+| 12 | — | ~15 per 100-line file |
+| 11 | — | 18 unique in a 93-line module, frontmatter and title included |
 
-A section of 24 modules is therefore closer to 400 lines of specification than to 24 specifications.
-Two measurements are worth quoting exactly. In §14 one mitigation sentence appears **125 times**
-across the section, under different failure modes. In §32 every one of the 23 modules carries an
-identical transformation-contract YAML in which all four `changes:` flags are `false` — including
-modules that obviously change observation — and `expected_relation.type` is a six-way pipe union
-that is never resolved to a selection. Nothing is derivable from it.
+**§23 is the exception and it is a real one.** Measured three ways over all 50 modules: 16.2% of
+lines appear in more than one module, 51.2% by the rare-term method used for §28, and only 11.6% of
+802 headings recur verbatim. It is the most content-dense section in the blueprint, and its
+repetition is *shape* — frontmatter, Purpose, a taxonomy list, a pseudo-code fence, evaluation hooks
+— rather than text. Six of its modules yielded roughly 300 distinguishing lines.
 
-This matters for planning. Section size predicts *reading* cost but not *implementation* cost, so a
-coverage percentage weighted by module count overstates how much real design surface remains. It is
-recorded here rather than corrected away: the correction factor is not uniform across sections, and
-inventing one would be worse than stating the observation.
+**These figures were produced by different methods and are not a single scale.** Only §23 was
+measured three ways, and its own two headline numbers differ by 35 points. A verbatim-duplication
+count and a rare-term count answer different questions, and no agent was given a common definition.
+Read the column as evidence that a section is repetitive or is not, and distrust small differences
+between rows.
+
+What survives every method: section size predicts *reading* cost and not *implementation* cost, so a
+coverage percentage weighted by module count overstates how much real design surface remains.
+
+Three findings are worth quoting exactly. In §14 one mitigation sentence appears **125 times** across
+the section, under different failure modes. In §32 every one of the 23 modules carries an identical
+transformation-contract YAML in which all four `changes:` flags are `false` — including modules that
+obviously change observation — and `expected_relation.type` is a six-way pipe union that is never
+resolved to a selection. In §42 every module's "Required API objects" list is identical, and none of
+the seven objects is defined anywhere in the section.
