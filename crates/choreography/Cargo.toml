@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-choreography"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Multiparty choreography: session types with projection, bounded protocol model checking, adjudication, quorum with checked independence, and sagas with honest compensation"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-weave = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

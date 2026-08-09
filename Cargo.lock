@@ -263,6 +263,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-influence"
+version = "0.1.0"
+dependencies = [
+ "bioprism-backends",
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
+ "bioprism-world",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-lab"
 version = "0.1.0"
 dependencies = [
