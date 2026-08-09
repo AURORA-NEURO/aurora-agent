@@ -98,7 +98,7 @@ fn the_property_ids_this_crate_names_still_exist_in_the_examples_catalogue() {
 fn the_recorded_obstacle_this_crate_answers_is_still_the_one_examples_records() {
     let source = examples_property_source();
     assert!(
-        source.contains("separating them needs an event over a non-protected variable that the target depends on"),
+        source.contains("withholds a decisive non-protected variable at the cut with an empty dropped_protected"),
         "the blocker text has changed; the worlds here were built against the old wording and the \
          claim should be re-checked rather than assumed"
     );
@@ -110,22 +110,33 @@ fn the_abstention_blocker_still_names_the_compiler_rather_than_the_world() {
     assert!(source.contains("OracleVerdict::abstain exists in bioprism-section but no path in bioprism-fiber constructs it"));
 }
 
+/// Every knob this crate named as missing is now a field `WorldSpec` has.
+///
+/// This assertion used to run the other way. It listed six fields and failed when `worldgen` gained
+/// one, so the gap list could not rot into a stale wishlist — and when the knobs landed it failed
+/// on the first, which is the mechanism working rather than a regression. It is inverted here
+/// rather than deleted, because the guarantee worth keeping is not "these are missing" but "this
+/// crate's account of the generator matches the generator".
+///
+/// `policy` is a seventh that was never on the original list. It became necessary when
+/// `bioprism-fiber` gained a pass screening facts by their policy scope dimension, at which point
+/// no generated world could exercise it.
 #[test]
-fn every_missing_knob_names_a_field_worldgen_does_not_have() {
+fn every_knob_this_crate_named_is_now_a_field_worldgen_has() {
     let spec = serde_json::to_value(WorldSpec::discriminating(1)).expect("WorldSpec serialises");
     let map = spec.as_object().expect("an object");
-    for absent in [
+    for landed in [
         "events",
         "protected_variables",
         "decision_time",
         "skeleton",
         "hypotheses",
         "declared_absent",
+        "policy",
     ] {
         assert!(
-            !map.contains_key(absent),
-            "WorldSpec has gained a `{absent}` field; crates/bioworlds/src/knobs.rs is now stale \
-             and the world here may be reimplementable as a spec"
+            map.contains_key(landed),
+            "WorldSpec has lost its `{landed}` field; the gap this crate recorded has reopened"
         );
     }
 }

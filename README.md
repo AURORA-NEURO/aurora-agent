@@ -69,7 +69,7 @@ implementations: CPython, the Rust eager path, and the Rust indexed store.
 | [`bioprism-section`](crates/section) | 43.25, 43.26, 43.36 | Decision Section IR, Context Certificate, omission manifest, plan descriptor | 8 |
 | [`bioprism-fiber`](crates/fiber) | 43.13, 43.16, 43.17, 43.41 | Protected closure, backward slice, temporal cut, oracle, compile pipeline | 15 |
 | [`bioprism-baseline`](crates/baseline) | 43.38, 43.41 | Equal-engineering comparators: full-context, k-hop, component, query-graph, BM25 | 8 |
-| [`bioprism-worldgen`](crates/worldgen) | 43.39 | Synthetic structural families: attachment, relay depth, tag camouflage, leakage injection | 8 |
+| [`bioprism-worldgen`](crates/worldgen) | 43.39 | Synthetic structural families: attachment, relay depth, tag camouflage, leakage injection, release schedule, protected set, decision cut, decisive skeleton, competing hypotheses, declared absences, policy requirements | 28 |
 | [`bioprism-store`](crates/store) | 43.34 | Content-addressed indexed storage; on-disk sorted maps, binary-search lookup | 8 |
 | [`bioprism-mcp`](crates/mcp) | 11.11, 43.35 | MCP server: progressive disclosure, root confinement, side-effect preview | 13 |
 | [`bioprism-prism`](crates/prism) | 03, 06, 07 | Decision Cells, matched forks, state minimization, attested bundles | 9 |
@@ -138,6 +138,30 @@ Compiling from a JSON document parses the whole world on every query. Index it o
 identical. On a one-million-fact world this takes query time from **26.5 s to 41.6 ms (638×)**, and
 compile cost becomes roughly logarithmic in corpus size rather than linear. The reasoning and the
 full measurements are in [ADR-001](docs/ADR-001-language-strategy.md).
+
+### Exit codes
+
+Ten codes, and **every failure code carries exactly one retry decision**, so a caller holding
+nothing but the process status can decide whether to re-send. `bioprism --help` prints the table;
+`--json` puts the same decision in the envelope as `error.retryability`.
+
+| code | | decision | code | | decision |
+|---:|---|---|---:|---|---|
+| 0 | `ok` | — | 5 | `io` | `retryable_as_is` |
+| 1 | `assertion_failed` | — | 6 | `conflict` | `terminal` |
+| 2 | `usage` | `terminal` | 7 | `policy_denied` | `retryable_after_change` |
+| 3 | `invalid_input` | `terminal` | 8 | `indeterminate` | `retryable_after_change` |
+| 4 | `compile_failed` | `retryable_after_change` | 9 | `stale` | `retryable_as_is` |
+
+Codes 0 and 1 report a verdict rather than a failure — the checked property held, or it did not —
+so they publish no retry decision rather than a third state every consumer would special-case.
+
+**This is a breaking change.** The registry previously had six codes, and 6–9 were all `4
+compile_failed`. Two of them are the reason for the split: a script reading exit 4 could not tell a
+policy refusal from an oracle abstention from a snapshot that had moved under it, and `stale` was
+advertised as *not* retryable when re-reading and re-sending the identical request is exactly what
+clears it. `bioprism-devx`'s exit-code audit found both against blueprint 40.36 and now reports
+neither; the registry it found them in is retained there as the audit's known-positive input.
 
 ## Using it from an agent
 

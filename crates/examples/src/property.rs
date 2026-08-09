@@ -295,7 +295,7 @@ impl Property {
                 "OracleVerdict::abstain exists in bioprism-section but no path in bioprism-fiber constructs it; the v0.1 oracle derives status solely from whether the witness list is empty",
             ),
             Property::PolicyBlockedOmission => Some(
-                "bioprism-fiber now screens facts by their policy scope dimension and emits InfluenceClass::InaccessibleByPolicy, but WorldSpec has no knob that binds that dimension, so every world this crate can generate declares no policy requirement and the pass withholds nothing",
+                "bioprism-worldgen's policy knob now generates a world that binds the dimension and bioprism-fiber's screen withholds a fact from it, so the class is producible; what this crate still cannot do is reach it, because no slice in its registry compiles a policy-restricted world",
             ),
             Property::BoundedInfluenceOmission => Some(
                 "bioprism-fiber emits only InfluenceClass::Zero and DeferredAcquisition; nothing computes a numeric influence bound, so no group is ever Bounded",
@@ -304,7 +304,7 @@ impl Property {
                 "bioprism-fiber hard-codes Backend::BackwardFactorSliceReference and leaves PlanDescriptor::fallback None on every compile; the other six backends have no implementation to select",
             ),
             Property::NonProtectedTemporalWithholding => Some(
-                "in the generated family every event-managed variable (training_decision_time, split_assignment, preprocess_fit_scope) is also protected, so an early cut cannot withhold evidence without simultaneously breaking the closure; separating them needs an event over a non-protected variable that the target depends on",
+                "bioprism-worldgen's protected_variables knob now separates protection from event management, and a generated world withholds a decisive non-protected variable at the cut with an empty dropped_protected, so the property is exercisable; what this crate still cannot do is exercise it, because its slices compile only the reference-shaped family",
             ),
             Property::MutationFamilyCoverage => Some(
                 "WorldSpec::LeakageMechanism has four members; 38.01 names six mutation families, and prevalence shift, segmentation perturbation and assay uncertainty have no generator knob",
