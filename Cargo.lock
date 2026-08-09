@@ -753,10 +753,8 @@ dependencies = [
 name = "bioprism-tokens"
 version = "0.1.0"
 dependencies = [
- "bioprism-fiber",
  "bioprism-ids",
  "bioprism-obligation",
- "bioprism-scope",
  "bioprism-section",
  "serde",
  "serde_json",
