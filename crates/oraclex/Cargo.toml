@@ -1,0 +1,20 @@
+[package]
+name = "bioprism-oraclex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Reference standards as claims about measurement processes, and the mutation validation program that decides whether a transformed case may be released"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-oracle = { workspace = true }
+bioprism-mutation = { workspace = true }
+bioprism-stress = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
