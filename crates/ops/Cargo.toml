@@ -1,0 +1,18 @@
+[package]
+name = "bioprism-ops"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Operational contracts of blueprint §40: configuration and feature flags, observability and audit, the capacity model, hardening, and the alpha acceptance criteria as predicates"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-infra = { workspace = true }
+bioprism-safety = { workspace = true }
+bioprism-services = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
