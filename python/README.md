@@ -82,6 +82,10 @@ privacy-safe affine digests are checked without reading image arrays or compress
 `n_obs`/`n_vars`, X/layer sparse metadata, obs/var indices and annotations, embeddings, pairwise
 matrices, raw dimensions, `uns` summaries, provenance, and index digests are checked without reading
 HDF5/Zarr chunks or matrix values.
+`AlignmentAdapter` and `audit_alignments()` add the parsed BAM/CRAM projection counterpart: explicit
+reference dictionaries, CIGAR spans, 0-based coordinate bounds, flags, mate pairing, sort order,
+mapping qualities, coverage, reference-build provenance, and read-identity digests are checked
+without decoding sequences, qualities, auxiliary tags, indexes, or reference bases.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

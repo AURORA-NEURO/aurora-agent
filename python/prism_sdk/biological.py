@@ -362,6 +362,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Python-owned BAM/CRAM adapter route preserving reference and alignment metadata.",
         ),
         _descriptor(
+            "bioprism.python.alignment_metadata",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/alignment-manifest",),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("coordinate_frame_not_carried", "provenance_unavailable", "content_uninterpreted", "type_undetermined"),
+            ("subject", "sample", "read", "reference", "locus"),
+            "Dependency-free audit of parsed BAM/CRAM records, CIGAR accounting, coordinates, flags, pairing, sort order, and coverage; read payloads remain uninterpreted.",
+        ),
+        _descriptor(
             "bioprism.python.ome_zarr",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/ome-zarr", "application/x-zarr"),

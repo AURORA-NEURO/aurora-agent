@@ -109,6 +109,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(anndata_metadata.executable)
         self.assertEqual(anndata_metadata.selected_adapter.id, "bioprism.python.anndata_metadata")
 
+        alignment_metadata = AdapterRegistry().plan(
+            AdapterPlanRequest("reads", SourceKind.BYTES, declared_format="application/alignment-manifest"),
+            check_environment=False,
+        )
+        self.assertTrue(alignment_metadata.executable)
+        self.assertEqual(alignment_metadata.selected_adapter.id, "bioprism.python.alignment_metadata")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)

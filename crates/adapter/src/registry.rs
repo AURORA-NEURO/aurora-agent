@@ -414,6 +414,24 @@ impl AdapterRegistry {
                 "Python-owned BAM/CRAM adapter route preserving reference and alignment metadata.",
             ),
             descriptor(
+                "bioprism.python.alignment_metadata",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/alignment-manifest"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "sample", "read", "reference", "locus"],
+                None,
+                "Dependency-free audit of parsed BAM/CRAM records, CIGAR accounting, coordinates, flags, pairing, sort order, and coverage; read payloads remain uninterpreted.",
+            ),
+            descriptor(
                 "bioprism.python.ome_zarr",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -759,6 +777,29 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.anndata_metadata")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn parsed_alignment_manifest_selects_the_dependency_free_record_auditor() {
+        let plan = AdapterRegistry::default()
+            .plan(request(
+                Some("application/alignment-manifest"),
+                SourceKind::Bytes,
+            ))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.alignment_metadata")
         );
         assert_eq!(
             plan.selected_adapter

@@ -104,6 +104,11 @@ invent defaults:
   obsm/varm embeddings, obsp/varp pairwise matrices, raw dimensions, and safe `uns` summaries. It
   returns index digests rather than index values, separates structural validity from provenance-
   gated publishability, and does not read HDF5/Zarr chunks or matrix payloads.
+- `AlignmentAdapter` and `audit_alignments(...)` provide a bounded parsed BAM/CRAM projection audit
+  using explicit 0-based half-open coordinates. It checks the reference dictionary, CIGAR query and
+  reference spans, coordinate bounds, flags, primary mate pairing, coordinate sort order, mapping
+  qualities, and per-reference coverage. Read identities are source-bound digests; sequences,
+  qualities, auxiliary tags, indexes, and reference bases are not decoded.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and
@@ -269,8 +274,9 @@ The package deliberately does not claim to implement DICOM/NIfTI/AnnData, indexe
 binary BIDS image parsing, inferential statistics, OTLP export, a notebook UI, or CI deployment. It
 now ships bounded text VCF, BIDS manifest, parsed DICOM metadata, parsed NIfTI header/affine, and
 parsed AnnData/Zarr matrix audits plus descriptive/cluster-bootstrap utilities above the Rust kernel.
-The repository still keeps gRPC, durable event storage, external webhook delivery, heavyweight binary
-biological readers, and statistical estimators as separate contracts.
+It also ships a parsed BAM/CRAM alignment audit. The repository still keeps gRPC, durable event
+storage, external webhook delivery, heavyweight binary biological readers, and statistical estimators
+as separate contracts.
 
 ## Verification
 
