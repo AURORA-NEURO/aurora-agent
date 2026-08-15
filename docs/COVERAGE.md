@@ -98,6 +98,10 @@ materialization in both serial and parallel modes. Schema refusals carry a schem
 JSON-pointer diagnostics and are distinct from the nested domain tool's own refusal envelope.
 `capability_discover` makes the complete cross-domain catalogue searchable by intent, domain, group,
 or tool and can attach the authoritative `tools/list` schemas for the ranked matches. The companion
+The Python `CapabilitySearchReport` and TypeScript `CapabilityDiscoverResult` projections preserve
+each matched group's domains, crates, CLI entrypoints, Python artifacts, ranked fields, matched
+tools, catalog digest, and optional schema attachment instead of collapsing discovery to an untyped
+blob.
 `capability_audit` proves that catalogue names and authoritative schemas remain in parity, reports
 catalog-only and uncatalogued tools, and keeps intentional multi-group membership explicit.
 It also validates every input schema's object shape, required/property consistency, and size bound,

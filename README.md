@@ -544,6 +544,10 @@ diagnostics, and keeps mission preflight and execution explicitly separate. Its 
 turning schema conformance into domain readiness. Every review also carries a deterministic,
 content-addressed `review_id` derived from the route provenance, caller selections, and validation
 mode, making the same handoff correlate cleanly across transports and event records.
+Typed discovery projections now preserve the complete matched group context—domains, Rust crates,
+CLI entrypoints, Python artifacts, ranked fields, matched tools, catalog digest, and optional
+authoritative tool schemas—so cross-domain routing can inspect coverage without falling back to
+unvalidated nested JSON.
 The HTTP boundary exposes that evidence through exact `review_id` filtering on event pages and a
 bounded `/v1/route-reviews/{review_id}/evidence` lookup; the Python and TypeScript SDKs provide
 typed helpers while preserving retention gaps and the explicit “not found in retained window”

@@ -9,6 +9,7 @@ import type {
   AgentMissionReport,
   AgentMissionPolicy,
   CapabilityDiscoverArgs,
+  CapabilityDiscoverResult,
   CapabilityAuditArgs,
   CapabilityRouteArgs,
   CapabilityRouteReviewArgs,
@@ -255,8 +256,8 @@ export class ApiClient {
     return this.callTool("developer_workbench", args, options);
   }
 
-  async capabilityDiscover(args: CapabilityDiscoverArgs = {}, options?: ClientRequestOptions) {
-    return this.callTool("capability_discover", args, options);
+  async capabilityDiscover(args: CapabilityDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityDiscoverResult>> {
+    return this.callTool<CapabilityDiscoverResult>("capability_discover", args, options);
   }
 
   async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions) {

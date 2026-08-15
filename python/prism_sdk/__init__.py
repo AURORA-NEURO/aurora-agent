@@ -73,6 +73,8 @@ from .authoring import (
 from .bed import BedAdapter, BedFinding, BedParseError, BedParseResult, parse_bed
 from .client import Client, ClientConfig
 from .capability import (
+    CapabilityGroupReport,
+    CapabilityMatchReport,
     CapabilityQuery,
     CapabilityRouteCoverage,
     CapabilityRouteNeed,
@@ -81,6 +83,8 @@ from .capability import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
+    CapabilitySearchReport,
+    capability_discover_report,
     capability_route_report,
     capability_route_review_report,
 )
@@ -368,6 +372,9 @@ __all__ = [
     "ConformanceLevel",
     "CalibrationObservation",
     "CapabilityQuery",
+    "CapabilityGroupReport",
+    "CapabilityMatchReport",
+    "CapabilitySearchReport",
     "CapabilityRouteNeed",
     "CapabilityRouteNeedReport",
     "CapabilityRouteCoverage",
@@ -377,6 +384,7 @@ __all__ = [
     "CapabilityRouteRequest",
     "capability_route_report",
     "capability_route_review_report",
+    "capability_discover_report",
     "CONTEXT_REQUEST_SCHEMA",
     "MAX_CONTEXT_HANDLE_BYTES",
     "MAX_CONTEXT_PATH_BYTES",

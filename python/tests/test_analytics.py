@@ -14,12 +14,16 @@ from prism_sdk import (
     AsyncClient,
     AsyncWorkspace,
     CalibrationObservation,
+    CapabilityGroupReport,
+    CapabilityMatchReport,
     CapabilityQuery,
+    CapabilitySearchReport,
     CapabilityRouteReport,
     CapabilityRouteNeed,
     CapabilityRouteRequest,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
+    capability_discover_report,
     capability_route_report,
     capability_route_review_report,
     Client,
@@ -136,6 +140,44 @@ def route_review_payload() -> dict:
             "valid": True,
             "fully_checked": True,
             "reports": [],
+        },
+    }
+
+
+def capability_discover_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "capability_discover",
+        "capability_schema_version": "bioprism-devplat-capability/0.1",
+        "schema_version": "bioprism-devplat-capability/0.1",
+        "catalog_digest": "c" * 64,
+        "total_groups": 1,
+        "query": {"query": "oncology", "max_items": 5, "include_tools": True},
+        "result_count": 1,
+        "matches": [
+            {
+                "group": {
+                    "id": "oncology",
+                    "domains": ["oncology"],
+                    "crates": ["bioprism-onco"],
+                    "mcp_tools": ["onco_response_assess"],
+                    "cli_entrypoints": ["bioprism onco"],
+                    "python_artifacts": ["prism_sdk.onco"],
+                    "status": "implemented",
+                },
+                "score": 640,
+                "matched_fields": ["domains", "mcp_tools"],
+                "matched_tools": ["onco_response_assess"],
+                "tool_schemas": [
+                    {"name": "onco_response_assess", "inputSchema": {"type": "object"}}
+                ],
+            }
+        ],
+        "schema_attachment": {
+            "requested": True,
+            "returned": 1,
+            "missing": [],
+            "authoritative_source": "tools/list definition set",
         },
     }
 
@@ -387,6 +429,20 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(report.candidate_domains, ("oncology",))
         self.assertEqual(report.to_dict()["route_id"], "r" * 64)
 
+    def test_capability_discover_report_preserves_cross_domain_context(self) -> None:
+        report = CapabilitySearchReport.from_wire(capability_discover_payload())
+        self.assertIsInstance(report.matches[0], CapabilityMatchReport)
+        self.assertIsInstance(report.matches[0].group, CapabilityGroupReport)
+        self.assertEqual(report.domains, ("oncology",))
+        self.assertEqual(report.tools, ("onco_response_assess",))
+        self.assertEqual(len(report.matches[0].tool_schemas), 1)
+
+    def test_capability_discover_report_extracts_http_projection(self) -> None:
+        report = capability_discover_report(
+            {"ok": True, "mcp": {"result": {"structuredContent": capability_discover_payload()}}}
+        )
+        self.assertEqual(report.catalog_digest, "c" * 64)
+
     def test_capability_route_report_extracts_http_json_text_projection(self) -> None:
         envelope = {
             "ok": True,
@@ -477,6 +533,22 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(result["echo"]["query"], "oncology")
         self.assertEqual(result["echo"]["include_tools"], False)
 
+    def test_sync_workspace_typed_capability_discovery_report(self) -> None:
+        with patch.object(
+            Workspace, "capability_discover", return_value=capability_discover_payload()
+        ) as discover:
+            report = Workspace(None).capability_discover_report(query="oncology")  # type: ignore[arg-type]
+        self.assertEqual(report.domains, ("oncology",))
+        discover.assert_called_once_with(
+            query="oncology",
+            text=None,
+            domain=None,
+            tool=None,
+            group_id=None,
+            max_items=50,
+            include_tools=False,
+        )
+
     def test_sync_workspace_exposes_capability_audit(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).capability_audit(include_groups=False)
@@ -545,6 +617,27 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             result = await AsyncWorkspace(client).capability_discover(domain="release", max_items=2)
         self.assertEqual(result["echo"]["domain"], "release")
         self.assertEqual(result["echo"]["max_items"], 2)
+
+    async def test_async_workspace_typed_capability_discovery_report(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "capability_discover",
+            new_callable=AsyncMock,
+            return_value=capability_discover_payload(),
+        ) as discover:
+            report = await AsyncWorkspace(None).capability_discover_report(  # type: ignore[arg-type]
+                query="oncology"
+            )
+        self.assertEqual(report.tools, ("onco_response_assess",))
+        discover.assert_awaited_once_with(
+            query="oncology",
+            text=None,
+            domain=None,
+            tool=None,
+            group_id=None,
+            max_items=50,
+            include_tools=False,
+        )
 
     async def test_async_workspace_exposes_capability_audit(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

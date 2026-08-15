@@ -393,6 +393,37 @@ export interface CapabilityAuditArgs extends JsonObject {
   include_groups?: boolean;
 }
 
+export interface CapabilityGroupResult extends JsonObject {
+  id: string;
+  domains: string[];
+  crates: string[];
+  mcp_tools: string[];
+  cli_entrypoints: string[];
+  python_artifacts: string[];
+  status: string;
+}
+
+export interface CapabilityMatchResult extends JsonObject {
+  group: CapabilityGroupResult;
+  score: number;
+  matched_fields: string[];
+  matched_tools: string[];
+  tool_schemas?: JsonObject[];
+}
+
+export interface CapabilityDiscoverResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_discover";
+  capability_schema_version: string;
+  schema_version: string;
+  catalog_digest: string;
+  total_groups: number;
+  query: JsonObject;
+  result_count: number;
+  matches: CapabilityMatchResult[];
+  schema_attachment: JsonObject;
+}
+
 export interface CapabilityRouteNeed extends JsonObject {
   id: string;
   query?: string;

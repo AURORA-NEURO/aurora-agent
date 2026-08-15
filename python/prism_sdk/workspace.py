@@ -17,12 +17,14 @@ from .biological import AdapterPlanRequest
 from .bioql import BioQlCompileRequest
 from .client import Client
 from .capability import (
+    CapabilitySearchReport,
     CapabilityQuery,
     CapabilityRouteNeed,
     CapabilityRouteReport,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
+    capability_discover_report,
     capability_route_report,
     capability_route_review_report,
 )
@@ -350,6 +352,31 @@ class Workspace:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return self.tool("capability_audit", {"include_groups": include_groups})
+
+    def capability_discover_report(
+        self,
+        *,
+        query: CapabilityQuery | str | None = None,
+        text: str | None = None,
+        domain: str | None = None,
+        tool: str | None = None,
+        group_id: str | None = None,
+        max_items: int = 50,
+        include_tools: bool = False,
+    ) -> CapabilitySearchReport:
+        """Return a validated ranked projection with domains, tools, and schema attachments."""
+
+        return capability_discover_report(
+            self.capability_discover(
+                query=query,
+                text=text,
+                domain=domain,
+                tool=tool,
+                group_id=group_id,
+                max_items=max_items,
+                include_tools=include_tools,
+            )
+        )
 
     def capability_route(
         self,
@@ -1044,6 +1071,31 @@ class AsyncWorkspace:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return await self.tool("capability_audit", {"include_groups": include_groups})
+
+    async def capability_discover_report(
+        self,
+        *,
+        query: CapabilityQuery | str | None = None,
+        text: str | None = None,
+        domain: str | None = None,
+        tool: str | None = None,
+        group_id: str | None = None,
+        max_items: int = 50,
+        include_tools: bool = False,
+    ) -> CapabilitySearchReport:
+        """Async typed ranked projection over the complete capability catalogue."""
+
+        return capability_discover_report(
+            await self.capability_discover(
+                query=query,
+                text=text,
+                domain=domain,
+                tool=tool,
+                group_id=group_id,
+                max_items=max_items,
+                include_tools=include_tools,
+            )
+        )
 
     async def capability_route(
         self,

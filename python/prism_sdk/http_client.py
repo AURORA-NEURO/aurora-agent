@@ -19,6 +19,7 @@ from urllib.parse import quote, urlencode, urlsplit
 
 from .biological import AdapterPlanRequest
 from .capability import (
+    CapabilitySearchReport,
     CapabilityQuery,
     CapabilityRouteNeed,
     CapabilityRouteReport,
@@ -26,6 +27,7 @@ from .capability import (
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
     capability_route_report,
+    capability_discover_report,
     capability_route_review_report,
 )
 from .context_requests import (
@@ -457,6 +459,31 @@ class ApiClient:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return self.call_tool("capability_audit", {"include_groups": include_groups})
+
+    def capability_discover_report(
+        self,
+        *,
+        query: CapabilityQuery | str | None = None,
+        text: str | None = None,
+        domain: str | None = None,
+        tool: str | None = None,
+        group_id: str | None = None,
+        max_items: int = 50,
+        include_tools: bool = False,
+    ) -> CapabilitySearchReport:
+        """Return a validated ranked projection from the HTTP capability catalogue."""
+
+        return capability_discover_report(
+            self.capability_discover(
+                query=query,
+                text=text,
+                domain=domain,
+                tool=tool,
+                group_id=group_id,
+                max_items=max_items,
+                include_tools=include_tools,
+            )
+        )
 
     def capability_route(
         self,
@@ -1156,6 +1183,31 @@ class AsyncApiClient:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return await self.call_tool("capability_audit", {"include_groups": include_groups})
+
+    async def capability_discover_report(
+        self,
+        *,
+        query: CapabilityQuery | str | None = None,
+        text: str | None = None,
+        domain: str | None = None,
+        tool: str | None = None,
+        group_id: str | None = None,
+        max_items: int = 50,
+        include_tools: bool = False,
+    ) -> CapabilitySearchReport:
+        """Async typed ranked projection from the HTTP capability catalogue."""
+
+        return capability_discover_report(
+            await self.capability_discover(
+                query=query,
+                text=text,
+                domain=domain,
+                tool=tool,
+                group_id=group_id,
+                max_items=max_items,
+                include_tools=include_tools,
+            )
+        )
 
     async def capability_route(
         self,

@@ -133,7 +133,8 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
 families without maintaining a fragile partial clone of 122 tool schemas. `capabilityDiscover`
-searches the explicit cross-domain catalogue and can request authoritative schemas for matches;
+searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
+with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` verifies catalogue/schema parity and exposes coverage gaps; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

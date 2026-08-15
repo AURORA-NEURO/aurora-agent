@@ -395,6 +395,142 @@ def capability_route_review_report(value: Mapping[str, Any]) -> CapabilityRouteR
 
 
 @dataclass(frozen=True)
+class CapabilityGroupReport:
+    """Validated cross-domain catalogue metadata for one ranked group."""
+
+    raw: dict[str, Any]
+    id: str
+    domains: tuple[str, ...]
+    crates: tuple[str, ...]
+    mcp_tools: tuple[str, ...]
+    cli_entrypoints: tuple[str, ...]
+    python_artifacts: tuple[str, ...]
+    status: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityGroupReport":
+        raw = _route_mapping("capability group", value)
+        return cls(
+            raw=raw,
+            id=_route_text("capability group id", raw.get("id")),
+            domains=_route_strings("capability group domains", raw.get("domains", [])),
+            crates=_route_strings("capability group crates", raw.get("crates", [])),
+            mcp_tools=_route_strings("capability group mcp_tools", raw.get("mcp_tools", [])),
+            cli_entrypoints=_route_strings(
+                "capability group cli_entrypoints", raw.get("cli_entrypoints", [])
+            ),
+            python_artifacts=_route_strings(
+                "capability group python_artifacts", raw.get("python_artifacts", [])
+            ),
+            status=_route_text("capability group status", raw.get("status")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilityMatchReport:
+    """One deterministic ranked match with its complete cross-domain context."""
+
+    raw: dict[str, Any]
+    group: CapabilityGroupReport
+    score: int
+    matched_fields: tuple[str, ...]
+    matched_tools: tuple[str, ...]
+    tool_schemas: tuple[dict[str, Any], ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityMatchReport":
+        raw = _route_mapping("capability match", value)
+        group = CapabilityGroupReport.from_wire(raw.get("group"))
+        matched_tools = _route_strings("capability matched_tools", raw.get("matched_tools", []))
+        if not set(matched_tools).issubset(set(group.mcp_tools)):
+            raise ArgumentError("capability matched_tools must belong to the matched group")
+        raw_schemas = raw.get("tool_schemas", [])
+        if not isinstance(raw_schemas, Sequence) or isinstance(raw_schemas, (str, bytes)):
+            raise ArgumentError("capability tool_schemas must be an array")
+        tool_schemas = tuple(_route_mapping("capability tool schema", schema) for schema in raw_schemas)
+        return cls(
+            raw=raw,
+            group=group,
+            score=_route_count("capability match score", raw.get("score")),
+            matched_fields=_route_strings(
+                "capability matched_fields", raw.get("matched_fields", [])
+            ),
+            matched_tools=matched_tools,
+            tool_schemas=tool_schemas,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilitySearchReport:
+    """Validated digest-bound search projection over every advertised domain group."""
+
+    raw: dict[str, Any]
+    schema_version: str
+    catalog_digest: str
+    total_groups: int
+    query: dict[str, Any]
+    result_count: int
+    matches: tuple[CapabilityMatchReport, ...]
+    schema_attachment: dict[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilitySearchReport":
+        raw = _route_mapping("capability discovery report", value)
+        if raw.get("ok") is False:
+            raise ArgumentError("capability discovery report is not successful")
+        if raw.get("workflow") != "capability_discover":
+            raise ArgumentError("capability discovery workflow is invalid")
+        raw_matches = raw.get("matches")
+        if not isinstance(raw_matches, Sequence) or isinstance(raw_matches, (str, bytes)):
+            raise ArgumentError("capability discovery matches must be an array")
+        matches = tuple(CapabilityMatchReport.from_wire(match) for match in raw_matches)
+        total_groups = _route_count("capability total_groups", raw.get("total_groups"))
+        result_count = _route_count("capability result_count", raw.get("result_count"))
+        if result_count != len(matches) or result_count > total_groups:
+            raise ArgumentError("capability discovery result counts do not reconcile")
+        group_ids = tuple(match.group.id for match in matches)
+        if len(group_ids) != len(set(group_ids)):
+            raise ArgumentError("capability discovery matches must contain unique groups")
+        return cls(
+            raw=raw,
+            schema_version=_route_text("capability schema_version", raw.get("schema_version")),
+            catalog_digest=_route_text("capability catalog_digest", raw.get("catalog_digest")),
+            total_groups=total_groups,
+            query=_route_mapping("capability discovery query", raw.get("query", {})),
+            result_count=result_count,
+            matches=matches,
+            schema_attachment=_route_mapping(
+                "capability discovery schema_attachment", raw.get("schema_attachment", {})
+            ),
+        )
+
+    @property
+    def domains(self) -> tuple[str, ...]:
+        return tuple(sorted({domain for match in self.matches for domain in match.group.domains}))
+
+    @property
+    def tools(self) -> tuple[str, ...]:
+        return tuple(
+            sorted({tool for match in self.matches for tool in match.matched_tools})
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def capability_discover_report(value: Mapping[str, Any]) -> CapabilitySearchReport:
+    """Parse a direct capability discovery result or an HTTP tool envelope."""
+
+    return CapabilitySearchReport.from_wire(_tool_payload(value, "capability_discover"))
+
+
+@dataclass(frozen=True)
 class CapabilityQuery:
     """Conjunctive filters for the digest-bound workspace capability catalogue."""
 
@@ -519,6 +655,9 @@ class CapabilityRouteRequest:
 
 __all__ = [
     "CapabilityQuery",
+    "CapabilityGroupReport",
+    "CapabilityMatchReport",
+    "CapabilitySearchReport",
     "CapabilityRouteNeed",
     "CapabilityRouteRequest",
     "CapabilityRouteNeedReport",
@@ -528,4 +667,5 @@ __all__ = [
     "CapabilityRouteReviewReport",
     "capability_route_report",
     "capability_route_review_report",
+    "capability_discover_report",
 ]

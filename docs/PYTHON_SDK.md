@@ -113,6 +113,10 @@ invent defaults:
   lifecycle sequence while preserving the raw report.
 - `capability_discover(...)` searches the complete domain catalogue by intent, domain, group, or
   tool and can attach authoritative MCP schemas for the returned routing matches.
+- `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
+  `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
+  ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool
+  schemas. `report.domains` and `report.tools` provide deterministic coverage projections.
 - `capability_audit(include_groups=...)` verifies catalogue/schema parity, input-schema quality,
   coverage gaps, and intentional multi-group membership.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
