@@ -76,6 +76,9 @@ The API crate also exposes a bounded `DeliverySender`/`ApiRouter::deliver_once` 
 workers: successful signed sends are acknowledged, retryable failures advance through the existing
 ten-attempt cap, and permanent or exhausted failures remain pending. Network/TLS and egress policy
 remain outside the dependency-free gateway.
+Delivery pages retain the last failure classification and error for operator inspection, while an
+explicit replay endpoint resets a selected row to attempt one without changing its delivery ID or
+pretending that the receiver accepted it.
 Python now exposes typed inventory pages plus bounded sync/async waits that retain the last live
 job on timeout; TypeScript exposes the same wait contract with abortable polling and a typed timeout
 error. These helpers coordinate every domain mission without claiming durable scheduling.

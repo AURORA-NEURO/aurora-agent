@@ -286,6 +286,9 @@ signals, retry attempts, signatures, and pending counts; the original raw `event
 `deliveries()` methods remain available for forward-compatible payload inspection. `event_stream()`
 parses the bounded SSE snapshot into `SseSnapshot`/`SseEvent` records and preserves `x-next-after`;
 the parser rejects malformed retry fields and NUL-containing IDs before application code sees them.
+Delivery rows also type `state`, `last_error`, and `last_error_retryable`; `replay()` resets selected
+rows to attempt one while preserving their delivery IDs, so an operator can distinguish retryable,
+permanent, and exhausted transport outcomes before choosing recovery.
 
 ## Metrics analytics across domains
 

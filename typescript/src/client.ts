@@ -436,13 +436,17 @@ export class ApiClient {
     return this.deliveryMutation("retry", subscriptionId, deliveryIds, options);
   }
 
+  async replay(subscriptionId: string, deliveryIds: readonly number[], options?: ClientRequestOptions): Promise<DeliveryMutationResponse> {
+    return this.deliveryMutation("replay", subscriptionId, deliveryIds, options);
+  }
+
   async deleteSubscription(subscriptionId: string, options?: ClientRequestOptions): Promise<JsonObject> {
     const id = pathSegment(subscriptionId, "subscription id");
     return this.request("DELETE", `/v1/webhooks/subscriptions/${encodeURIComponent(id)}`, undefined, options);
   }
 
   private async deliveryMutation(
-    operation: "ack" | "retry",
+    operation: "ack" | "retry" | "replay",
     subscriptionId: string,
     deliveryIds: readonly number[],
     options?: ClientRequestOptions,

@@ -522,6 +522,9 @@ impl ApiRouter {
             ("POST", path) if path.ends_with("/retry") => {
                 self.retry_deliveries(&request, &request_id)
             }
+            ("POST", path) if path.ends_with("/replay") => {
+                self.replay_deliveries(&request, &request_id)
+            }
             _ => self.error(404, "not_found", "route does not exist", &request_id),
         };
         self.finish(response, &request_id)
@@ -735,6 +738,8 @@ impl ApiRouter {
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
                     "durable_event_snapshots": self.config.event_state_path.is_some(),
                     "signed_webhook_outbox": true,
+                    "delivery_failure_inspection": true,
+                    "bounded_delivery_replay": true,
                     "grpc": false,
                     "tls": false,
                     "external_delivery_worker": false
@@ -746,6 +751,7 @@ impl ApiRouter {
                     "mission_state_file_bytes": MAX_MISSION_STATE_FILE_BYTES,
                     "persisted_mission_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
                     "event_state_file_bytes": MAX_EVENT_STATE_FILE_BYTES,
+                    "delivery_error_bytes": crate::events::MAX_DELIVERY_ERROR_BYTES,
                     "webhook_filters": MAX_FILTERS
                 }
             }),
@@ -1627,7 +1633,8 @@ impl ApiRouter {
                         "mode": "signed_outbox",
                         "poll": "/v1/webhooks/subscriptions/{id}/deliveries",
                         "ack": "/v1/webhooks/subscriptions/{id}/ack",
-                        "retry": "/v1/webhooks/subscriptions/{id}/retry"
+                        "retry": "/v1/webhooks/subscriptions/{id}/retry",
+                        "replay": "/v1/webhooks/subscriptions/{id}/replay"
                     }
                 }),
             ),
@@ -1701,11 +1708,15 @@ impl ApiRouter {
     }
 
     fn ack_deliveries(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
-        self.delivery_mutation(request, request_id, false)
+        self.delivery_mutation(request, request_id, false, false)
     }
 
     fn retry_deliveries(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
-        self.delivery_mutation(request, request_id, true)
+        self.delivery_mutation(request, request_id, true, false)
+    }
+
+    fn replay_deliveries(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        self.delivery_mutation(request, request_id, false, true)
     }
 
     fn delivery_mutation(
@@ -1713,11 +1724,16 @@ impl ApiRouter {
         request: &HttpRequest,
         request_id: &str,
         retry: bool,
+        replay: bool,
     ) -> HttpResponse {
-        let Some(id) = subscription_id(
-            &request.path_segments(),
-            Some(if retry { "retry" } else { "ack" }),
-        ) else {
+        let operation = if retry {
+            "retry"
+        } else if replay {
+            "replay"
+        } else {
+            "ack"
+        };
+        let Some(id) = subscription_id(&request.path_segments(), Some(operation)) else {
             return self.error(
                 404,
                 "not_found",
@@ -1764,6 +1780,13 @@ impl ApiRouter {
             match events.retry(&id, &ids) {
                 Ok(deliveries) => {
                     HttpResponse::json(200, &json!({ "ok": true, "retried": deliveries }))
+                }
+                Err(error) => self.error(404, "not_found", &error, request_id),
+            }
+        } else if replay {
+            match events.replay(&id, &ids) {
+                Ok(deliveries) => {
+                    HttpResponse::json(200, &json!({ "ok": true, "replayed": deliveries }))
                 }
                 Err(error) => self.error(404, "not_found", &error, request_id),
             }
@@ -1882,7 +1905,11 @@ impl ApiRouter {
                     "/v1/events/stream": { "get": { "responses": { "200": { "description": "bounded Server-Sent Events snapshot" } } } },
                     "/v1/events/persistence": { "get": { "responses": { "200": { "description": "event cursor checkpoint status" } } } },
                     "/v1/events/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded event cursor checkpoint" } } } },
-                    "/v1/webhooks/subscriptions": { "get": { "responses": { "200": { "description": "subscriptions" } } }, "post": { "responses": { "201": { "description": "subscription" } } } }
+                    "/v1/webhooks/subscriptions": { "get": { "responses": { "200": { "description": "subscriptions" } } }, "post": { "responses": { "201": { "description": "subscription" } } } },
+                    "/v1/webhooks/subscriptions/{id}/deliveries": { "get": { "responses": { "200": { "description": "cursor page of inspectable pending deliveries and failure metadata" } } } },
+                    "/v1/webhooks/subscriptions/{id}/ack": { "post": { "responses": { "200": { "description": "idempotent acknowledgement" } } } },
+                    "/v1/webhooks/subscriptions/{id}/retry": { "post": { "responses": { "200": { "description": "advance selected deliveries by one retry attempt" } } } },
+                    "/v1/webhooks/subscriptions/{id}/replay": { "post": { "responses": { "200": { "description": "reset selected deliveries for an explicit bounded replay" } } } }
                 },
                 "x-contract": {
                     "grpc": "not provided by this dependency-free HTTP boundary",
@@ -2593,6 +2620,59 @@ mod tests {
         assert_eq!(deliveries.status, 200);
         let value: Value = serde_json::from_slice(&deliveries.body).unwrap();
         assert_eq!(value["page"]["deliveries"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn webhook_failures_are_inspectable_and_replay_resets_the_attempt_budget() {
+        struct PermanentSender;
+        impl DeliverySender for PermanentSender {
+            fn send(
+                &mut self,
+                _endpoint: &str,
+                _envelope: &Value,
+            ) -> Result<(), crate::events::DeliverySendError> {
+                Err(crate::events::DeliverySendError::permanent(
+                    "operator blocked egress",
+                ))
+            }
+        }
+
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let created = router.handle(request(
+            "POST",
+            "/v1/webhooks/subscriptions",
+            json!({ "id": "replayable", "endpoint": "https://example.test/hook", "secret": "a-secret-key" }),
+        ));
+        assert_eq!(created.status, 201);
+        assert_eq!(
+            router
+                .handle(request("POST", "/v1/tools/modality_catalog", json!({})))
+                .status,
+            200
+        );
+        let report = router.deliver_once(&mut PermanentSender, 10).unwrap();
+        assert_eq!(report.failed, 1);
+        let deliveries = router.handle(request(
+            "GET",
+            "/v1/webhooks/subscriptions/replayable/deliveries?after=0&limit=10",
+            json!({}),
+        ));
+        let deliveries: Value = serde_json::from_slice(&deliveries.body).unwrap();
+        assert_eq!(deliveries["page"]["deliveries"][0]["state"], "failed");
+        assert_eq!(
+            deliveries["page"]["deliveries"][0]["last_error_retryable"],
+            false
+        );
+        let replay = router.handle(request(
+            "POST",
+            "/v1/webhooks/subscriptions/replayable/replay",
+            json!({ "delivery_ids": [1] }),
+        ));
+        assert_eq!(replay.status, 200);
+        let replay: Value = serde_json::from_slice(&replay.body).unwrap();
+        assert_eq!(replay["replayed"][0]["state"], "pending");
+        assert_eq!(replay["replayed"][0]["attempt"], 1);
     }
 
     #[test]

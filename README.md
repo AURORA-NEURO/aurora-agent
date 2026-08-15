@@ -324,6 +324,9 @@ inferring them from an HTTP listener.
 Embedded Rust consumers can plug an egress-controlled `DeliverySender` into
 `ApiRouter::deliver_once(...)` to acknowledge successful signed webhook sends and classify bounded
 retryable/permanent failures without giving the gateway arbitrary network access.
+Delivery pages expose pending, retryable, failed, and exhausted state with the last transport error;
+`POST .../{id}/replay` is an explicit operator reset that preserves the delivery ID, resets the
+attempt budget, and re-signs without claiming delivery.
 The serving path uses one immutable shared router across connection threads, atomically allocates
 request IDs, and clones ready MCP dispatch sessions per request. Mission, event, subscription, and
 delivery state remain independently bounded and synchronized, so unrelated domain calls do not

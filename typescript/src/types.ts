@@ -183,6 +183,9 @@ export interface DeliveryView extends JsonObject {
   delivery_id: number;
   subscription_id: string;
   attempt: number;
+  state: "pending" | "retryable" | "failed" | "exhausted";
+  last_error: string | null;
+  last_error_retryable: boolean | null;
   event_id: number;
   event_type: string;
   signature: string;
@@ -206,6 +209,7 @@ export interface DeliveryMutationResponse extends JsonObject {
   ok: boolean;
   acknowledged?: number[];
   retried?: DeliveryView[];
+  replayed?: DeliveryView[];
 }
 
 export interface EventMetrics extends JsonObject {

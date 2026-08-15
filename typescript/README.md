@@ -79,7 +79,7 @@ if (result.mcp.result?.isError) {
   refusals carry bounded JSON-pointer diagnostics and a schema digest before nested dispatch.
 - `eventStream` parses the gateway's bounded SSE snapshot and returns the `x-next-after` cursor;
   it is deliberately not a long-lived socket or an implicit reconnect loop.
-- Webhook delivery is poll/send/acknowledge: `deliveries`, `retry`, and `acknowledge` operate on
+- Webhook delivery is poll/send/acknowledge: `deliveries`, `retry`, `replay`, and `acknowledge` operate on
   signed outbox envelopes. The SDK never opens arbitrary outbound connections to subscription
   endpoints.
 

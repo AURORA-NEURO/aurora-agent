@@ -820,6 +820,12 @@ class ApiClient:
         self._subscription_id(subscription_id)
         return self.request("POST", f"/v1/webhooks/subscriptions/{subscription_id}/retry", {"delivery_ids": list(delivery_ids)})
 
+    def replay(self, subscription_id: str, delivery_ids: Sequence[int]) -> dict[str, Any]:
+        """Reset selected pending deliveries for an explicit bounded replay."""
+
+        self._subscription_id(subscription_id)
+        return self.request("POST", f"/v1/webhooks/subscriptions/{subscription_id}/replay", {"delivery_ids": list(delivery_ids)})
+
     def delete_subscription(self, subscription_id: str) -> dict[str, Any]:
         self._subscription_id(subscription_id)
         return self.request("DELETE", f"/v1/webhooks/subscriptions/{subscription_id}")
@@ -997,6 +1003,11 @@ class AsyncApiClient:
         """Async typed cursor page over pending signed deliveries."""
 
         return await asyncio.to_thread(self.client.delivery_page, subscription_id, after=after, limit=limit)
+
+    async def replay(self, subscription_id: str, delivery_ids: Sequence[int]) -> dict[str, Any]:
+        """Async explicit bounded replay that resets selected delivery attempts."""
+
+        return await asyncio.to_thread(self.client.replay, subscription_id, delivery_ids)
 
     async def mission_from_route(
         self,

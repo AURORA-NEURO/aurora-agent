@@ -29,6 +29,14 @@ def _non_negative(name: str, value: Any) -> int:
     return value
 
 
+def _optional_bool(name: str, value: Any) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ArgumentError(f"{name} must be a boolean or null")
+    return value
+
+
 @dataclass(frozen=True)
 class ApiEvent:
     """One retained, sequence-addressed event emitted by the HTTP boundary."""
@@ -158,12 +166,15 @@ class EventPersistenceStatus:
 
 @dataclass(frozen=True)
 class DeliveryView:
-    """One signed webhook outbox delivery, including its retry attempt."""
+    """One signed webhook delivery plus operator-visible failure and replay state."""
 
     raw: dict[str, Any]
     delivery_id: int
     subscription_id: str
     attempt: int
+    state: str
+    last_error: str | None
+    last_error_retryable: bool | None
     event_id: int
     event_type: str
     signature: str
@@ -177,6 +188,15 @@ class DeliveryView:
             delivery_id=_non_negative("delivery id", raw.get("delivery_id")),
             subscription_id=_text("delivery subscription_id", raw.get("subscription_id")),
             attempt=_non_negative("delivery attempt", raw.get("attempt")),
+            state=_text("delivery state", raw.get("state")),
+            last_error=(
+                None
+                if raw.get("last_error") is None
+                else _text("delivery last_error", raw.get("last_error"))
+            ),
+            last_error_retryable=_optional_bool(
+                "delivery last_error_retryable", raw.get("last_error_retryable")
+            ),
             event_id=_non_negative("delivery event_id", raw.get("event_id")),
             event_type=_text("delivery event_type", raw.get("event_type")),
             signature=_text("delivery signature", raw.get("signature")),

@@ -20,6 +20,7 @@ pub const MAX_RETRY_ATTEMPTS: u32 = 10;
 pub const EVENT_STATE_SCHEMA_VERSION: u64 = 1;
 pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_DELIVERY_WORKER_BATCH: usize = 100;
+pub const MAX_DELIVERY_ERROR_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApiEvent {
@@ -64,6 +65,9 @@ pub struct DeliveryView {
     pub delivery_id: u64,
     pub subscription_id: String,
     pub attempt: u32,
+    pub state: String,
+    pub last_error: Option<String>,
+    pub last_error_retryable: Option<bool>,
     pub event_id: u64,
     pub event_type: String,
     pub signature: String,
@@ -107,6 +111,7 @@ pub struct DeliveryRunReport {
     pub retried: usize,
     pub failed: usize,
     pub exhausted: usize,
+    pub pending: usize,
     pub failures: Vec<DeliveryFailure>,
 }
 
@@ -149,6 +154,8 @@ struct Subscription {
 #[derive(Debug, Clone)]
 struct PendingDelivery {
     envelope: WebhookEnvelope,
+    last_error: Option<String>,
+    last_error_retryable: Option<bool>,
 }
 
 pub struct EventLog {
@@ -548,6 +555,42 @@ impl EventLog {
         Ok(retried)
     }
 
+    /// Reset selected deliveries for an operator-approved replay.
+    ///
+    /// Replay keeps the delivery ID stable for receiver-side idempotency, resets the attempt
+    /// budget to one, re-signs the envelope, and clears the previous transport failure. It never
+    /// acknowledges the row or creates an unbounded copy in the outbox.
+    pub fn replay(
+        &mut self,
+        subscription_id: &str,
+        ids: &[u64],
+    ) -> Result<Vec<DeliveryView>, String> {
+        self.require_subscription(subscription_id)?;
+        if ids.len() > 1000 {
+            return Err("a single replay request may contain at most 1000 ids".into());
+        }
+        let secret = self
+            .subscriptions
+            .get(subscription_id)
+            .map(|subscription| subscription.secret.clone())
+            .ok_or_else(|| format!("unknown subscription {subscription_id:?}"))?;
+        let mut replayed = Vec::new();
+        for id in ids {
+            let Some(delivery) = self.deliveries.get_mut(id) else {
+                continue;
+            };
+            if delivery.envelope.subscription_id != subscription_id {
+                continue;
+            }
+            delivery.envelope.attempt = 1;
+            delivery.last_error = None;
+            delivery.last_error_retryable = None;
+            delivery.envelope.signature = sign_envelope(&secret, &delivery.envelope);
+            replayed.push(delivery_view(delivery));
+        }
+        Ok(replayed)
+    }
+
     pub fn metrics(&self) -> EventMetrics {
         EventMetrics {
             retained_events: self.events.len(),
@@ -586,6 +629,7 @@ impl EventLog {
             retried: 0,
             failed: 0,
             exhausted: 0,
+            pending: 0,
             failures: Vec::new(),
         };
         for subscription in subscriptions {
@@ -610,8 +654,12 @@ impl EventLog {
                             subscription_id: subscription.id.clone(),
                             attempt: delivery.attempt,
                             retryable: error.retryable,
-                            error: error.message,
+                            error: bounded_error(error.message),
                         };
+                        if let Some(pending) = self.deliveries.get_mut(&delivery.delivery_id) {
+                            pending.last_error = Some(failure.error.clone());
+                            pending.last_error_retryable = Some(failure.retryable);
+                        }
                         if failure.retryable && delivery.attempt < MAX_RETRY_ATTEMPTS {
                             self.retry(&subscription.id, &[delivery.delivery_id])?;
                             report.retried += 1;
@@ -625,6 +673,7 @@ impl EventLog {
                 }
             }
         }
+        report.pending = self.deliveries.len();
         Ok(report)
     }
 
@@ -673,8 +722,14 @@ impl EventLog {
                 self.dropped_deliveries = self.dropped_deliveries.saturating_add(1);
             }
         }
-        self.deliveries
-            .insert(delivery_id, PendingDelivery { envelope });
+        self.deliveries.insert(
+            delivery_id,
+            PendingDelivery {
+                envelope,
+                last_error: None,
+                last_error_retryable: None,
+            },
+        );
         Ok(())
     }
 
@@ -692,11 +747,39 @@ fn delivery_view(delivery: &PendingDelivery) -> DeliveryView {
         delivery_id: delivery.envelope.delivery_id,
         subscription_id: delivery.envelope.subscription_id.clone(),
         attempt: delivery.envelope.attempt,
+        state: delivery_state(delivery),
+        last_error: delivery.last_error.clone(),
+        last_error_retryable: delivery.last_error_retryable,
         event_id: delivery.envelope.event.id,
         event_type: delivery.envelope.event.event_type.clone(),
         signature: delivery.envelope.signature.clone(),
         envelope: serde_json::to_value(&delivery.envelope).unwrap_or_else(|_| json!({})),
     }
+}
+
+fn delivery_state(delivery: &PendingDelivery) -> String {
+    match delivery.last_error_retryable {
+        None => "pending".into(),
+        Some(false) => "failed".into(),
+        Some(true) if delivery.envelope.attempt >= MAX_RETRY_ATTEMPTS => "exhausted".into(),
+        Some(true) => "retryable".into(),
+    }
+}
+
+fn bounded_error(message: String) -> String {
+    if message.len() <= MAX_DELIVERY_ERROR_BYTES {
+        return message;
+    }
+    let prefix_limit = MAX_DELIVERY_ERROR_BYTES.saturating_sub(16);
+    let mut bounded = String::new();
+    for character in message.chars() {
+        if bounded.len().saturating_add(character.len_utf8()) > prefix_limit {
+            break;
+        }
+        bounded.push(character);
+    }
+    bounded.push_str("… [truncated]");
+    bounded
 }
 
 fn sign_envelope(secret: &[u8], envelope: &WebhookEnvelope) -> String {
@@ -943,9 +1026,19 @@ mod tests {
         let report = log.deliver_once(&mut PermanentSender, 1).unwrap();
         assert_eq!(report.failed, 1);
         assert_eq!(report.retried, 0);
+        assert_eq!(report.pending, 1);
+        let page = log.deliveries("permanent", 0, 10).unwrap();
+        assert_eq!(page.deliveries.len(), 1);
+        assert_eq!(page.deliveries[0].state, "failed");
         assert_eq!(
-            log.deliveries("permanent", 0, 10).unwrap().deliveries.len(),
-            1
+            page.deliveries[0].last_error,
+            Some("certificate rejected".into())
         );
+        assert_eq!(page.deliveries[0].last_error_retryable, Some(false));
+        let replayed = log.replay("permanent", &[1]).unwrap();
+        assert_eq!(replayed.len(), 1);
+        assert_eq!(replayed[0].state, "pending");
+        assert_eq!(replayed[0].attempt, 1);
+        assert_eq!(replayed[0].last_error, None);
     }
 }

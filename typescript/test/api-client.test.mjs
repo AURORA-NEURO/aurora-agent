@@ -220,9 +220,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
 test("client parses cursor SSE and validates webhook mutations", async () => {
   const client = new ApiClient({
     baseUrl: "https://example.test",
-    fetch: async () => new Response("id: 4\nevent: tool.completed\ndata: {\"ok\":true}\n\nevent: cursor_gap\ndata: {\"after\":0}\n\n", {
+    fetch: async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/deliveries")) {
+        return jsonResponse({ ok: true, page: { deliveries: [{ delivery_id: 1, subscription_id: "sub", attempt: 1, state: "failed", last_error: "blocked", last_error_retryable: false, event_id: 2, event_type: "tool.completed", signature: "sha256=x", envelope: { delivery_id: 1, subscription_id: "sub", attempt: 1, event: { id: 2, event_type: "tool.completed", subject: "tool", request_id: "req", payload: {} }, signature: "sha256=x" } }], after: 0, next_after: 1, pending_count: 1, dropped_deliveries: 0 } });
+      }
+      if (path.endsWith("/replay") && init.method === "POST") {
+        return jsonResponse({ ok: true, replayed: [{ delivery_id: 1, subscription_id: "sub", attempt: 1, state: "pending", last_error: null, last_error_retryable: null, event_id: 2, event_type: "tool.completed", signature: "sha256=x", envelope: {} }] });
+      }
+      return new Response("id: 4\nevent: tool.completed\ndata: {\"ok\":true}\n\nevent: cursor_gap\ndata: {\"after\":0}\n\n", {
       headers: { "content-type": "text/event-stream", "x-next-after": "4" },
-    }),
+      });
+    },
   });
   const snapshot = await client.eventStream(0, 10);
   assert.equal(snapshot.nextAfter, 4);
@@ -230,6 +239,10 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   assert.deepEqual(JSON.parse(snapshot.events[1].data), { after: 0 });
   assert.deepEqual(parseSse("data: a\ndata: b\n\n"), [{ data: "a\nb" }]);
   assert.throws(() => parseSse("retry: nope\n\n"), /retry/);
+  const deliveries = await client.deliveries("sub");
+  assert.equal(deliveries.page.deliveries[0].state, "failed");
+  const replayed = await client.replay("sub", [1]);
+  assert.equal(replayed.replayed[0].state, "pending");
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
 });
 

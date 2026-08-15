@@ -38,6 +38,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET .../{id}/deliveries` | Poll signed pending envelopes by delivery cursor |
 | `POST .../{id}/retry` | Increment an attempt and recompute the signature, bounded at ten attempts |
 | `POST .../{id}/ack` | Idempotently remove acknowledged deliveries |
+| `POST .../{id}/replay` | Reset selected deliveries to attempt one after operator review |
 | `DELETE .../{id}` | Remove a subscription and its pending outbox |
 
 REST and MCP calls share the same in-process `bioprism-mcp::Server`. Every tool call emits a
@@ -152,6 +153,11 @@ Embedded Rust deployments can use `bioprism_api::DeliverySender` and
 already-signed envelope, while the router acknowledges successes, advances retryable attempts up
 to ten, and leaves permanent/exhausted failures pending with a typed `DeliveryRunReport`. The
 callback still owns HTTP/TLS, egress policy, and transport classification.
+Each delivery row also carries `state` (`pending`, `retryable`, `failed`, or `exhausted`),
+`last_error`, and `last_error_retryable`. A failed row remains pending for inspection; replay is
+an explicit bounded reset that keeps the delivery ID stable for receiver idempotency, resets the
+attempt to one, re-signs the envelope, and clears the prior failure. It never creates an
+unbounded duplicate or treats operator intent as a successful send.
 
 ## Explicit nonclaims
 

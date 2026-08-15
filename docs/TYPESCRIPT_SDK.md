@@ -158,6 +158,8 @@ const subscription = await api.subscribe(
 const deliveries = await api.deliveries(subscription.subscription.id);
 // An operator-owned worker sends the signed envelope, then acknowledges only accepted ids.
 await api.acknowledge(subscription.subscription.id, deliveries.page.deliveries.map((d) => d.delivery_id));
+// Explicit operator recovery keeps delivery IDs stable and resets selected attempts.
+await api.replay(subscription.subscription.id, deliveries.page.deliveries.map((d) => d.delivery_id));
 ```
 
 The SSE route is a bounded snapshot, not a streaming connection. `eventStream` returns the raw

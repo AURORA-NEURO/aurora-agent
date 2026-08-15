@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, DeliveryPage, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -83,6 +83,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
+        elif self.path.endswith("/replay"):
+            self._send(200, {"ok": True, "replayed": [{"delivery_id": 1, "subscription_id": "sub", "attempt": 1, "state": "pending", "last_error": None, "last_error_retryable": None, "event_id": 2, "event_type": "tool.completed", "signature": "sha256=x", "envelope": {}}]})
         else:
             self._send(422, {"ok": False, "error": {"code": "refused"}})
 
@@ -101,6 +103,34 @@ class HttpApiClientTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=2)
+
+    def test_delivery_failure_state_is_typed_and_replay_is_explicit(self) -> None:
+        page = DeliveryPage.from_wire({
+            "ok": True,
+            "page": {
+                "deliveries": [{
+                    "delivery_id": 1,
+                    "subscription_id": "sub",
+                    "attempt": 1,
+                    "state": "failed",
+                    "last_error": "blocked",
+                    "last_error_retryable": False,
+                    "event_id": 2,
+                    "event_type": "tool.completed",
+                    "signature": "sha256=x",
+                    "envelope": {},
+                }],
+                "after": 0,
+                "next_after": 1,
+                "pending_count": 1,
+                "dropped_deliveries": 0,
+            },
+        })
+        self.assertEqual(page.deliveries[0].state, "failed")
+        self.assertEqual(page.deliveries[0].last_error, "blocked")
+        self.assertIs(page.deliveries[0].last_error_retryable, False)
+        replayed = ApiClient(self.base_url).replay("sub", [1])
+        self.assertEqual(replayed["replayed"][0]["state"], "pending")
 
     def test_http_health_tools_events_and_structured_errors(self) -> None:
         client = ApiClient(self.base_url, bearer_token="0123456789abcdef")
@@ -259,6 +289,7 @@ class HttpApiClientTests(unittest.TestCase):
 
         async def run() -> None:
             self.assertTrue((await client.health())["ok"])
+            self.assertEqual((await client.replay("sub", [1]))["replayed"][0]["state"], "pending")
             catalogue = await client.tool_catalogue()
             self.assertEqual((await client.plan_tool("echo", {"value": 5}, catalogue=catalogue)).tool, "echo")
             self.assertEqual((await client.tool_checked("echo", {"value": 5}, catalogue=catalogue))["mcp"]["result"]["value"], 5)
