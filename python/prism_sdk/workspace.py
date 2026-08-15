@@ -98,7 +98,17 @@ from .safety import (
     safety_posture_report,
     safety_release_gate_report,
 )
-from .hub import HubSearchArgs, HubSearchReport, hub_search_report
+from .hub import (
+    HubLockArgs,
+    HubLockReport,
+    HubResolveArgs,
+    HubResolveReport,
+    HubSearchArgs,
+    HubSearchReport,
+    hub_lock_report,
+    hub_resolve_report,
+    hub_search_report,
+)
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 
@@ -692,6 +702,40 @@ class Workspace:
         """Return typed matches, near misses, facet reasons, and provenance."""
 
         return hub_search_report(self.hub_search(request))
+
+    def hub_resolve(
+        self,
+        request: HubResolveArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve one federated pack while retaining exact subject and provenance."""
+
+        normalized = request if isinstance(request, HubResolveArgs) else HubResolveArgs.from_wire(request)
+        return self.tool("hub_resolve", normalized.to_mcp_arguments())
+
+    def hub_resolve_report(
+        self,
+        request: HubResolveArgs | Mapping[str, Any],
+    ) -> HubResolveReport:
+        """Return typed resolution subject, authority, freshness, policy, and lifecycle notes."""
+
+        return hub_resolve_report(self.hub_resolve(request))
+
+    def hub_lock(
+        self,
+        request: HubLockArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve a bounded transitive dependency closure with required-by provenance."""
+
+        normalized = request if isinstance(request, HubLockArgs) else HubLockArgs.from_wire(request)
+        return self.tool("hub_lock", normalized.to_mcp_arguments())
+
+    def hub_lock_report(
+        self,
+        request: HubLockArgs | Mapping[str, Any],
+    ) -> HubLockReport:
+        """Return typed lock entries, digest provenance, lifecycle notes, and omission counts."""
+
+        return hub_lock_report(self.hub_lock(request))
 
     def oracle_combine(
         self,
@@ -1653,6 +1697,40 @@ class AsyncWorkspace:
         """Return typed async federated hub-search evidence."""
 
         return hub_search_report(await self.hub_search(request))
+
+    async def hub_resolve(
+        self,
+        request: HubResolveArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.hub_resolve`."""
+
+        normalized = request if isinstance(request, HubResolveArgs) else HubResolveArgs.from_wire(request)
+        return await self.tool("hub_resolve", normalized.to_mcp_arguments())
+
+    async def hub_resolve_report(
+        self,
+        request: HubResolveArgs | Mapping[str, Any],
+    ) -> HubResolveReport:
+        """Return typed async federated resolution evidence."""
+
+        return hub_resolve_report(await self.hub_resolve(request))
+
+    async def hub_lock(
+        self,
+        request: HubLockArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.hub_lock`."""
+
+        normalized = request if isinstance(request, HubLockArgs) else HubLockArgs.from_wire(request)
+        return await self.tool("hub_lock", normalized.to_mcp_arguments())
+
+    async def hub_lock_report(
+        self,
+        request: HubLockArgs | Mapping[str, Any],
+    ) -> HubLockReport:
+        """Return typed async dependency-lock evidence."""
+
+        return hub_lock_report(await self.hub_lock(request))
 
     async def oracle_combine(
         self,

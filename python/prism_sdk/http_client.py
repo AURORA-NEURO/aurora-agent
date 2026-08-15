@@ -99,7 +99,17 @@ from .safety import (
     safety_posture_report,
     safety_release_gate_report,
 )
-from .hub import HubSearchArgs, HubSearchReport, hub_search_report
+from .hub import (
+    HubLockArgs,
+    HubLockReport,
+    HubResolveArgs,
+    HubResolveReport,
+    HubSearchArgs,
+    HubSearchReport,
+    hub_lock_report,
+    hub_resolve_report,
+    hub_search_report,
+)
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
@@ -876,6 +886,40 @@ class ApiClient:
         """Return typed HTTP federated hub-search evidence."""
 
         return hub_search_report(self.hub_search(request))
+
+    def hub_resolve(
+        self,
+        request: HubResolveArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve one federated pack through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubResolveArgs) else HubResolveArgs.from_wire(request)
+        return self.call_tool("hub_resolve", normalized.to_mcp_arguments())
+
+    def hub_resolve_report(
+        self,
+        request: HubResolveArgs | Mapping[str, Any],
+    ) -> HubResolveReport:
+        """Return typed HTTP federated resolution evidence."""
+
+        return hub_resolve_report(self.hub_resolve(request))
+
+    def hub_lock(
+        self,
+        request: HubLockArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve a bounded dependency closure through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubLockArgs) else HubLockArgs.from_wire(request)
+        return self.call_tool("hub_lock", normalized.to_mcp_arguments())
+
+    def hub_lock_report(
+        self,
+        request: HubLockArgs | Mapping[str, Any],
+    ) -> HubLockReport:
+        """Return typed HTTP dependency-lock evidence."""
+
+        return hub_lock_report(self.hub_lock(request))
 
     def biocapability_evidence_audit(
         self,
@@ -1881,6 +1925,40 @@ class AsyncApiClient:
         """Return typed async HTTP federated hub-search evidence."""
 
         return hub_search_report(await self.hub_search(request))
+
+    async def hub_resolve(
+        self,
+        request: HubResolveArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.hub_resolve`."""
+
+        normalized = request if isinstance(request, HubResolveArgs) else HubResolveArgs.from_wire(request)
+        return await self.call_tool("hub_resolve", normalized.to_mcp_arguments())
+
+    async def hub_resolve_report(
+        self,
+        request: HubResolveArgs | Mapping[str, Any],
+    ) -> HubResolveReport:
+        """Return typed async HTTP federated resolution evidence."""
+
+        return hub_resolve_report(await self.hub_resolve(request))
+
+    async def hub_lock(
+        self,
+        request: HubLockArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.hub_lock`."""
+
+        normalized = request if isinstance(request, HubLockArgs) else HubLockArgs.from_wire(request)
+        return await self.call_tool("hub_lock", normalized.to_mcp_arguments())
+
+    async def hub_lock_report(
+        self,
+        request: HubLockArgs | Mapping[str, Any],
+    ) -> HubLockReport:
+        """Return typed async HTTP dependency-lock evidence."""
+
+        return hub_lock_report(await self.hub_lock(request))
 
     async def biocapability_evidence_audit(
         self,

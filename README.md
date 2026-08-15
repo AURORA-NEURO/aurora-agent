@@ -361,12 +361,10 @@ delegation with reserve-protected accounting,
 `policy_screen` enforces caller-supplied policy rules before selection and preserves typed
 refusals, `safety_posture` reports section-13 threat populations without claiming runtime
 enforcement, and `safety_release_gate` applies the complete dual-use risk gate with unrated dimensions
-still blocking, `hub_search` performs bounded federated exact-facet discovery with authority and
-freshness provenance, `measurement_compare` checks standards declarations without silent unit or
-ontology coercion, and `measurement_compare` returns typed conversion receipts and first blocking
-reasons without silent unit or ontology coercion; `hub_search` returns typed exact-facet matches,
-near-miss reasons, authority, tier, digest, and freshness without pretending lexical search is
-semantic ranking; `governance_schema_check` checks the shipped schema contracts,
+still blocking, `hub_search` performs bounded federated exact-facet discovery with typed authority,
+tier, digest, freshness, and near-miss provenance, `measurement_compare` checks standards
+declarations without silent unit or ontology coercion and returns typed conversion receipts and
+first blocking reasons; `governance_schema_check` checks the shipped schema contracts,
 `medical_boundary_check` admits research use cases and structurally refuses clinical outputs,
 `tabular_ingest` runs the real CSV/TSV adapter with independent conformance and loss accounting,
 `observed_world_declare` seals pinned observed-world declarations, `world_claim_check` enforces

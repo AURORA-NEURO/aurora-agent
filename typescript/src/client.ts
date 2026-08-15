@@ -34,6 +34,10 @@ import type {
   SafetyPostureResult,
   HubSearchArgs,
   HubSearchResult,
+  HubResolveArgs,
+  HubResolveResult,
+  HubLockArgs,
+  HubLockResult,
   MeasurementCompareArgs,
   MeasurementCompareResult,
   OpsAcceptanceArgs,
@@ -331,6 +335,14 @@ export class ApiClient {
 
   async hubSearch(args: HubSearchArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubSearchResult>> {
     return this.callTool<HubSearchResult>("hub_search", args, options);
+  }
+
+  async hubResolve(args: HubResolveArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubResolveResult>> {
+    return this.callTool<HubResolveResult>("hub_resolve", args, options);
+  }
+
+  async hubLock(args: HubLockArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubLockResult>> {
+    return this.callTool<HubLockResult>("hub_lock", args, options);
   }
 
   async measurementCompare(args: MeasurementCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MeasurementCompareResult>> {

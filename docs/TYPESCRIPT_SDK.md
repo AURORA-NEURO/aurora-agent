@@ -193,6 +193,10 @@ near-miss exclusions, trust tier, authority provenance, freshness variants, and 
 truncation. Federation and catalog values remain JSON inputs because the Rust hubapi owns their
 serialization and authority validation; the client does not invent registry membership or
 semantic-search claims.
+`hubResolve` and `hubLock` preserve the same federation decisions through typed resolution subjects,
+accepted freshness policy, lifecycle notes, dependency requirement sources, digest provenance, and
+bounded lock omissions. A lock response remains visibly partial when `omitted_entries` is nonzero;
+the client does not infer a complete closure from a capped page.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

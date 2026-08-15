@@ -273,6 +273,11 @@ invent defaults:
   types every match, non-empty facet explanation, near miss, trust tier, namespace authority,
   freshness state, digest, and truncation count; mirror provenance is never collapsed into origin
   authority and omitted exclusions cannot be mistaken for an exhaustive result.
+- `HubResolveArgs`/`hub_resolve(...)` and `HubLockArgs`/`hub_lock(...)` retain exact resolved
+  subjects, digest identity, answering authority, freshness state, accepted policy, lifecycle
+  notes, transitive `required_by` witnesses, and bounded omitted-entry counts. The typed lock
+  parser reconciles every visible entry's name and answerer without pretending a partial lock is a
+  complete dependency closure.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

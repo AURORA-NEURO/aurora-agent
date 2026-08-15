@@ -76,6 +76,10 @@ evidence and bounds, while the report validates non-empty facet explanations, de
 identity, near-miss counts, exact truncation accounting, authority standing, trust tiers, digest
 identity, and all five freshness outcomes. The clients do not turn caller-supplied registry
 membership into verified signatures or lexical facets into semantic similarity.
+`hub_resolve` and `hub_lock` now retain that provenance through the SDK boundary: exact subjects
+and digests, answering authority, freshness policy, lifecycle notes, dependency requirement
+sources, required-by witnesses, and exact omitted-entry accounting remain typed. A bounded lock
+cannot be presented as an exhaustive dependency closure.
 `agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
 deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
 blocking dependent work, bounding output, and refusing side-effect confirmations by default. Serial

@@ -1314,6 +1314,88 @@ export interface HubSearchResult extends JsonObject {
   limitations: string[];
 }
 
+export interface HubResolveArgs extends JsonObject {
+  federation: JsonObject;
+  catalogs: JsonObject[];
+  request: JsonObject;
+}
+
+export interface HubLockArgs extends HubResolveArgs {
+  max_items?: number;
+}
+
+export interface HubFreshnessPolicyResult extends JsonObject {
+  require_authority: boolean;
+  accept_undetermined: boolean;
+  accept_beyond_bound: boolean;
+  max_accepted_lag: number | null;
+}
+
+export type HubLifecycleNoteResult =
+  | { note: "yanked_but_pinned"; reason: string; epoch: number }
+  | { note: "deprecated"; stage: string; replacement: string; reason: string };
+
+export interface HubResolutionSubjectResult extends JsonObject {
+  name: string;
+  version: string;
+  digest: string;
+}
+
+export interface HubResolutionResult extends JsonObject {
+  subject: HubResolutionSubjectResult;
+  provenance: {
+    authority: HubAuthorityResult;
+    freshness: HubFreshnessResult;
+    accepted_under: HubFreshnessPolicyResult;
+    notes: HubLifecycleNoteResult[];
+  };
+}
+
+export interface HubResolveResult extends JsonObject {
+  ok: boolean;
+  resolution: HubResolutionResult;
+  answered_by: string;
+  authoritative: boolean;
+  catalog_count: number;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export type HubVersionRequirementResult =
+  | { req: "exact" | "at_least" | "compatible" | "approximately"; spec: string }
+  | { req: "range"; spec: { low: string; high: string } }
+  | { req: "any" };
+
+export type HubRequirementSourceResult =
+  | { source: "root" }
+  | { source: "pack"; name: string; version: string };
+
+export interface HubRequirementResult extends JsonObject {
+  on: string;
+  req: HubVersionRequirementResult;
+  source: HubRequirementSourceResult;
+}
+
+export interface HubLockEntryResult extends JsonObject {
+  name: string;
+  locked: {
+    resolution: HubResolutionResult;
+    required_by: HubRequirementResult[];
+  };
+}
+
+export interface HubLockResult extends JsonObject {
+  ok: boolean;
+  entry_count: number;
+  fully_authoritative: boolean;
+  answering_registries: string[];
+  remarked_entry_count: number;
+  entries: HubLockEntryResult[];
+  omitted_entries: number;
+  max_items: number;
+  guarantees: string[];
+}
+
 export interface MeasurementCompareArgs extends JsonObject {
   left: JsonObject;
   right: JsonObject;

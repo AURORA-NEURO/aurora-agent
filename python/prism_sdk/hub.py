@@ -58,6 +58,22 @@ def _array_of_mappings(name: str, value: Any) -> tuple[dict[str, Any], ...]:
     return values
 
 
+def _normalize_hub_inputs(
+    federation: Any,
+    catalogs: Any,
+) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
+    if not isinstance(federation, Mapping):
+        raise ArgumentError("federation must be an object")
+    normalized_catalogs = _array_of_mappings("catalogs", catalogs)
+    if len(normalized_catalogs) > HUB_MAX_CATALOGS:
+        raise ArgumentError(f"catalogs must contain at most {HUB_MAX_CATALOGS} catalogs")
+    for index, catalog in enumerate(normalized_catalogs):
+        releases = catalog.get("releases")
+        if isinstance(releases, Mapping) and len(releases) > HUB_MAX_RELEASES:
+            raise ArgumentError(f"catalogs[{index}].releases exceeds {HUB_MAX_RELEASES} releases")
+    return dict(federation), normalized_catalogs
+
+
 def _payload(value: Mapping[str, Any]) -> dict[str, Any]:
     """Extract a structured hub result from direct, MCP, or HTTP output."""
 
@@ -108,6 +124,45 @@ def _payload(value: Mapping[str, Any]) -> dict[str, Any]:
     raise ArgumentError("response does not contain a hub search projection")
 
 
+def _payload_for_keys(
+    value: Mapping[str, Any],
+    required: tuple[str, ...],
+    label: str,
+) -> dict[str, Any]:
+    """Extract a projection for the resolution and lock response families."""
+
+    raw = _route_mapping(f"{label} response", value)
+    if all(key in raw for key in required):
+        return raw
+    envelopes: list[Mapping[str, Any]] = [raw]
+    mcp = raw.get("mcp")
+    if isinstance(mcp, Mapping):
+        envelopes.append(mcp)
+    for envelope in envelopes:
+        result = envelope.get("result")
+        candidates: list[Mapping[str, Any]] = [envelope]
+        if isinstance(result, Mapping):
+            candidates.append(result)
+        for candidate in candidates:
+            structured = candidate.get("structuredContent")
+            if isinstance(structured, Mapping) and all(key in structured for key in required):
+                return dict(structured)
+            content = candidate.get("content")
+            if not isinstance(content, Sequence) or isinstance(content, (str, bytes)):
+                continue
+            for block in content:
+                if not isinstance(block, Mapping) or not isinstance(block.get("text"), str):
+                    continue
+                try:
+                    decoded = json.loads(block["text"])
+                except json.JSONDecodeError as error:
+                    raise ArgumentError(f"{label} response text is not JSON: {error}") from error
+                decoded_mapping = _route_mapping(f"decoded {label} response", decoded)
+                if all(key in decoded_mapping for key in required):
+                    return decoded_mapping
+    raise ArgumentError(f"response does not contain a {label} projection")
+
+
 @dataclass(frozen=True)
 class HubSearchArgs:
     """Bounded search over caller-supplied federation and catalog evidence."""
@@ -124,19 +179,11 @@ class HubSearchArgs:
         query: Mapping[str, Any],
         max_items: int = HUB_DEFAULT_MAX_ITEMS,
     ) -> None:
-        if not isinstance(federation, Mapping):
-            raise ArgumentError("federation must be an object")
         if not isinstance(query, Mapping):
             raise ArgumentError("query must be an object")
-        normalized_catalogs = _array_of_mappings("catalogs", catalogs)
-        if len(normalized_catalogs) > HUB_MAX_CATALOGS:
-            raise ArgumentError(f"catalogs must contain at most {HUB_MAX_CATALOGS} catalogs")
-        for index, catalog in enumerate(normalized_catalogs):
-            releases = catalog.get("releases")
-            if isinstance(releases, Mapping) and len(releases) > HUB_MAX_RELEASES:
-                raise ArgumentError(f"catalogs[{index}].releases exceeds {HUB_MAX_RELEASES} releases")
+        normalized_federation, normalized_catalogs = _normalize_hub_inputs(federation, catalogs)
         _bounded_max_items("max_items", max_items)
-        object.__setattr__(self, "federation", dict(federation))
+        object.__setattr__(self, "federation", normalized_federation)
         object.__setattr__(self, "catalogs", normalized_catalogs)
         object.__setattr__(self, "query", dict(query))
         object.__setattr__(self, "max_items", max_items)
@@ -156,6 +203,84 @@ class HubSearchArgs:
             "federation": dict(self.federation),
             "catalogs": [dict(catalog) for catalog in self.catalogs],
             "query": dict(self.query),
+            "max_items": self.max_items,
+        }
+
+
+@dataclass(frozen=True)
+class HubResolveArgs:
+    """One federated resolution request with explicit lifecycle and freshness policy JSON."""
+
+    federation: Mapping[str, Any]
+    catalogs: tuple[Mapping[str, Any], ...]
+    request: Mapping[str, Any]
+
+    def __init__(
+        self,
+        federation: Mapping[str, Any],
+        catalogs: Sequence[Mapping[str, Any]],
+        request: Mapping[str, Any],
+    ) -> None:
+        normalized_federation, normalized_catalogs = _normalize_hub_inputs(federation, catalogs)
+        if not isinstance(request, Mapping):
+            raise ArgumentError("hub resolution request must be an object")
+        object.__setattr__(self, "federation", normalized_federation)
+        object.__setattr__(self, "catalogs", normalized_catalogs)
+        object.__setattr__(self, "request", dict(request))
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubResolveArgs":
+        raw = _route_mapping("hub resolve arguments", value)
+        return cls(raw.get("federation"), raw.get("catalogs"), raw.get("request"))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {
+            "federation": dict(self.federation),
+            "catalogs": [dict(catalog) for catalog in self.catalogs],
+            "request": dict(self.request),
+        }
+
+
+@dataclass(frozen=True)
+class HubLockArgs:
+    """Bounded transitive dependency-lock request over the same federation inputs."""
+
+    federation: Mapping[str, Any]
+    catalogs: tuple[Mapping[str, Any], ...]
+    request: Mapping[str, Any]
+    max_items: int = HUB_DEFAULT_MAX_ITEMS
+
+    def __init__(
+        self,
+        federation: Mapping[str, Any],
+        catalogs: Sequence[Mapping[str, Any]],
+        request: Mapping[str, Any],
+        max_items: int = HUB_DEFAULT_MAX_ITEMS,
+    ) -> None:
+        normalized_federation, normalized_catalogs = _normalize_hub_inputs(federation, catalogs)
+        if not isinstance(request, Mapping):
+            raise ArgumentError("hub lock request must be an object")
+        _bounded_max_items("hub lock max_items", max_items)
+        object.__setattr__(self, "federation", normalized_federation)
+        object.__setattr__(self, "catalogs", normalized_catalogs)
+        object.__setattr__(self, "request", dict(request))
+        object.__setattr__(self, "max_items", max_items)
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubLockArgs":
+        raw = _route_mapping("hub lock arguments", value)
+        return cls(
+            raw.get("federation"),
+            raw.get("catalogs"),
+            raw.get("request"),
+            raw.get("max_items", HUB_DEFAULT_MAX_ITEMS),
+        )
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {
+            "federation": dict(self.federation),
+            "catalogs": [dict(catalog) for catalog in self.catalogs],
+            "request": dict(self.request),
             "max_items": self.max_items,
         }
 
@@ -282,6 +407,293 @@ class HubWhyReport:
         if kind not in HUB_WHY_KINDS:
             raise ArgumentError(f"unknown hub match reason: {kind!r}")
         return cls(raw, kind)
+
+
+@dataclass(frozen=True)
+class HubFreshnessPolicyReport:
+    raw: dict[str, Any]
+    require_authority: bool
+    accept_undetermined: bool
+    accept_beyond_bound: bool
+    max_accepted_lag: int | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubFreshnessPolicyReport":
+        raw = _route_mapping("hub accepted freshness policy", value)
+        maximum = raw.get("max_accepted_lag")
+        return cls(
+            raw,
+            _bool("hub freshness require_authority", raw.get("require_authority")),
+            _bool("hub freshness accept_undetermined", raw.get("accept_undetermined")),
+            _bool("hub freshness accept_beyond_bound", raw.get("accept_beyond_bound")),
+            None if maximum is None else _route_count("hub freshness max_accepted_lag", maximum),
+        )
+
+
+@dataclass(frozen=True)
+class HubLifecycleNoteReport:
+    raw: dict[str, Any]
+    kind: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubLifecycleNoteReport":
+        raw = _route_mapping("hub lifecycle note", value)
+        kind = _route_text("hub lifecycle note kind", raw.get("note"))
+        if kind not in {"yanked_but_pinned", "deprecated"}:
+            raise ArgumentError(f"unknown hub lifecycle note: {kind!r}")
+        if kind == "yanked_but_pinned":
+            _route_text("hub yanked note reason", raw.get("reason"))
+            _route_count("hub yanked note epoch", raw.get("epoch"))
+        else:
+            for field_name in ("stage", "replacement", "reason"):
+                _route_text(f"hub deprecated note {field_name}", raw.get(field_name))
+        return cls(raw, kind)
+
+
+@dataclass(frozen=True)
+class HubResolutionSubjectReport:
+    raw: dict[str, Any]
+    name: str
+    version: str
+    digest: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubResolutionSubjectReport":
+        raw = _route_mapping("hub resolution subject", value)
+        return cls(
+            raw,
+            _route_text("hub resolved name", raw.get("name")),
+            _route_text("hub resolved version", raw.get("version")),
+            _route_text("hub resolved digest", raw.get("digest")),
+        )
+
+
+@dataclass(frozen=True)
+class HubResolutionReport:
+    raw: dict[str, Any]
+    subject: HubResolutionSubjectReport
+    authority: HubAuthorityReport
+    freshness: HubFreshnessReport
+    accepted_under: HubFreshnessPolicyReport
+    notes: tuple[HubLifecycleNoteReport, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubResolutionReport":
+        raw = _route_mapping("hub resolution", value)
+        provenance = _route_mapping("hub resolution provenance", raw.get("provenance"))
+        return cls(
+            raw,
+            HubResolutionSubjectReport.from_wire(raw.get("subject")),
+            HubAuthorityReport.from_wire(provenance.get("authority")),
+            HubFreshnessReport.from_wire(provenance.get("freshness")),
+            HubFreshnessPolicyReport.from_wire(provenance.get("accepted_under")),
+            tuple(
+                HubLifecycleNoteReport.from_wire(item)
+                for item in _array_of_mappings("hub resolution notes", provenance.get("notes", []))
+            ),
+        )
+
+    @property
+    def digest(self) -> str:
+        return self.subject.digest
+
+    @property
+    def answered_by(self) -> str:
+        return self.authority.answered_by
+
+    @property
+    def authoritative(self) -> bool:
+        return self.authority.authoritative
+
+
+@dataclass(frozen=True)
+class HubResolveReport:
+    raw: dict[str, Any]
+    ok: bool
+    resolution: HubResolutionReport
+    answered_by: str
+    authoritative: bool
+    catalog_count: int
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubResolveReport":
+        raw = _payload_for_keys(
+            value,
+            ("ok", "resolution", "answered_by", "authoritative", "catalog_count", "guarantees", "limitations"),
+            "hub resolve",
+        )
+        if not _bool("hub resolve ok", raw.get("ok")):
+            raise ArgumentError("hub resolve report is not successful")
+        resolution = HubResolutionReport.from_wire(raw.get("resolution"))
+        answered_by = _route_text("hub resolve answered_by", raw.get("answered_by"))
+        authoritative = _bool("hub resolve authoritative", raw.get("authoritative"))
+        if answered_by != resolution.answered_by or authoritative != resolution.authoritative:
+            raise ArgumentError("hub resolve top-level provenance does not reconcile with resolution")
+        return cls(
+            raw,
+            True,
+            resolution,
+            answered_by,
+            authoritative,
+            _route_count("hub resolve catalog_count", raw.get("catalog_count")),
+            _route_strings("hub resolve guarantees", raw.get("guarantees")),
+            _route_strings("hub resolve limitations", raw.get("limitations")),
+        )
+
+
+@dataclass(frozen=True)
+class HubVersionRequirementReport:
+    raw: dict[str, Any]
+    kind: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubVersionRequirementReport":
+        raw = _route_mapping("hub dependency version requirement", value)
+        kind = _route_text("hub dependency requirement kind", raw.get("req"))
+        if kind not in {"exact", "at_least", "compatible", "approximately", "range", "any"}:
+            raise ArgumentError(f"unknown hub dependency requirement: {kind!r}")
+        if kind == "any":
+            if "spec" in raw:
+                raise ArgumentError("any dependency requirement cannot carry a spec")
+        elif raw.get("spec") is None:
+            raise ArgumentError(f"{kind} dependency requirement must carry a spec")
+        elif kind == "range":
+            spec = _route_mapping("hub dependency range spec", raw.get("spec"))
+            _route_text("hub dependency range low", spec.get("low"))
+            _route_text("hub dependency range high", spec.get("high"))
+        else:
+            _route_text("hub dependency version spec", raw.get("spec"))
+        return cls(raw, kind)
+
+
+@dataclass(frozen=True)
+class HubRequirementSourceReport:
+    raw: dict[str, Any]
+    kind: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubRequirementSourceReport":
+        raw = _route_mapping("hub dependency requirement source", value)
+        kind = _route_text("hub dependency source kind", raw.get("source"))
+        if kind not in {"root", "pack"}:
+            raise ArgumentError(f"unknown hub dependency source: {kind!r}")
+        if kind == "pack":
+            _route_text("hub dependency source name", raw.get("name"))
+            _route_text("hub dependency source version", raw.get("version"))
+        return cls(raw, kind)
+
+
+@dataclass(frozen=True)
+class HubRequirementReport:
+    raw: dict[str, Any]
+    on: str
+    requirement: HubVersionRequirementReport
+    source: HubRequirementSourceReport
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubRequirementReport":
+        raw = _route_mapping("hub dependency requirement", value)
+        return cls(
+            raw,
+            _route_text("hub dependency requirement on", raw.get("on")),
+            HubVersionRequirementReport.from_wire(raw.get("req")),
+            HubRequirementSourceReport.from_wire(raw.get("source")),
+        )
+
+
+@dataclass(frozen=True)
+class HubLockEntryReport:
+    raw: dict[str, Any]
+    name: str
+    resolution: HubResolutionReport
+    required_by: tuple[HubRequirementReport, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubLockEntryReport":
+        raw = _route_mapping("hub lock entry", value)
+        name = _route_text("hub lock entry name", raw.get("name"))
+        locked = _route_mapping("hub locked payload", raw.get("locked"))
+        required_by = tuple(
+            HubRequirementReport.from_wire(item)
+            for item in _array_of_mappings("hub locked required_by", locked.get("required_by", []))
+        )
+        if not required_by:
+            raise ArgumentError("hub lock entries must retain required_by provenance")
+        resolution = HubResolutionReport.from_wire(locked.get("resolution"))
+        if resolution.subject.name != name:
+            raise ArgumentError("hub lock entry name does not match its resolution subject")
+        return cls(raw, name, resolution, required_by)
+
+
+@dataclass(frozen=True)
+class HubLockReport:
+    raw: dict[str, Any]
+    ok: bool
+    entry_count: int
+    fully_authoritative: bool
+    answering_registries: tuple[str, ...]
+    remarked_entry_count: int
+    entries: tuple[HubLockEntryReport, ...]
+    omitted_entries: int
+    max_items: int
+    guarantees: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "HubLockReport":
+        raw = _payload_for_keys(
+            value,
+            (
+                "ok",
+                "entry_count",
+                "fully_authoritative",
+                "answering_registries",
+                "remarked_entry_count",
+                "entries",
+                "omitted_entries",
+                "max_items",
+                "guarantees",
+            ),
+            "hub lock",
+        )
+        if not _bool("hub lock ok", raw.get("ok")):
+            raise ArgumentError("hub lock report is not successful")
+        entry_count = _route_count("hub lock entry_count", raw.get("entry_count"))
+        max_items = _bounded_max_items("hub lock max_items", raw.get("max_items"))
+        entries = tuple(HubLockEntryReport.from_wire(item) for item in _array_of_mappings("hub lock entries", raw.get("entries")))
+        omitted_entries = _route_count("hub lock omitted_entries", raw.get("omitted_entries"))
+        if entry_count < len(entries) or omitted_entries != entry_count - len(entries):
+            raise ArgumentError("hub lock entry counts do not reconcile")
+        if len(entries) > max_items:
+            raise ArgumentError("hub lock visible entries exceed max_items")
+        names = tuple(entry.name for entry in entries)
+        if len(names) != len(set(names)):
+            raise ArgumentError("hub lock entries must be unique by name")
+        registries = _route_strings("hub lock answering_registries", raw.get("answering_registries"))
+        visible_registries = {entry.resolution.answered_by for entry in entries}
+        if not visible_registries.issubset(set(registries)):
+            raise ArgumentError("hub lock answering_registries omits a visible answerer")
+        remarked_entry_count = _route_count("hub lock remarked_entry_count", raw.get("remarked_entry_count"))
+        visible_remarks = sum(bool(entry.resolution.notes) for entry in entries)
+        if remarked_entry_count < visible_remarks:
+            raise ArgumentError("hub lock remarked_entry_count omits a visible lifecycle note")
+        return cls(
+            raw,
+            True,
+            entry_count,
+            _bool("hub lock fully_authoritative", raw.get("fully_authoritative")),
+            registries,
+            remarked_entry_count,
+            entries,
+            omitted_entries,
+            max_items,
+            _route_strings("hub lock guarantees", raw.get("guarantees")),
+        )
+
+    @property
+    def exhaustive(self) -> bool:
+        return self.omitted_entries == 0
 
 
 @dataclass(frozen=True)
@@ -427,6 +839,18 @@ def hub_search_report(value: Mapping[str, Any]) -> HubSearchReport:
     return HubSearchReport.from_wire(value)
 
 
+def hub_resolve_report(value: Mapping[str, Any]) -> HubResolveReport:
+    """Parse direct MCP or HTTP federated resolution output."""
+
+    return HubResolveReport.from_wire(value)
+
+
+def hub_lock_report(value: Mapping[str, Any]) -> HubLockReport:
+    """Parse direct MCP or HTTP dependency-lock output."""
+
+    return HubLockReport.from_wire(value)
+
+
 __all__ = [
     "HUB_AUTHORITY_KINDS",
     "HUB_DEFAULT_MAX_ITEMS",
@@ -439,10 +863,24 @@ __all__ = [
     "HubAuthorityReport",
     "HubExcludedReport",
     "HubFreshnessReport",
+    "HubFreshnessPolicyReport",
+    "HubLifecycleNoteReport",
+    "HubLockArgs",
+    "HubLockEntryReport",
+    "HubLockReport",
     "HubMatchReport",
+    "HubRequirementReport",
+    "HubRequirementSourceReport",
+    "HubResolutionReport",
+    "HubResolutionSubjectReport",
+    "HubResolveArgs",
+    "HubResolveReport",
     "HubSearchArgs",
     "HubSearchReport",
     "HubStalenessBoundReport",
+    "HubVersionRequirementReport",
     "HubWhyReport",
+    "hub_lock_report",
+    "hub_resolve_report",
     "hub_search_report",
 ]

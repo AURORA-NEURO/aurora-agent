@@ -290,6 +290,26 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["every match carries its matching facets, authority, tier, digest, and freshness"],
         limitations: ["catalog contents are caller-supplied"],
       } } } });
+      if (path === "/v1/tools/hub_resolve") return jsonResponse({ ok: true, tool: "hub_resolve", request_id: "r23", mcp: { result: { structuredContent: {
+        ok: true,
+        resolution: { subject: { name: "bioprism/root", version: "1.0.0", digest: "sha256:root" }, provenance: { authority: { authority: "authoritative", registry: "origin" }, freshness: { freshness: "authoritative" }, accepted_under: { require_authority: false, accept_undetermined: false, accept_beyond_bound: false, max_accepted_lag: null }, notes: [] } },
+        answered_by: "origin",
+        authoritative: true,
+        catalog_count: 1,
+        guarantees: ["federation is checked"],
+        limitations: ["caller-supplied catalogs"],
+      } } } });
+      if (path === "/v1/tools/hub_lock") return jsonResponse({ ok: true, tool: "hub_lock", request_id: "r24", mcp: { result: { structuredContent: {
+        ok: true,
+        entry_count: 1,
+        fully_authoritative: true,
+        answering_registries: ["origin"],
+        remarked_entry_count: 0,
+        entries: [{ name: "bioprism/root", locked: { resolution: { subject: { name: "bioprism/root", version: "1.0.0", digest: "sha256:root" }, provenance: { authority: { authority: "authoritative", registry: "origin" }, freshness: { freshness: "authoritative" }, accepted_under: { require_authority: false, accept_undetermined: false, accept_beyond_bound: false, max_accepted_lag: null }, notes: [] } }, required_by: [{ on: "bioprism/root", req: { req: "any" }, source: { source: "root" } }] } }],
+        omitted_entries: 0,
+        max_items: 3,
+        guarantees: ["transitive dependencies are fixed by a bounded deterministic fixpoint"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -474,6 +494,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const posture = await client.safetyPosture({ include_threats: false });
   const measurement = await client.measurementCompare({ left: { label: "left" }, right: { label: "right" }, require_bound_terms: false });
   const hub = await client.hubSearch({ federation: { members: {} }, catalogs: [], query: { facets: [] }, max_items: 3 });
+  const resolvedHub = await client.hubResolve({ federation: { members: {} }, catalogs: [], request: { name: "bioprism/root" } });
+  const lockedHub = await client.hubLock({ federation: { members: {} }, catalogs: [], request: { name: "bioprism/root" }, max_items: 3 });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -511,6 +533,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(posture.mcp.result.structuredContent.coverage.unmitigated, 4);
   assert.equal(measurement.mcp.result.structuredContent.report.verdict.verdict, "comparable");
   assert.equal(hub.mcp.result.structuredContent.matches[0].authority.authority, "authoritative");
+  assert.equal(resolvedHub.mcp.result.structuredContent.resolution.subject.digest, "sha256:root");
+  assert.equal(lockedHub.mcp.result.structuredContent.entries[0].locked.required_by[0].source.source, "root");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");
