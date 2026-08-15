@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EvidenceItem, LabPlanRequest, MissionRequest, MissionStep, RoutingDecisionRequest, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, WorldClaimCheckRequest
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -44,11 +44,13 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/v1/events"):
             self._send(200, {"ok": True, "page": {"events": [], "next_after": 0}})
         elif self.path.startswith("/v1/missions?"):
-            self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
+            self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "progress": {"phase": "succeeded", "current_wave": 0, "total_steps": 1, "completed_steps": 1, "active_steps": 0, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "trace_sequence": 4, "last_event": "mission.completed"}, "summary": {"total_steps": 1, "completed_steps": 1, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "result_available": True}, "poll": "/v1/missions/async-1", "cancel": "/v1/missions/async-1/cancel", "trace": "/v1/missions/async-1/trace"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
         elif self.path.startswith("/v1/missions/async-1/trace"):
             self._send(200, {"ok": True, "mission_id": "async-1", "trace_schema_version": "bioprism-devplat-mission-trace/0.1", "events": [{"sequence": 0, "event": "mission.started", "wave": None, "step_id": None, "tool": None, "status": "running", "arguments_digest": None, "bytes": 0, "detail": None}, {"sequence": 1, "event": "mission.completed", "wave": None, "step_id": None, "tool": None, "status": "succeeded", "arguments_digest": None, "bytes": 14, "detail": None}], "after": 0, "next_after": 2, "oldest": 0, "newest": 1, "gap": False, "dropped_events": 0, "terminal": True, "limit": 100, "truncated": False})
         elif self.path == "/v1/missions/async-1":
             self._send(200, {"ok": True, "mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "progress": {"phase": "succeeded", "current_wave": 0, "total_steps": 1, "completed_steps": 1, "active_steps": 0, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "trace_sequence": 4, "last_event": "mission.completed"}, "result": {"mission_status": "succeeded"}})
+        elif self.path == "/v1/missions/slow":
+            self._send(200, {"ok": True, "mission_id": "slow", "status": "running", "cancel_requested": False, "progress": {"phase": "running", "current_wave": 0, "total_steps": 1, "completed_steps": 0, "active_steps": 1, "succeeded": 0, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 0, "trace_sequence": 1, "last_event": "step.started"}})
         else:
             self._send(404, {"ok": False, "error": {"code": "not_found"}})
 
@@ -122,6 +124,8 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(status.progress.phase, "succeeded")
         self.assertEqual(status.progress.completed_steps, 1)
         self.assertEqual(status.progress.last_event, "mission.completed")
+        waited = client.wait_mission("async-1", timeout=1.0, poll_interval=0.01)
+        self.assertEqual(waited.status, "succeeded")
         trace = client.mission_trace("async-1")
         self.assertEqual(trace.events[0].event, "mission.started")
         self.assertEqual(trace.events[-1].event, "mission.completed")
@@ -130,6 +134,15 @@ class HttpApiClientTests(unittest.TestCase):
             client.mission_trace("async-1", after=-1)
         inventory = client.missions(status="succeeded", limit=5)
         self.assertEqual(inventory["missions"][0]["mission_id"], "async-1")
+        typed_inventory = client.mission_inventory(status="succeeded", limit=5)
+        self.assertIsInstance(typed_inventory, MissionInventoryPage)
+        self.assertTrue(typed_inventory.missions[0].terminal)
+        self.assertEqual(typed_inventory.missions[0].progress.completed_steps, 1)
+        with self.assertRaises(ArgumentError):
+            client.wait_mission("async-1", timeout=0)
+        with self.assertRaises(MissionWaitTimeout) as wait_error:
+            client.wait_mission("slow", timeout=0.01, poll_interval=0.01)
+        self.assertEqual(wait_error.exception.last_job.status, "running")
         self.assertTrue(client.cancel_mission("async-1", "operator stop").cancel_requested)
         self.assertEqual(
             client.capability_discover(query="oncology")["mcp"]["result"]["query"],
@@ -246,10 +259,15 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(status.status, "succeeded")
             self.assertIsNotNone(status.progress)
             self.assertEqual(status.progress.phase, "succeeded")
+            waited = await client.wait_mission("async-1", timeout=1.0, poll_interval=0.01)
+            self.assertEqual(waited.status, "succeeded")
             trace = await client.mission_trace("async-1")
             self.assertEqual(trace.events[-1].event, "mission.completed")
             inventory = await client.missions(status="succeeded", limit=5)
             self.assertEqual(inventory["missions"][0]["mission_id"], "async-1")
+            typed_inventory = await client.mission_inventory(status="succeeded", limit=5)
+            self.assertIsInstance(typed_inventory, MissionInventoryPage)
+            self.assertTrue(typed_inventory.missions[0].terminal)
             self.assertTrue((await client.cancel_mission("async-1", "operator stop")).cancel_requested)
             self.assertEqual(
                 (await client.capability_route("async route", [{"id": "release", "tool": "bundle_verify"}]))["mcp"]["result"]["goal"],

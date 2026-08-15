@@ -57,6 +57,19 @@ class ResponseTimeout(TransportError):
         super().__init__(f"timed out waiting for {method!r} after {timeout:g}s")
 
 
+class MissionWaitTimeout(SdkError, TimeoutError):
+    """A bounded mission wait expired before the job reached a terminal state."""
+
+    def __init__(self, mission_id: str, timeout: float, last_job: Any) -> None:
+        self.mission_id = mission_id
+        self.timeout = timeout
+        self.last_job = last_job
+        status = getattr(last_job, "status", "unknown")
+        super().__init__(
+            f"timed out waiting for mission {mission_id!r} after {timeout:g}s; last status is {status!r}"
+        )
+
+
 class ProtocolError(SdkError):
     """The peer emitted malformed or semantically invalid JSON-RPC."""
 

@@ -63,6 +63,9 @@ replay/observability contract without inventing domain-specific event semantics.
 The same retained rows are emitted as `mission.trace` events into the gateway's cursor, SSE, and
 signed webhook surfaces, allowing lifecycle monitoring and delivery retry to share one event log
 and one retention-gap contract with ordinary tool calls.
+Python now exposes typed inventory pages plus bounded sync/async waits that retain the last live
+job on timeout; TypeScript exposes the same wait contract with abortable polling and a typed timeout
+error. These helpers coordinate every domain mission without claiming durable scheduling.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 The authoritative executor validates every known tool's materialized arguments against its

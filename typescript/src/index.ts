@@ -2,6 +2,7 @@ export { ApiClient } from "./client.js";
 export {
   ApiError,
   ArgumentError,
+  MissionWaitTimeoutError,
   PrismSdkError,
   ProtocolError,
   ResponseTooLargeError,

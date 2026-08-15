@@ -230,6 +230,13 @@ export interface ClientRequestOptions {
   requestId?: string;
 }
 
+export interface MissionWaitOptions extends ClientRequestOptions {
+  /** Total wall-clock bound for status polling, in milliseconds. */
+  timeoutMs?: number;
+  /** Delay between non-terminal status reads, in milliseconds. */
+  pollIntervalMs?: number;
+}
+
 export interface FetchLike {
   (input: string | URL, init?: RequestInit): Promise<Response>;
 }

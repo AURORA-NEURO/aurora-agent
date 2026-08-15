@@ -1,4 +1,4 @@
-import type { ApiErrorBody, JsonValue } from "./types.js";
+import type { ApiErrorBody, JsonValue, MissionJob } from "./types.js";
 
 /** Base class for errors raised before a remote tool is allowed to run. */
 export class PrismSdkError extends Error {
@@ -52,6 +52,21 @@ export class ResponseTooLargeError extends TransportError {
   constructor(maxResponseBytes: number) {
     super(`HTTP API response exceeded maxResponseBytes (${maxResponseBytes})`);
     this.maxResponseBytes = maxResponseBytes;
+  }
+}
+
+/** Bounded mission polling expired while retaining the last authoritative status snapshot. */
+export class MissionWaitTimeoutError extends PrismSdkError {
+  override readonly name = "MissionWaitTimeoutError";
+  readonly missionId: string;
+  readonly timeoutMs: number;
+  readonly lastJob: MissionJob;
+
+  constructor(missionId: string, timeoutMs: number, lastJob: MissionJob) {
+    super(`timed out waiting for mission ${missionId} after ${timeoutMs}ms; last status is ${lastJob.status}`);
+    this.missionId = missionId;
+    this.timeoutMs = timeoutMs;
+    this.lastJob = lastJob;
   }
 }
 

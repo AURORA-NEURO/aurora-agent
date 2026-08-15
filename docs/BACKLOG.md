@@ -174,6 +174,9 @@ explicit, so replay tooling can distinguish an empty page from history that was 
 Each asynchronous trace row is also emitted as a `mission.trace` event through the shared cursor,
 SSE, and signed webhook outbox. This makes cross-domain mission monitoring composable with the
 existing delivery worker contract instead of requiring a second event transport.
+The SDK layer now adds typed Python mission inventory pages and bounded synchronous/asynchronous
+wait helpers. A wait returns only a terminal job, never spins without a deadline, and preserves the
+last live job on timeout; this is an orchestration convenience, not a durable queue or scheduler.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full

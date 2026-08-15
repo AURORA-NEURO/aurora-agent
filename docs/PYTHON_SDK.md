@@ -133,6 +133,11 @@ invent defaults:
   dashboards but does not replace the terminal report or claim domain success.
   `mission_trace(mission_id, after=..., limit=...)` returns a typed `MissionTracePage` with ordered
   `MissionTraceEvent` rows, an exclusive `next_after` cursor, and explicit retention-gap metadata.
+  `mission_inventory(...)` returns a typed bounded `MissionInventoryPage` with progress, outcome
+  counters, and lifecycle links. `wait_mission(...)` and its async counterpart poll only until a
+  terminal state inside an explicit timeout/poll interval bound; `MissionWaitTimeout` retains the
+  last authoritative live `MissionJob` so callers can resume, cancel, or inspect without parsing
+  an exception string.
   `delete_mission(mission_id)` removes a terminal job when the caller has consumed its report;
   active jobs are refused so cleanup cannot discard in-flight work.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

@@ -119,6 +119,9 @@ and the latest clock-free trace sequence/event. The terminal `result` and its ex
 authoritative for replay and domain interpretation.
 `missionTrace(missionId, after, limit)` provides a typed `MissionTracePage` with ordered events,
 an exclusive `next_after` cursor, and explicit retention-gap metadata.
+`waitMission(missionId, { timeoutMs, pollIntervalMs, signal })` performs bounded, abortable
+polling and returns only a terminal `MissionJob`; `MissionWaitTimeoutError` carries the last
+authoritative live snapshot so an operator can resume or cancel without losing progress.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain

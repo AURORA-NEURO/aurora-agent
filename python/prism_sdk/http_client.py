@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import http.client
 import json
+import math
 import ssl
+import time
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlencode, urlsplit
 
@@ -25,15 +27,18 @@ from .context_requests import (
     FiberVerifyRequest,
     ProjectionBundleRequest,
 )
-from .errors import ApiError, ArgumentError, TransportError
+from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
 from .mission import (
     MissionAssembly,
     MAX_MISSION_LIST_LIMIT,
+    MAX_MISSION_POLL_INTERVAL_SECONDS,
     MAX_MISSION_TRACE_PAGE,
+    MAX_MISSION_WAIT_SECONDS,
     MissionJob,
+    MissionInventoryPage,
     MissionPolicy,
     MissionPreflight,
     MissionRequest,
@@ -215,6 +220,27 @@ class ApiClient:
         query = urlencode({"after": str(after), "limit": str(limit)})
         return MissionTracePage.from_wire(self.request("GET", f"/v1/missions/{mission_id}/trace?{query}"))
 
+    def wait_mission(
+        self,
+        mission_id: str,
+        *,
+        timeout: float = 30.0,
+        poll_interval: float = 0.25,
+    ) -> MissionJob:
+        """Poll until a mission is terminal, with explicit bounds and the last live snapshot on timeout."""
+
+        self._mission_id(mission_id)
+        timeout_value, poll_value = self._mission_wait_options(timeout, poll_interval)
+        deadline = time.monotonic() + timeout_value
+        job = self.mission_status(mission_id)
+        while not job.terminal:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise MissionWaitTimeout(mission_id, timeout_value, job)
+            time.sleep(min(poll_value, remaining))
+            job = self.mission_status(mission_id)
+        return job
+
     def cancel_mission(self, mission_id: str, reason: str | None = None) -> MissionJob:
         self._mission_id(mission_id)
         if reason is not None and (not isinstance(reason, str) or not reason.strip() or len(reason) > 2_048):
@@ -280,8 +306,8 @@ class ApiClient:
         arguments = request.to_mcp_arguments() if isinstance(request, MissionRequest) else dict(request)
         return self.request("POST", "/v1/missions/preflight", arguments)
 
-    def missions(self, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
-        """List bounded mission summaries from the authoritative process-local registry."""
+    def mission_inventory(self, *, status: str | None = None, limit: int = 100) -> MissionInventoryPage:
+        """Return a typed bounded page from the authoritative process-local registry."""
 
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_MISSION_LIST_LIMIT:
             raise ArgumentError(f"limit must be between 1 and {MAX_MISSION_LIST_LIMIT}")
@@ -290,7 +316,12 @@ class ApiClient:
         query: dict[str, str] = {"limit": str(limit)}
         if status is not None:
             query["status"] = status
-        return self.request("GET", f"/v1/missions?{urlencode(query)}")
+        return MissionInventoryPage.from_wire(self.request("GET", f"/v1/missions?{urlencode(query)}"))
+
+    def missions(self, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
+        """Backward-compatible raw mission inventory response."""
+
+        return self.mission_inventory(status=status, limit=limit).to_dict()
 
     def mission_from_route(
         self,
@@ -674,6 +705,16 @@ class ApiClient:
         if not isinstance(value, str) or not value or "/" in value or "\r" in value or "\n" in value:
             raise ArgumentError("mission_id must be a non-empty path-safe string")
 
+    @staticmethod
+    def _mission_wait_options(timeout: float, poll_interval: float) -> tuple[float, float]:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or not 0 < timeout <= MAX_MISSION_WAIT_SECONDS:
+            raise ArgumentError(f"timeout must be finite and between 0 and {MAX_MISSION_WAIT_SECONDS:g} seconds")
+        if isinstance(poll_interval, bool) or not isinstance(poll_interval, (int, float)) or not math.isfinite(poll_interval) or not 0 < poll_interval <= MAX_MISSION_POLL_INTERVAL_SECONDS:
+            raise ArgumentError(
+                f"poll_interval must be finite and between 0 and {MAX_MISSION_POLL_INTERVAL_SECONDS:g} seconds"
+            )
+        return float(timeout), float(poll_interval)
+
 
 class AsyncApiClient:
     """Async facade over :class:`ApiClient`, using bounded worker threads for stdlib portability."""
@@ -706,6 +747,27 @@ class AsyncApiClient:
         """Async bounded cursor page over the authoritative mission trace."""
 
         return await asyncio.to_thread(self.client.mission_trace, mission_id, after=after, limit=limit)
+
+    async def wait_mission(
+        self,
+        mission_id: str,
+        *,
+        timeout: float = 30.0,
+        poll_interval: float = 0.25,
+    ) -> MissionJob:
+        """Async bounded mission wait that does not block the event loop between polls."""
+
+        self.client._mission_id(mission_id)
+        timeout_value, poll_value = self.client._mission_wait_options(timeout, poll_interval)
+        deadline = asyncio.get_running_loop().time() + timeout_value
+        job = await self.mission_status(mission_id)
+        while not job.terminal:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise MissionWaitTimeout(mission_id, timeout_value, job)
+            await asyncio.sleep(min(poll_value, remaining))
+            job = await self.mission_status(mission_id)
+        return job
 
     async def cancel_mission(self, mission_id: str, reason: str | None = None) -> MissionJob:
         return await asyncio.to_thread(self.client.cancel_mission, mission_id, reason)
@@ -766,6 +828,11 @@ class AsyncApiClient:
         """Async bounded mission inventory."""
 
         return await asyncio.to_thread(self.client.missions, status=status, limit=limit)
+
+    async def mission_inventory(self, *, status: str | None = None, limit: int = 100) -> MissionInventoryPage:
+        """Async typed bounded mission inventory."""
+
+        return await asyncio.to_thread(self.client.mission_inventory, status=status, limit=limit)
 
     async def mission_from_route(
         self,

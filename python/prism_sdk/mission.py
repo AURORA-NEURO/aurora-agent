@@ -22,6 +22,8 @@ MAX_TOTAL_OUTPUT_BYTES = 20_000_000
 MAX_PARALLEL_WAVE_WIDTH = 16
 MAX_MISSION_LIST_LIMIT = 256
 MAX_MISSION_TRACE_PAGE = 1000
+MAX_MISSION_WAIT_SECONDS = 86_400.0
+MAX_MISSION_POLL_INTERVAL_SECONDS = 60.0
 MISSION_ASSEMBLY_SCHEMA = "bioprism-python-mission-assembly/0.1"
 MISSION_TRACE_SCHEMA_VERSION = "bioprism-devplat-mission-trace/0.1"
 MISSION_TRACE_EVENTS = frozenset(
@@ -888,6 +890,160 @@ class MissionJob:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class MissionInventorySummary:
+    """Typed bounded outcome counters returned by the mission inventory route."""
+
+    raw: dict[str, Any]
+    total_steps: int
+    completed_steps: int
+    succeeded: int
+    refused: int
+    blocked: int
+    cancelled: int
+    required_failures: int
+    returned_bytes: int
+    result_available: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionInventorySummary":
+        raw = _mapping("mission inventory summary", value)
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission inventory summary {name} must be a non-negative integer")
+            return candidate
+
+        result_available = raw.get("result_available")
+        if not isinstance(result_available, bool):
+            raise ArgumentError("mission inventory summary result_available must be a boolean")
+        return cls(
+            raw=raw,
+            total_steps=non_negative("total_steps"),
+            completed_steps=non_negative("completed_steps"),
+            succeeded=non_negative("succeeded"),
+            refused=non_negative("refused"),
+            blocked=non_negative("blocked"),
+            cancelled=non_negative("cancelled"),
+            required_failures=non_negative("required_failures"),
+            returned_bytes=non_negative("returned_bytes"),
+            result_available=result_available,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionInventoryItem:
+    """Typed summary for one bounded mission registry entry."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    status: str
+    cancel_requested: bool
+    cancel_reason: str | None
+    progress: MissionProgress
+    summary: MissionInventorySummary
+    poll: str
+    cancel: str
+    trace: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionInventoryItem":
+        raw = _mapping("mission inventory item", value)
+        mission_id = raw.get("mission_id")
+        _text("mission inventory mission_id", mission_id)
+        status = raw.get("status")
+        _text("mission inventory status", status)
+        if status not in {"queued", "running", "planned", "succeeded", "partial", "failed", "cancelled"}:
+            raise ArgumentError(f"unknown mission inventory status: {status}")
+        cancel_requested = raw.get("cancel_requested")
+        if not isinstance(cancel_requested, bool):
+            raise ArgumentError("mission inventory cancel_requested must be a boolean")
+        cancel_reason = raw.get("cancel_reason")
+        if cancel_reason is not None:
+            _text("mission inventory cancel_reason", cancel_reason)
+        progress_value = raw.get("progress")
+        if not isinstance(progress_value, Mapping):
+            raise ArgumentError("mission inventory progress must be an object")
+        summary_value = raw.get("summary")
+        if not isinstance(summary_value, Mapping):
+            raise ArgumentError("mission inventory summary must be an object")
+        links: dict[str, str] = {}
+        for name in ("poll", "cancel", "trace"):
+            candidate = raw.get(name)
+            _text(f"mission inventory {name}", candidate)
+            links[name] = candidate
+        return cls(
+            raw,
+            mission_id,
+            status,
+            cancel_requested,
+            cancel_reason,
+            MissionProgress.from_wire(progress_value),
+            MissionInventorySummary.from_wire(summary_value),
+            links["poll"],
+            links["cancel"],
+            links["trace"],
+        )
+
+    @property
+    def terminal(self) -> bool:
+        return self.status in {"planned", "succeeded", "partial", "failed", "cancelled"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionInventoryPage:
+    """Typed bounded page over the process-local asynchronous mission registry."""
+
+    raw: dict[str, Any]
+    missions: tuple[MissionInventoryItem, ...]
+    returned: int
+    total_matching: int
+    limit: int
+    truncated: bool
+    status_filter: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionInventoryPage":
+        raw = _mapping("mission inventory page", value)
+        values = raw.get("missions")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ArgumentError("mission inventory missions must be an array")
+        missions = tuple(MissionInventoryItem.from_wire(item) for item in values)
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission inventory {name} must be a non-negative integer")
+            return candidate
+
+        returned = non_negative("returned")
+        if returned != len(missions):
+            raise ArgumentError("mission inventory returned must equal the number of mission items")
+        total_matching = non_negative("total_matching")
+        limit = raw.get("limit")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_MISSION_LIST_LIMIT:
+            raise ArgumentError(f"mission inventory limit must be between 1 and {MAX_MISSION_LIST_LIMIT}")
+        truncated = raw.get("truncated")
+        if not isinstance(truncated, bool):
+            raise ArgumentError("mission inventory truncated must be a boolean")
+        status_filter = raw.get("status_filter")
+        if status_filter is not None:
+            _text("mission inventory status_filter", status_filter)
+            if status_filter not in {"queued", "running", "planned", "succeeded", "partial", "failed", "cancelled"}:
+                raise ArgumentError(f"unknown mission inventory status_filter: {status_filter}")
+        return cls(raw, missions, returned, total_matching, limit, truncated, status_filter)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> MissionPreflight:
     """Review a mission against a live schema snapshot without dispatching any tool."""
 
@@ -1119,6 +1275,10 @@ def _contains_confirmation(value: Any) -> bool:
 __all__ = [
     "MAX_ALLOWED_TOOLS",
     "MAX_MISSION_STEPS",
+    "MAX_MISSION_LIST_LIMIT",
+    "MAX_MISSION_TRACE_PAGE",
+    "MAX_MISSION_WAIT_SECONDS",
+    "MAX_MISSION_POLL_INTERVAL_SECONDS",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
     "MAX_PARALLEL_WAVE_WIDTH",
@@ -1130,6 +1290,9 @@ __all__ = [
     "MissionPolicy",
     "MissionPreflight",
     "MissionExecutionReport",
+    "MissionInventoryItem",
+    "MissionInventoryPage",
+    "MissionInventorySummary",
     "MissionTraceEvent",
     "MissionPreflightError",
     "MissionRouteSelection",

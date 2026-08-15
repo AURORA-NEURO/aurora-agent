@@ -1,4 +1,4 @@
-import { ApiError, ArgumentError, ProtocolError, ResponseTooLargeError, ToolRefusalError, TransportError, isObject } from "./errors.js";
+import { ApiError, ArgumentError, MissionWaitTimeoutError, ProtocolError, ResponseTooLargeError, ToolRefusalError, TransportError, isObject } from "./errors.js";
 import { missionFromRoute as assembleMissionFromRoute, preflightMission } from "./mission.js";
 import { parseSse } from "./sse.js";
 import { ToolCatalogue } from "./tooling.js";
@@ -36,6 +36,7 @@ import type {
   MissionPreflightResult,
   MissionRouteSelection,
   MissionTracePage,
+  MissionWaitOptions,
   RepositoryBundleArgs,
   RepositoryCatalogArgs,
   RepositoryImpactArgs,
@@ -57,6 +58,8 @@ const DEFAULT_MAX_RESPONSE_BYTES = 20_000_000;
 const DEFAULT_MAX_REQUEST_BYTES = 10_000_000;
 const MAX_EVENT_PAGE = 1_000;
 const MAX_REQUEST_ID_BYTES = 256;
+const MAX_MISSION_WAIT_MS = 86_400_000;
+const MAX_MISSION_POLL_INTERVAL_MS = 60_000;
 
 /**
  * Fetch-based client for the bounded Prism API.
@@ -301,6 +304,22 @@ export class ApiClient {
     return this.request<MissionTracePage>("GET", `/v1/missions/${encodeURIComponent(id)}/trace?${query.toString()}`, undefined, options);
   }
 
+  /** Poll a mission to a terminal state with bounded, abortable client-side waiting. */
+  async waitMission(missionId: string, options: MissionWaitOptions = {}): Promise<MissionJob> {
+    const id = pathSegment(missionId, "mission id");
+    const timeoutMs = boundedDuration(options.timeoutMs ?? this.timeoutMs, "timeoutMs", MAX_MISSION_WAIT_MS);
+    const pollIntervalMs = boundedDuration(options.pollIntervalMs ?? 250, "pollIntervalMs", MAX_MISSION_POLL_INTERVAL_MS);
+    const deadline = Date.now() + timeoutMs;
+    let job = await this.missionStatus(id, options);
+    while (!isTerminalMissionStatus(job.status)) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new MissionWaitTimeoutError(id, timeoutMs, job);
+      await delay(Math.min(pollIntervalMs, remaining), options.signal);
+      job = await this.missionStatus(id, options);
+    }
+    return job;
+  }
+
   /** Request cooperative cancellation; in-flight nested tools are allowed to return. */
   async cancelMission(missionId: string, reason?: string, options?: ClientRequestOptions): Promise<MissionJob> {
     const id = pathSegment(missionId, "mission id");
@@ -510,6 +529,40 @@ function validateHeaders(headers: Readonly<Record<string, string>>): Record<stri
 function positiveInteger(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) throw new ArgumentError(`${name} must be a positive safe integer`);
   return value;
+}
+
+function boundedDuration(value: number, name: string, maximum: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) {
+    throw new ArgumentError(`${name} must be a positive safe integer no greater than ${maximum}`);
+  }
+  return value;
+}
+
+function isTerminalMissionStatus(status: MissionJobStatus): boolean {
+  return status === "planned" || status === "succeeded" || status === "partial" || status === "failed" || status === "cancelled";
+}
+
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new TransportError("mission wait was aborted by the caller"));
+      return;
+    }
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(new TransportError("mission wait was aborted by the caller"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function cursor(value: number, name: string): void {
