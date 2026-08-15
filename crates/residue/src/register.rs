@@ -1,4 +1,4 @@
-//! The fifty, transcribed.
+//! The forty-eight, transcribed.
 //!
 //! Every module `docs/BACKLOG.md` lists, with the verdict a classifying crate reached about it and
 //! the file that verdict was written in. Nothing here is a new judgement about a module a crate
@@ -149,38 +149,6 @@ fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
                  unwritable here: no Rust type can be the module, and nothing in this repository \
                  can look for `prism.compiler.mine` now or ever.",
                 ForeignSurface::PythonPackage,
-            )?],
-        )?,
-        entry(
-            11,
-            15,
-            "Evaluator Oracle And Mutation Sdk",
-            vec![transcribed(
-                "bioprism-devplat",
-                DEVPLAT,
-                "title: \"Evaluator, Oracle, and Mutation SDK\",",
-                "Typed claims with evidence references, declared preconditions, expected semantic \
-                 relations and deterministic-first priority are already enforced by three crates. \
-                 What is left over is Python decorator ergonomics.",
-                Classification::discharged_by([
-                    "bioprism-oracle",
-                    "bioprism-mutation",
-                    "bioprism-sdk",
-                ])?,
-            )?],
-        )?,
-        entry(
-            11,
-            16,
-            "Environment And Pack Authoring Sdk",
-            vec![transcribed(
-                "bioprism-devplat",
-                DEVPLAT,
-                "title: \"Environment and Pack Authoring SDK\",",
-                "Pack structure, manifests, fixture provenance and local validation gates already \
-                 live in two crates. The remainder is scaffolding subcommands and starting \
-                 templates: files a generator writes, not properties a type holds.",
-                Classification::discharged_by(["bioprism-packs", "bioprism-factory"])?,
             )?],
         )?,
         entry(

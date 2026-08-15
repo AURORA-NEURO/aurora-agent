@@ -9,7 +9,7 @@
 //! That sentence has been true and unenforceable. The explanations existed — ten crates had read
 //! their section's remainder and written down what they found — but they lived in ten `lib.rs` doc
 //! comments, in prose, in whichever crate happened to be built next to them. Nothing could ask *how
-//! many of the fifty are process*, nothing noticed when two crates disagreed, and nothing
+//! many of the forty-eight are process*, nothing noticed when two crates disagreed, and nothing
 //! failed when a module left the backlog and its explanation did not. That last one is no longer
 //! hypothetical: twenty-seven modules left in a single pass, and the register said so before anybody
 //! read it.
@@ -50,8 +50,8 @@
 //! # The trap this crate is shaped around
 //!
 //! `tools/coverage.sh` counts a blueprint module as covered when its `NN.MM` token appears anywhere
-//! under `crates/` or `docs/`. A register listing fifty uncovered ids would mark all
-//! fifty covered and take the headline to 100% — a number produced entirely by the document
+//! under `crates/` or `docs/`. A register listing forty-eight uncovered ids would mark all
+//! forty-eight covered and take the headline to 100% — a number produced entirely by the document
 //! complaining that the number is produced that way.
 //!
 //! Two crates have already been bitten. `docs/BACKLOG.md` emptied itself on its second run, because
@@ -80,18 +80,18 @@
 //!
 //! # What the register says
 //!
-//! Fifty modules, seventy-five recorded verdicts. By primary verdict:
+//! Forty-eight modules, seventy-three recorded verdicts. By primary verdict:
 //!
 //! ```text
 //! process                37   councils, cadence, appeals, a dashboard somebody reads
 //! foreign artifact        4   Python, two GitHub Actions, and a workflow file
-//! discharged elsewhere    9   the content exists, under another section's id
+//! discharged elsewhere    7   the content exists, under another section's id
 //! genuinely uncovered     0   nobody has read it, or it is real work not yet done
 //! ```
 //!
 //! **Exactly one module carries work on any reading**, and it is a second reading rather than a
-//! headline — see the regeneration note below before reading that zero as good news. **Seventy-five of
-//! the seventy-six verdicts are transcriptions** of a sentence a classifying crate wrote about the
+//! headline — see the regeneration note below before reading that zero as good news. **Seventy-two of
+//! the seventy-three verdicts are transcriptions** of a sentence a classifying crate wrote about the
 //! module named; the one exception is marked [`Standing::InferredHere`] and sits beside a
 //! transcription on the same module, so the disagreement has somewhere to land.
 //!

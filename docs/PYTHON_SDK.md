@@ -1,6 +1,7 @@
 # Python SDK
 
-This document covers blueprint modules **11.04** (Python SDK) and **11.05** (Python benchmark
+This document covers blueprint modules **11.04** (Python SDK), **11.05** (Python benchmark
+authoring SDK), **11.15** (evaluator/oracle/mutation SDK), and **11.16** (environment and pack
 authoring SDK). The package remains dependency-free and keeps Rust authoritative for canonical
 bytes, scientific invariants, oracle decisions, and release gates.
 
@@ -123,10 +124,54 @@ marks a benchmark healthy, a mutation postcondition held, or a cell scientifical
 own. `DecisionCell.accepts()` only evaluates the declared set-valued contract: wrong verdicts,
 missing witnesses, and incomplete protected closure remain distinct failures.
 
+## Oracle mesh and evaluation workflows
+
+`OracleManifest`, `JudgementBuilder`, and `PositionDistribution` author the complete evidence
+record used by `bioprism-oracle`: versioned `namespace:name` identities, declared versus effective
+tiers, independence demotion, explicit evidential planes, fixed UTC validity windows, admissibility
+states, checkable findings, abstentions, and tied distributions. A circular oracle is demoted by
+the local builder before its judgement is serialized, so a caller cannot accidentally claim a
+stronger rung than its declaration permits:
+
+```python
+from prism_sdk import (
+    EvidenceTier,
+    Independence,
+    JudgementBuilder,
+    OracleManifest,
+    OracleRef,
+    OracleVersion,
+    Position,
+    ValidityWindow,
+)
+
+manifest = OracleManifest(
+    OracleRef("demo:checksum", OracleVersion(1, 0, 0)),
+    EvidenceTier.DETERMINISTIC,
+    frozenset({"artifact"}),
+    frozenset({"biological", "causal"}),
+    ValidityWindow("2025-01-01T00:00:00Z", "2030-01-01T00:00:00Z"),
+    independence=Independence(),
+)
+judgement = JudgementBuilder(
+    manifest, "2026-01-01T00:00:00Z", Position.SUPPORTED
+).rationale("canonical artifact check passed").build()
+```
+
+`Workspace.oracle_combine()` forwards these judgements to the Rust mesh, which preserves
+same-tier disagreement, suppressed weaker overrides, inadmissible evidence, and unknown states.
+`oracle_reference_panel()` and `oracle_missingness()` cover independent-reader consensus and
+small-cell/missingness boundaries. `bioeval_reference_audit()`, `evaluation_worldline_audit()`,
+`evaluation_reproduction_check()`, and `evaluation_trajectory_check()` expose reference
+uncertainty, future-evidence firewalls, reproducibility divergence, and bounded trajectory
+properties. These helpers never locally choose a biological truth or convert an abstention into a
+negative result.
+
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData/VCF readers, benchmark
 statistics, OTLP export, a notebook UI, or CI deployment. The repository now ships a bounded REST
-gateway and the pack/cell/mutation authoring contracts, but gRPC, durable event storage, external
-webhook delivery, and those domain artifacts remain separate contracts.
+gateway, pack/cell/mutation authoring contracts, and oracle/evaluation request contracts, but gRPC,
+durable event storage, external webhook delivery, biological format adapters, benchmark statistics,
+and those domain artifacts remain separate contracts.
 
 ## Verification
 

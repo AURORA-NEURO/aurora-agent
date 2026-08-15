@@ -264,8 +264,9 @@ keeps transport/protocol/remote-refusal errors distinct, bounds JSON-RPC frames,
 helpers for `developer_delivery_audit`, `bioatlas_publication_audit`, and `fiber_compile`. It is an
 integration foundation above the Rust kernel, not a claim that the full Python data-adapter,
 benchmark-statistics, or biological-format ecosystem is complete. Its authoring layer now builds
-digest-bound packs, decision cells, and mutation plans while leaving final health and oracle
-decisions to Rust. `prism_sdk.ApiClient` and
+digest-bound packs, decision cells, deterministic mutation plans, versioned oracle judgements,
+reference-panel requests, and evaluation requests while leaving final health and oracle decisions
+to Rust. `prism_sdk.ApiClient` and
 `AsyncApiClient` also speak the bounded HTTP gateway described in [`docs/HTTP_API.md`](docs/HTTP_API.md).
 
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding

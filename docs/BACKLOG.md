@@ -1,6 +1,6 @@
 # Remaining backlog
 
-50 code-bearing blueprint modules are not yet cited by any crate or design note,
+48 code-bearing blueprint modules are not yet cited by any crate or design note,
 across 9 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.
 
@@ -163,13 +163,17 @@ helpers for the shipped cross-domain workflows. This is intentionally narrower t
 Python SDK backlog: biological format adapters, benchmark statistics, and the remaining
 nine-distribution ergonomics are still absent and remain foreign or unimplemented rather than
 being inferred from the transport or authoring clients.
+The Python layer now also covers the evaluator/oracle/mutation and environment/pack authoring
+contracts: it builds versioned oracle manifests and judgements, preserves tier demotion and
+admissibility, validates distributions and findings, and exposes the oracle mesh, reference-panel,
+missingness, worldline, reproduction, trajectory, and reference-standard tools. Rust still owns
+combination and scientific decisions; the remaining Python backlog is biological adapters,
+benchmark statistics, and full distribution ergonomics.
 
 
-## §11 Developer Platform — 8 uncovered
+## §11 Developer Platform — 6 uncovered
 
 - `11.04` Python Sdk
-- `11.15` Evaluator Oracle And Mutation Sdk
-- `11.16` Environment And Pack Authoring Sdk
 - `11.17` Authoring Studio
 - `11.18` Authoring Studio And Notebook Workflow
 - `11.20` Capability Dashboard And Query

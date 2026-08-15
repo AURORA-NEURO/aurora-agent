@@ -186,10 +186,12 @@ pub fn classification() -> Vec<ModuleVerdict> {
             title: "Evaluator, Oracle, and Mutation SDK",
             verdict: Verdict::CoveredElsewhere {
                 crates: vec!["bioprism-oracle", "bioprism-mutation", "bioprism-sdk"],
-                because: "the authoring contract it describes — typed claims with evidence \
-                          references, declared preconditions and expected semantic relations, \
-                          deterministic-first priority — is the contract those three crates \
-                          already enforce. What is left over is Python decorator ergonomics.",
+                because: "the repository now ships dependency-free Python authoring and \
+                          oracle/evaluation request contracts over the typed claims, evidence \
+                          references, declared preconditions and deterministic-first priority \
+                          those crates enforce. Rust still owns combination and scientific \
+                          semantics; the remaining gap is the full multi-distribution SDK \
+                          ergonomics described by the blueprint.",
             },
         },
         ModuleVerdict {

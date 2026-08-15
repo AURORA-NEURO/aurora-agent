@@ -81,12 +81,12 @@ prose from the uncovered list before counting, which is why its figure was the c
 along. 702 + 57 = 759 now reconciles.
 
 
-Coverage is **93.4%** — 709 of 759 code-bearing modules. The remaining **50 are enumerated in
+Coverage is **93.7%** — 711 of 759 code-bearing modules. The remaining **48 are enumerated in
 `docs/BACKLOG.md` and explained in `crates/residue`**, which holds one typed verdict per module
 saying why no crate implements it, anchored to a sentence a classifying crate actually wrote. Its
 reconciliation against the backlog is a test, so the two cannot drift apart silently.
 
-The primary distribution over the 50: **37 process, 4 foreign artifact, 9 discharged elsewhere,
+The primary distribution over the 48: **37 process, 4 foreign artifact, 7 discharged elsewhere,
 and 0 genuinely uncovered.** One module still carries work on a secondary reading. `crates/bioethics`
 discharges §36's sandboxing module and in the same paragraph records that all thirteen of its
 required controls need a process boundary, a network stack or a scanner, none of which exists here
@@ -100,8 +100,8 @@ section and refused to pad:
 - **Process** — describes what people do. `crates/stewardship` found 12 of §14's 18.
 - **Foreign artifact** — code-bearing, precise, testable, and not Rust and not in this repository.
   `crates/devplat` now finds 3 of 20 in §11 and §19: the two GitHub Action modules and the full
-  Python SDK surface. The TypeScript gateway and Python authoring clients are now in this
-  repository over authoritative Rust contracts.
+  Python SDK surface. The TypeScript gateway and Python pack/oracle/evaluation authoring clients
+  are now in this repository over authoritative Rust contracts.
 - **Discharged elsewhere** — the content exists under a different section's id. **11 verdicts name
   their own author as the discharger**, a crate that built the capability without ever citing the
   module, which a token scan structurally cannot see.
@@ -140,13 +140,13 @@ state is a backlog whose residue is explained rather than empty.
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 709 |
-| **code-bearing coverage** | **93.4%** |
+| cited | 711 |
+| **code-bearing coverage** | **93.7%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 93.4% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 93.7% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 
@@ -231,7 +231,7 @@ repetitive; one is not, and the exception matters more than the average.
 | 12 | — | ~15 per 100-line file |
 | 11 | — | 18 unique in a 93-line module, frontmatter and title included |
 
-**§23 is the exception and it is a real one.** Measured three ways over all 50 modules: 16.2% of
+**§23 is the exception and it is a real one.** Measured three ways over all 48 modules: 16.2% of
 lines appear in more than one module, 51.2% by the rare-term method used for §28, and only 11.6% of
 802 headings recur verbatim. It is the most content-dense section in the blueprint, and its
 repetition is *shape* — frontmatter, Purpose, a taxonomy list, a pseudo-code fence, evaluation hooks
