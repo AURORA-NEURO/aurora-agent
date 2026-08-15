@@ -10,12 +10,14 @@ from prism_sdk import (
     ProjectionRequest,
     RuntimeStatus,
     read_anndata_projection,
+    read_dicom_projection,
     read_nifti_header,
 )
 
 
 HAS_NIBABEL = importlib.util.find_spec("nibabel") is not None
 HAS_ANNDATA = importlib.util.find_spec("anndata") is not None
+HAS_PYDICOM = importlib.util.find_spec("pydicom") is not None
 
 
 @unittest.skipUnless(HAS_NIBABEL, "nibabel is not installed in this test environment")
@@ -133,6 +135,83 @@ class AnnDataReaderTests(unittest.TestCase):
                     "bioprism.python.anndata",
                     "runtime-anndata",
                     {"path": str(path), "storage_format": "h5ad"},
+                    provenance={"accession": "runtime"},
+                )
+            )
+
+        self.assertEqual(result.status, RuntimeStatus.SUCCEEDED)
+        self.assertTrue(result.executable)
+
+
+@unittest.skipUnless(HAS_PYDICOM, "pydicom is not installed in this test environment")
+class DicomReaderTests(unittest.TestCase):
+    def test_reader_projects_file_metadata_without_loading_pixels(self) -> None:
+        from pydicom.dataset import FileDataset, FileMetaDataset
+        from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "image.dcm"
+            file_meta = FileMetaDataset()
+            file_meta.MediaStorageSOPClassUID = CTImageStorage
+            file_meta.MediaStorageSOPInstanceUID = generate_uid()
+            file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+            file_meta.ImplementationClassUID = generate_uid()
+            dataset = FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+            dataset.StudyInstanceUID = generate_uid()
+            dataset.SeriesInstanceUID = generate_uid()
+            dataset.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+            dataset.SOPClassUID = CTImageStorage
+            dataset.FrameOfReferenceUID = generate_uid()
+            dataset.Modality = "CT"
+            dataset.Rows = 4
+            dataset.Columns = 4
+            dataset.InstanceNumber = 1
+            dataset.PixelSpacing = ["1.0", "1.0"]
+            dataset.ImageOrientationPatient = ["1", "0", "0", "0", "1", "0"]
+            dataset.ImagePositionPatient = ["0", "0", "0"]
+            dataset.save_as(str(path))
+
+            document = read_dicom_projection(
+                str(path),
+                source_id="raw-dicom",
+                provenance={"accession": "dicom-1"},
+            )
+
+        self.assertTrue(document["valid"])
+        self.assertEqual(document["manifest"]["adapter"], "bioprism.python.dicom_metadata")
+        self.assertEqual(document["manifest"]["bytes_read"], False)
+        self.assertEqual(document["instances"][0]["dimensions"], [4, 4])
+
+    def test_runtime_executes_raw_dicom_route_when_dependency_is_available(self) -> None:
+        from pydicom.dataset import FileDataset, FileMetaDataset
+        from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.dcm"
+            file_meta = FileMetaDataset()
+            file_meta.MediaStorageSOPClassUID = CTImageStorage
+            file_meta.MediaStorageSOPInstanceUID = generate_uid()
+            file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+            file_meta.ImplementationClassUID = generate_uid()
+            dataset = FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+            dataset.StudyInstanceUID = generate_uid()
+            dataset.SeriesInstanceUID = generate_uid()
+            dataset.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+            dataset.SOPClassUID = CTImageStorage
+            dataset.FrameOfReferenceUID = generate_uid()
+            dataset.Modality = "MR"
+            dataset.Rows = 2
+            dataset.Columns = 2
+            dataset.InstanceNumber = 1
+            dataset.PixelSpacing = ["1.0", "1.0"]
+            dataset.ImageOrientationPatient = ["1", "0", "0", "0", "1", "0"]
+            dataset.ImagePositionPatient = ["0", "0", "0"]
+            dataset.save_as(str(path))
+            result = AdapterRuntime().execute(
+                ProjectionRequest(
+                    "bioprism.python.dicom",
+                    "runtime-dicom",
+                    {"path": str(path)},
                     provenance={"accession": "runtime"},
                 )
             )

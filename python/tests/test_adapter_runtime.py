@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+from pathlib import Path
+import tempfile
 import unittest
 
 from prism_sdk import (
@@ -18,6 +20,9 @@ VCF = """##fileformat=VCFv4.3
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO
 chr1\t10\t.\tA\tG\t50\tPASS\tDP=4
 """
+
+
+HAS_PYSAM = importlib.util.find_spec("pysam") is not None
 
 
 def nifti_payload() -> dict[str, object]:
@@ -123,6 +128,24 @@ class AdapterRuntimeTests(unittest.TestCase):
         else:
             self.assertEqual(result.status, RuntimeStatus.REJECTED)
             self.assertEqual(result.to_wire()["error"]["kind"], "argument_error")
+
+    def test_pysam_routes_refuse_explicitly_when_dependency_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "existing.data"
+            path.write_bytes(b"not a biological file")
+            for adapter_id, dependency in (
+                ("bioprism.python.vcf_indexed", "pysam"),
+                ("bioprism.python.bam_cram", "pysam"),
+            ):
+                with self.subTest(adapter_id=adapter_id):
+                    result = execute_projection(adapter_id, "raw-indexed", {"path": str(path)})
+                    if HAS_PYSAM:
+                        self.assertEqual(result.status, RuntimeStatus.REJECTED)
+                        self.assertEqual(result.to_wire()["error"]["kind"], "argument_error")
+                    else:
+                        self.assertEqual(result.status, RuntimeStatus.UNSUPPORTED)
+                        self.assertEqual(result.to_wire()["error"]["kind"], "optional_dependency_missing")
+                        self.assertIn(dependency, result.to_wire()["error"]["detail"])
 
     def test_invalid_payload_is_rejected_and_unknown_route_is_typed(self) -> None:
         rejected = execute_projection("bioprism.python.bids_manifest", "bad", {"metadata": {}})

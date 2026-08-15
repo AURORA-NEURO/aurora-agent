@@ -343,7 +343,8 @@ def _parse_instance(mapping: Mapping[str, Any], index: int, audit: _Audit) -> _I
     position_raw = _vector(mapping.get("image_position_patient"), path=instance_id, field="ImagePositionPatient", size=3, audit=audit)
     position = None if position_raw is None else tuple(position_raw)  # type: ignore[assignment]
     frame_positions = _frame_positions(mapping.get("per_frame_positions"), path=instance_id, expected=frames, audit=audit)
-    between = _finite_number(mapping["spacing_between_slices"], path=instance_id, field="SpacingBetweenSlices", audit=audit) if "spacing_between_slices" in mapping else None
+    raw_between = mapping.get("spacing_between_slices")
+    between = _finite_number(raw_between, path=instance_id, field="SpacingBetweenSlices", audit=audit) if raw_between is not None else None
     if between is not None and between == 0:
         audit.add("number_invalid", "error", instance_id, "SpacingBetweenSlices must not be zero")
     tags = mapping.get("tags")
