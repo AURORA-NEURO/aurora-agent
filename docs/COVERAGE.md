@@ -63,6 +63,11 @@ replay/observability contract without inventing domain-specific event semantics.
 The same retained rows are emitted as `mission.trace` events into the gateway's cursor, SSE, and
 signed webhook surfaces, allowing lifecycle monitoring and delivery retry to share one event log
 and one retention-gap contract with ordinary tool calls.
+The gateway also accepts an optional `--mission-state` path for an atomic, 64 MiB-bounded mission
+checkpoint. Terminal jobs restore their retained progress, traces, and size-limited reports;
+queued/running jobs become explicit `failed` records with `recovered_after_restart` after a
+restart, never falsely claiming that interrupted work resumed. This is restart-aware mission
+inspection, not durable event storage, distributed scheduling, or effect rollback.
 Python now exposes typed inventory pages plus bounded sync/async waits that retain the last live
 job on timeout; TypeScript exposes the same wait contract with abortable polling and a typed timeout
 error. These helpers coordinate every domain mission without claiming durable scheduling.

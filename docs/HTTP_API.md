@@ -4,7 +4,8 @@
 available as a library (`bioprism_api::ApiRouter`) and as the `bioprism-api` binary:
 
 ```bash
-cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes>
+cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes> \
+  --mission-state .local/mission-state.json
 ```
 
 The gateway is intentionally bounded and one-request-per-connection. Headers default to 32 KiB,
@@ -21,6 +22,8 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
+| `GET /v1/missions/persistence` | Inspect bounded checkpoint configuration and on-disk size |
+| `POST /v1/missions/persistence/flush` | Force a checkpoint and verify it can be written |
 | `GET /v1/missions/{mission_id}` | Poll job state and retrieve the authoritative mission report |
 | `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
@@ -49,6 +52,27 @@ domain mission without inventing a domain-specific subscription path.
 The TCP serving path shares an immutable router across connection threads and allocates request IDs
 atomically. Each stateless REST/JSON-RPC dispatch uses a cloned ready MCP session; mutable mission,
 event, subscription, and delivery state remains independently bounded and synchronized.
+
+## Restart-aware mission snapshots
+
+Pass `--mission-state <file>` to enable an optional, atomically replaced JSON checkpoint for the
+asynchronous mission registry. The snapshot is bounded to 64 MiB, keeps at most 4,096 missions and
+4,096 trace rows per mission, and omits terminal result bodies larger than 256 KiB in favour of
+byte-count and SHA-256 metadata. This makes operator restarts inspectable without turning a local
+gateway into an unbounded database.
+
+On startup, terminal jobs are restored with their retained progress, trace, error, and (when within
+the result bound) authoritative report. A queued or running job is never falsely resumed: it is
+converted to `failed`, marked `recovered_after_restart: true`, and reports that execution was not
+resumed. `GET /v1/missions/{mission_id}` exposes `result_omitted` when a result body was not
+retained. Snapshot writes happen after acceptance, trace observation, cancellation, terminal
+completion, and deletion; a write failure rejects new acceptance and leaves existing process state
+intact. The snapshot is not an event-log or webhook-delivery journal, so event IDs, SSE cursors,
+subscriptions, and pending deliveries remain process-local.
+`GET /v1/missions/persistence` reports whether checkpointing is enabled, the current file size,
+registry size, bounds, and the non-durable event/delivery distinction. The authenticated
+`POST /v1/missions/persistence/flush` route gives operators an explicit write/readiness check;
+it returns `409` when no state path was configured and `503` when the checkpoint cannot be written.
 
 ## Asynchronous missions
 
@@ -118,9 +142,12 @@ execute a scheduler, or claim delivery success merely because an envelope was cr
 ## Explicit nonclaims
 
 The dependency-free boundary does not implement HTTP/2 gRPC, TLS termination, an identity provider,
-durable event storage, or a consumer-repository GitHub Action. Those are deployment/artifact
-surfaces. The `capabilities` response reports these as false so clients can route to an operator's
-proxy or delivery worker instead of inferring them from the REST routes.
+durable event storage, a distributed mission queue, or a consumer-repository GitHub Action. Those
+are deployment/artifact surfaces. The optional mission snapshot is deliberately narrower than
+durable event storage: it restores bounded mission state and explicitly fails interrupted work
+instead of claiming recovery. The `capabilities` response reports these distinctions so clients
+can route to an operator's proxy, queue, or delivery worker instead of inferring them from REST
+routes.
 
 The Python standard-library SDK exposes the same HTTP surface through `prism_sdk.ApiClient` and
 `prism_sdk.AsyncApiClient`; the stdio MCP client remains available for local, process-confined

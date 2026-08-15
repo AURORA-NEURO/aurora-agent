@@ -138,8 +138,13 @@ invent defaults:
   terminal state inside an explicit timeout/poll interval bound; `MissionWaitTimeout` retains the
   last authoritative live `MissionJob` so callers can resume, cancel, or inspect without parsing
   an exception string.
+  If the gateway is started with `--mission-state`, restored jobs expose
+  `recovered_after_restart`; interrupted queued/running work is an explicit failed record, and
+  `result_omitted` carries bounded byte-count/SHA-256 metadata when a persisted report was too large.
   `delete_mission(mission_id)` removes a terminal job when the caller has consumed its report;
   active jobs are refused so cleanup cannot discard in-flight work.
+  `mission_persistence()` and `flush_mission_persistence()` provide typed operator checks for
+  the optional checkpoint without implying durable event cursors or webhook delivery state.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the
   complete live MCP catalogue, including domains that do not yet have a handwritten convenience
   method. The catalogue is copied from `tools/list` or `/v1/tools`, deduplicated, bounded, and

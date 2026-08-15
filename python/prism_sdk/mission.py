@@ -845,6 +845,29 @@ class MissionProgress:
 
 
 @dataclass(frozen=True)
+class MissionResultOmission:
+    """Bounded metadata for a mission result body omitted from a durable snapshot."""
+
+    raw: dict[str, Any]
+    bytes: int
+    sha256: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionResultOmission":
+        raw = _mapping("mission result omission", value)
+        byte_count = raw.get("bytes")
+        if not isinstance(byte_count, int) or isinstance(byte_count, bool) or byte_count < 0:
+            raise ArgumentError("mission result omission bytes must be a non-negative integer")
+        digest = raw.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ArgumentError("mission result omission sha256 must be a lowercase SHA-256 digest")
+        return cls(raw, byte_count, digest)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class MissionJob:
     """Typed view over an asynchronous HTTP mission job."""
 
@@ -853,7 +876,9 @@ class MissionJob:
     status: str
     cancel_requested: bool
     cancel_reason: str | None
+    recovered_after_restart: bool
     result: Mapping[str, Any] | None
+    result_omitted: MissionResultOmission | None
     error: str | None
     progress: MissionProgress | None
 
@@ -872,15 +897,22 @@ class MissionJob:
         cancel_reason = raw.get("cancel_reason")
         if cancel_reason is not None:
             _text("mission job cancel_reason", cancel_reason)
+        recovered_after_restart = raw.get("recovered_after_restart", False)
+        if not isinstance(recovered_after_restart, bool):
+            raise ArgumentError("mission job recovered_after_restart must be a boolean")
         result = raw.get("result")
         if result is not None and not isinstance(result, Mapping):
             raise ArgumentError("mission job result must be an object or null")
+        result_omitted_value = raw.get("result_omitted")
+        if result_omitted_value is not None and not isinstance(result_omitted_value, Mapping):
+            raise ArgumentError("mission job result_omitted must be an object or null")
+        result_omitted = None if result_omitted_value is None else MissionResultOmission.from_wire(result_omitted_value)
         error = raw.get("error")
         if error is not None:
             _text("mission job error", error)
         progress_value = raw.get("progress")
         progress = None if progress_value is None else MissionProgress.from_wire(progress_value)
-        return cls(raw, mission_id, status, cancel_requested, cancel_reason, result, error, progress)
+        return cls(raw, mission_id, status, cancel_requested, cancel_reason, recovered_after_restart, result, result_omitted, error, progress)
 
     @property
     def terminal(self) -> bool:
@@ -904,6 +936,8 @@ class MissionInventorySummary:
     required_failures: int
     returned_bytes: int
     result_available: bool
+    result_omitted: MissionResultOmission | None
+    recovered_after_restart: bool
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "MissionInventorySummary":
@@ -918,6 +952,13 @@ class MissionInventorySummary:
         result_available = raw.get("result_available")
         if not isinstance(result_available, bool):
             raise ArgumentError("mission inventory summary result_available must be a boolean")
+        result_omitted_value = raw.get("result_omitted")
+        if result_omitted_value is not None and not isinstance(result_omitted_value, Mapping):
+            raise ArgumentError("mission inventory summary result_omitted must be an object or null")
+        result_omitted = None if result_omitted_value is None else MissionResultOmission.from_wire(result_omitted_value)
+        recovered_after_restart = raw.get("recovered_after_restart", False)
+        if not isinstance(recovered_after_restart, bool):
+            raise ArgumentError("mission inventory summary recovered_after_restart must be a boolean")
         return cls(
             raw=raw,
             total_steps=non_negative("total_steps"),
@@ -929,6 +970,8 @@ class MissionInventorySummary:
             required_failures=non_negative("required_failures"),
             returned_bytes=non_negative("returned_bytes"),
             result_available=result_available,
+            result_omitted=result_omitted,
+            recovered_after_restart=recovered_after_restart,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -944,6 +987,7 @@ class MissionInventoryItem:
     status: str
     cancel_requested: bool
     cancel_reason: str | None
+    recovered_after_restart: bool
     progress: MissionProgress
     summary: MissionInventorySummary
     poll: str
@@ -965,6 +1009,9 @@ class MissionInventoryItem:
         cancel_reason = raw.get("cancel_reason")
         if cancel_reason is not None:
             _text("mission inventory cancel_reason", cancel_reason)
+        recovered_after_restart = raw.get("recovered_after_restart", False)
+        if not isinstance(recovered_after_restart, bool):
+            raise ArgumentError("mission inventory recovered_after_restart must be a boolean")
         progress_value = raw.get("progress")
         if not isinstance(progress_value, Mapping):
             raise ArgumentError("mission inventory progress must be an object")
@@ -982,6 +1029,7 @@ class MissionInventoryItem:
             status,
             cancel_requested,
             cancel_reason,
+            recovered_after_restart,
             MissionProgress.from_wire(progress_value),
             MissionInventorySummary.from_wire(summary_value),
             links["poll"],
@@ -1039,6 +1087,63 @@ class MissionInventoryPage:
             if status_filter not in {"queued", "running", "planned", "succeeded", "partial", "failed", "cancelled"}:
                 raise ArgumentError(f"unknown mission inventory status_filter: {status_filter}")
         return cls(raw, missions, returned, total_matching, limit, truncated, status_filter)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionPersistenceStatus:
+    """Typed operator view over the optional restart-aware mission checkpoint."""
+
+    raw: dict[str, Any]
+    enabled: bool
+    file_present: bool
+    file_bytes: int | None
+    schema_version: int
+    max_file_bytes: int
+    max_result_bytes: int
+    registry_size: int
+    recovery_policy: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionPersistenceStatus":
+        raw = _mapping("mission persistence status", value)
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission persistence {name} must be a non-negative integer")
+            return candidate
+
+        enabled = raw.get("enabled")
+        file_present = raw.get("file_present")
+        if not isinstance(enabled, bool) or not isinstance(file_present, bool):
+            raise ArgumentError("mission persistence enabled and file_present must be booleans")
+        file_bytes = raw.get("file_bytes")
+        if file_bytes is not None and (
+            not isinstance(file_bytes, int) or isinstance(file_bytes, bool) or file_bytes < 0
+        ):
+            raise ArgumentError("mission persistence file_bytes must be a non-negative integer or null")
+        schema_version = non_negative("schema_version")
+        max_file_bytes = non_negative("max_file_bytes")
+        max_result_bytes = non_negative("max_result_bytes")
+        registry_size = non_negative("registry_size")
+        recovery_policy = raw.get("recovery_policy")
+        _text("mission persistence recovery_policy", recovery_policy)
+        if raw.get("event_log_durable") is not False or raw.get("webhook_deliveries_durable") is not False:
+            raise ArgumentError("mission persistence must make non-durable event and delivery state explicit")
+        return cls(
+            raw,
+            enabled,
+            file_present,
+            file_bytes,
+            schema_version,
+            max_file_bytes,
+            max_result_bytes,
+            registry_size,
+            recovery_policy,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -1290,9 +1395,12 @@ __all__ = [
     "MissionPolicy",
     "MissionPreflight",
     "MissionExecutionReport",
+    "MissionJob",
+    "MissionResultOmission",
     "MissionInventoryItem",
     "MissionInventoryPage",
     "MissionInventorySummary",
+    "MissionPersistenceStatus",
     "MissionTraceEvent",
     "MissionPreflightError",
     "MissionRouteSelection",

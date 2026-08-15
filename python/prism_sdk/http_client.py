@@ -40,6 +40,7 @@ from .mission import (
     MAX_MISSION_WAIT_SECONDS,
     MissionJob,
     MissionInventoryPage,
+    MissionPersistenceStatus,
     MissionPolicy,
     MissionPreflight,
     MissionRequest,
@@ -380,6 +381,18 @@ class ApiClient:
         if status is not None:
             query["status"] = status
         return MissionInventoryPage.from_wire(self.request("GET", f"/v1/missions?{urlencode(query)}"))
+
+    def mission_persistence(self) -> MissionPersistenceStatus:
+        """Inspect the optional restart-aware mission checkpoint and its bounded file state."""
+
+        return MissionPersistenceStatus.from_wire(self.request("GET", "/v1/missions/persistence"))
+
+    def flush_mission_persistence(self) -> MissionPersistenceStatus:
+        """Force a checkpoint and return the gateway's resulting persistence status."""
+
+        return MissionPersistenceStatus.from_wire(
+            self.request("POST", "/v1/missions/persistence/flush", {})
+        )
 
     def missions(self, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
         """Backward-compatible raw mission inventory response."""
@@ -947,6 +960,16 @@ class AsyncApiClient:
         """Async typed bounded mission inventory."""
 
         return await asyncio.to_thread(self.client.mission_inventory, status=status, limit=limit)
+
+    async def mission_persistence(self) -> MissionPersistenceStatus:
+        """Async inspection of the optional restart-aware mission checkpoint."""
+
+        return await asyncio.to_thread(self.client.mission_persistence)
+
+    async def flush_mission_persistence(self) -> MissionPersistenceStatus:
+        """Async forced checkpoint with typed bounded status."""
+
+        return await asyncio.to_thread(self.client.flush_mission_persistence)
 
     async def delivery_page(self, subscription_id: str, *, after: int = 0, limit: int = 100) -> DeliveryPage:
         """Async typed cursor page over pending signed deliveries."""

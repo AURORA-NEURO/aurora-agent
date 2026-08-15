@@ -13,7 +13,8 @@ canonical serialization, and scientific contracts.
 ## Start a gateway
 
 ```bash
-cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token 0123456789abcdef
+cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token 0123456789abcdef \
+  --mission-state .local/mission-state.json
 ```
 
 In another terminal:
@@ -116,12 +117,16 @@ explicit; cancellation is a request to stop future dispatch, not a force-kill or
 Its optional `progress: MissionProgress` field provides one bounded shape for queued, live, and
 terminal dashboards: phase, current wave, active/completed steps, outcome counters, returned bytes,
 and the latest clock-free trace sequence/event. The terminal `result` and its execution trace remain
-authoritative for replay and domain interpretation.
+authoritative for replay and domain interpretation. When the gateway restores a bounded checkpoint,
+`recovered_after_restart` is true and the job is an explicit failed interruption; `result_omitted`
+exposes byte-count and SHA-256 metadata when a durable snapshot could not retain a large report.
 `missionTrace(missionId, after, limit)` provides a typed `MissionTracePage` with ordered events,
 an exclusive `next_after` cursor, and explicit retention-gap metadata.
 `waitMission(missionId, { timeoutMs, pollIntervalMs, signal })` performs bounded, abortable
 polling and returns only a terminal `MissionJob`; `MissionWaitTimeoutError` carries the last
 authoritative live snapshot so an operator can resume or cancel without losing progress.
+`missionPersistence()` and `flushMissionPersistence()` expose the same bounded checkpoint status
+and explicit flush/readiness check for operator tooling.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain

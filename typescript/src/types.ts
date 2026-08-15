@@ -507,13 +507,20 @@ export interface MissionProgress extends JsonObject {
   last_event: string | null;
 }
 
+export interface MissionResultOmission extends JsonObject {
+  bytes: number;
+  sha256: string;
+}
+
 export interface MissionJob extends JsonObject {
   ok: boolean;
   mission_id: string;
   status: MissionJobStatus;
   cancel_requested: boolean;
   cancel_reason?: string | null;
+  recovered_after_restart?: boolean;
   result?: AgentMissionReport | null;
+  result_omitted?: MissionResultOmission | null;
   error?: string | null;
   progress?: MissionProgress;
   poll?: string;
@@ -547,6 +554,8 @@ export interface MissionInventorySummary extends JsonObject {
   required_failures: number;
   returned_bytes: number;
   result_available: boolean;
+  result_omitted?: MissionResultOmission | null;
+  recovered_after_restart?: boolean;
 }
 
 export interface MissionInventoryItem extends JsonObject {
@@ -554,6 +563,7 @@ export interface MissionInventoryItem extends JsonObject {
   status: MissionJobStatus;
   cancel_requested: boolean;
   cancel_reason?: string | null;
+  recovered_after_restart?: boolean;
   progress: MissionProgress;
   summary: MissionInventorySummary;
   poll: string;
@@ -569,6 +579,21 @@ export interface MissionInventoryResponse extends JsonObject {
   limit: number;
   truncated: boolean;
   status_filter: MissionJobStatus | null;
+}
+
+export interface MissionPersistenceStatus extends JsonObject {
+  ok: boolean;
+  enabled: boolean;
+  file_present: boolean;
+  file_bytes: number | null;
+  schema_version: number;
+  max_file_bytes: number;
+  max_result_bytes: number;
+  registry_size: number;
+  event_log_durable: false;
+  webhook_deliveries_durable: false;
+  recovery_policy: string;
+  flush: string;
 }
 
 export interface MissionStepPreflight extends JsonObject {

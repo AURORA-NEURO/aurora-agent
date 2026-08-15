@@ -33,6 +33,7 @@ import type {
   MissionJob,
   MissionJobStatus,
   MissionInventoryResponse,
+  MissionPersistenceStatus,
   MissionPreflightResult,
   MissionRouteSelection,
   MissionTracePage,
@@ -282,6 +283,16 @@ export class ApiClient {
     const query = new URLSearchParams({ limit: String(limit) });
     if (status !== undefined) query.set("status", status);
     return this.request<MissionInventoryResponse>("GET", `/v1/missions?${query.toString()}`, undefined, options);
+  }
+
+  /** Inspect whether restart-aware mission snapshots are enabled and within their bounds. */
+  async missionPersistence(options?: ClientRequestOptions): Promise<MissionPersistenceStatus> {
+    return this.request<MissionPersistenceStatus>("GET", "/v1/missions/persistence", undefined, options);
+  }
+
+  /** Force a bounded mission snapshot checkpoint; the gateway returns the resulting status. */
+  async flushMissionPersistence(options?: ClientRequestOptions): Promise<MissionPersistenceStatus> {
+    return this.request<MissionPersistenceStatus>("POST", "/v1/missions/persistence/flush", {}, options);
   }
 
   /** Read the current asynchronous mission status and, once terminal, its authoritative report. */

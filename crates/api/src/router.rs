@@ -11,7 +11,7 @@ use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -23,6 +23,10 @@ pub const DEFAULT_EVENT_CAPACITY: usize = 4096;
 pub const MAX_MISSION_JOBS: usize = 4096;
 pub const MAX_MISSION_LIST_LIMIT: usize = 256;
 pub const MAX_MISSION_TRACE_EVENTS: usize = 4096;
+pub const MISSION_STATE_SCHEMA_VERSION: u64 = 1;
+pub const MAX_MISSION_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_PERSISTED_MISSION_RESULT_BYTES: usize = 256 * 1024;
+pub const MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -30,6 +34,11 @@ pub struct ApiConfig {
     pub max_body_bytes: usize,
     pub event_capacity: usize,
     pub bearer_token: Option<String>,
+    /// Optional atomic JSON checkpoint for the bounded asynchronous mission registry.
+    ///
+    /// Event cursors remain process-local; this path only restores mission status, bounded
+    /// trace rows, progress, and size-bounded result metadata after an API restart.
+    pub mission_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -39,6 +48,7 @@ impl Default for ApiConfig {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             event_capacity: DEFAULT_EVENT_CAPACITY,
             bearer_token: None,
+            mission_state_path: None,
         }
     }
 }
@@ -59,6 +69,13 @@ impl ApiConfig {
                 return Err("bearer_token must contain 16..=4096 visible bytes".into());
             }
         }
+        if self
+            .mission_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("mission_state_path must not be empty".into());
+        }
         Ok(())
     }
 }
@@ -70,11 +87,98 @@ pub struct ApiRouter {
     events: Arc<Mutex<EventLog>>,
     next_request_id: AtomicU64,
     mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
+    mission_persistence: Arc<MissionPersistence>,
 }
 
 struct MissionJob {
     cancellation: Arc<AtomicBool>,
     state: Arc<Mutex<MissionJobState>>,
+}
+
+struct MissionPersistence {
+    path: Option<PathBuf>,
+    jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
+    lock: Mutex<()>,
+}
+
+impl MissionPersistence {
+    fn persist(&self) -> Result<(), String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(());
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "mission persistence lock is unavailable".to_string())?;
+        let mut missions = {
+            let jobs = self
+                .jobs
+                .lock()
+                .map_err(|_| "mission registry is unavailable".to_string())?;
+            jobs.iter()
+                .map(|(mission_id, job)| {
+                    let state = job
+                        .state
+                        .lock()
+                        .map_err(|_| "mission state is unavailable".to_string())?;
+                    Ok(durable_mission_state_json(mission_id, &state))
+                })
+                .collect::<Result<Vec<_>, String>>()?
+        };
+        trim_mission_snapshot_to_bound(&mut missions)?;
+        let document = json!({
+            "schema_version": MISSION_STATE_SCHEMA_VERSION,
+            "missions": missions,
+            "guarantees": [
+                "terminal reports are restored only when their bounded JSON was retained",
+                "queued and running jobs are marked failed after a process restart",
+                "event cursors and webhook deliveries remain process-local"
+            ]
+        });
+        let bytes = serde_json::to_vec_pretty(&document)
+            .map_err(|error| format!("mission state could not be serialized: {error}"))?;
+        if bytes.len() > MAX_MISSION_STATE_FILE_BYTES {
+            return Err(format!(
+                "mission state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_MISSION_STATE_FILE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("mission state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "mission_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(".{filename}.tmp"));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("mission state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "mission state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "mission state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -86,7 +190,9 @@ struct MissionJobState {
     cancel_requested: bool,
     cancel_reason: Option<String>,
     result: Option<Value>,
+    result_omitted: Option<Value>,
     error: Option<String>,
+    recovered_after_restart: bool,
 }
 
 #[derive(Clone)]
@@ -229,6 +335,7 @@ impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
         config.validate()?;
         let events = Arc::new(Mutex::new(EventLog::new(config.event_capacity)?));
+        let restored_jobs = load_mission_jobs(config.mission_state_path.as_deref())?;
         let mut server = bioprism_mcp::Server::new(root);
         let initialize = Request {
             id: Some(json!(0)),
@@ -249,14 +356,29 @@ impl ApiRouter {
         };
         server.handle(&initialized);
         let mission_executor = Arc::new(server.clone());
-        Ok(Self {
+        let mission_jobs = Arc::new(Mutex::new(restored_jobs));
+        let mission_persistence = Arc::new(MissionPersistence {
+            path: config.mission_state_path.clone(),
+            jobs: Arc::clone(&mission_jobs),
+            lock: Mutex::new(()),
+        });
+        let router = Self {
             server,
             mission_executor,
             config,
             events,
             next_request_id: AtomicU64::new(1),
-            mission_jobs: Arc::new(Mutex::new(BTreeMap::new())),
-        })
+            mission_jobs,
+            mission_persistence,
+        };
+        if router.config.mission_state_path.is_some() {
+            router.persist_mission_registry()?;
+        }
+        Ok(router)
+    }
+
+    fn persist_mission_registry(&self) -> Result<(), String> {
+        self.mission_persistence.persist()
     }
 
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
@@ -311,6 +433,10 @@ impl ApiRouter {
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
             ("GET", "/v1/missions") => self.mission_inventory(&request, &request_id),
+            ("GET", "/v1/missions/persistence") => self.mission_persistence_status(),
+            ("POST", "/v1/missions/persistence/flush") => {
+                self.flush_mission_persistence(&request_id)
+            }
             ("POST", "/v1/missions/preflight") => self.preflight_mission(&request, &request_id),
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/trace") => {
@@ -357,6 +483,49 @@ impl ApiRouter {
 
     pub fn limits(&self) -> (usize, usize) {
         (self.config.max_header_bytes, self.config.max_body_bytes)
+    }
+
+    fn mission_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.mission_state_path.is_some();
+        let file_bytes = self
+            .config
+            .mission_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry_size = self.mission_jobs.lock().map(|jobs| jobs.len()).unwrap_or(0);
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema_version": MISSION_STATE_SCHEMA_VERSION,
+                "max_file_bytes": MAX_MISSION_STATE_FILE_BYTES,
+                "max_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
+                "registry_size": registry_size,
+                "event_log_durable": false,
+                "webhook_deliveries_durable": false,
+                "recovery_policy": "terminal snapshots restore; queued and running jobs fail explicitly after restart",
+                "flush": "/v1/missions/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_mission_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.mission_state_path.is_none() {
+            return self.error(
+                409,
+                "mission_persistence_disabled",
+                "configure --mission-state before flushing a mission snapshot",
+                request_id,
+            );
+        }
+        match self.persist_mission_registry() {
+            Ok(()) => self.mission_persistence_status(),
+            Err(error) => self.error(503, "mission_persistence_unavailable", &error, request_id),
+        }
     }
 
     fn request_id(&self, request: &HttpRequest) -> String {
@@ -420,6 +589,7 @@ impl ApiRouter {
                     "capabilities": "/v1/capabilities",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
+                    "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
                     "webhooks": "/v1/webhooks/subscriptions"
@@ -448,6 +618,7 @@ impl ApiRouter {
                     "mission_trace": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
+                    "durable_mission_snapshots": self.config.mission_state_path.is_some(),
                     "signed_webhook_outbox": true,
                     "grpc": false,
                     "tls": false,
@@ -457,6 +628,8 @@ impl ApiRouter {
                     "max_header_bytes": self.config.max_header_bytes,
                     "max_body_bytes": self.config.max_body_bytes,
                     "event_capacity": self.config.event_capacity,
+                    "mission_state_file_bytes": MAX_MISSION_STATE_FILE_BYTES,
+                    "persisted_mission_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
                     "webhook_filters": MAX_FILTERS
                 }
             }),
@@ -686,7 +859,9 @@ impl ApiRouter {
             cancel_requested: false,
             cancel_reason: None,
             result: None,
+            result_omitted: None,
             error: None,
+            recovered_after_restart: false,
         }));
         let job = Arc::new(MissionJob {
             cancellation: Arc::clone(&cancellation),
@@ -722,15 +897,23 @@ impl ApiRouter {
             }
             jobs.insert(mission_id.clone(), Arc::clone(&job));
         }
+        if let Err(error) = self.persist_mission_registry() {
+            if let Ok(mut jobs) = self.mission_jobs.lock() {
+                jobs.remove(&mission_id);
+            }
+            return self.error(503, "mission_persistence_unavailable", &error, request_id);
+        }
 
         let progress_state = Arc::clone(&state);
         let mission_events = Arc::clone(&self.events);
+        let persistence = Arc::clone(&self.mission_persistence);
         let mission_subject = mission_id.clone();
         let mission_request_id = request_id.to_string();
         let observer = Arc::new(move |event: Value| {
             if let Ok(mut current) = progress_state.lock() {
                 current.record_trace(event.clone());
             }
+            let _ = persistence.persist();
             if let Ok(mut events) = mission_events.lock() {
                 let _ = events.emit(
                     "mission.trace",
@@ -741,6 +924,7 @@ impl ApiRouter {
             }
         });
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
+        let worker_persistence = Arc::clone(&self.mission_persistence);
         let worker_id = mission_id.clone();
         let worker_arguments = arguments;
         let spawn = thread::Builder::new()
@@ -750,6 +934,7 @@ impl ApiRouter {
                     current.status = "running".into();
                     current.progress.phase = "running".into();
                 }
+                let _ = worker_persistence.persist();
                 let outcome = executor
                     .execute_agent_mission_with_cancellation(&worker_arguments, &cancellation);
                 if let Ok(mut current) = job.state.lock() {
@@ -762,6 +947,7 @@ impl ApiRouter {
                                 .unwrap_or("succeeded")
                                 .into();
                             current.result = Some(result);
+                            current.result_omitted = None;
                         }
                         Err(error) => {
                             current.status = "failed".into();
@@ -771,11 +957,13 @@ impl ApiRouter {
                         }
                     }
                 }
+                let _ = worker_persistence.persist();
             });
         if spawn.is_err() {
             if let Ok(mut jobs) = self.mission_jobs.lock() {
                 jobs.remove(&mission_id);
             }
+            let _ = self.persist_mission_registry();
             return self.error(
                 503,
                 "mission_worker_unavailable",
@@ -877,6 +1065,7 @@ impl ApiRouter {
                 "status": state.status,
                 "cancel_requested": state.cancel_requested,
                 "cancel_reason": state.cancel_reason,
+                "recovered_after_restart": state.recovered_after_restart,
                 "progress": mission_progress_json(&state.progress),
                 "summary": mission_summary(&state),
                 "poll": format!("/v1/missions/{mission_id}"),
@@ -942,8 +1131,10 @@ impl ApiRouter {
                 "status": current.status,
                 "cancel_requested": current.cancel_requested,
                 "cancel_reason": current.cancel_reason,
+                "recovered_after_restart": current.recovered_after_restart,
                 "progress": mission_progress_json(&current.progress),
                 "result": current.result,
+                "result_omitted": current.result_omitted,
                 "error": current.error,
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
@@ -1154,6 +1345,8 @@ impl ApiRouter {
         state.cancel_requested = current.cancel_requested;
         state.cancel_reason = current.cancel_reason.clone();
         state.progress.request_cancel();
+        drop(state);
+        let _ = self.persist_mission_registry();
         HttpResponse::json(
             202,
             &json!({
@@ -1208,6 +1401,13 @@ impl ApiRouter {
                 "only terminal missions may be removed",
                 request_id,
             );
+        }
+        drop(jobs);
+        if let Err(error) = self.persist_mission_registry() {
+            if let Ok(mut jobs) = self.mission_jobs.lock() {
+                jobs.insert(mission_id.clone(), job);
+            }
+            return self.error(503, "mission_persistence_unavailable", &error, request_id);
         }
         HttpResponse::json(
             200,
@@ -1553,6 +1753,8 @@ impl ApiRouter {
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
+                    "/v1/missions/persistence": { "get": { "responses": { "200": { "description": "restart-aware mission snapshot status" } } } },
+                    "/v1/missions/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded mission snapshot checkpoint" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
                     "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
@@ -1573,6 +1775,263 @@ impl ApiRouter {
 
 fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
     job.state.lock().map(|state| state.clone()).map_err(|_| ())
+}
+
+fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
+    let Some(path) = path else {
+        return Ok(BTreeMap::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) => return Err(format!("mission state snapshot could not be read: {error}")),
+    };
+    if bytes.len() > MAX_MISSION_STATE_FILE_BYTES {
+        return Err(format!(
+            "mission state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_MISSION_STATE_FILE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("mission state snapshot is invalid JSON: {error}"))?;
+    let schema_version = document
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "mission state snapshot has no schema_version".to_string())?;
+    if schema_version != MISSION_STATE_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported mission state schema version {schema_version}; expected {MISSION_STATE_SCHEMA_VERSION}"
+        ));
+    }
+    let missions = document
+        .get("missions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "mission state snapshot has no missions array".to_string())?;
+    if missions.len() > MAX_MISSION_JOBS {
+        return Err(format!(
+            "mission state snapshot contains {} jobs, above the {}-job bound",
+            missions.len(),
+            MAX_MISSION_JOBS
+        ));
+    }
+    let mut restored = BTreeMap::new();
+    for mission in missions {
+        let object = mission
+            .as_object()
+            .ok_or_else(|| "mission state entry must be a JSON object".to_string())?;
+        let mission_id = object
+            .get("mission_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty() && value.len() <= 256)
+            .ok_or_else(|| "mission state entry has an invalid mission_id".to_string())?
+            .to_string();
+        if restored.contains_key(&mission_id) {
+            return Err(format!(
+                "mission state snapshot repeats mission_id {mission_id:?}"
+            ));
+        }
+        let status = object
+            .get("status")
+            .and_then(Value::as_str)
+            .filter(|status| is_known_mission_status(status))
+            .ok_or_else(|| format!("mission {mission_id:?} has an invalid status"))?
+            .to_string();
+        let total_steps = object.get("total_steps").and_then(value_usize).unwrap_or(0);
+        let trace = object
+            .get("trace")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("mission {mission_id:?} has no trace array"))?
+            .iter()
+            .rev()
+            .take(MAX_MISSION_TRACE_EVENTS)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
+        let mut state = MissionJobState {
+            total_steps,
+            trace,
+            progress: mission_progress_from_json(object.get("progress"), total_steps),
+            status,
+            cancel_requested: object
+                .get("cancel_requested")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            cancel_reason: object
+                .get("cancel_reason")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            result: object
+                .get("result")
+                .filter(|value| !value.is_null())
+                .cloned(),
+            result_omitted: object.get("result_omitted").cloned(),
+            error: object
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            recovered_after_restart: object
+                .get("recovered_after_restart")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        };
+        if !is_terminal_mission_status(&state.status) {
+            state.status = "failed".into();
+            state.progress.phase = "failed".into();
+            state.progress.active_steps = 0;
+            state.error = Some(
+                "mission was interrupted by an API process restart; execution was not resumed"
+                    .into(),
+            );
+            state.recovered_after_restart = true;
+        }
+        restored.insert(
+            mission_id,
+            Arc::new(MissionJob {
+                cancellation: Arc::new(AtomicBool::new(false)),
+                state: Arc::new(Mutex::new(state)),
+            }),
+        );
+    }
+    Ok(restored)
+}
+
+fn durable_mission_state_json(mission_id: &str, state: &MissionJobState) -> Value {
+    let persisted_trace = state
+        .trace
+        .iter()
+        .map(durable_trace_event)
+        .collect::<Vec<_>>();
+    let (result, generated_omission) = match state.result.as_ref() {
+        Some(result) => match serde_json::to_vec(result) {
+            Ok(bytes) if bytes.len() <= MAX_PERSISTED_MISSION_RESULT_BYTES => {
+                (result.clone(), None)
+            }
+            Ok(bytes) => (Value::Null, Some(value_omission(&bytes))),
+            Err(_) => (Value::Null, None),
+        },
+        None => (Value::Null, None),
+    };
+    json!({
+        "mission_id": mission_id,
+        "total_steps": state.total_steps,
+        "status": state.status,
+        "cancel_requested": state.cancel_requested,
+        "cancel_reason": state.cancel_reason,
+        "progress": mission_progress_json(&state.progress),
+        "trace": persisted_trace,
+        "result": result,
+        "result_omitted": state.result_omitted.clone().or(generated_omission),
+        "error": state.error,
+        "recovered_after_restart": state.recovered_after_restart,
+    })
+}
+
+fn durable_trace_event(event: &Value) -> Value {
+    let Ok(bytes) = serde_json::to_vec(event) else {
+        return json!({ "event": "trace.event_omitted", "detail_omitted": true });
+    };
+    if bytes.len() <= MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES {
+        return event.clone();
+    }
+    json!({
+        "sequence": event.get("sequence"),
+        "event": event.get("event"),
+        "wave": event.get("wave"),
+        "step_id": event.get("step_id"),
+        "tool": event.get("tool"),
+        "status": event.get("status"),
+        "arguments_digest": event.get("arguments_digest"),
+        "bytes": event.get("bytes"),
+        "detail": Value::Null,
+        "detail_omitted": value_omission(&bytes),
+    })
+}
+
+fn value_omission(bytes: &[u8]) -> Value {
+    let mut digest = Sha256::new();
+    digest.update(bytes);
+    json!({ "bytes": bytes.len(), "sha256": hex_digest(&digest.finalize()) })
+}
+
+fn trim_mission_snapshot_to_bound(missions: &mut [Value]) -> Result<(), String> {
+    loop {
+        let size = serde_json::to_vec(&json!({
+            "schema_version": MISSION_STATE_SCHEMA_VERSION,
+            "missions": missions,
+        }))
+        .map_err(|error| format!("mission state could not be sized: {error}"))?
+        .len();
+        if size <= MAX_MISSION_STATE_FILE_BYTES {
+            return Ok(());
+        }
+        if let Some(object) = missions.iter_mut().find_map(Value::as_object_mut) {
+            if let Some(result) = object.get_mut("result") {
+                if !result.is_null() {
+                    let bytes = serde_json::to_vec(result)
+                        .map_err(|error| format!("mission result could not be sized: {error}"))?;
+                    let omission = value_omission(&bytes);
+                    *result = Value::Null;
+                    object.insert("result_omitted".into(), omission);
+                    continue;
+                }
+            }
+        }
+        if let Some(trace) = missions.iter_mut().find_map(|mission| {
+            mission
+                .get_mut("trace")
+                .and_then(Value::as_array_mut)
+                .filter(|trace| !trace.is_empty())
+        }) {
+            trace.remove(0);
+            continue;
+        }
+        return Err(format!(
+            "mission state snapshot cannot fit within the {}-byte bound",
+            MAX_MISSION_STATE_FILE_BYTES
+        ));
+    }
+}
+
+fn mission_progress_from_json(value: Option<&Value>, total_steps: usize) -> MissionProgressState {
+    let mut progress = MissionProgressState::new(total_steps);
+    let Some(object) = value.and_then(Value::as_object) else {
+        return progress;
+    };
+    if let Some(phase) = object.get("phase").and_then(Value::as_str) {
+        progress.phase = phase.to_string();
+    }
+    progress.current_wave = object.get("current_wave").and_then(value_usize);
+    progress.total_steps = object
+        .get("total_steps")
+        .and_then(value_usize)
+        .unwrap_or(total_steps);
+    for (key, target) in [
+        ("completed_steps", &mut progress.completed_steps),
+        ("active_steps", &mut progress.active_steps),
+        ("succeeded", &mut progress.succeeded),
+        ("refused", &mut progress.refused),
+        ("blocked", &mut progress.blocked),
+        ("cancelled", &mut progress.cancelled),
+        ("required_failures", &mut progress.required_failures),
+        ("returned_bytes", &mut progress.returned_bytes),
+    ] {
+        if let Some(value) = object.get(key).and_then(value_usize) {
+            *target = value;
+        }
+    }
+    progress.trace_sequence = object.get("trace_sequence").and_then(value_usize);
+    progress.last_event = object
+        .get("last_event")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    progress
+}
+
+fn value_usize(value: &Value) -> Option<usize> {
+    value.as_u64().and_then(|value| usize::try_from(value).ok())
 }
 
 fn unavailable_event_metrics() -> EventMetrics {
@@ -1640,6 +2099,8 @@ fn mission_summary(state: &MissionJobState) -> Value {
         "required_failures": count("required_failures"),
         "returned_bytes": count("returned_bytes"),
         "result_available": report.is_some(),
+        "result_omitted": state.result_omitted,
+        "recovered_after_restart": state.recovered_after_restart,
     })
 }
 
@@ -1771,6 +2232,18 @@ mod tests {
         }
     }
 
+    fn test_state_path(label: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_TEST_STATE: AtomicU64 = AtomicU64::new(1);
+        let path = std::env::temp_dir().join(format!(
+            "bioprism-api-{label}-{}-{}.json",
+            std::process::id(),
+            NEXT_TEST_STATE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
     #[test]
     fn rest_and_json_rpc_share_tool_dispatch_and_auth_is_fail_closed() {
         let router = ApiRouter::new(
@@ -1823,6 +2296,122 @@ mod tests {
             .map(|handle| handle.join().unwrap().unwrap())
             .collect::<BTreeSet<_>>();
         assert_eq!(ids.len(), 32);
+    }
+
+    #[test]
+    fn durable_mission_state_restores_terminal_jobs_and_fails_interrupted_jobs() {
+        let path = test_state_path("restart");
+        let progress = mission_progress_json(&MissionProgressState::new(1));
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "schema_version": MISSION_STATE_SCHEMA_VERSION,
+                "missions": [
+                    {
+                        "mission_id": "active-before-restart",
+                        "total_steps": 1,
+                        "status": "running",
+                        "cancel_requested": false,
+                        "cancel_reason": null,
+                        "progress": progress,
+                        "trace": [],
+                        "result": null,
+                        "result_omitted": null,
+                        "error": null,
+                        "recovered_after_restart": false
+                    },
+                    {
+                        "mission_id": "terminal-before-restart",
+                        "total_steps": 0,
+                        "status": "succeeded",
+                        "cancel_requested": false,
+                        "cancel_reason": null,
+                        "progress": mission_progress_json(&MissionProgressState::new(0)),
+                        "trace": [],
+                        "result": {"mission_status": "succeeded", "results": []},
+                        "result_omitted": null,
+                        "error": null,
+                        "recovered_after_restart": false
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_state_path: Some(path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+
+        let persistence = router.handle(request("GET", "/v1/missions/persistence", json!({})));
+        let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
+        assert_eq!(persistence["enabled"], true);
+        assert_eq!(persistence["event_log_durable"], false);
+        assert_eq!(
+            router
+                .handle(request("POST", "/v1/missions/persistence/flush", json!({})))
+                .status,
+            200
+        );
+
+        let active = router.handle(request(
+            "GET",
+            "/v1/missions/active-before-restart",
+            json!({}),
+        ));
+        let active: Value = serde_json::from_slice(&active.body).unwrap();
+        assert_eq!(active["status"], "failed");
+        assert_eq!(active["recovered_after_restart"], true);
+        assert!(active["error"].as_str().unwrap().contains("not resumed"));
+
+        let terminal = router.handle(request(
+            "GET",
+            "/v1/missions/terminal-before-restart",
+            json!({}),
+        ));
+        let terminal: Value = serde_json::from_slice(&terminal.body).unwrap();
+        assert_eq!(terminal["status"], "succeeded");
+        assert_eq!(terminal["result"]["mission_status"], "succeeded");
+
+        let persisted: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let persisted_active = persisted["missions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|mission| mission["mission_id"] == "active-before-restart")
+            .unwrap();
+        assert_eq!(persisted_active["status"], "failed");
+        assert_eq!(persisted_active["recovered_after_restart"], true);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn durable_mission_state_omits_large_results_with_digest_metadata() {
+        let state = MissionJobState {
+            total_steps: 0,
+            trace: Vec::new(),
+            progress: MissionProgressState::new(0),
+            status: "succeeded".into(),
+            cancel_requested: false,
+            cancel_reason: None,
+            result: Some(Value::String(
+                "x".repeat(MAX_PERSISTED_MISSION_RESULT_BYTES + 1),
+            )),
+            result_omitted: None,
+            error: None,
+            recovered_after_restart: false,
+        };
+        let persisted = durable_mission_state_json("large-result", &state);
+        assert!(persisted["result"].is_null());
+        assert_eq!(
+            persisted["result_omitted"]["bytes"],
+            (MAX_PERSISTED_MISSION_RESULT_BYTES + 3) as u64
+        );
+        assert!(persisted["result_omitted"]["sha256"].as_str().is_some());
     }
 
     #[test]
