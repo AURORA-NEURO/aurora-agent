@@ -524,6 +524,7 @@ impl Server {
             "hub_disclosure_review" => self.hub_disclosure_review(&arguments),
             "hub_card_render" => self.hub_card_render(&arguments),
             "hub_leaderboard_render" => self.hub_leaderboard_render(&arguments),
+            "bioatlas_publication_audit" => self.bioatlas_publication_audit(&arguments),
             "measurement_compare" => self.measurement_compare(&arguments),
             "hub_resolve" => self.hub_resolve(&arguments),
             "hub_lock" => self.hub_lock(&arguments),
@@ -7032,6 +7033,272 @@ impl Server {
         }))
     }
 
+    fn bioatlas_publication_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure BioAtlas publication input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("BioAtlas publication input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+
+        let raw_atlas = arguments
+            .get("atlas")
+            .cloned()
+            .ok_or("atlas is required and must be a serialized bioprism-atlas Atlas")?;
+        let mut atlas_arguments = serde_json::Map::new();
+        atlas_arguments.insert("atlas".into(), raw_atlas);
+        if let Some(weighting) = arguments.get("weighting") {
+            atlas_arguments.insert("weighting".into(), weighting.clone());
+        }
+        atlas_arguments.insert("max_items".into(), json!(max_items));
+        let atlas = self.atlas_report(&Value::Object(atlas_arguments))?;
+
+        let evidence_audit = match arguments.get("evidence_audit") {
+            Some(raw) => Some(self.biocapability_evidence_audit(raw)?),
+            None => None,
+        };
+        let card = match arguments.get("card") {
+            Some(raw) => Some(self.hub_card_render(raw)?),
+            None => None,
+        };
+        let leaderboard = match arguments.get("leaderboard") {
+            Some(raw) => Some(self.hub_leaderboard_render(raw)?),
+            None => None,
+        };
+
+        let atlas_ok = atlas.get("ok").and_then(Value::as_bool).unwrap_or(false);
+        let atlas_aggregation_ready = atlas
+            .get("summary")
+            .and_then(Value::as_object)
+            .and_then(|summary| summary.get("coverage_supports_aggregation"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let evidence_ready = evidence_audit
+            .as_ref()
+            .and_then(|value| value.get("release_posture"))
+            .and_then(|posture| posture.get("ready_for_requested_claims"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let card_ok = card
+            .as_ref()
+            .and_then(|value| value.get("ok"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let card_score_attached = card
+            .as_ref()
+            .and_then(|value| value.get("score"))
+            .and_then(|score| score.get("attached"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let leaderboard_ok = leaderboard
+            .as_ref()
+            .and_then(|value| value.get("ok"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let ranked_count = leaderboard
+            .as_ref()
+            .and_then(|value| value.get("ranked_count"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let unranked_count = leaderboard
+            .as_ref()
+            .and_then(|value| value.get("unranked_count"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+
+        let release_request = if let Some(raw_request) = arguments.get("release_request") {
+            let request = raw_request
+                .as_object()
+                .ok_or("release_request must be an object")?;
+            let request_id = request
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or("release_request.id must be a non-empty string")?;
+            let raw_targets = request
+                .get("targets")
+                .and_then(Value::as_array)
+                .ok_or("release_request.targets must be an array")?;
+            if raw_targets.is_empty() || raw_targets.len() > 16 {
+                return Err("release_request.targets must contain between 1 and 16 entries".into());
+            }
+
+            let mut seen = BTreeSet::new();
+            let mut target_rows = Vec::with_capacity(raw_targets.len());
+            for raw_target in raw_targets {
+                let target = raw_target
+                    .as_str()
+                    .ok_or("release_request.targets must contain strings")?;
+                if !seen.insert(target.to_string()) {
+                    return Err(format!(
+                        "release_request.targets contains duplicate {target:?}"
+                    ));
+                }
+                let (eligible, blockers, notes): (bool, Vec<&str>, Vec<&str>) = match target {
+                    "atlas_profile" => (
+                        atlas_ok,
+                        if atlas_ok { vec![] } else { vec!["atlas_audit_failed"] },
+                        vec!["atlas coverage and holes remain visible in the atlas result"],
+                    ),
+                    "atlas_aggregation" => (
+                        atlas_ok && atlas_aggregation_ready,
+                        if !atlas_ok {
+                            vec!["atlas_audit_failed"]
+                        } else if !atlas_aggregation_ready {
+                            vec!["coverage_does_not_support_aggregation"]
+                        } else {
+                            vec![]
+                        },
+                        vec!["aggregation readiness is derived from the atlas coverage gate"],
+                    ),
+                    "evidence_claims" => (
+                        evidence_ready,
+                        if evidence_audit.is_none() {
+                            vec!["evidence_audit_missing"]
+                        } else if !evidence_ready {
+                            vec!["evidence_claims_not_ready"]
+                        } else {
+                            vec![]
+                        },
+                        vec!["only explicitly requested evidence claims can become eligible"],
+                    ),
+                    "card_render" => (
+                        card_ok,
+                        if card.is_none() {
+                            vec!["card_input_missing"]
+                        } else if !card_ok {
+                            vec!["card_render_failed"]
+                        } else {
+                            vec![]
+                        },
+                        vec!["a rendered card may intentionally retain a withheld score"],
+                    ),
+                    "numeric_card_score" => (
+                        card_ok && card_score_attached && evidence_ready,
+                        {
+                            let mut blockers = Vec::new();
+                            if !card_ok {
+                                blockers.push("card_render_failed");
+                            }
+                            if card_ok && !card_score_attached {
+                                blockers.push("numeric_score_not_attached");
+                            }
+                            if evidence_audit.is_none() {
+                                blockers.push("evidence_audit_missing");
+                            } else if !evidence_ready {
+                                blockers.push("evidence_claims_not_ready");
+                            }
+                            blockers
+                        },
+                        vec!["numeric score release additionally requires an evidence-conditioned claim audit"],
+                    ),
+                    "leaderboard" => (
+                        leaderboard_ok && ranked_count > 0,
+                        {
+                            let mut blockers = Vec::new();
+                            if leaderboard.is_none() {
+                                blockers.push("leaderboard_input_missing");
+                            } else if !leaderboard_ok {
+                                blockers.push("leaderboard_render_failed");
+                            } else if ranked_count == 0 {
+                                blockers.push("no_ranked_entries");
+                            }
+                            blockers
+                        },
+                        vec!["ranked and unranked entries remain separately visible"],
+                    ),
+                    "ranked_leaderboard" => (
+                        leaderboard_ok && ranked_count > 0 && unranked_count == 0,
+                        {
+                            let mut blockers = Vec::new();
+                            if leaderboard.is_none() {
+                                blockers.push("leaderboard_input_missing");
+                            } else if !leaderboard_ok {
+                                blockers.push("leaderboard_render_failed");
+                            } else if ranked_count == 0 {
+                                blockers.push("no_ranked_entries");
+                            }
+                            if leaderboard_ok && unranked_count > 0 {
+                                blockers.push("unranked_entries_present");
+                            }
+                            blockers
+                        },
+                        vec!["a fully ranked board requires zero unranked entries"],
+                    ),
+                    other => {
+                        return Err(format!(
+                            "unknown release target {other:?}; choose atlas_profile, atlas_aggregation, evidence_claims, card_render, numeric_card_score, leaderboard, or ranked_leaderboard"
+                        ));
+                    }
+                };
+                target_rows.push(json!({
+                    "target": target,
+                    "eligible": eligible,
+                    "blockers": blockers,
+                    "notes": notes,
+                }));
+            }
+            let ready = target_rows.iter().all(|row| {
+                row.get("eligible")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            });
+            json!({
+                "present": true,
+                "id": request_id,
+                "targets": target_rows,
+                "ready": ready,
+                "fail_closed": !ready,
+                "no_implicit_release": true,
+            })
+        } else {
+            json!({
+                "present": false,
+                "ready": false,
+                "reason": "release_request is required to make a publication readiness claim",
+                "no_implicit_release": true,
+            })
+        };
+
+        Ok(json!({
+            "ok": true,
+            "workflow": "bioatlas_publication_audit",
+            "atlas": atlas,
+            "evidence_audit": evidence_audit,
+            "card": card,
+            "leaderboard": leaderboard,
+            "release_request": release_request,
+            "cross_layer": {
+                "numeric_score_requires_evidence_audit": true,
+                "numeric_score_evidence_ready": evidence_ready,
+                "atlas_aggregation_ready": atlas_aggregation_ready,
+                "leaderboard_ranked_count": ranked_count,
+                "leaderboard_unranked_count": unranked_count,
+                "unranked_leaderboard_entries_remain_visible": true,
+                "withheld_scores_are_not_zeroes": true,
+            },
+            "guarantees": [
+                "atlas coverage, evidence-conditioned claims, moderation/card rendering, and leaderboard ranking remain distinct gates",
+                "a publication readiness claim is emitted only for explicit requested targets",
+                "numeric card scores require both the card's disclosure/publication gate and an evidence-conditioned claim audit",
+                "partial or unranked public surfaces remain visible and cannot be silently promoted to a complete release",
+            ],
+            "limitations": [
+                "all atlas, evidence, moderation, disclosure, score, and leaderboard inputs are caller-supplied serialized contracts",
+                "this workflow does not publish a web page, authenticate identities, execute assays, or discover leakage",
+                "a green render or release target is contract eligibility, not scientific truth, clinical authority, or network deployment",
+            ],
+        }))
+    }
+
     fn pack_health_assess(&self, arguments: &Value) -> Result<Value, String> {
         let raw_pack = arguments
             .get("pack")
@@ -12671,7 +12938,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "public_hub_submission_and_moderation",
             "domains": ["submission contracts", "provenance and licensing", "limitations cards", "append-only moderation", "independent verification"],
             "crates": ["bioprism-hub", "bioprism-hubapi"],
-            "mcp_tools": ["hub_submission_review", "hub_disclosure_review", "hub_card_render", "hub_leaderboard_render", "hub_search", "hub_resolve", "hub_lock"],
+            "mcp_tools": ["hub_submission_review", "hub_disclosure_review", "hub_card_render", "hub_leaderboard_render", "bioatlas_publication_audit", "hub_search", "hub_resolve", "hub_lock"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -13204,6 +13471,23 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_details": { "type": "boolean", "description": "Include the full RankedBoard; defaults false while always returning counts and headline." }
                 },
                 "required": ["board", "entries", "moderation", "disclosure"]
+            }
+        }),
+        json!({
+            "name": "bioatlas_publication_audit",
+            "description": "Compose a strict BioAtlas publication workflow from atlas coverage, optional evidence-conditioned claims, moderation/card rendering, and leaderboard ranking. Explicit release targets are required for readiness; numeric card scores additionally require an evidence audit, atlas holes never become zeroes, and ranked/unranked public entries remain distinct. This is an in-memory contract audit, not web publication, identity authentication, assay execution, leakage discovery, scientific truth, or clinical approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "atlas": { "type": "object", "description": "Serialized bioprism-atlas Atlas; required for every workflow." },
+                    "weighting": { "type": "object", "description": "Optional serialized WeightingPolicy passed to atlas_report after coverage is computed." },
+                    "evidence_audit": { "type": "object", "description": "Optional exact arguments for biocapability_evidence_audit. It is required for evidence_claims or numeric_card_score targets." },
+                    "card": { "type": "object", "description": "Optional exact arguments for hub_card_render, including moderation and submission and optionally a disclosure-gated score." },
+                    "leaderboard": { "type": "object", "description": "Optional exact arguments for hub_leaderboard_render, including board, entries, moderation, and disclosure." },
+                    "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: atlas_profile, atlas_aggregation, evidence_claims, card_render, numeric_card_score, leaderboard, or ranked_leaderboard. Omit it to receive no release claim." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound atlas rows and nested delegated output rows; defaults to 100." }
+                },
+                "required": ["atlas"]
             }
         }),
         json!({
