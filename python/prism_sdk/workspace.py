@@ -17,6 +17,7 @@ from .biological import AdapterPlanRequest
 from .bioql import BioQlCompileRequest
 from .client import Client
 from .capability import (
+    CapabilityAuditReport,
     CapabilitySearchReport,
     CapabilityQuery,
     CapabilityRouteNeed,
@@ -24,6 +25,7 @@ from .capability import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
+    capability_audit_report,
     capability_discover_report,
     capability_route_report,
     capability_route_review_report,
@@ -352,6 +354,11 @@ class Workspace:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return self.tool("capability_audit", {"include_groups": include_groups})
+
+    def capability_audit_report(self, *, include_groups: bool = True) -> CapabilityAuditReport:
+        """Return validated parity and schema-quality diagnostics for the capability catalogue."""
+
+        return capability_audit_report(self.capability_audit(include_groups=include_groups))
 
     def capability_discover_report(
         self,
@@ -1071,6 +1078,13 @@ class AsyncWorkspace:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return await self.tool("capability_audit", {"include_groups": include_groups})
+
+    async def capability_audit_report(self, *, include_groups: bool = True) -> CapabilityAuditReport:
+        """Async typed parity and schema-quality diagnostics for the capability catalogue."""
+
+        return capability_audit_report(
+            await self.capability_audit(include_groups=include_groups)
+        )
 
     async def capability_discover_report(
         self,

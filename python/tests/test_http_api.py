@@ -5,8 +5,42 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
+from unittest.mock import AsyncMock, patch
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, DeliveryPage, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+
+
+def capability_audit_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "capability_audit",
+        "capability_schema_version": "bioprism-devplat-capability/0.1",
+        "catalog_digest": "c" * 64,
+        "healthy": True,
+        "total_groups": 1,
+        "catalog_tool_memberships": 1,
+        "unique_catalog_tools": 1,
+        "advertised_tool_count": 1,
+        "catalog_only_tools": [],
+        "advertised_only_tools": [],
+        "duplicate_schema_names": [],
+        "duplicate_group_memberships": [],
+        "schema_quality": {
+            "checked": 1,
+            "valid": 1,
+            "total_bytes": 128,
+            "maximum_schema_bytes": 1_000_000,
+            "findings": [],
+        },
+        "invariants": {
+            "every_catalog_tool_has_authoritative_schema": True,
+            "every_advertised_tool_is_catalogued": True,
+            "schema_names_are_unique": True,
+            "all_input_schemas_are_well_formed": True,
+            "multi_group_membership_is_allowed": True,
+        },
+        "groups": [],
+    }
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -291,6 +325,13 @@ class HttpApiClientTests(unittest.TestCase):
             client.request("POST", "/v1/tools/refuse", {})
         self.assertEqual(error.exception.status, 422)
 
+    def test_http_typed_capability_audit_report_delegates_to_raw_helper(self) -> None:
+        with patch.object(ApiClient, "capability_audit", return_value=capability_audit_payload()) as audit:
+            report = ApiClient(self.base_url).capability_audit_report(include_groups=False)
+        self.assertIsInstance(report, CapabilityAuditReport)
+        self.assertTrue(report.schema_quality.fully_valid)
+        audit.assert_called_once_with(include_groups=False)
+
     def test_http_arguments_and_async_facade(self) -> None:
         with self.assertRaises(ArgumentError):
             ApiClient(self.base_url, bearer_token="short")
@@ -399,6 +440,15 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertFalse((await client.event_page(review_id="a" * 64)).gap)
             self.assertEqual((await client.event_stream()).events[0].data, '{"mission_id":"async-1"}')
             self.assertTrue((await client.route_review_evidence("a" * 64)).found)
+            with patch.object(
+                AsyncApiClient,
+                "capability_audit",
+                new_callable=AsyncMock,
+                return_value=capability_audit_payload(),
+            ) as audit:
+                report = await client.capability_audit_report(include_groups=True)
+            self.assertTrue(report.catalogue_complete)
+            audit.assert_awaited_once_with(include_groups=True)
 
         asyncio.run(run())
 

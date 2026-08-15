@@ -106,6 +106,9 @@ blob.
 catalog-only and uncatalogued tools, and keeps intentional multi-group membership explicit.
 It also validates every input schema's object shape, required/property consistency, and size bound,
 so a name-parity pass cannot conceal a malformed contract.
+The Python `CapabilityAuditReport` and TypeScript `CapabilityAuditResult` projections preserve the
+audit's reconciliation totals, invariant flags, schema-quality findings, duplicate memberships, and
+optional per-group coverage with explicit `catalogue_complete`/`fully_valid` inspection signals.
 `capability_route` batches named needs across those groups into a single route id, preserves each
 bounded search result, distinguishes explicit tool filters from ranked candidates, and never
 executes the proposed tools. Each need now carries candidate domains, and `route_coverage` reports

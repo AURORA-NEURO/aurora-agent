@@ -19,6 +19,7 @@ from urllib.parse import quote, urlencode, urlsplit
 
 from .biological import AdapterPlanRequest
 from .capability import (
+    CapabilityAuditReport,
     CapabilitySearchReport,
     CapabilityQuery,
     CapabilityRouteNeed,
@@ -26,6 +27,7 @@ from .capability import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
+    capability_audit_report,
     capability_route_report,
     capability_discover_report,
     capability_route_review_report,
@@ -459,6 +461,11 @@ class ApiClient:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return self.call_tool("capability_audit", {"include_groups": include_groups})
+
+    def capability_audit_report(self, *, include_groups: bool = True) -> CapabilityAuditReport:
+        """Return validated capability parity and schema-quality diagnostics over HTTP."""
+
+        return capability_audit_report(self.capability_audit(include_groups=include_groups))
 
     def capability_discover_report(
         self,
@@ -1183,6 +1190,13 @@ class AsyncApiClient:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return await self.call_tool("capability_audit", {"include_groups": include_groups})
+
+    async def capability_audit_report(self, *, include_groups: bool = True) -> CapabilityAuditReport:
+        """Async typed capability parity and schema-quality diagnostics over HTTP."""
+
+        return capability_audit_report(
+            await self.capability_audit(include_groups=include_groups)
+        )
 
     async def capability_discover_report(
         self,

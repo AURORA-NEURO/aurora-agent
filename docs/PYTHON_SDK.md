@@ -119,6 +119,12 @@ invent defaults:
   schemas. `report.domains` and `report.tools` provide deterministic coverage projections.
 - `capability_audit(include_groups=...)` verifies catalogue/schema parity, input-schema quality,
   coverage gaps, and intentional multi-group membership.
+- `CapabilityAuditReport.from_wire(...)` plus `Workspace.capability_audit_report(...)`,
+  `AsyncWorkspace.capability_audit_report(...)`, and the corresponding HTTP helpers expose typed
+  parity counts, catalog-only/advertised-only gaps, duplicate memberships, invariant flags, bounded
+  schema findings, and optional per-group coverage. Use `report.catalogue_complete` and
+  `report.schema_quality.fully_valid` as explicit inspection signals; they are evidence for planning,
+  not authorization or domain validity.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates. Its raw result also
   includes per-need candidate domains and a `route_coverage` ledger for resolved/unresolved needs.

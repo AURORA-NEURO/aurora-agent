@@ -424,6 +424,43 @@ export interface CapabilityDiscoverResult extends JsonObject {
   schema_attachment: JsonObject;
 }
 
+export interface CapabilityAuditGroupResult extends JsonObject {
+  id: string;
+  domains: string[];
+  status: string;
+  declared_tool_memberships: number;
+  unique_tools: number;
+  schemas_found: number;
+  missing_schemas: string[];
+}
+
+export interface CapabilitySchemaQualityResult extends JsonObject {
+  checked: number;
+  valid: number;
+  total_bytes: number;
+  maximum_schema_bytes: number;
+  findings: JsonObject[];
+}
+
+export interface CapabilityAuditResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_audit";
+  capability_schema_version: string;
+  catalog_digest: string;
+  healthy: boolean;
+  total_groups: number;
+  catalog_tool_memberships: number;
+  unique_catalog_tools: number;
+  advertised_tool_count: number;
+  catalog_only_tools: string[];
+  advertised_only_tools: string[];
+  duplicate_schema_names: string[];
+  duplicate_group_memberships: JsonObject[];
+  schema_quality: CapabilitySchemaQualityResult;
+  invariants: JsonObject;
+  groups?: CapabilityAuditGroupResult[];
+}
+
 export interface CapabilityRouteNeed extends JsonObject {
   id: string;
   query?: string;

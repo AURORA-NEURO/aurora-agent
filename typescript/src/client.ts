@@ -11,6 +11,7 @@ import type {
   CapabilityDiscoverArgs,
   CapabilityDiscoverResult,
   CapabilityAuditArgs,
+  CapabilityAuditResult,
   CapabilityRouteArgs,
   CapabilityRouteReviewArgs,
   CapabilityRouteReviewResult,
@@ -260,8 +261,8 @@ export class ApiClient {
     return this.callTool<CapabilityDiscoverResult>("capability_discover", args, options);
   }
 
-  async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions) {
-    return this.callTool("capability_audit", args, options);
+  async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityAuditResult>> {
+    return this.callTool<CapabilityAuditResult>("capability_audit", args, options);
   }
 
   async capabilityRoute(args: CapabilityRouteArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRouteResult>> {

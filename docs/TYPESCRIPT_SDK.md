@@ -135,7 +135,8 @@ objects where the Rust crate is authoritative. That keeps the client useful acro
 families without maintaining a fragile partial clone of 122 tool schemas. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
-`capabilityAudit` verifies catalogue/schema parity and exposes coverage gaps; `capabilityRoute`
+`capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
+invariant flags, duplicate memberships, and optional per-group coverage; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected
 tools and arguments are supplied. The route response retains per-need candidate domains and a

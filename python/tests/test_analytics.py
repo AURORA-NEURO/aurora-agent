@@ -14,6 +14,8 @@ from prism_sdk import (
     AsyncClient,
     AsyncWorkspace,
     CalibrationObservation,
+    CapabilityAuditGroupReport,
+    CapabilityAuditReport,
     CapabilityGroupReport,
     CapabilityMatchReport,
     CapabilityQuery,
@@ -23,6 +25,8 @@ from prism_sdk import (
     CapabilityRouteRequest,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
+    CapabilitySchemaQualityReport,
+    capability_audit_report,
     capability_discover_report,
     capability_route_report,
     capability_route_review_report,
@@ -179,6 +183,49 @@ def capability_discover_payload() -> dict:
             "missing": [],
             "authoritative_source": "tools/list definition set",
         },
+    }
+
+
+def capability_audit_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "capability_audit",
+        "capability_schema_version": "bioprism-devplat-capability/0.1",
+        "catalog_digest": "c" * 64,
+        "healthy": True,
+        "total_groups": 1,
+        "catalog_tool_memberships": 1,
+        "unique_catalog_tools": 1,
+        "advertised_tool_count": 1,
+        "catalog_only_tools": [],
+        "advertised_only_tools": [],
+        "duplicate_schema_names": [],
+        "duplicate_group_memberships": [],
+        "schema_quality": {
+            "checked": 1,
+            "valid": 1,
+            "total_bytes": 128,
+            "maximum_schema_bytes": 1_000_000,
+            "findings": [],
+        },
+        "invariants": {
+            "every_catalog_tool_has_authoritative_schema": True,
+            "every_advertised_tool_is_catalogued": True,
+            "schema_names_are_unique": True,
+            "all_input_schemas_are_well_formed": True,
+            "multi_group_membership_is_allowed": True,
+        },
+        "groups": [
+            {
+                "id": "oncology",
+                "domains": ["oncology"],
+                "status": "implemented",
+                "declared_tool_memberships": 1,
+                "unique_tools": 1,
+                "schemas_found": 1,
+                "missing_schemas": [],
+            }
+        ],
     }
 
 
@@ -443,6 +490,21 @@ class AnalyticsModelTests(unittest.TestCase):
         )
         self.assertEqual(report.catalog_digest, "c" * 64)
 
+    def test_capability_audit_report_reconciles_parity_and_quality(self) -> None:
+        report = CapabilityAuditReport.from_wire(capability_audit_payload())
+        self.assertTrue(report.healthy)
+        self.assertTrue(report.catalogue_complete)
+        self.assertTrue(report.schema_quality.fully_valid)
+        self.assertIsInstance(report.schema_quality, CapabilitySchemaQualityReport)
+        self.assertIsInstance(report.groups[0], CapabilityAuditGroupReport)
+        self.assertEqual(report.groups[0].schemas_found, 1)
+
+    def test_capability_audit_report_extracts_http_projection(self) -> None:
+        report = capability_audit_report(
+            {"ok": True, "mcp": {"result": {"structuredContent": capability_audit_payload()}}}
+        )
+        self.assertEqual(report.catalog_digest, "c" * 64)
+
     def test_capability_route_report_extracts_http_json_text_projection(self) -> None:
         envelope = {
             "ok": True,
@@ -554,6 +616,12 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             result = Workspace(client).capability_audit(include_groups=False)
         self.assertEqual(result["echo"], {"include_groups": False})
 
+    def test_sync_workspace_typed_capability_audit_report(self) -> None:
+        with patch.object(Workspace, "capability_audit", return_value=capability_audit_payload()) as audit:
+            report = Workspace(None).capability_audit_report(include_groups=False)  # type: ignore[arg-type]
+        self.assertTrue(report.catalogue_complete)
+        audit.assert_called_once_with(include_groups=False)
+
     def test_sync_workspace_exposes_capability_route(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).capability_route(
@@ -643,6 +711,19 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(command(), timeout=2) as client:
             result = await AsyncWorkspace(client).capability_audit()
         self.assertEqual(result["echo"], {"include_groups": True})
+
+    async def test_async_workspace_typed_capability_audit_report(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "capability_audit",
+            new_callable=AsyncMock,
+            return_value=capability_audit_payload(),
+        ) as audit:
+            report = await AsyncWorkspace(None).capability_audit_report(  # type: ignore[arg-type]
+                include_groups=True
+            )
+        self.assertTrue(report.schema_quality.fully_valid)
+        audit.assert_awaited_once_with(include_groups=True)
 
     async def test_async_workspace_exposes_capability_route(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

@@ -531,6 +531,184 @@ def capability_discover_report(value: Mapping[str, Any]) -> CapabilitySearchRepo
 
 
 @dataclass(frozen=True)
+class CapabilityAuditGroupReport:
+    """Validated per-group coverage from the authoritative capability audit."""
+
+    raw: dict[str, Any]
+    id: str
+    domains: tuple[str, ...]
+    status: str
+    declared_tool_memberships: int
+    unique_tools: int
+    schemas_found: int
+    missing_schemas: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityAuditGroupReport":
+        raw = _route_mapping("capability audit group", value)
+        declared = _route_count(
+            "capability audit declared_tool_memberships",
+            raw.get("declared_tool_memberships"),
+        )
+        unique_tools = _route_count("capability audit unique_tools", raw.get("unique_tools"))
+        schemas_found = _route_count("capability audit schemas_found", raw.get("schemas_found"))
+        if unique_tools > declared or schemas_found > unique_tools:
+            raise ArgumentError("capability audit group counts do not reconcile")
+        missing_schemas = _route_strings(
+            "capability audit missing_schemas", raw.get("missing_schemas", [])
+        )
+        if len(missing_schemas) != unique_tools - schemas_found:
+            raise ArgumentError("capability audit missing schema count does not reconcile")
+        return cls(
+            raw=raw,
+            id=_route_text("capability audit group id", raw.get("id")),
+            domains=_route_strings("capability audit group domains", raw.get("domains", [])),
+            status=_route_text("capability audit group status", raw.get("status")),
+            declared_tool_memberships=declared,
+            unique_tools=unique_tools,
+            schemas_found=schemas_found,
+            missing_schemas=missing_schemas,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilitySchemaQualityReport:
+    """Schema validation totals and bounded findings from a capability audit."""
+
+    raw: dict[str, Any]
+    checked: int
+    valid: int
+    total_bytes: int
+    maximum_schema_bytes: int
+    findings: tuple[dict[str, Any], ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilitySchemaQualityReport":
+        raw = _route_mapping("capability schema quality", value)
+        checked = _route_count("capability schema quality checked", raw.get("checked"))
+        valid = _route_count("capability schema quality valid", raw.get("valid"))
+        total_bytes = _route_count("capability schema quality total_bytes", raw.get("total_bytes"))
+        maximum_schema_bytes = _route_count(
+            "capability schema quality maximum_schema_bytes",
+            raw.get("maximum_schema_bytes"),
+        )
+        if valid > checked:
+            raise ArgumentError("capability schema quality valid count exceeds checked count")
+        raw_findings = raw.get("findings", [])
+        if not isinstance(raw_findings, Sequence) or isinstance(raw_findings, (str, bytes)):
+            raise ArgumentError("capability schema quality findings must be an array")
+        findings = tuple(
+            _route_mapping("capability schema quality finding", finding)
+            for finding in raw_findings
+        )
+        return cls(
+            raw=raw,
+            checked=checked,
+            valid=valid,
+            total_bytes=total_bytes,
+            maximum_schema_bytes=maximum_schema_bytes,
+            findings=findings,
+        )
+
+    @property
+    def fully_valid(self) -> bool:
+        return self.checked == self.valid and not self.findings
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilityAuditReport:
+    """Validated parity, schema quality, and per-group coverage diagnostics."""
+
+    raw: dict[str, Any]
+    capability_schema_version: str
+    catalog_digest: str
+    healthy: bool
+    total_groups: int
+    catalog_tool_memberships: int
+    unique_catalog_tools: int
+    advertised_tool_count: int
+    catalog_only_tools: tuple[str, ...]
+    advertised_only_tools: tuple[str, ...]
+    duplicate_schema_names: tuple[str, ...]
+    duplicate_group_memberships: tuple[dict[str, Any], ...]
+    schema_quality: CapabilitySchemaQualityReport
+    invariants: dict[str, Any]
+    groups: tuple[CapabilityAuditGroupReport, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityAuditReport":
+        raw = _route_mapping("capability audit report", value)
+        if raw.get("ok") is False:
+            raise ArgumentError("capability audit report is not successful")
+        if raw.get("workflow") != "capability_audit":
+            raise ArgumentError("capability audit workflow is invalid")
+        raw_memberships = raw.get("duplicate_group_memberships", [])
+        if not isinstance(raw_memberships, Sequence) or isinstance(raw_memberships, (str, bytes)):
+            raise ArgumentError("capability audit duplicate_group_memberships must be an array")
+        duplicate_group_memberships = tuple(
+            _route_mapping("capability audit duplicate membership", membership)
+            for membership in raw_memberships
+        )
+        raw_groups = raw.get("groups", [])
+        if not isinstance(raw_groups, Sequence) or isinstance(raw_groups, (str, bytes)):
+            raise ArgumentError("capability audit groups must be an array")
+        groups = tuple(CapabilityAuditGroupReport.from_wire(group) for group in raw_groups)
+        total_groups = _route_count("capability audit total_groups", raw.get("total_groups"))
+        if groups and len(groups) != total_groups:
+            raise ArgumentError("capability audit group count does not reconcile")
+        return cls(
+            raw=raw,
+            capability_schema_version=_route_text(
+                "capability audit schema version", raw.get("capability_schema_version")
+            ),
+            catalog_digest=_route_text("capability audit catalog_digest", raw.get("catalog_digest")),
+            healthy=raw.get("healthy") is True,
+            total_groups=total_groups,
+            catalog_tool_memberships=_route_count(
+                "capability audit catalog_tool_memberships", raw.get("catalog_tool_memberships")
+            ),
+            unique_catalog_tools=_route_count(
+                "capability audit unique_catalog_tools", raw.get("unique_catalog_tools")
+            ),
+            advertised_tool_count=_route_count(
+                "capability audit advertised_tool_count", raw.get("advertised_tool_count")
+            ),
+            catalog_only_tools=_route_strings(
+                "capability audit catalog_only_tools", raw.get("catalog_only_tools", [])
+            ),
+            advertised_only_tools=_route_strings(
+                "capability audit advertised_only_tools", raw.get("advertised_only_tools", [])
+            ),
+            duplicate_schema_names=_route_strings(
+                "capability audit duplicate_schema_names", raw.get("duplicate_schema_names", [])
+            ),
+            duplicate_group_memberships=duplicate_group_memberships,
+            schema_quality=CapabilitySchemaQualityReport.from_wire(raw.get("schema_quality", {})),
+            invariants=_route_mapping("capability audit invariants", raw.get("invariants", {})),
+            groups=groups,
+        )
+
+    @property
+    def catalogue_complete(self) -> bool:
+        return not self.catalog_only_tools and not self.advertised_only_tools
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def capability_audit_report(value: Mapping[str, Any]) -> CapabilityAuditReport:
+    """Parse a direct capability audit result or an HTTP tool envelope."""
+
+    return CapabilityAuditReport.from_wire(_tool_payload(value, "capability_audit"))
+
+
+@dataclass(frozen=True)
 class CapabilityQuery:
     """Conjunctive filters for the digest-bound workspace capability catalogue."""
 
@@ -658,6 +836,9 @@ __all__ = [
     "CapabilityGroupReport",
     "CapabilityMatchReport",
     "CapabilitySearchReport",
+    "CapabilityAuditGroupReport",
+    "CapabilitySchemaQualityReport",
+    "CapabilityAuditReport",
     "CapabilityRouteNeed",
     "CapabilityRouteRequest",
     "CapabilityRouteNeedReport",
@@ -668,4 +849,5 @@ __all__ = [
     "capability_route_report",
     "capability_route_review_report",
     "capability_discover_report",
+    "capability_audit_report",
 ]

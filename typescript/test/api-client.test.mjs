@@ -38,7 +38,30 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/repository_impact") return jsonResponse({ ok: true, tool: "repository_impact", request_id: "r13", mcp: { result: { structuredContent: { workflow: "repository_impact", changed: "docs/README" } } } });
       if (path === "/v1/tools/telemetry_project") return jsonResponse({ ok: true, tool: "telemetry_project", request_id: "r14", mcp: { result: { structuredContent: { workflow: "telemetry_project", trace: "trace-ts" } } } });
       if (path === "/v1/tools/capability_discover") return jsonResponse({ ok: true, tool: "capability_discover", request_id: "r6", mcp: { result: { structuredContent: { workflow: "capability_discover", capability_schema_version: "bioprism-devplat-capability/0.1", schema_version: "bioprism-devplat-capability/0.1", catalog_digest: "c".repeat(64), total_groups: 1, query: {}, result_count: 1, matches: [{ group: { id: "testing", domains: ["verification"], crates: ["bioprism-devplat"], mcp_tools: ["echo"], cli_entrypoints: ["bioprism test"], python_artifacts: ["prism_sdk.testing"], status: "implemented" }, score: 100, matched_fields: ["domains"], matched_tools: ["echo"], tool_schemas: [] }], schema_attachment: { requested: false, returned: 0, missing: [] } } } } });
-      if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: { workflow: "capability_audit", healthy: true } } } });
+      if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "capability_audit",
+        capability_schema_version: "bioprism-devplat-capability/0.1",
+        catalog_digest: "c".repeat(64),
+        healthy: true,
+        total_groups: 1,
+        catalog_tool_memberships: 1,
+        unique_catalog_tools: 1,
+        advertised_tool_count: 1,
+        catalog_only_tools: [],
+        advertised_only_tools: [],
+        duplicate_schema_names: [],
+        duplicate_group_memberships: [],
+        schema_quality: { checked: 1, valid: 1, total_bytes: 128, maximum_schema_bytes: 1000000, findings: [] },
+        invariants: {
+          every_catalog_tool_has_authoritative_schema: true,
+          every_advertised_tool_is_catalogued: true,
+          schema_names_are_unique: true,
+          all_input_schemas_are_well_formed: true,
+          multi_group_membership_is_allowed: true,
+        },
+        groups: [{ id: "testing", domains: ["verification"], status: "implemented", declared_tool_memberships: 1, unique_tools: 1, schemas_found: 1, missing_schemas: [] }],
+      } } } });
       if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started", route_coverage: { needs_total: 1, needs_resolved: 1, needs_unresolved: 0, candidate_group_count: 1, candidate_groups: ["testing"], candidate_domain_count: 1, candidate_domains: ["verification"], candidate_tool_count: 1, posture: "routing evidence only" } } } } });
       if (path === "/v1/tools/capability_route_review") return jsonResponse({ ok: true, tool: "capability_route_review", request_id: "r9", mcp: { result: { structuredContent: { workflow: "capability_route_review", review_id: "v".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [["oncology"]], schema_review: { requested: true, checked: 1, valid: true, fully_checked: true } } } } });
       if (path === "/v1/tools/adapter_plan") return jsonResponse({ ok: true, tool: "adapter_plan", request_id: "r10", mcp: { result: { structuredContent: { workflow: "adapter_plan", executable: true } } } });
@@ -215,6 +238,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
   assert.equal(capabilityAudit.mcp.result.structuredContent.workflow, "capability_audit");
   assert.equal(capabilityAudit.mcp.result.structuredContent.healthy, true);
+  assert.equal(capabilityAudit.mcp.result.structuredContent.catalog_digest.length, 64);
+  assert.equal(capabilityAudit.mcp.result.structuredContent.schema_quality.valid, 1);
   assert.equal(route.mcp.result.structuredContent.workflow, "capability_route");
   assert.equal(route.mcp.result.structuredContent.execution, "not_started");
   assert.equal(route.mcp.result.structuredContent.route_coverage.needs_resolved, 1);
