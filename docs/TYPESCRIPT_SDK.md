@@ -173,6 +173,13 @@ parity, deployment planes, tenant patterns, service-contract counts, metric defi
 bounded omission metadata. `opsAcceptance` returns `OpsAcceptanceResult`; its `is_decidable` and
 `is_release_ready` fields remain mechanical predicates over the three-way verdict counts, not
 claims that unobservable checkout, CI, or external-service criteria passed.
+`safetyReleaseGate` accepts a typed `RiskAssessmentArgs` with the closed nine-dimension risk
+vocabulary and returns `SafetyReleaseGateResult` with the exact decision, high-risk drivers,
+unrated dimensions, fail-closed flag, and conditioned controls. `medicalBoundaryCheck` accepts
+typed research or clinical output labels and returns `MedicalBoundaryResult`; research use cases
+may be admitted, while clinical categories remain a structured refusal with an unconditional
+boundary. These result types preserve policy evidence and do not imply content classification,
+runtime security, medical advice, or deployment approval.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

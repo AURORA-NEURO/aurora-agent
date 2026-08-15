@@ -247,6 +247,16 @@ invent defaults:
   turn unverifiable criteria into a percentage or release pass, validates basis variants such as
   linked types and no-observer explanations, and exposes `release_ready` and `decidable` only as
   the Rust summary predicates. Both workflows are available on sync/async MCP and HTTP facades.
+- `RiskAssessmentRequest`/`SafetyReleaseGateArgs` and `safety_release_gate(...)` expose the
+  dual-use release gate over the nine closed risk dimensions and six sensitive categories.
+  `SafetyReleaseGateReport` validates the exact cleared/conditioned/blocked decision, driver
+  dimensions, conditioned controls, subject parity, and fail-closed omission rule: a successful
+  report cannot contain unrated dimensions, and an unrated assessment remains a remote refusal.
+- `MedicalBoundaryRequest` and `medical_boundary_check(...)` expose the research-only medical
+  boundary over enumerated research use cases and prohibited clinical output categories.
+  `MedicalBoundaryReport` preserves either admitted research use or structured clinical refusal,
+  requires an unconditional boundary flag, and never turns a clinical refusal into a successful
+  recommendation. Both safety workflows are available on sync/async MCP and HTTP facades.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

@@ -1103,6 +1103,99 @@ export interface OperationsCatalogResult extends JsonObject {
   limitations: string[];
 }
 
+export type SafetyRiskDimension =
+  | "capability_uplift"
+  | "actionability"
+  | "scale"
+  | "expertise_reduction"
+  | "target_specificity"
+  | "reversibility"
+  | "detectability"
+  | "available_safeguards"
+  | "legitimate_scientific_value";
+
+export type SafetyRating = "low" | "moderate" | "high";
+
+export type SafetyCategory =
+  | "cyber_exploitation"
+  | "biological_design"
+  | "surveillance_and_privacy_invasion"
+  | "fraud"
+  | "harmful_physical_automation"
+  | "clinical_misuse";
+
+export interface RiskAssessmentArgs extends JsonObject {
+  subject: string;
+  category?: SafetyCategory;
+  ratings: Partial<Record<SafetyRiskDimension, SafetyRating>>;
+}
+
+export interface SafetyReleaseGateArgs extends JsonObject {
+  assessment: RiskAssessmentArgs;
+}
+
+export type SafetyGateDecision = "cleared" | "conditioned" | "blocked";
+
+export interface SafetyGateDecisionResult extends JsonObject {
+  decision: SafetyGateDecision;
+  subject: string;
+  conditions?: string[];
+  driven_by?: SafetyRiskDimension[];
+}
+
+export interface SafetyReleaseGateResult extends JsonObject {
+  ok: boolean;
+  subject: string;
+  category?: SafetyCategory | null;
+  decision: SafetyGateDecisionResult;
+  cleared: boolean;
+  unrated_dimensions: SafetyRiskDimension[];
+  high_risk_dimensions: SafetyRiskDimension[];
+  rule: string;
+  fail_closed: boolean;
+  limitations: string[];
+}
+
+export type MedicalResearchUse =
+  | "workflow_reproducibility"
+  | "data_quality_checks"
+  | "paper_data_code_linkage"
+  | "imaging_and_omics_metadata_reasoning"
+  | "tool_use"
+  | "provenance"
+  | "evidence_synthesis"
+  | "uncertainty_reporting"
+  | "benchmark_methodology";
+
+export type ProhibitedClinicalOutput =
+  | "personalised_clinical_recommendation"
+  | "urgency_classification"
+  | "treatment_selection"
+  | "prognosis_as_patient_advice"
+  | "clinician_review_bypass";
+
+export interface MedicalBoundaryOutputArgs extends JsonObject {
+  side: "research" | "clinical";
+  label: string;
+  use_case?: MedicalResearchUse;
+  category?: ProhibitedClinicalOutput;
+}
+
+export interface MedicalBoundaryArgs extends JsonObject {
+  output: MedicalBoundaryOutputArgs;
+}
+
+export interface MedicalBoundaryResult extends JsonObject {
+  ok: boolean;
+  admitted: boolean;
+  use_case?: MedicalResearchUse;
+  refusal?: string;
+  research_only_label: string;
+  boundary_is_unconditional: boolean;
+  clinical_output_is_never_admitted?: boolean;
+  limitations?: string[];
+}
+
 export interface OpsAcceptanceArgs extends JsonObject {
   max_items?: number;
 }

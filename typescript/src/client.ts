@@ -26,6 +26,10 @@ import type {
   ReleaseAuditResult,
   OperationsCatalogArgs,
   OperationsCatalogResult,
+  SafetyReleaseGateArgs,
+  SafetyReleaseGateResult,
+  MedicalBoundaryArgs,
+  MedicalBoundaryResult,
   OpsAcceptanceArgs,
   OpsAcceptanceResult,
   BioAtlasPublicationAuditArgs,
@@ -305,6 +309,14 @@ export class ApiClient {
 
   async operationsCatalog(args: OperationsCatalogArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OperationsCatalogResult>> {
     return this.callTool<OperationsCatalogResult>("operations_catalog", args, options);
+  }
+
+  async safetyReleaseGate(args: SafetyReleaseGateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<SafetyReleaseGateResult>> {
+    return this.callTool<SafetyReleaseGateResult>("safety_release_gate", args, options);
+  }
+
+  async medicalBoundaryCheck(args: MedicalBoundaryArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MedicalBoundaryResult>> {
+    return this.callTool<MedicalBoundaryResult>("medical_boundary_check", args, options);
   }
 
   async opsAcceptance(args: OpsAcceptanceArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OpsAcceptanceResult>> {

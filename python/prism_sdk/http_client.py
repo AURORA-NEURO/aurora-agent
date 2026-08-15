@@ -87,6 +87,15 @@ from .operations import (
     ops_acceptance_report,
     operations_catalog_report,
 )
+from .safety import (
+    MedicalBoundaryReport,
+    MedicalBoundaryRequest,
+    RiskAssessmentRequest,
+    SafetyReleaseGateArgs,
+    SafetyReleaseGateReport,
+    medical_boundary_report,
+    safety_release_gate_report,
+)
 from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
     RepositoryBundleRequest,
@@ -783,6 +792,40 @@ class ApiClient:
         """Return typed HTTP met/refuted/unverifiable acceptance evidence."""
 
         return ops_acceptance_report(self.ops_acceptance(max_items=max_items))
+
+    def safety_release_gate(
+        self,
+        assessment: SafetyReleaseGateArgs | RiskAssessmentRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Evaluate a reviewer-labelled safety release assessment over HTTP."""
+
+        if isinstance(assessment, SafetyReleaseGateArgs):
+            request = assessment
+        else:
+            request = SafetyReleaseGateArgs(
+                assessment if isinstance(assessment, RiskAssessmentRequest) else RiskAssessmentRequest.from_wire(assessment)
+            )
+        return self.call_tool("safety_release_gate", request.to_mcp_arguments())
+
+    def safety_release_gate_report(
+        self,
+        assessment: SafetyReleaseGateArgs | RiskAssessmentRequest | Mapping[str, Any],
+    ) -> SafetyReleaseGateReport:
+        """Return typed HTTP fail-closed safety-gate evidence."""
+
+        return safety_release_gate_report(self.safety_release_gate(assessment))
+
+    def medical_boundary_check(self, request: MedicalBoundaryRequest) -> dict[str, Any]:
+        """Check the research-only medical boundary over HTTP."""
+
+        if not isinstance(request, MedicalBoundaryRequest):
+            raise ArgumentError("request must be a MedicalBoundaryRequest")
+        return self.call_tool("medical_boundary_check", request.to_mcp_arguments())
+
+    def medical_boundary_report(self, request: MedicalBoundaryRequest) -> MedicalBoundaryReport:
+        """Return typed HTTP research admission or clinical refusal evidence."""
+
+        return medical_boundary_report(self.medical_boundary_check(request))
 
     def biocapability_evidence_audit(
         self,
@@ -1709,6 +1752,40 @@ class AsyncApiClient:
         """Return typed async acceptance evidence and decidability state."""
 
         return ops_acceptance_report(await self.ops_acceptance(max_items=max_items))
+
+    async def safety_release_gate(
+        self,
+        assessment: SafetyReleaseGateArgs | RiskAssessmentRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.safety_release_gate`."""
+
+        if isinstance(assessment, SafetyReleaseGateArgs):
+            request = assessment
+        else:
+            request = SafetyReleaseGateArgs(
+                assessment if isinstance(assessment, RiskAssessmentRequest) else RiskAssessmentRequest.from_wire(assessment)
+            )
+        return await self.call_tool("safety_release_gate", request.to_mcp_arguments())
+
+    async def safety_release_gate_report(
+        self,
+        assessment: SafetyReleaseGateArgs | RiskAssessmentRequest | Mapping[str, Any],
+    ) -> SafetyReleaseGateReport:
+        """Return typed async HTTP fail-closed safety-gate evidence."""
+
+        return safety_release_gate_report(await self.safety_release_gate(assessment))
+
+    async def medical_boundary_check(self, request: MedicalBoundaryRequest) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.medical_boundary_check`."""
+
+        if not isinstance(request, MedicalBoundaryRequest):
+            raise ArgumentError("request must be a MedicalBoundaryRequest")
+        return await self.call_tool("medical_boundary_check", request.to_mcp_arguments())
+
+    async def medical_boundary_report(self, request: MedicalBoundaryRequest) -> MedicalBoundaryReport:
+        """Return typed async HTTP medical boundary evidence."""
+
+        return medical_boundary_report(await self.medical_boundary_check(request))
 
     async def biocapability_evidence_audit(
         self,

@@ -233,6 +233,26 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["unverifiable is not a pass"],
         limitations: ["no external CI"],
       } } } });
+      if (path === "/v1/tools/safety_release_gate") return jsonResponse({ ok: true, tool: "safety_release_gate", request_id: "r18", mcp: { result: { structuredContent: {
+        ok: true,
+        subject: "pack/biological-design@1",
+        category: "biological_design",
+        decision: { decision: "cleared", subject: "pack/biological-design@1" },
+        cleared: true,
+        unrated_dimensions: [],
+        high_risk_dimensions: [],
+        rule: "zero high non-mitigating dimensions clears",
+        fail_closed: true,
+        limitations: [],
+      } } } });
+      if (path === "/v1/tools/medical_boundary_check") return jsonResponse({ ok: true, tool: "medical_boundary_check", request_id: "r19", mcp: { result: { structuredContent: {
+        ok: false,
+        admitted: false,
+        refusal: "clinical output is not admitted",
+        research_only_label: "research use only",
+        boundary_is_unconditional: true,
+        clinical_output_is_never_admitted: true,
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -412,6 +432,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const release = await client.releaseAudit({ checks: [{ kind: "conformance_run", arguments: {} }] });
   const operations = await client.operationsCatalog({ include_details: false, max_items: 2 });
   const acceptance = await client.opsAcceptance({ max_items: 3 });
+  const safety = await client.safetyReleaseGate({ assessment: { subject: "pack/biological-design@1", category: "biological_design", ratings: { capability_uplift: "low" } } });
+  const medical = await client.medicalBoundaryCheck({ output: { side: "clinical", category: "treatment_selection", label: "choose a treatment" } });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -444,6 +466,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(operations.mcp.result.structuredContent.topologies.promise_parity.holds, true);
   assert.equal(operations.mcp.result.structuredContent.metrics.named_but_undefined, 117);
   assert.equal(acceptance.mcp.result.structuredContent.summary.is_decidable, false);
+  assert.equal(safety.mcp.result.structuredContent.decision.decision, "cleared");
+  assert.equal(medical.mcp.result.structuredContent.admitted, false);
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

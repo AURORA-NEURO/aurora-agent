@@ -86,6 +86,15 @@ from .operations import (
     ops_acceptance_report,
     operations_catalog_report,
 )
+from .safety import (
+    MedicalBoundaryReport,
+    MedicalBoundaryRequest,
+    RiskAssessmentRequest,
+    SafetyReleaseGateArgs,
+    SafetyReleaseGateReport,
+    medical_boundary_report,
+    safety_release_gate_report,
+)
 from .workbench import WorkbenchRequest
 
 
@@ -596,6 +605,43 @@ class Workspace:
         """Return typed met/refuted/unverifiable operational acceptance evidence."""
 
         return ops_acceptance_report(self.ops_acceptance(max_items=max_items))
+
+    def safety_release_gate(
+        self,
+        assessment: SafetyReleaseGateArgs | RiskAssessmentRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Evaluate a complete reviewer-labelled safety release assessment."""
+
+        if isinstance(assessment, SafetyReleaseGateArgs):
+            request = assessment
+        else:
+            request = SafetyReleaseGateArgs(
+                assessment if isinstance(assessment, RiskAssessmentRequest) else RiskAssessmentRequest.from_wire(assessment)
+            )
+        return self.tool("safety_release_gate", request.to_mcp_arguments())
+
+    def safety_release_gate_report(
+        self,
+        assessment: SafetyReleaseGateArgs | RiskAssessmentRequest | Mapping[str, Any],
+    ) -> SafetyReleaseGateReport:
+        """Return typed fail-closed safety-gate evidence."""
+
+        return safety_release_gate_report(self.safety_release_gate(assessment))
+
+    def medical_boundary_check(self, request: MedicalBoundaryRequest) -> dict[str, Any]:
+        """Check a research-only medical boundary and preserve structured clinical refusal."""
+
+        if not isinstance(request, MedicalBoundaryRequest):
+            raise ArgumentError("request must be a MedicalBoundaryRequest")
+        result = self.client.call_tool("medical_boundary_check", request.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def medical_boundary_report(self, request: MedicalBoundaryRequest) -> MedicalBoundaryReport:
+        """Return typed research admission or unconditional clinical refusal evidence."""
+
+        return medical_boundary_report(self.medical_boundary_check(request))
 
     def oracle_combine(
         self,
@@ -1475,6 +1521,43 @@ class AsyncWorkspace:
         """Return typed async acceptance evidence and decidability state."""
 
         return ops_acceptance_report(await self.ops_acceptance(max_items=max_items))
+
+    async def safety_release_gate(
+        self,
+        assessment: SafetyReleaseGateArgs | RiskAssessmentRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.safety_release_gate`."""
+
+        if isinstance(assessment, SafetyReleaseGateArgs):
+            request = assessment
+        else:
+            request = SafetyReleaseGateArgs(
+                assessment if isinstance(assessment, RiskAssessmentRequest) else RiskAssessmentRequest.from_wire(assessment)
+            )
+        return await self.tool("safety_release_gate", request.to_mcp_arguments())
+
+    async def safety_release_gate_report(
+        self,
+        assessment: SafetyReleaseGateArgs | RiskAssessmentRequest | Mapping[str, Any],
+    ) -> SafetyReleaseGateReport:
+        """Return typed async fail-closed safety-gate evidence."""
+
+        return safety_release_gate_report(await self.safety_release_gate(assessment))
+
+    async def medical_boundary_check(self, request: MedicalBoundaryRequest) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.medical_boundary_check`."""
+
+        if not isinstance(request, MedicalBoundaryRequest):
+            raise ArgumentError("request must be a MedicalBoundaryRequest")
+        result = await self.client.call_tool("medical_boundary_check", request.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def medical_boundary_report(self, request: MedicalBoundaryRequest) -> MedicalBoundaryReport:
+        """Return typed async medical research admission/refusal evidence."""
+
+        return medical_boundary_report(await self.medical_boundary_check(request))
 
     async def oracle_combine(
         self,
