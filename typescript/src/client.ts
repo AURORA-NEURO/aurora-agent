@@ -22,6 +22,8 @@ import type {
   TabularIngestResult,
   ConformanceRunArgs,
   ConformanceRunResult,
+  ReleaseAuditArgs,
+  ReleaseAuditResult,
   BioAtlasPublicationAuditArgs,
   BioAtlasPublicationAuditResult,
   BioCapabilityEvidenceAuditArgs,
@@ -291,6 +293,10 @@ export class ApiClient {
 
   async conformanceRun(args: ConformanceRunArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<ConformanceRunResult>> {
     return this.callTool<ConformanceRunResult>("conformance_run", args, options);
+  }
+
+  async releaseAudit(args: ReleaseAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ReleaseAuditResult>> {
+    return this.callTool<ReleaseAuditResult>("release_audit", args, options);
   }
 
   async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AgentMissionReport>> {

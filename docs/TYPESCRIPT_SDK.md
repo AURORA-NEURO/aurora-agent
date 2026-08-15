@@ -159,6 +159,11 @@ fact counts. It does not infer a format or turn adapter conformance into source 
 `conformanceRun` returns typed `ConformanceRunResult` suite and release evidence, including fixture
 drift, test-pyramid counts, bounded case outcomes, and all unmet noncompensatory gates. A null
 `results` field means case details were not requested; it is not an empty-suite claim.
+`releaseAudit` accepts up to 32 typed `ReleaseAuditCheckArgs` requests and returns
+`ReleaseAuditResult` with ordered check rows, required/advisory classification, delegated result
+digests, refusal and fail-closed fields, blocker references, and strict release conjunction state.
+`repository_impact` and `developer_platform_status` remain advisory-only with a null gate; callers
+must not infer release approval from their observations or from an optional check that passed.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

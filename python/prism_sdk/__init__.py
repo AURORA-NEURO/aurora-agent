@@ -290,6 +290,18 @@ from .publication import (
     PublicationTargetReport,
     bioatlas_publication_audit_report,
 )
+from .release import (
+    RELEASE_ADVISORY_ONLY_KINDS,
+    RELEASE_AUDIT_MAX_CHECKS,
+    RELEASE_AUDIT_MAX_INPUT_BYTES,
+    RELEASE_CHECK_KINDS,
+    ReleaseAuditArgs,
+    ReleaseAuditBlockerReport,
+    ReleaseAuditCheckReport,
+    ReleaseAuditCheckRequest,
+    ReleaseAuditReport,
+    release_audit_report,
+)
 from .workbench import WorkbenchRequest
 from .tooling import (
     MAX_TOOL_ARGUMENT_DEPTH,
@@ -599,6 +611,16 @@ __all__ = [
     "adapter_plan",
     "adapter_plan_report",
     "conformance_run_report",
+    "RELEASE_ADVISORY_ONLY_KINDS",
+    "RELEASE_AUDIT_MAX_CHECKS",
+    "RELEASE_AUDIT_MAX_INPUT_BYTES",
+    "RELEASE_CHECK_KINDS",
+    "ReleaseAuditArgs",
+    "ReleaseAuditBlockerReport",
+    "ReleaseAuditCheckReport",
+    "ReleaseAuditCheckRequest",
+    "ReleaseAuditReport",
+    "release_audit_report",
     "tabular_ingest_report",
     "audit_bids",
     "audit_dicom",

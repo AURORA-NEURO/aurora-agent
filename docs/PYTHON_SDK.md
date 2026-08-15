@@ -228,6 +228,14 @@ invent defaults:
   on `Workspace`, `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`; blocked decisions retain
   every unmet gate and actionable evidence, while `results=None` explicitly means details were
   not requested rather than that the suite had no cases.
+- `ReleaseAuditArgs`, `ReleaseAuditCheckRequest`, and `release_audit(...)` compose up to 32 exact
+  delegated release checks across registry, bundle, conformance, research CI, quality, operations,
+  pack health, repository impact, and developer-platform diagnostics. `ReleaseAuditReport` keeps
+  required gates, advisory-only observations, evaluated failures, invocation refusals, result
+  digests, fail-closed blockers, guarantees, and limitations distinct. Its parser rechecks ordered
+  row indexes, count parity, blocker references, advisory null gates, and the Rust aggregator's
+  strict conjunction, so a forged or compensating top-level `release_ready` value is rejected.
+  `Workspace`, `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient` expose the same typed boundary.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

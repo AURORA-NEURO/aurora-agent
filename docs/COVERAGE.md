@@ -49,6 +49,11 @@ governance, and release checks into independently inspectable readiness gates. I
 TypeScript projections preserve explicit release targets, blockers, fail-closed/no-implicit-release
 state, foreign-artifact posture, and omitted optional evidence instead of collapsing an incomplete
 delivery review into a green score.
+`release_audit` now provides the lower-level composition boundary beneath that delivery review:
+typed callers can supply exact delegated checks, retain each result digest and refusal, and inspect
+the strict required-gate conjunction while repository impact and developer-platform diagnostics stay
+advisory-only. The SDK parser verifies count/index/blocker parity and rejects compensating or forged
+top-level readiness state.
 `agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
 deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
 blocking dependent work, bounding output, and refusing side-effect confirmations by default. Serial

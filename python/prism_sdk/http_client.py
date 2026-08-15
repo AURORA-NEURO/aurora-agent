@@ -78,6 +78,7 @@ from .mission import (
     preflight_mission,
 )
 from .publication import BioAtlasPublicationAuditReport, bioatlas_publication_audit_report
+from .release import ReleaseAuditArgs, ReleaseAuditReport, release_audit_report
 from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
     RepositoryBundleRequest,
@@ -728,6 +729,18 @@ class ApiClient:
         return conformance_run_report(
             self.conformance_run(include_details=include_details, max_items=max_items)
         )
+
+    def release_audit(self, request: ReleaseAuditArgs) -> dict[str, Any]:
+        """Compose release gates through the HTTP gateway."""
+
+        if not isinstance(request, ReleaseAuditArgs):
+            raise ArgumentError("request must be a ReleaseAuditArgs")
+        return self.call_tool("release_audit", request.to_mcp_arguments())
+
+    def release_audit_report(self, request: ReleaseAuditArgs) -> ReleaseAuditReport:
+        """Return typed HTTP release readiness and delegated check evidence."""
+
+        return release_audit_report(self.release_audit(request))
 
     def biocapability_evidence_audit(
         self,
@@ -1608,6 +1621,18 @@ class AsyncApiClient:
         return conformance_run_report(
             await self.conformance_run(include_details=include_details, max_items=max_items)
         )
+
+    async def release_audit(self, request: ReleaseAuditArgs) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.release_audit`."""
+
+        if not isinstance(request, ReleaseAuditArgs):
+            raise ArgumentError("request must be a ReleaseAuditArgs")
+        return await self.call_tool("release_audit", request.to_mcp_arguments())
+
+    async def release_audit_report(self, request: ReleaseAuditArgs) -> ReleaseAuditReport:
+        """Return typed async HTTP release gates and delegated evidence."""
+
+        return release_audit_report(await self.release_audit(request))
 
     async def biocapability_evidence_audit(
         self,

@@ -199,6 +199,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         results: null,
         guarantees: ["fixture digests are verified"],
       } } } });
+      if (path === "/v1/tools/release_audit") return jsonResponse({ ok: true, tool: "release_audit", request_id: "r13", mcp: { result: { structuredContent: {
+        ok: true,
+        release_ready: true,
+        required_check_count: 1,
+        check_count: 1,
+        invocation_failures: 0,
+        blocking_count: 0,
+        blockers: [],
+        checks: [{ index: 0, kind: "conformance_run", required: true, advisory: false, evaluated: true, gate: true, passed: true, result_digest: "r".repeat(64) }],
+        guarantees: ["required checks are conjunctive"],
+        limitations: ["local evidence only"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -375,6 +387,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const adapter = await client.adapterPlan({ source_id: "scan-1", source_kind: "bytes", declared_format: "application/dicom", available_dependencies: ["pydicom"] });
   const tabular = await client.tabularIngest({ source_id: "cohort.csv", profile: { profile_id: "RG-DEMO-001" }, csv: "subject\nS1\n", format: "text/csv", include_facts: true });
   const conformance = await client.conformanceRun({ include_details: false, max_items: 100 });
+  const release = await client.releaseAudit({ checks: [{ kind: "conformance_run", arguments: {} }] });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -402,6 +415,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(tabular.mcp.result.structuredContent.facts[0].value, "S1");
   assert.equal(conformance.mcp.result.structuredContent.release_decision.decision, "release");
   assert.equal(conformance.mcp.result.structuredContent.suite.pyramid.counts.unit, 1);
+  assert.equal(release.mcp.result.structuredContent.release_ready, true);
+  assert.equal(release.mcp.result.structuredContent.checks[0].advisory, false);
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

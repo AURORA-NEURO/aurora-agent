@@ -918,6 +918,63 @@ export interface ConformanceRunResult extends JsonObject {
   guarantees: string[];
 }
 
+export type ReleaseAuditCheckKind =
+  | "registry_gate"
+  | "bundle_verify"
+  | "conformance_run"
+  | "research_ci_check"
+  | "quality_gate_run"
+  | "ops_acceptance"
+  | "pack_health_assess"
+  | "repository_impact"
+  | "developer_platform_status";
+
+export interface ReleaseAuditCheckArgs extends JsonObject {
+  kind: ReleaseAuditCheckKind;
+  arguments?: JsonObject;
+  required?: boolean;
+}
+
+export interface ReleaseAuditArgs extends JsonObject {
+  checks: ReleaseAuditCheckArgs[];
+  include_details?: boolean;
+}
+
+export interface ReleaseAuditCheckResult extends JsonObject {
+  index: number;
+  kind: ReleaseAuditCheckKind;
+  required: boolean;
+  advisory: boolean;
+  evaluated: boolean;
+  gate: boolean | null;
+  passed: boolean;
+  result_digest?: string;
+  result_ok?: boolean;
+  refusal?: string;
+  fail_closed?: boolean;
+  result?: JsonObject;
+}
+
+export interface ReleaseAuditBlockerResult extends JsonObject {
+  index: number;
+  kind: ReleaseAuditCheckKind;
+  reason: string;
+  fail_closed: boolean;
+}
+
+export interface ReleaseAuditResult extends JsonObject {
+  ok: boolean;
+  release_ready: boolean;
+  required_check_count: number;
+  check_count: number;
+  invocation_failures: number;
+  blocking_count: number;
+  blockers: ReleaseAuditBlockerResult[];
+  checks: ReleaseAuditCheckResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;
