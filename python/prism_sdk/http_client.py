@@ -29,7 +29,15 @@ from .errors import ApiError, ArgumentError, TransportError
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
-from .mission import MissionPreflight, MissionRequest, preflight_mission
+from .mission import (
+    MissionAssembly,
+    MissionPolicy,
+    MissionPreflight,
+    MissionRequest,
+    MissionRouteSelection,
+    mission_from_route as assemble_mission_from_route,
+    preflight_mission,
+)
 from .repository_requests import (
     RepositoryBundleRequest,
     RepositoryCatalogRequest,
@@ -223,6 +231,18 @@ class ApiClient:
             raise ArgumentError("request must be a MissionRequest")
         snapshot = catalogue if catalogue is not None else self.tool_catalogue()
         return preflight_mission(request, snapshot)
+
+    def mission_from_route(
+        self,
+        route: Mapping[str, Any],
+        mission_id: str,
+        selections: Sequence[MissionRouteSelection | Mapping[str, Any]],
+        *,
+        policy: MissionPolicy | Mapping[str, Any] | None = None,
+    ) -> MissionAssembly:
+        """Assemble a route-bound mission locally; callers still preflight before any POST."""
+
+        return assemble_mission_from_route(route, mission_id, selections, policy=policy)
 
     def capability_discover(
         self,
@@ -654,6 +674,18 @@ class AsyncApiClient:
             raise ArgumentError("request must be a MissionRequest")
         snapshot = catalogue if catalogue is not None else await self.tool_catalogue()
         return preflight_mission(request, snapshot)
+
+    async def mission_from_route(
+        self,
+        route: Mapping[str, Any],
+        mission_id: str,
+        selections: Sequence[MissionRouteSelection | Mapping[str, Any]],
+        *,
+        policy: MissionPolicy | Mapping[str, Any] | None = None,
+    ) -> MissionAssembly:
+        """Async local route-to-mission assembly; no HTTP request is issued."""
+
+        return assemble_mission_from_route(route, mission_id, selections, policy=policy)
 
     async def capability_discover(
         self,

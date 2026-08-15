@@ -51,6 +51,10 @@ if (result.mcp.result?.isError) {
   `assertMissionPreflight()` turns a failed report into a typed local error: together they return
   request and catalogue digests, deterministic dependency waves, JSON-pointer binding findings,
   execution allow-list failures, and per-step schema reports before `agentMission()` is sent.
+- `missionFromRoute()` converts a completed `capabilityRoute()` response into a provenance-preserving
+  mission assembly only after every need has one caller-selected candidate and explicit JSON
+  arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is
+  designed to feed `missionPreflight()` before `agentMission()`.
 - `eventStream` parses the gateway's bounded SSE snapshot and returns the `x-next-after` cursor;
   it is deliberately not a long-lived socket or an implicit reconnect loop.
 - Webhook delivery is poll/send/acknowledge: `deliveries`, `retry`, and `acknowledge` operate on

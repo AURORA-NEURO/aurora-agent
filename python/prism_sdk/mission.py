@@ -7,7 +7,7 @@ interpretation to the authoritative MCP server.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
@@ -19,6 +19,7 @@ MAX_MISSION_STEPS = 128
 MAX_ALLOWED_TOOLS = 512
 MAX_STEP_OUTPUT_BYTES = 20_000_000
 MAX_TOTAL_OUTPUT_BYTES = 20_000_000
+MISSION_ASSEMBLY_SCHEMA = "bioprism-python-mission-assembly/0.1"
 
 
 def _text(name: str, value: str) -> None:
@@ -254,6 +255,197 @@ class MissionRequest:
                 else _mapping("policy", self.policy)
             )
         return arguments
+
+
+@dataclass(frozen=True)
+class MissionRouteSelection:
+    """One explicit, caller-reviewed choice that turns a routed need into a mission step."""
+
+    need_id: str
+    tool: str
+    domain: str
+    capability: str
+    objective: str
+    arguments: Mapping[str, Any]
+    depends_on: Sequence[str] = ()
+    required: bool = True
+    bindings: Sequence[MissionBinding | Mapping[str, Any]] = ()
+
+    def __post_init__(self) -> None:
+        for name in ("need_id", "tool", "domain", "capability", "objective"):
+            _text(f"route selection.{name}", getattr(self, name))
+        _mapping("route selection.arguments", self.arguments)
+        if not isinstance(self.depends_on, Sequence) or isinstance(self.depends_on, (str, bytes)):
+            raise ArgumentError("route selection.depends_on must be a sequence")
+        for dependency in self.depends_on:
+            _text("route selection dependency", dependency)
+        if not isinstance(self.required, bool):
+            raise ArgumentError("route selection.required must be a boolean")
+        if not isinstance(self.bindings, Sequence) or isinstance(self.bindings, (str, bytes)):
+            raise ArgumentError("route selection.bindings must be a sequence")
+        for binding in self.bindings:
+            _binding(binding)
+
+    def to_step(self) -> MissionStep:
+        """Convert the reviewed selection into the existing typed mission-step contract."""
+
+        return MissionStep(
+            id=self.need_id,
+            domain=self.domain,
+            capability=self.capability,
+            objective=self.objective,
+            tool=self.tool,
+            arguments=self.arguments,
+            depends_on=tuple(self.depends_on),
+            required=self.required,
+            bindings=self.bindings,
+        )
+
+
+def _route_selection(value: MissionRouteSelection | Mapping[str, Any]) -> MissionRouteSelection:
+    if isinstance(value, MissionRouteSelection):
+        return value
+    raw = _mapping("route selection", value)
+    for name in ("need_id", "tool", "domain", "capability", "objective", "arguments"):
+        if name not in raw:
+            raise ArgumentError(f"route selection requires {name}")
+    return MissionRouteSelection(
+        need_id=raw["need_id"],
+        tool=raw["tool"],
+        domain=raw["domain"],
+        capability=raw["capability"],
+        objective=raw["objective"],
+        arguments=raw["arguments"],
+        depends_on=raw.get("depends_on", ()),
+        required=raw.get("required", True),
+        bindings=raw.get("bindings", ()),
+    )
+
+
+@dataclass(frozen=True)
+class MissionAssembly:
+    """A route-bound mission draft whose candidate choices and provenance remain inspectable."""
+
+    route_id: str
+    catalog_digest: str
+    request: MissionRequest
+    selected_tools: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": MISSION_ASSEMBLY_SCHEMA,
+            "route_id": self.route_id,
+            "catalog_digest": self.catalog_digest,
+            "mission": self.request.to_mcp_arguments(),
+            "selected_tools": list(self.selected_tools),
+            "limitations": [
+                "tool and argument choices are caller-selected; routing scores do not authorize execution",
+                "the route catalogue digest is provenance, not a guarantee that the live catalogue is unchanged",
+                "mission graph and per-tool schema validity still require mission_preflight",
+            ],
+        }
+
+
+def mission_from_route(
+    route: Mapping[str, Any],
+    mission_id: str,
+    selections: Sequence[MissionRouteSelection | Mapping[str, Any]],
+    *,
+    policy: MissionPolicy | Mapping[str, Any] | None = None,
+) -> MissionAssembly:
+    """Build an explicit mission only from tools selected out of one capability-route result.
+
+    This function never executes a routed candidate and never invents tool arguments. Every route
+    need must have exactly one caller-supplied selection whose tool is present in that need's
+    bounded candidate list; the returned request can then be reviewed with ``preflight_mission``.
+    """
+
+    if not isinstance(route, Mapping):
+        raise ArgumentError("route must be a mapping")
+    if route.get("workflow") != "capability_route":
+        raise ArgumentError("route.workflow must be capability_route")
+    route_id = route.get("route_id")
+    catalog_digest = route.get("catalog_digest")
+    goal = route.get("goal")
+    _text("route_id", route_id)
+    _text("catalog_digest", catalog_digest)
+    _text("route.goal", goal)
+    raw_needs = route.get("needs")
+    if (
+        not isinstance(raw_needs, Sequence)
+        or isinstance(raw_needs, (str, bytes))
+        or not raw_needs
+        or len(raw_needs) > MAX_MISSION_STEPS
+    ):
+        raise ArgumentError("route.needs must contain between 1 and 128 needs")
+    unresolved = route.get("unresolved_needs", ())
+    if not isinstance(unresolved, Sequence) or isinstance(unresolved, (str, bytes)):
+        raise ArgumentError("route.unresolved_needs must be a sequence")
+    if unresolved:
+        raise ArgumentError(f"route contains unresolved needs: {list(unresolved)!r}")
+
+    candidates_by_need: dict[str, tuple[str, ...]] = {}
+    ordered_need_ids: list[str] = []
+    for raw_need in raw_needs:
+        if not isinstance(raw_need, Mapping):
+            raise ArgumentError("route.needs entries must be mappings")
+        need_id = raw_need.get("id")
+        _text("route need.id", need_id)
+        if need_id in candidates_by_need:
+            raise ArgumentError(f"route contains duplicate need id: {need_id}")
+        raw_candidates = raw_need.get("candidate_tools")
+        if not isinstance(raw_candidates, Sequence) or isinstance(raw_candidates, (str, bytes)):
+            raise ArgumentError(f"route need {need_id!r} has no candidate_tools array")
+        candidates: list[str] = []
+        for candidate in raw_candidates:
+            _text("route candidate tool", candidate)
+            if candidate not in candidates:
+                candidates.append(candidate)
+        if not candidates:
+            raise ArgumentError(f"route need {need_id!r} is unresolved")
+        candidates_by_need[need_id] = tuple(candidates)
+        ordered_need_ids.append(need_id)
+
+    if (
+        not isinstance(selections, Sequence)
+        or isinstance(selections, (str, bytes))
+        or len(selections) != len(ordered_need_ids)
+    ):
+        raise ArgumentError("selections must contain exactly one choice for every routed need")
+    selected_by_need: dict[str, MissionRouteSelection] = {}
+    for value in selections:
+        selection = _route_selection(value)
+        if selection.need_id in selected_by_need:
+            raise ArgumentError(f"duplicate route selection for need: {selection.need_id}")
+        candidates = candidates_by_need.get(selection.need_id)
+        if candidates is None:
+            raise ArgumentError(f"selection refers to unknown route need: {selection.need_id}")
+        if selection.tool not in candidates:
+            raise ArgumentError(
+                f"tool {selection.tool!r} is not a candidate for route need {selection.need_id!r}"
+            )
+        for dependency in selection.depends_on:
+            if dependency not in candidates_by_need:
+                raise ArgumentError(
+                    f"route selection {selection.need_id!r} depends on unknown need: {dependency}"
+                )
+        selected_by_need[selection.need_id] = selection
+    missing = [need_id for need_id in ordered_need_ids if need_id not in selected_by_need]
+    if missing:
+        raise ArgumentError(f"route needs have no explicit selection: {missing!r}")
+
+    request = MissionRequest(
+        mission_id,
+        goal,
+        [selected_by_need[need_id].to_step() for need_id in ordered_need_ids],
+        policy,
+    )
+    return MissionAssembly(
+        route_id=route_id,
+        catalog_digest=catalog_digest,
+        request=request,
+        selected_tools=tuple(selected_by_need[need_id].tool for need_id in ordered_need_ids),
+    )
 
 
 class MissionPreflightError(ArgumentError):
@@ -583,12 +775,16 @@ __all__ = [
     "MAX_MISSION_STEPS",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
+    "MISSION_ASSEMBLY_SCHEMA",
     "MissionBinding",
+    "MissionAssembly",
     "MissionPolicy",
     "MissionPreflight",
     "MissionPreflightError",
+    "MissionRouteSelection",
     "MissionRequest",
     "MissionStep",
     "MissionStepPreflight",
+    "mission_from_route",
     "preflight_mission",
 ]

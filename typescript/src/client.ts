@@ -1,11 +1,12 @@
 import { ApiError, ArgumentError, ProtocolError, ResponseTooLargeError, ToolRefusalError, TransportError, isObject } from "./errors.js";
-import { preflightMission } from "./mission.js";
+import { missionFromRoute as assembleMissionFromRoute, preflightMission } from "./mission.js";
 import { parseSse } from "./sse.js";
 import { ToolCatalogue } from "./tooling.js";
 import type {
   ApiClientOptions,
   ApiErrorBody,
   AgentMissionArgs,
+  AgentMissionPolicy,
   CapabilityDiscoverArgs,
   CapabilityAuditArgs,
   CapabilityRouteArgs,
@@ -27,7 +28,9 @@ import type {
   JsonValue,
   MetricsAnalyticsAuditArgs,
   MetricsProfileAuditArgs,
+  MissionAssembly,
   MissionPreflightResult,
+  MissionRouteSelection,
   RepositoryBundleArgs,
   RepositoryCatalogArgs,
   RepositoryImpactArgs,
@@ -256,6 +259,16 @@ export class ApiClient {
   ): Promise<MissionPreflightResult> {
     const snapshot = catalogue ?? await this.toolCatalogue(options);
     return preflightMission(args, snapshot);
+  }
+
+  /** Assemble a route-bound mission locally; this performs no network call or tool execution. */
+  missionFromRoute(
+    route: JsonObject,
+    missionId: string,
+    selections: readonly MissionRouteSelection[],
+    policy?: AgentMissionPolicy,
+  ): MissionAssembly {
+    return assembleMissionFromRoute(route, missionId, selections, policy);
   }
 
   async runtimeExecutionSimulate(args: RuntimeExecutionSimulateArgs, options?: ClientRequestOptions) {

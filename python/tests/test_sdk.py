@@ -14,6 +14,7 @@ from prism_sdk import (
     ToolRefusal,
     ToolSchemaError,
     MissionRequest,
+    MissionRouteSelection,
     MissionStep,
     Workspace,
 )
@@ -53,6 +54,19 @@ class SyncClientTests(unittest.TestCase):
             )
             self.assertTrue(mission.ok)
             self.assertEqual(mission.waves, (("one",),))
+            assembly = workspace.mission_from_route(
+                {
+                    "workflow": "capability_route",
+                    "route_id": "route-sdk",
+                    "catalog_digest": "d" * 64,
+                    "goal": "check",
+                    "needs": [{"id": "one", "candidate_tools": ["echo"]}],
+                    "unresolved_needs": [],
+                },
+                "mission-route-sdk",
+                [MissionRouteSelection("one", "echo", "data", "read", "check", {"value": 3})],
+            )
+            self.assertEqual(assembly.request.mission_id, "mission-route-sdk")
             result = client.call_tool("echo", {"value": 3})
             self.assertFalse(result.is_error)
             self.assertEqual(result.require_ok()["echo"]["value"], 3)
@@ -109,6 +123,19 @@ class AsyncClientTests(unittest.IsolatedAsyncioTestCase):
                 catalogue=catalogue,
             )
             self.assertTrue(mission.fully_checked)
+            assembly = await workspace.mission_from_route(
+                {
+                    "workflow": "capability_route",
+                    "route_id": "route-async-sdk",
+                    "catalog_digest": "e" * 64,
+                    "goal": "check",
+                    "needs": [{"id": "one", "candidate_tools": ["echo"]}],
+                    "unresolved_needs": [],
+                },
+                "mission-route-async-sdk",
+                [MissionRouteSelection("one", "echo", "data", "read", "check", {"value": 4})],
+            )
+            self.assertEqual(assembly.selected_tools, ("echo",))
             result = await client.call_tool("echo", {"async": True})
             self.assertEqual(result.require_ok()["echo"]["async"], True)
             report = await AsyncWorkspace(client).developer_delivery_audit(

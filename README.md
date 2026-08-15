@@ -286,7 +286,8 @@ for the compatibility, workbench, mission, secret-handling, and schema-aware ful
 invocation contract. `toolCatalogue()` and `planTool()` make arbitrary domain calls reviewable
 before `toolChecked()` executes them; `missionPreflight()` extends that review across dependency
 graphs, bindings, and execution policy before `agentMission()` is sent. Remote refusals remain
-visible rather than becoming success.
+visible rather than becoming success. `missionFromRoute()` connects the generic capability
+catalogue to that review while keeping candidate selection and arguments explicit.
 
 The repository ships `bioprism-api` for deployments that need a network boundary:
 

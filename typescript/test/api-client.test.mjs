@@ -50,6 +50,40 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const catalogue = await client.toolCatalogue();
   assert.equal(catalogue.definitions.length, 1);
   assert.equal(catalogue.digest.length, 64);
+  const assembly = client.missionFromRoute({
+    workflow: "capability_route",
+    route_id: "route-ts",
+    catalog_digest: "d".repeat(64),
+    goal: "check routed work",
+    needs: [{ id: "echo-need", resolution: "explicit", candidate_tools: ["echo"] }],
+    unresolved_needs: [],
+  }, "mission-from-route", [{
+    need_id: "echo-need",
+    tool: "echo",
+    domain: "workspace",
+    capability: "discovery",
+    objective: "check routed work",
+    arguments: { value: 3 },
+  }]);
+  assert.equal(assembly.route_id, "route-ts");
+  assert.deepEqual(assembly.selected_tools, ["echo"]);
+  const assembledPreflight = await client.missionPreflight(assembly.mission, catalogue);
+  assert.equal(assembledPreflight.ok, true);
+  assert.throws(() => client.missionFromRoute({
+    workflow: "capability_route",
+    route_id: "route-ts",
+    catalog_digest: "d".repeat(64),
+    goal: "reject unselected tool",
+    needs: [{ id: "echo-need", candidate_tools: ["echo"] }],
+    unresolved_needs: [],
+  }, "mission-bad-route", [{
+    need_id: "echo-need",
+    tool: "missing",
+    domain: "workspace",
+    capability: "discovery",
+    objective: "reject",
+    arguments: {},
+  }]), ArgumentError);
   const plan = await client.planTool("echo", { value: 3, mode: "safe" }, catalogue);
   assert.equal(plan.tool, "echo");
   assert.equal(plan.report.fullyChecked, true);

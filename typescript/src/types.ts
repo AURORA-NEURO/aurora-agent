@@ -462,6 +462,27 @@ export interface MissionPreflightResult extends JsonObject {
   limitations: string[];
 }
 
+export interface MissionRouteSelection extends JsonObject {
+  need_id: string;
+  tool: string;
+  domain: string;
+  capability: string;
+  objective: string;
+  arguments: JsonObject;
+  depends_on?: string[];
+  required?: boolean;
+  bindings?: AgentMissionBinding[];
+}
+
+export interface MissionAssembly extends JsonObject {
+  schema: "bioprism-typescript-mission-assembly/0.1";
+  route_id: string;
+  catalog_digest: string;
+  mission: AgentMissionArgs;
+  selected_tools: string[];
+  limitations: string[];
+}
+
 export interface RuntimeExecutionSimulateArgs extends JsonObject {
   tape?: JsonObject;
   actions?: JsonValue[];

@@ -133,13 +133,17 @@ from .mission import (
     MAX_MISSION_STEPS,
     MAX_STEP_OUTPUT_BYTES,
     MAX_TOTAL_OUTPUT_BYTES,
+    MISSION_ASSEMBLY_SCHEMA,
     MissionBinding,
+    MissionAssembly,
     MissionPolicy,
     MissionPreflight,
     MissionPreflightError,
+    MissionRouteSelection,
     MissionRequest,
     MissionStep,
     MissionStepPreflight,
+    mission_from_route,
     preflight_mission,
 )
 from .nifti import NiftiAdapter, NiftiAuditResult, NiftiFinding, audit_nifti

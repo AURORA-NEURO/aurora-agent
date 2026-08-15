@@ -70,7 +70,10 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 content digests, deterministic waves, missing/cyclic dependencies, binding targets, execution
 allow-list and side-effect policy findings, and per-step schema warnings before any mission POST.
 It is a transport and orchestration review only; the Rust `agent_mission` tool remains authoritative
-for actual execution and refusal propagation.
+for actual execution and refusal propagation. `mission_from_route()` then turns a completed
+`capability_route()` response into a provenance-preserving `MissionAssembly`, but only after the
+caller selects exactly one candidate tool and supplies its arguments for every need; unresolved
+and out-of-candidate selections are refused rather than guessed.
 For any current or future domain without a handwritten wrapper, `tool_catalogue()` snapshots the
 live `tools/list` or `/v1/tools` definitions, `plan_tool()` performs conservative shape-only
 preflight, and `tool_checked()` executes the reviewed call. Plans are digest-bound and carry no

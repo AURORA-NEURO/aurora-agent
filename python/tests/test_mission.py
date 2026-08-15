@@ -5,9 +5,11 @@ import unittest
 from prism_sdk import (
     ArgumentError,
     MissionBinding,
+    MissionRouteSelection,
     MissionRequest,
     MissionStep,
     ToolCatalogue,
+    mission_from_route,
     preflight_mission,
 )
 
@@ -106,6 +108,41 @@ class MissionPreflightTests(unittest.TestCase):
             MissionRequest("bad", "missing step field", [{"id": "one"}])
         with self.assertRaises(ArgumentError):
             MissionBinding("one", "/valid", "/invalid~2")
+
+    def test_route_assembly_requires_explicit_candidates_and_preserves_provenance(self) -> None:
+        route = {
+            "workflow": "capability_route",
+            "route_id": "route-123",
+            "catalog_digest": "c" * 64,
+            "goal": "compose a checked route",
+            "needs": [
+                {"id": "acquire", "resolution": "explicit", "candidate_tools": ["echo"]},
+                {"id": "audit", "resolution": "ranked_candidates", "candidate_tools": ["audit", "echo"]},
+            ],
+            "unresolved_needs": [],
+        }
+        assembly = mission_from_route(
+            route,
+            "mission-from-route",
+            [
+                MissionRouteSelection("acquire", "echo", "data", "read", "acquire", {"value": 3}),
+                MissionRouteSelection("audit", "audit", "evaluation", "verify", "audit", {"value": 0}, depends_on=("acquire",)),
+            ],
+        )
+        self.assertEqual(assembly.route_id, "route-123")
+        self.assertEqual(assembly.selected_tools, ("echo", "audit"))
+        report = preflight_mission(assembly.request, catalogue())
+        self.assertTrue(report.ok)
+        self.assertEqual(assembly.to_dict()["mission"]["mission_id"], "mission-from-route")
+        with self.assertRaises(ArgumentError):
+            mission_from_route(
+                route,
+                "bad-route",
+                [
+                    MissionRouteSelection("acquire", "missing", "data", "read", "acquire", {"value": 3}),
+                    MissionRouteSelection("audit", "audit", "evaluation", "verify", "audit", {"value": 0}),
+                ],
+            )
 
 
 if __name__ == "__main__":

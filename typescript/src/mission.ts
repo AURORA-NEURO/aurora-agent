@@ -6,12 +6,15 @@ import type {
   AgentMissionPolicy,
   AgentMissionStep,
   JsonObject,
+  MissionAssembly,
   MissionPreflightResult,
+  MissionRouteSelection,
   MissionStepPreflight,
   ToolValidationReport,
 } from "./types.js";
 
 export const MISSION_PREFLIGHT_SCHEMA = "bioprism-typescript-mission-preflight/0.1";
+export const MISSION_ASSEMBLY_SCHEMA = "bioprism-typescript-mission-assembly/0.1";
 export const MAX_MISSION_STEPS = 128;
 export const MAX_ALLOWED_TOOLS = 512;
 export const MAX_STEP_OUTPUT_BYTES = 20_000_000;
@@ -280,6 +283,129 @@ export async function preflightMission(
   };
 }
 
+/**
+ * Turn one capability-route response into an explicit mission draft.
+ *
+ * Candidate ranking is never treated as permission: every routed need must have exactly one
+ * caller-selected candidate and explicit JSON arguments. The returned assembly is local data;
+ * callers should run `preflightMission` against a matching catalogue before `agentMission`.
+ */
+export function missionFromRoute(
+  route: JsonObject,
+  missionId: string,
+  selections: readonly MissionRouteSelection[],
+  policy?: AgentMissionPolicy,
+): MissionAssembly {
+  if (!isObject(route)) throw new ArgumentError("route must be a JSON object");
+  if (route.workflow !== "capability_route") throw new ArgumentError("route.workflow must be capability_route");
+  const routeId = requiredText(route.route_id, "route_id");
+  const catalogueDigest = requiredText(route.catalog_digest, "catalog_digest");
+  const goal = requiredText(route.goal, "route.goal");
+  const rawNeeds = route.needs;
+  if (!Array.isArray(rawNeeds) || rawNeeds.length === 0 || rawNeeds.length > MAX_MISSION_STEPS) {
+    throw new ArgumentError(`route.needs must contain between 1 and ${MAX_MISSION_STEPS} needs`);
+  }
+  const unresolved = route.unresolved_needs;
+  if (!Array.isArray(unresolved)) throw new ArgumentError("route.unresolved_needs must be an array");
+  if (unresolved.length > 0) throw new ArgumentError(`route contains unresolved needs: ${unresolved.map(String).join(", ")}`);
+
+  const candidatesByNeed = new Map<string, string[]>();
+  const orderedNeedIds: string[] = [];
+  for (const rawNeed of rawNeeds) {
+    if (!isObject(rawNeed)) throw new ArgumentError("route.needs entries must be JSON objects");
+    const needId = requiredText(rawNeed.id, "route need.id");
+    if (candidatesByNeed.has(needId)) throw new ArgumentError(`route contains duplicate need id: ${needId}`);
+    if (!Array.isArray(rawNeed.candidate_tools)) throw new ArgumentError(`route need ${needId} has no candidate_tools array`);
+    const candidates: string[] = [];
+    for (const candidate of rawNeed.candidate_tools) {
+      const tool = requiredText(candidate, "route candidate tool");
+      if (!candidates.includes(tool)) candidates.push(tool);
+    }
+    if (candidates.length === 0) throw new ArgumentError(`route need ${needId} is unresolved`);
+    candidatesByNeed.set(needId, candidates);
+    orderedNeedIds.push(needId);
+  }
+
+  if (!Array.isArray(selections) || selections.length !== orderedNeedIds.length) {
+    throw new ArgumentError("selections must contain exactly one choice for every routed need");
+  }
+  const selectedByNeed = new Map<string, MissionRouteSelection>();
+  for (const rawSelection of selections) {
+    if (!isObject(rawSelection)) throw new ArgumentError("route selections must be JSON objects");
+    const selection = rawSelection as MissionRouteSelection;
+    const needId = requiredText(selection.need_id, "route selection.need_id");
+    const tool = requiredText(selection.tool, "route selection.tool");
+    if (selectedByNeed.has(needId)) throw new ArgumentError(`duplicate route selection for need: ${needId}`);
+    const candidates = candidatesByNeed.get(needId);
+    if (!candidates) throw new ArgumentError(`selection refers to unknown route need: ${needId}`);
+    if (!candidates.includes(tool)) throw new ArgumentError(`tool ${tool} is not a candidate for route need ${needId}`);
+    const domain = requiredText(selection.domain, "route selection.domain");
+    const capability = requiredText(selection.capability, "route selection.capability");
+    const objective = requiredText(selection.objective, "route selection.objective");
+    if (!isObject(selection.arguments)) throw new ArgumentError(`route selection ${needId} arguments must be a JSON object`);
+    const dependencies = selection.depends_on ?? [];
+    if (!Array.isArray(dependencies) || dependencies.some((value) => typeof value !== "string" || !value.trim())) {
+      throw new ArgumentError(`route selection ${needId}.depends_on must contain non-empty strings`);
+    }
+    for (const dependency of dependencies) {
+      if (!candidatesByNeed.has(dependency)) throw new ArgumentError(`route selection ${needId} depends on unknown need: ${dependency}`);
+    }
+    const required = selection.required ?? true;
+    if (typeof required !== "boolean") throw new ArgumentError(`route selection ${needId}.required must be a boolean`);
+    const bindings = selection.bindings ?? [];
+    if (!Array.isArray(bindings) || bindings.some((value) => !isObject(value))) {
+      throw new ArgumentError(`route selection ${needId}.bindings must be an array of objects`);
+    }
+    selectedByNeed.set(needId, {
+      need_id: needId,
+      tool,
+      domain,
+      capability,
+      objective,
+      arguments: selection.arguments,
+      depends_on: dependencies,
+      required,
+      bindings: bindings as AgentMissionBinding[],
+    });
+  }
+  const missing = orderedNeedIds.filter((needId) => !selectedByNeed.has(needId));
+  if (missing.length > 0) throw new ArgumentError(`route needs have no explicit selection: ${missing.join(", ")}`);
+  if (policy !== undefined && !isObject(policy)) throw new ArgumentError("mission policy must be a JSON object");
+
+  const steps: AgentMissionStep[] = orderedNeedIds.map((needId) => {
+    const selection = selectedByNeed.get(needId) as MissionRouteSelection;
+    return {
+      id: needId,
+      domain: selection.domain,
+      capability: selection.capability,
+      objective: selection.objective,
+      tool: selection.tool,
+      arguments: selection.arguments,
+      depends_on: selection.depends_on ?? [],
+      required: selection.required ?? true,
+      bindings: selection.bindings ?? [],
+    };
+  });
+  const mission: AgentMissionArgs = {
+    mission_id: requiredText(missionId, "mission_id"),
+    goal,
+    steps,
+    ...(policy === undefined ? {} : { policy }),
+  };
+  return {
+    schema: MISSION_ASSEMBLY_SCHEMA,
+    route_id: routeId,
+    catalog_digest: catalogueDigest,
+    mission,
+    selected_tools: steps.map((step) => step.tool),
+    limitations: [
+      "tool and argument choices are caller-selected; routing scores do not authorize execution",
+      "the route catalogue digest is provenance, not a guarantee that the live catalogue is unchanged",
+      "mission graph and per-tool schema validity still require missionPreflight",
+    ],
+  };
+}
+
 /** Throw a typed local error when a preflight report is not safe to submit. */
 export function assertMissionPreflight(result: MissionPreflightResult): MissionPreflightResult {
   if (!isObject(result) || result.ok !== true) {
@@ -294,6 +420,11 @@ export function assertMissionPreflight(result: MissionPreflightResult): MissionP
     throw new MissionPreflightError(`mission ${missionId} failed preflight: ${details}`, result);
   }
   return result;
+}
+
+function requiredText(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new ArgumentError(`${name} must be a non-empty string`);
+  return value;
 }
 
 function normalisePolicy(raw: AgentMissionPolicy | undefined, issues: string[]): NormalPolicy {

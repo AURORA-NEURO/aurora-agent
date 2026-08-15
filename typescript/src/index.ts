@@ -11,12 +11,14 @@ export {
 export { parseSse } from "./sse.js";
 export {
   MAX_ALLOWED_TOOLS,
+  MISSION_ASSEMBLY_SCHEMA,
   MAX_MISSION_STEPS,
   MAX_STEP_OUTPUT_BYTES,
   MAX_TOTAL_OUTPUT_BYTES,
   MISSION_PREFLIGHT_SCHEMA,
   MissionPreflightError,
   assertMissionPreflight,
+  missionFromRoute,
   preflightMission,
 } from "./mission.js";
 export {

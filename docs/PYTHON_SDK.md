@@ -112,6 +112,11 @@ invent defaults:
   coverage gaps, and intentional multi-group membership.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates.
+- `mission_from_route(route, mission_id, selections, policy=...)` converts that route into a
+  provenance-preserving `MissionAssembly` only after every need has one caller-selected candidate,
+  explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or
+  out-of-candidate tools, performs no transport call, and is intended to feed `mission_preflight()`
+  before `agent_mission()`.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the
   complete live MCP catalogue, including domains that do not yet have a handwritten convenience
   method. The catalogue is copied from `tools/list` or `/v1/tools`, deduplicated, bounded, and
