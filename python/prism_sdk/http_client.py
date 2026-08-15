@@ -28,6 +28,7 @@ from .context_requests import (
     ProjectionBundleRequest,
 )
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
+from .events import MAX_EVENT_PAGE, DeliveryPage, EventPage
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
@@ -662,6 +663,15 @@ class ApiClient:
             raise ArgumentError("after must be non-negative and limit must be 1..=1000")
         return self.request("GET", f"/v1/events?after={after}&limit={limit}")
 
+    def event_page(self, *, after: int = 0, limit: int = 100) -> EventPage:
+        """Read a typed cursor page over all retained tool and mission events."""
+
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_EVENT_PAGE:
+            raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
+        return EventPage.from_wire(self.request("GET", f"/v1/events?after={after}&limit={limit}"))
+
     def subscribe(
         self,
         endpoint: str,
@@ -682,6 +692,21 @@ class ApiClient:
         if after < 0 or not 1 <= limit <= 1000:
             raise ArgumentError("after must be non-negative and limit must be 1..=1000")
         return self.request("GET", f"/v1/webhooks/subscriptions/{subscription_id}/deliveries?after={after}&limit={limit}")
+
+    def delivery_page(self, subscription_id: str, *, after: int = 0, limit: int = 100) -> DeliveryPage:
+        """Read a typed cursor page over a subscription's pending signed deliveries."""
+
+        self._subscription_id(subscription_id)
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_EVENT_PAGE:
+            raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
+        return DeliveryPage.from_wire(
+            self.request(
+                "GET",
+                f"/v1/webhooks/subscriptions/{subscription_id}/deliveries?after={after}&limit={limit}",
+            )
+        )
 
     def acknowledge(self, subscription_id: str, delivery_ids: Sequence[int]) -> dict[str, Any]:
         self._subscription_id(subscription_id)
@@ -829,10 +854,20 @@ class AsyncApiClient:
 
         return await asyncio.to_thread(self.client.missions, status=status, limit=limit)
 
+    async def event_page(self, *, after: int = 0, limit: int = 100) -> EventPage:
+        """Async typed cursor page over retained tool and mission events."""
+
+        return await asyncio.to_thread(self.client.event_page, after=after, limit=limit)
+
     async def mission_inventory(self, *, status: str | None = None, limit: int = 100) -> MissionInventoryPage:
         """Async typed bounded mission inventory."""
 
         return await asyncio.to_thread(self.client.mission_inventory, status=status, limit=limit)
+
+    async def delivery_page(self, subscription_id: str, *, after: int = 0, limit: int = 100) -> DeliveryPage:
+        """Async typed cursor page over pending signed deliveries."""
+
+        return await asyncio.to_thread(self.client.delivery_page, subscription_id, after=after, limit=limit)
 
     async def mission_from_route(
         self,

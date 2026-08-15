@@ -66,6 +66,8 @@ and one retention-gap contract with ordinary tool calls.
 Python now exposes typed inventory pages plus bounded sync/async waits that retain the last live
 job on timeout; TypeScript exposes the same wait contract with abortable polling and a typed timeout
 error. These helpers coordinate every domain mission without claiming durable scheduling.
+The Python HTTP SDK also exposes typed event and signed-delivery pages with the same cursor ordering,
+retention-gap, retry-attempt, signature, and pending-count fields already present in TypeScript.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 The authoritative executor validates every known tool's materialized arguments against its

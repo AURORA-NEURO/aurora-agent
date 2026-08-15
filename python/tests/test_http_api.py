@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EventPage, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, WorldClaimCheckRequest
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -42,7 +42,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
                 },
             )
         elif self.path.startswith("/v1/events"):
-            self._send(200, {"ok": True, "page": {"events": [], "next_after": 0}})
+            self._send(200, {"ok": True, "page": {"events": [], "after": 0, "next_after": 0, "oldest": None, "newest": None, "gap": False, "dropped_events": 0}})
         elif self.path.startswith("/v1/missions?"):
             self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "progress": {"phase": "succeeded", "current_wave": 0, "total_steps": 1, "completed_steps": 1, "active_steps": 0, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "trace_sequence": 4, "last_event": "mission.completed"}, "summary": {"total_steps": 1, "completed_steps": 1, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "result_available": True}, "poll": "/v1/missions/async-1", "cancel": "/v1/missions/async-1/cancel", "trace": "/v1/missions/async-1/trace"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
         elif self.path.startswith("/v1/missions/async-1/trace"):
@@ -221,6 +221,11 @@ class HttpApiClientTests(unittest.TestCase):
             "trace-http",
         )
         self.assertEqual(client.events()["page"]["events"], [])
+        event_page = client.event_page()
+        self.assertIsInstance(event_page, EventPage)
+        self.assertFalse(event_page.gap)
+        with self.assertRaises(ArgumentError):
+            client.event_page(after=True)
         with self.assertRaises(ApiError) as error:
             client.request("POST", "/v1/tools/refuse", {})
         self.assertEqual(error.exception.status, 422)
@@ -329,6 +334,7 @@ class HttpApiClientTests(unittest.TestCase):
                 (await client.telemetry_project({"kind": "event"}, {"treatments": {}}, "trace-async"))["mcp"]["result"]["trace"],
                 "trace-async",
             )
+            self.assertFalse((await client.event_page()).gap)
 
         asyncio.run(run())
 

@@ -111,6 +111,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
+from .events import ApiEvent, DeliveryPage, DeliveryView, EventPage, MAX_EVENT_PAGE
 from .evidence import (
     BioCapabilityEvidenceAuditRequest,
     ClaimRequest,
@@ -241,6 +242,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ArgumentError",
+    "ApiEvent",
     "BioCapabilityEvidenceAuditRequest",
     "BioQlCompileRequest",
     "ApiClient",
@@ -267,6 +269,8 @@ __all__ = [
     "AsyncClient",
     "AsyncApiClient",
     "AsyncWorkspace",
+    "DeliveryPage",
+    "DeliveryView",
     "Admissibility",
     "AnalyticsDirection",
     "AnalyticsEvidence",
@@ -340,6 +344,8 @@ __all__ = [
     "EVIDENCE_STATUSES",
     "EvidenceItem",
     "EvidenceStatus",
+    "EventPage",
+    "MAX_EVENT_PAGE",
     "ConformanceLevel",
     "CalibrationObservation",
     "CapabilityQuery",

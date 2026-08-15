@@ -177,6 +177,9 @@ existing delivery worker contract instead of requiring a second event transport.
 The SDK layer now adds typed Python mission inventory pages and bounded synchronous/asynchronous
 wait helpers. A wait returns only a terminal job, never spins without a deadline, and preserves the
 last live job on timeout; this is an orchestration convenience, not a durable queue or scheduler.
+Python now also types the shared event cursor and webhook delivery pages, including retention gaps,
+ordered event IDs, retry attempts, signatures, and pending counts. This keeps mission monitoring and
+ordinary domain-tool observability on one contract in both SDK families.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full

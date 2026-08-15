@@ -273,7 +273,10 @@ invent defaults:
 gateway: health/capability discovery, typed `capability_discover`, `capability_audit`,
 `capability_route`, and `adapter_plan` helpers, REST tool calls, cursor-based event pages, and signed
 webhook subscription/delivery acknowledgement. They preserve status and JSON error payloads in
-`ApiError` and do not recreate Rust domain semantics.
+`ApiError` and do not recreate Rust domain semantics. `event_page()` and `delivery_page()` add
+typed `EventPage`, `ApiEvent`, and `DeliveryPage` projections with ordered cursors, retention-gap
+signals, retry attempts, signatures, and pending counts; the original raw `events()` and
+`deliveries()` methods remain available for forward-compatible payload inspection.
 
 ## Metrics analytics across domains
 
