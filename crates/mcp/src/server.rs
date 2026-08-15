@@ -58,8 +58,8 @@ use bioprism_dataops::{
 use bioprism_devplat::{
     apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
     CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
-    MissionStep, MissionStepResult, WorkbenchRequest, CAPABILITY_SCHEMA_VERSION,
-    MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    MissionStep, MissionStepResult, MissionTraceEvent, WorkbenchRequest, CAPABILITY_SCHEMA_VERSION,
+    MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -301,6 +301,30 @@ fn encode_mission_report(report: MissionReport, context: &str) -> Result<Value, 
     output["workflow"] = json!("agent_mission");
     output["mission_schema_version"] = json!(MISSION_SCHEMA_VERSION);
     Ok(output)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn trace_event(
+    report: &mut MissionReport,
+    event: &str,
+    wave: Option<usize>,
+    step: Option<&MissionStep>,
+    status: Option<&str>,
+    arguments_digest: Option<String>,
+    bytes: usize,
+    detail: Option<String>,
+) {
+    report.execution_trace.push(MissionTraceEvent {
+        sequence: report.execution_trace.len(),
+        event: event.into(),
+        wave,
+        step_id: step.map(|value| value.id.clone()),
+        tool: step.map(|value| value.tool.clone()),
+        status: status.map(str::to_string),
+        arguments_digest,
+        bytes,
+        detail,
+    });
 }
 
 impl Server {
@@ -11857,6 +11881,8 @@ impl Server {
             required_failures: 0,
             returned_bytes: 0,
             results: Vec::new(),
+            execution_trace_schema_version: MISSION_TRACE_SCHEMA_VERSION.into(),
+            execution_trace: Vec::new(),
             guarantees: vec![
             "the mission DAG was validated before any nested tool call".into(),
             "nested calls preserve raw JSON-RPC result and refusal envelopes".into(),
@@ -11877,8 +11903,32 @@ impl Server {
                 "this is an in-process bounded executor, not a distributed scheduler, durable queue, or external worker pool".into(),
             ],
         };
+        let initial_status = report.mission_status.clone();
+        trace_event(
+            &mut report,
+            "mission.started",
+            None,
+            None,
+            Some(initial_status.as_str()),
+            None,
+            0,
+            Some(format!(
+                "execution_mode={}, max_parallelism={}",
+                request.policy.execution_mode, request.policy.max_parallelism
+            )),
+        );
 
         if !request.policy.execute {
+            trace_event(
+                &mut report,
+                "mission.completed",
+                None,
+                None,
+                Some("planned"),
+                None,
+                0,
+                Some("planning did not dispatch any nested tool".into()),
+            );
             return encode_mission_report(report, "cannot encode agent mission plan");
         }
 
@@ -11896,174 +11946,273 @@ impl Server {
         let mut payloads: BTreeMap<String, Value> = BTreeMap::new();
         let mut abort = false;
 
-        for step_id in &report.plan.ordered_steps {
-            let step = steps
-                .get(step_id.as_str())
-                .ok_or_else(|| format!("mission plan lost step `{step_id}`"))?;
-            if abort
-                || step
-                    .depends_on
-                    .iter()
-                    .any(|dependency| failed.contains(dependency) || blocked.contains(dependency))
-            {
-                blocked.insert(step.id.clone());
-                report.blocked += 1;
-                if step.required {
-                    report.required_failures += 1;
-                    abort = true;
+        let waves = report.plan.waves.clone();
+        for (wave_index, wave) in waves.iter().enumerate() {
+            trace_event(
+                &mut report,
+                "wave.started",
+                Some(wave_index),
+                None,
+                Some("running"),
+                None,
+                0,
+                None,
+            );
+            for step_id in wave {
+                let step = steps
+                    .get(step_id.as_str())
+                    .ok_or_else(|| format!("mission plan lost step `{step_id}`"))?;
+                if abort
+                    || step.depends_on.iter().any(|dependency| {
+                        failed.contains(dependency) || blocked.contains(dependency)
+                    })
+                {
+                    blocked.insert(step.id.clone());
+                    report.blocked += 1;
+                    if step.required {
+                        report.required_failures += 1;
+                        abort = true;
+                    }
+                    let detail = "a prerequisite mission step refused or was blocked".to_string();
+                    report.results.push(MissionStepResult {
+                        id: step.id.clone(),
+                        tool: step.tool.clone(),
+                        status: "blocked".into(),
+                        required: step.required,
+                        arguments_digest: None,
+                        bytes: 0,
+                        wire: None,
+                        error: Some(detail.clone()),
+                    });
+                    trace_event(
+                        &mut report,
+                        "step.blocked",
+                        Some(wave_index),
+                        Some(step),
+                        Some("blocked"),
+                        None,
+                        0,
+                        Some(detail),
+                    );
+                    continue;
                 }
-                report.results.push(MissionStepResult {
-                    id: step.id.clone(),
-                    tool: step.tool.clone(),
-                    status: "blocked".into(),
-                    required: step.required,
-                    arguments_digest: None,
-                    bytes: 0,
-                    wire: None,
-                    error: Some("a prerequisite mission step refused or was blocked".into()),
-                });
-                continue;
-            }
 
-            let mut effective_arguments = step.arguments.clone();
-            let binding_result = step.bindings.iter().try_for_each(|binding| {
-                let payload = payloads.get(&binding.from_step).ok_or_else(|| {
-                    format!(
-                        "binding source step `{}` has no successful structured payload",
-                        binding.from_step
-                    )
-                })?;
-                apply_binding(&mut effective_arguments, binding, payload)
-                    .map_err(|error| error.to_string())
-            });
-            if let Err(error) = binding_result {
-                failed.insert(step.id.clone());
-                report.refused += 1;
-                if step.required {
-                    report.required_failures += 1;
-                }
-                report.results.push(MissionStepResult {
-                    id: step.id.clone(),
-                    tool: step.tool.clone(),
-                    status: "refused".into(),
-                    required: step.required,
-                    arguments_digest: None,
-                    bytes: 0,
-                    wire: None,
-                    error: Some(format!("mission binding refused: {error}")),
+                let mut effective_arguments = step.arguments.clone();
+                let binding_result = step.bindings.iter().try_for_each(|binding| {
+                    let payload = payloads.get(&binding.from_step).ok_or_else(|| {
+                        format!(
+                            "binding source step `{}` has no successful structured payload",
+                            binding.from_step
+                        )
+                    })?;
+                    apply_binding(&mut effective_arguments, binding, payload)
+                        .map_err(|error| error.to_string())
                 });
-                abort |= step.required || request.policy.stop_on_error;
-                continue;
-            }
-            let arguments_digest = bioprism_ids::ContentHash::of_value(&effective_arguments)
-                .map_err(|error| {
-                    format!("cannot hash mission step `{}` arguments: {error}", step.id)
-                })?
-                .to_string();
-
-            let nested = Request {
-                id: Some(json!(step.id)),
-                method: "tools/call".into(),
-                params: json!({
-                    "name": step.tool,
-                    "arguments": effective_arguments,
-                }),
-            };
-            let wire = self.call_tool(&nested).to_json();
-            let bytes = serde_json::to_vec(&wire)
-                .map_err(|error| format!("cannot measure mission step `{}`: {error}", step.id))?
-                .len();
-            if bytes > request.policy.max_step_output_bytes {
-                failed.insert(step.id.clone());
-                report.refused += 1;
-                if step.required {
-                    report.required_failures += 1;
+                if let Err(error) = binding_result {
+                    failed.insert(step.id.clone());
+                    report.refused += 1;
+                    if step.required {
+                        report.required_failures += 1;
+                    }
+                    let detail = format!("mission binding refused: {error}");
+                    report.results.push(MissionStepResult {
+                        id: step.id.clone(),
+                        tool: step.tool.clone(),
+                        status: "refused".into(),
+                        required: step.required,
+                        arguments_digest: None,
+                        bytes: 0,
+                        wire: None,
+                        error: Some(detail.clone()),
+                    });
+                    trace_event(
+                        &mut report,
+                        "step.refused",
+                        Some(wave_index),
+                        Some(step),
+                        Some("refused"),
+                        None,
+                        0,
+                        Some(detail),
+                    );
+                    abort |= step.required || request.policy.stop_on_error;
+                    continue;
                 }
-                report.results.push(MissionStepResult {
-                    id: step.id.clone(),
-                    tool: step.tool.clone(),
-                    status: "refused".into(),
-                    required: step.required,
-                    arguments_digest: Some(arguments_digest.clone()),
-                    bytes,
-                    wire: None,
-                    error: Some(format!(
+                let arguments_digest = bioprism_ids::ContentHash::of_value(&effective_arguments)
+                    .map_err(|error| {
+                        format!("cannot hash mission step `{}` arguments: {error}", step.id)
+                    })?
+                    .to_string();
+
+                trace_event(
+                    &mut report,
+                    "step.started",
+                    Some(wave_index),
+                    Some(step),
+                    Some("running"),
+                    Some(arguments_digest.clone()),
+                    0,
+                    None,
+                );
+
+                let nested = Request {
+                    id: Some(json!(step.id)),
+                    method: "tools/call".into(),
+                    params: json!({
+                        "name": step.tool,
+                        "arguments": effective_arguments,
+                    }),
+                };
+                let wire = self.call_tool(&nested).to_json();
+                let bytes = serde_json::to_vec(&wire)
+                    .map_err(|error| format!("cannot measure mission step `{}`: {error}", step.id))?
+                    .len();
+                if bytes > request.policy.max_step_output_bytes {
+                    failed.insert(step.id.clone());
+                    report.refused += 1;
+                    if step.required {
+                        report.required_failures += 1;
+                    }
+                    let detail = format!(
                         "nested result is {bytes} bytes, above the per-step output budget of {}",
                         request.policy.max_step_output_bytes
-                    )),
-                });
-                abort |= step.required || request.policy.stop_on_error;
-                continue;
-            }
-            if report.returned_bytes.saturating_add(bytes) > request.policy.max_total_output_bytes {
-                failed.insert(step.id.clone());
-                report.refused += 1;
-                if step.required {
-                    report.required_failures += 1;
+                    );
+                    report.results.push(MissionStepResult {
+                        id: step.id.clone(),
+                        tool: step.tool.clone(),
+                        status: "refused".into(),
+                        required: step.required,
+                        arguments_digest: Some(arguments_digest.clone()),
+                        bytes,
+                        wire: None,
+                        error: Some(detail.clone()),
+                    });
+                    trace_event(
+                        &mut report,
+                        "step.refused",
+                        Some(wave_index),
+                        Some(step),
+                        Some("refused"),
+                        Some(arguments_digest.clone()),
+                        bytes,
+                        Some(detail),
+                    );
+                    abort |= step.required || request.policy.stop_on_error;
+                    continue;
                 }
-                report.results.push(MissionStepResult {
-                    id: step.id.clone(),
-                    tool: step.tool.clone(),
-                    status: "refused".into(),
-                    required: step.required,
-                    arguments_digest: Some(arguments_digest.clone()),
-                    bytes,
-                    wire: None,
-                    error: Some(format!(
+                if report.returned_bytes.saturating_add(bytes)
+                    > request.policy.max_total_output_bytes
+                {
+                    failed.insert(step.id.clone());
+                    report.refused += 1;
+                    if step.required {
+                        report.required_failures += 1;
+                    }
+                    let detail = format!(
                         "mission output budget of {} bytes would be exceeded",
                         request.policy.max_total_output_bytes
-                    )),
-                });
-                abort |= step.required || request.policy.stop_on_error;
-                continue;
-            }
-
-            let is_error = wire
-                .pointer("/result/isError")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-                || wire.get("error").is_some();
-            let error = wire
-                .pointer("/result/content/0/text")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            report.returned_bytes += bytes;
-            if is_error {
-                failed.insert(step.id.clone());
-                report.refused += 1;
-                if step.required {
-                    report.required_failures += 1;
+                    );
+                    report.results.push(MissionStepResult {
+                        id: step.id.clone(),
+                        tool: step.tool.clone(),
+                        status: "refused".into(),
+                        required: step.required,
+                        arguments_digest: Some(arguments_digest.clone()),
+                        bytes,
+                        wire: None,
+                        error: Some(detail.clone()),
+                    });
+                    trace_event(
+                        &mut report,
+                        "step.refused",
+                        Some(wave_index),
+                        Some(step),
+                        Some("refused"),
+                        Some(arguments_digest.clone()),
+                        bytes,
+                        Some(detail),
+                    );
+                    abort |= step.required || request.policy.stop_on_error;
+                    continue;
                 }
-                report.results.push(MissionStepResult {
-                    id: step.id.clone(),
-                    tool: step.tool.clone(),
-                    status: "refused".into(),
-                    required: step.required,
-                    arguments_digest: Some(arguments_digest.clone()),
-                    bytes,
-                    wire: Some(wire),
-                    error,
-                });
-                abort |= step.required || request.policy.stop_on_error;
-            } else {
-                let payload = wire
+
+                let is_error = wire
+                    .pointer("/result/isError")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    || wire.get("error").is_some();
+                let error = wire
                     .pointer("/result/content/0/text")
                     .and_then(Value::as_str)
-                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
-                    .unwrap_or_else(|| wire.clone());
-                payloads.insert(step.id.clone(), payload);
-                report.succeeded += 1;
-                report.results.push(MissionStepResult {
-                    id: step.id.clone(),
-                    tool: step.tool.clone(),
-                    status: "succeeded".into(),
-                    required: step.required,
-                    arguments_digest: Some(arguments_digest),
-                    bytes,
-                    wire: Some(wire),
-                    error: None,
-                });
+                    .map(str::to_string);
+                report.returned_bytes += bytes;
+                if is_error {
+                    failed.insert(step.id.clone());
+                    report.refused += 1;
+                    if step.required {
+                        report.required_failures += 1;
+                    }
+                    trace_event(
+                        &mut report,
+                        "step.refused",
+                        Some(wave_index),
+                        Some(step),
+                        Some("refused"),
+                        Some(arguments_digest.clone()),
+                        bytes,
+                        error.clone(),
+                    );
+                    report.results.push(MissionStepResult {
+                        id: step.id.clone(),
+                        tool: step.tool.clone(),
+                        status: "refused".into(),
+                        required: step.required,
+                        arguments_digest: Some(arguments_digest.clone()),
+                        bytes,
+                        wire: Some(wire),
+                        error,
+                    });
+                    abort |= step.required || request.policy.stop_on_error;
+                } else {
+                    let payload = wire
+                        .pointer("/result/content/0/text")
+                        .and_then(Value::as_str)
+                        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                        .unwrap_or_else(|| wire.clone());
+                    payloads.insert(step.id.clone(), payload);
+                    report.succeeded += 1;
+                    trace_event(
+                        &mut report,
+                        "step.completed",
+                        Some(wave_index),
+                        Some(step),
+                        Some("succeeded"),
+                        Some(arguments_digest.clone()),
+                        bytes,
+                        None,
+                    );
+                    report.results.push(MissionStepResult {
+                        id: step.id.clone(),
+                        tool: step.tool.clone(),
+                        status: "succeeded".into(),
+                        required: step.required,
+                        arguments_digest: Some(arguments_digest),
+                        bytes,
+                        wire: Some(wire),
+                        error: None,
+                    });
+                }
             }
+            trace_event(
+                &mut report,
+                "wave.completed",
+                Some(wave_index),
+                None,
+                Some("completed"),
+                None,
+                0,
+                None,
+            );
         }
 
         report.mission_status = if report.required_failures > 0 {
@@ -12073,6 +12222,19 @@ impl Server {
         } else {
             "succeeded".into()
         };
+
+        let mission_status = report.mission_status.clone();
+        let returned_bytes = report.returned_bytes;
+        trace_event(
+            &mut report,
+            "mission.completed",
+            None,
+            None,
+            Some(mission_status.as_str()),
+            None,
+            returned_bytes,
+            None,
+        );
 
         encode_mission_report(report, "cannot encode agent mission report")
     }
@@ -12092,7 +12254,18 @@ impl Server {
         let mut payloads: BTreeMap<String, Value> = BTreeMap::new();
         let mut abort = false;
 
-        for wave in &report.plan.waves {
+        let waves = report.plan.waves.clone();
+        for (wave_index, wave) in waves.iter().enumerate() {
+            trace_event(
+                &mut report,
+                "wave.started",
+                Some(wave_index),
+                None,
+                Some("running"),
+                None,
+                0,
+                None,
+            );
             let mut pending = Vec::new();
             let mut wave_abort = abort;
             for step_id in wave {
@@ -12190,6 +12363,26 @@ impl Server {
                 }
             }
 
+            for item in &pending {
+                if let ParallelPending::Call {
+                    step,
+                    arguments_digest,
+                    ..
+                } = item
+                {
+                    trace_event(
+                        &mut report,
+                        "step.started",
+                        Some(wave_index),
+                        Some(step),
+                        Some("running"),
+                        Some(arguments_digest.clone()),
+                        0,
+                        None,
+                    );
+                }
+            }
+
             let call_entries = pending
                 .iter()
                 .filter_map(|item| match item {
@@ -12234,6 +12427,7 @@ impl Server {
                             report.required_failures += 1;
                             abort = true;
                         }
+                        let detail = error.clone();
                         report.results.push(MissionStepResult {
                             id: step.id.clone(),
                             tool: step.tool.clone(),
@@ -12244,6 +12438,16 @@ impl Server {
                             wire: None,
                             error: Some(error),
                         });
+                        trace_event(
+                            &mut report,
+                            "step.blocked",
+                            Some(wave_index),
+                            Some(step),
+                            Some("blocked"),
+                            None,
+                            0,
+                            Some(detail),
+                        );
                     }
                     ParallelPending::Refused {
                         step,
@@ -12256,6 +12460,8 @@ impl Server {
                         if step.required {
                             report.required_failures += 1;
                         }
+                        let detail = error.clone();
+                        let trace_digest = arguments_digest.clone();
                         report.results.push(MissionStepResult {
                             id: step.id.clone(),
                             tool: step.tool.clone(),
@@ -12266,6 +12472,16 @@ impl Server {
                             wire: None,
                             error: Some(error),
                         });
+                        trace_event(
+                            &mut report,
+                            "step.refused",
+                            Some(wave_index),
+                            Some(step),
+                            Some("refused"),
+                            trace_digest,
+                            bytes,
+                            Some(detail),
+                        );
                         abort |= step.required || request.policy.stop_on_error;
                     }
                     ParallelPending::Call {
@@ -12282,18 +12498,30 @@ impl Server {
                             if step.required {
                                 report.required_failures += 1;
                             }
+                            let bytes = outcome.bytes;
+                            let detail = format!(
+                                "nested result is {bytes} bytes, above the per-step output budget of {}",
+                                request.policy.max_step_output_bytes
+                            );
+                            trace_event(
+                                &mut report,
+                                "step.refused",
+                                Some(wave_index),
+                                Some(step),
+                                Some("refused"),
+                                Some(arguments_digest.clone()),
+                                bytes,
+                                Some(detail.clone()),
+                            );
                             report.results.push(MissionStepResult {
                                 id: step.id.clone(),
                                 tool: step.tool.clone(),
                                 status: "refused".into(),
                                 required: step.required,
                                 arguments_digest: Some(arguments_digest),
-                                bytes: outcome.bytes,
+                                bytes,
                                 wire: None,
-                                error: Some(format!(
-                                    "nested result is {} bytes, above the per-step output budget of {}",
-                                    outcome.bytes, request.policy.max_step_output_bytes
-                                )),
+                                error: Some(detail),
                             });
                             abort |= step.required || request.policy.stop_on_error;
                             continue;
@@ -12306,18 +12534,30 @@ impl Server {
                             if step.required {
                                 report.required_failures += 1;
                             }
+                            let bytes = outcome.bytes;
+                            let detail = format!(
+                                "mission output budget of {} bytes would be exceeded",
+                                request.policy.max_total_output_bytes
+                            );
+                            trace_event(
+                                &mut report,
+                                "step.refused",
+                                Some(wave_index),
+                                Some(step),
+                                Some("refused"),
+                                Some(arguments_digest.clone()),
+                                bytes,
+                                Some(detail.clone()),
+                            );
                             report.results.push(MissionStepResult {
                                 id: step.id.clone(),
                                 tool: step.tool.clone(),
                                 status: "refused".into(),
                                 required: step.required,
                                 arguments_digest: Some(arguments_digest),
-                                bytes: outcome.bytes,
+                                bytes,
                                 wire: None,
-                                error: Some(format!(
-                                    "mission output budget of {} bytes would be exceeded",
-                                    request.policy.max_total_output_bytes
-                                )),
+                                error: Some(detail),
                             });
                             abort |= step.required || request.policy.stop_on_error;
                             continue;
@@ -12330,6 +12570,17 @@ impl Server {
                             if step.required {
                                 report.required_failures += 1;
                             }
+                            let detail = outcome.error.clone();
+                            trace_event(
+                                &mut report,
+                                "step.refused",
+                                Some(wave_index),
+                                Some(step),
+                                Some("refused"),
+                                Some(arguments_digest.clone()),
+                                outcome.bytes,
+                                detail,
+                            );
                             report.results.push(MissionStepResult {
                                 id: step.id.clone(),
                                 tool: step.tool.clone(),
@@ -12350,6 +12601,16 @@ impl Server {
                                 .unwrap_or_else(|| outcome.wire.clone());
                             payloads.insert(step.id.clone(), payload);
                             report.succeeded += 1;
+                            trace_event(
+                                &mut report,
+                                "step.completed",
+                                Some(wave_index),
+                                Some(step),
+                                Some("succeeded"),
+                                Some(arguments_digest.clone()),
+                                outcome.bytes,
+                                None,
+                            );
                             report.results.push(MissionStepResult {
                                 id: step.id.clone(),
                                 tool: step.tool.clone(),
@@ -12364,6 +12625,16 @@ impl Server {
                     }
                 }
             }
+            trace_event(
+                &mut report,
+                "wave.completed",
+                Some(wave_index),
+                None,
+                Some("completed"),
+                None,
+                0,
+                None,
+            );
         }
 
         report.mission_status = if report.required_failures > 0 {
@@ -12373,6 +12644,18 @@ impl Server {
         } else {
             "succeeded".into()
         };
+        let mission_status = report.mission_status.clone();
+        let returned_bytes = report.returned_bytes;
+        trace_event(
+            &mut report,
+            "mission.completed",
+            None,
+            None,
+            Some(mission_status.as_str()),
+            None,
+            returned_bytes,
+            None,
+        );
         encode_mission_report(report, "cannot encode parallel agent mission report")
     }
 
@@ -16350,7 +16633,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "agent_mission",
-            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. The explicit execution_mode can run independent waves concurrently inside this bounded process; it never invokes itself or becomes a distributed scheduler.",
+            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

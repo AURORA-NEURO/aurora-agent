@@ -19,6 +19,7 @@ use thiserror::Error;
 
 /// Schema version for mission requests, plans, and execution reports.
 pub const MISSION_SCHEMA_VERSION: &str = "bioprism-devplat-mission/0.1";
+pub const MISSION_TRACE_SCHEMA_VERSION: &str = "bioprism-devplat-mission-trace/0.1";
 const MAX_STEPS: usize = 128;
 const MAX_ALLOWED_TOOLS: usize = 512;
 const MAX_STEP_OUTPUT_BYTES: usize = 20_000_000;
@@ -524,6 +525,24 @@ pub struct MissionStepResult {
     pub error: Option<String>,
 }
 
+/// Deterministic, clock-free execution evidence for one mission transition.
+///
+/// The sequence is assigned by the executor, not by a wall clock or thread completion order.
+/// This makes serial and parallel runs comparable while retaining the exact step ordering,
+/// refusal propagation, and output accounting decisions that produced the final report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissionTraceEvent {
+    pub sequence: usize,
+    pub event: String,
+    pub wave: Option<usize>,
+    pub step_id: Option<String>,
+    pub tool: Option<String>,
+    pub status: Option<String>,
+    pub arguments_digest: Option<String>,
+    pub bytes: usize,
+    pub detail: Option<String>,
+}
+
 /// Full plan or execution report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissionReport {
@@ -537,6 +556,8 @@ pub struct MissionReport {
     pub required_failures: usize,
     pub returned_bytes: usize,
     pub results: Vec<MissionStepResult>,
+    pub execution_trace_schema_version: String,
+    pub execution_trace: Vec<MissionTraceEvent>,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
 }

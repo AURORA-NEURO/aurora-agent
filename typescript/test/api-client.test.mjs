@@ -40,7 +40,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: { workflow: "capability_audit", healthy: true } } } });
       if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started" } } } });
       if (path === "/v1/tools/adapter_plan") return jsonResponse({ ok: true, tool: "adapter_plan", request_id: "r10", mcp: { result: { structuredContent: { workflow: "adapter_plan", executable: true } } } });
-      if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: { workflow: "agent_mission", execution: "planned" } } } });
+      if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
+        workflow: "agent_mission",
+        execution: "planned",
+        mission_status: "planned",
+        returned_bytes: 0,
+        execution_trace_schema_version: "bioprism-devplat-mission-trace/0.1",
+        execution_trace: [
+          { sequence: 0, event: "mission.started", wave: null, step_id: null, tool: null, status: "planned", arguments_digest: null, bytes: 0, detail: null },
+          { sequence: 1, event: "mission.completed", wave: null, step_id: null, tool: null, status: "planned", arguments_digest: null, bytes: 0, detail: "planning did not dispatch any nested tool" },
+        ],
+        plan: {},
+        results: [],
+      } } } });
       if (path === "/v1/tools/refuse") return jsonResponse({ ok: true, tool: "refuse", request_id: "r2", mcp: { result: { isError: true, structuredContent: { reason: "blocked" } } }, guarantee: "shared" });
       return jsonResponse({ ok: true });
     },
@@ -198,6 +210,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(adapter.mcp.result.structuredContent.workflow, "adapter_plan");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
+  assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");
+  assert.equal(mission.mcp.result.structuredContent.execution_trace.at(-1).event, "mission.completed");
   await assert.rejects(client.callTool("unsafe/name"), ArgumentError);
   await assert.rejects(async () => client.requireToolSuccess(await client.callTool("refuse")), ToolRefusalError);
 });

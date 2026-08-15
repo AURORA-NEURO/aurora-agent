@@ -278,6 +278,8 @@ Mission requests can additionally pass through `mission_preflight()` for digest-
 wave, binding, authorization, and per-step schema review before the Rust mission executor is
 called. The executor is serial by default; an explicit `execution_mode: "parallel_waves"` policy
 dispatches independent wave members concurrently with bounded width and reserved output budget.
+Executed missions also return a deterministic clock-free trace of lifecycle, wave, step, refusal,
+block, digest, and byte-accounting transitions.
 
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,

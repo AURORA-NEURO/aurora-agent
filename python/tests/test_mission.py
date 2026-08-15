@@ -5,9 +5,11 @@ import unittest
 from prism_sdk import (
     ArgumentError,
     MissionBinding,
+    MissionExecutionReport,
     MissionRouteSelection,
     MissionRequest,
     MissionStep,
+    MissionTraceEvent,
     ToolCatalogue,
     mission_from_route,
     preflight_mission,
@@ -66,6 +68,64 @@ class MissionPreflightTests(unittest.TestCase):
         self.assertEqual(len(report.request_digest), 64)
         self.assertEqual(len(report.catalogue_digest), 64)
         self.assertEqual(report.to_dict()["limitations"][-1], "no step is executed by this report")
+
+    def test_execution_report_validates_clock_free_trace_order_and_refuses_gaps(self) -> None:
+        report = MissionExecutionReport.from_wire(
+            {
+                "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
+                "mission_status": "succeeded",
+                "returned_bytes": 12,
+                "execution_trace": [
+                    {
+                        "sequence": 0,
+                        "event": "mission.started",
+                        "wave": None,
+                        "step_id": None,
+                        "tool": None,
+                        "status": "running",
+                        "arguments_digest": None,
+                        "bytes": 0,
+                        "detail": None,
+                    },
+                    {
+                        "sequence": 1,
+                        "event": "mission.completed",
+                        "wave": None,
+                        "step_id": None,
+                        "tool": None,
+                        "status": "succeeded",
+                        "arguments_digest": None,
+                        "bytes": 12,
+                        "detail": None,
+                    },
+                ],
+            }
+        )
+        self.assertEqual(report.mission_status, "succeeded")
+        self.assertEqual(report.returned_bytes, 12)
+        self.assertIsInstance(report.execution_trace[0], MissionTraceEvent)
+        self.assertEqual(report.execution_trace[-1].event, "mission.completed")
+        with self.assertRaises(ArgumentError):
+            MissionExecutionReport.from_wire(
+                {
+                    "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
+                    "mission_status": "succeeded",
+                    "returned_bytes": 0,
+                    "execution_trace": [
+                        {
+                            "sequence": 1,
+                            "event": "mission.started",
+                            "wave": None,
+                            "step_id": None,
+                            "tool": None,
+                            "status": "running",
+                            "arguments_digest": None,
+                            "bytes": 0,
+                            "detail": None,
+                        }
+                    ],
+                }
+            )
 
     def test_preflight_preserves_cycle_and_schema_failures(self) -> None:
         request = MissionRequest(

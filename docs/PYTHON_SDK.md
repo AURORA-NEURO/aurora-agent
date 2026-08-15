@@ -108,7 +108,9 @@ invent defaults:
   dispatch. It returns a request digest, live-catalogue digest, deterministic waves, per-step
   schema reports, binding/dependency findings, execution authorization issues, and explicit
   limitations. It never turns a plan into a domain result; `agent_mission(...)` remains the Rust
-  authority for execution, refusal propagation, and output accounting.
+  authority for execution, refusal propagation, and output accounting. Executed reports include a
+  clock-free `execution_trace`; `MissionExecutionReport.from_wire()` validates its contiguous
+  lifecycle sequence while preserving the raw report.
 - `capability_discover(...)` searches the complete domain catalogue by intent, domain, group, or
   tool and can attach authoritative MCP schemas for the returned routing matches.
 - `capability_audit(include_groups=...)` verifies catalogue/schema parity, input-schema quality,

@@ -436,6 +436,41 @@ export interface AgentMissionArgs extends JsonObject {
   policy?: AgentMissionPolicy;
 }
 
+export type MissionTraceEventName =
+  | "mission.started"
+  | "wave.started"
+  | "step.started"
+  | "step.completed"
+  | "step.refused"
+  | "step.blocked"
+  | "wave.completed"
+  | "mission.completed";
+
+export interface MissionTraceEvent extends JsonObject {
+  sequence: number;
+  event: MissionTraceEventName;
+  wave: number | null;
+  step_id: string | null;
+  tool: string | null;
+  status: string | null;
+  arguments_digest: string | null;
+  bytes: number;
+  detail: string | null;
+}
+
+export interface AgentMissionReport extends JsonObject {
+  ok: boolean;
+  workflow: "agent_mission";
+  execution: "planned" | "executed";
+  mission_status: "planned" | "running" | "succeeded" | "partial" | "failed";
+  returned_bytes: number;
+  execution_trace_schema_version: string;
+  execution_trace: MissionTraceEvent[];
+  plan: JsonObject;
+  results: JsonObject[];
+  [key: string]: JsonValue | undefined;
+}
+
 export interface MissionStepPreflight extends JsonObject {
   id: string;
   tool: string;

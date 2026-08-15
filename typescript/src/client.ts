@@ -6,6 +6,7 @@ import type {
   ApiClientOptions,
   ApiErrorBody,
   AgentMissionArgs,
+  AgentMissionReport,
   AgentMissionPolicy,
   CapabilityDiscoverArgs,
   CapabilityAuditArgs,
@@ -247,8 +248,8 @@ export class ApiClient {
     return this.callTool("adapter_plan", args, options);
   }
 
-  async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions) {
-    return this.callTool("agent_mission", args, options);
+  async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AgentMissionReport>> {
+    return this.callTool<AgentMissionReport>("agent_mission", args, options);
   }
 
   /** Review a mission against a live or caller-supplied catalogue without issuing any tool call. */

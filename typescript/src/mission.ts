@@ -15,6 +15,17 @@ import type {
 
 export const MISSION_PREFLIGHT_SCHEMA = "bioprism-typescript-mission-preflight/0.1";
 export const MISSION_ASSEMBLY_SCHEMA = "bioprism-typescript-mission-assembly/0.1";
+export const MISSION_TRACE_SCHEMA_VERSION = "bioprism-devplat-mission-trace/0.1";
+export const MISSION_TRACE_EVENTS = [
+  "mission.started",
+  "wave.started",
+  "step.started",
+  "step.completed",
+  "step.refused",
+  "step.blocked",
+  "wave.completed",
+  "mission.completed",
+] as const;
 export const MAX_MISSION_STEPS = 128;
 export const MAX_ALLOWED_TOOLS = 512;
 export const MAX_STEP_OUTPUT_BYTES = 20_000_000;

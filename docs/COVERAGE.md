@@ -50,6 +50,9 @@ blocking dependent work, bounding output, and refusing side-effect confirmations
 execution remains the default; `parallel_waves` explicitly dispatches independent steps concurrently
 inside a bounded in-process executor after reserving the worst-case wave budget. It is not a
 distributed scheduler, durable queue, or truth synthesizer.
+Every executed mission also returns a clock-free, sequence-addressed execution trace covering
+mission and wave lifecycle, step starts, completions, refusals, blocks, argument digests, and byte
+accounting; parallel thread completion order never changes that trace order.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 `capability_discover` makes the complete cross-domain catalogue searchable by intent, domain, group,

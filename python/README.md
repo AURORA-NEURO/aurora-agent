@@ -73,7 +73,9 @@ Set `MissionPolicy(execution_mode="parallel_waves", max_parallelism=4)` to reque
 concurrent batches for independent steps in each wave; serial execution remains the default, and
 preflight reserves the worst-case per-wave output budget before the Rust executor can launch it.
 It is a transport and orchestration review only; the Rust `agent_mission` tool remains authoritative
-for actual execution and refusal propagation. `mission_from_route()` then turns a completed
+for actual execution and refusal propagation. Executed reports carry a clock-free
+`execution_trace`; `MissionExecutionReport.from_wire()` validates contiguous sequencing and
+mission lifecycle boundaries without hiding the raw report. `mission_from_route()` then turns a completed
 `capability_route()` response into a provenance-preserving `MissionAssembly`, but only after the
 caller selects exactly one candidate tool and supplies its arguments for every need; unresolved
 and out-of-candidate selections are refused rather than guessed.

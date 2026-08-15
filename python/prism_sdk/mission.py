@@ -21,6 +21,19 @@ MAX_STEP_OUTPUT_BYTES = 20_000_000
 MAX_TOTAL_OUTPUT_BYTES = 20_000_000
 MAX_PARALLEL_WAVE_WIDTH = 16
 MISSION_ASSEMBLY_SCHEMA = "bioprism-python-mission-assembly/0.1"
+MISSION_TRACE_SCHEMA_VERSION = "bioprism-devplat-mission-trace/0.1"
+MISSION_TRACE_EVENTS = frozenset(
+    {
+        "mission.started",
+        "wave.started",
+        "step.started",
+        "step.completed",
+        "step.refused",
+        "step.blocked",
+        "wave.completed",
+        "mission.completed",
+    }
+)
 
 
 def _text(name: str, value: str) -> None:
@@ -571,6 +584,106 @@ class MissionPreflight:
         }
 
 
+@dataclass(frozen=True)
+class MissionTraceEvent:
+    """One clock-free, sequence-addressed event from an executed Rust mission."""
+
+    sequence: int
+    event: str
+    wave: int | None
+    step_id: str | None
+    tool: str | None
+    status: str | None
+    arguments_digest: str | None
+    bytes: int
+    detail: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionTraceEvent":
+        raw = _mapping("mission execution trace event", value)
+        sequence = raw.get("sequence")
+        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+            raise ArgumentError("mission trace sequence must be a non-negative integer")
+        event = raw.get("event")
+        _text("mission trace event", event)
+        if event not in MISSION_TRACE_EVENTS:
+            raise ArgumentError(f"unknown mission trace event: {event}")
+        wave = raw.get("wave")
+        if wave is not None and (not isinstance(wave, int) or isinstance(wave, bool) or wave < 0):
+            raise ArgumentError("mission trace wave must be null or a non-negative integer")
+        for name in ("step_id", "tool", "status", "arguments_digest", "detail"):
+            candidate = raw.get(name)
+            if candidate is not None:
+                _text(f"mission trace {name}", candidate)
+        bytes_value = raw.get("bytes")
+        if not isinstance(bytes_value, int) or isinstance(bytes_value, bool) or bytes_value < 0:
+            raise ArgumentError("mission trace bytes must be a non-negative integer")
+        return cls(
+            sequence=sequence,
+            event=event,
+            wave=wave,
+            step_id=raw.get("step_id"),
+            tool=raw.get("tool"),
+            status=raw.get("status"),
+            arguments_digest=raw.get("arguments_digest"),
+            bytes=bytes_value,
+            detail=raw.get("detail"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sequence": self.sequence,
+            "event": self.event,
+            "wave": self.wave,
+            "step_id": self.step_id,
+            "tool": self.tool,
+            "status": self.status,
+            "arguments_digest": self.arguments_digest,
+            "bytes": self.bytes,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True)
+class MissionExecutionReport:
+    """Typed view over the authoritative MCP mission report and its execution trace."""
+
+    raw: dict[str, Any]
+    execution_trace_schema_version: str
+    execution_trace: tuple[MissionTraceEvent, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionExecutionReport":
+        raw = _mapping("mission execution report", value)
+        schema = raw.get("execution_trace_schema_version")
+        _text("execution_trace_schema_version", schema)
+        values = raw.get("execution_trace")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ArgumentError("execution_trace must be an array")
+        trace = tuple(MissionTraceEvent.from_wire(item) for item in values)
+        if tuple(event.sequence for event in trace) != tuple(range(len(trace))):
+            raise ArgumentError("execution_trace sequence must be contiguous from zero")
+        if not trace or trace[0].event != "mission.started" or trace[-1].event != "mission.completed":
+            raise ArgumentError("execution_trace must begin and end with mission lifecycle events")
+        return cls(raw=raw, execution_trace_schema_version=schema, execution_trace=trace)
+
+    @property
+    def mission_status(self) -> str:
+        status = self.raw.get("mission_status")
+        _text("mission_status", status)
+        return status
+
+    @property
+    def returned_bytes(self) -> int:
+        value = self.raw.get("returned_bytes")
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ArgumentError("returned_bytes must be a non-negative integer")
+        return value
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> MissionPreflight:
     """Review a mission against a live schema snapshot without dispatching any tool."""
 
@@ -806,10 +919,14 @@ __all__ = [
     "MAX_TOTAL_OUTPUT_BYTES",
     "MAX_PARALLEL_WAVE_WIDTH",
     "MISSION_ASSEMBLY_SCHEMA",
+    "MISSION_TRACE_SCHEMA_VERSION",
+    "MISSION_TRACE_EVENTS",
     "MissionBinding",
     "MissionAssembly",
     "MissionPolicy",
     "MissionPreflight",
+    "MissionExecutionReport",
+    "MissionTraceEvent",
     "MissionPreflightError",
     "MissionRouteSelection",
     "MissionRequest",

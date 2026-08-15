@@ -240,7 +240,7 @@ pub use exploit::{
 pub use mission::{
     apply_binding, plan_mission, MissionBinding, MissionError, MissionPlan, MissionPolicy,
     MissionReport, MissionRequest, MissionStep, MissionStepPlan, MissionStepResult,
-    MISSION_SCHEMA_VERSION,
+    MissionTraceEvent, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
 };
 pub use report::{
     drifted_figures, render, render_all, Audience, Depth, EvidenceState, Figure, FigureStatus,

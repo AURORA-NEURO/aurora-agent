@@ -33,7 +33,9 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 REST and MCP calls share the same in-process `bioprism-mcp::Server`. Every tool call emits a
 `tool.completed`, `tool.refused`, or `tool.rpc_error` event. Large responses are replaced in the
 event payload by byte count and SHA-256, so observability cannot silently turn into an unbounded
-memory sink.
+memory sink. `agent_mission` reports include a clock-free `execution_trace`; when its raw response
+is omitted for size, the event retains a bounded mission-trace projection with lifecycle, refusal,
+block, digest, and byte-accounting evidence.
 
 ## Cursor and webhook guarantees
 

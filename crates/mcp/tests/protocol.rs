@@ -3548,6 +3548,23 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     assert_eq!(executed["blocked"], json!(0));
     assert_eq!(executed["results"][0]["status"], json!("succeeded"));
     assert!(executed["results"][0]["wire"]["result"].is_object());
+    assert_eq!(
+        executed["execution_trace"][0]["event"],
+        json!("mission.started")
+    );
+    assert_eq!(
+        executed["execution_trace"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["event"],
+        json!("mission.completed")
+    );
+    assert!(executed["execution_trace"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|event| event["event"] == "wave.completed"));
     let source_payload: Value = serde_json::from_str(
         executed["results"][0]["wire"]["result"]["content"][0]["text"]
             .as_str()
@@ -3607,6 +3624,30 @@ fn agent_mission_executes_independent_parallel_waves_with_deterministic_reportin
     assert_eq!(executed["results"][1]["status"], json!("succeeded"));
     assert_eq!(executed["results"][2]["id"], json!("protocol-extra"));
     assert_eq!(executed["results"][2]["status"], json!("succeeded"));
+    let trace = executed["execution_trace"].as_array().unwrap();
+    assert_eq!(trace.len(), 10);
+    for (sequence, event) in trace.iter().enumerate() {
+        assert_eq!(event["sequence"], json!(sequence));
+    }
+    assert_eq!(trace[0]["event"], json!("mission.started"));
+    assert_eq!(trace[1]["event"], json!("wave.started"));
+    assert_eq!(trace[trace.len() - 2]["event"], json!("wave.completed"));
+    assert_eq!(trace[trace.len() - 1]["event"], json!("mission.completed"));
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|event| event["event"] == "step.started")
+            .count(),
+        3
+    );
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|event| event["event"] == "step.completed")
+            .count(),
+        3
+    );
+    assert_eq!(trace[trace.len() - 1]["bytes"], executed["returned_bytes"]);
 }
 
 #[test]
@@ -3636,6 +3677,11 @@ fn agent_mission_parallel_waves_preserve_refusals_and_block_dependents() {
     assert_eq!(result["mission_status"], json!("failed"));
     assert_eq!(result["results"][0]["status"], json!("refused"));
     assert_eq!(result["results"][1]["status"], json!("blocked"));
+    let trace = result["execution_trace"].as_array().unwrap();
+    assert!(trace.iter().any(|event| event["event"] == "step.refused"));
+    assert!(trace.iter().any(|event| event["event"] == "step.blocked"));
+    assert_eq!(trace.last().unwrap()["event"], json!("mission.completed"));
+    assert_eq!(trace.last().unwrap()["status"], json!("failed"));
 }
 
 #[test]

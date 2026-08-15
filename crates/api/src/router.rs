@@ -657,12 +657,30 @@ impl ApiRouter {
         let payload = if encoded.len() <= 64 * 1024 {
             json!({ "tool": tool, "response": wire })
         } else {
-            json!({
+            let mut projection = json!({
                 "tool": tool,
                 "response_omitted": true,
                 "response_bytes": encoded.len(),
                 "response_sha256": hex_digest(&Sha256::digest(&encoded))
-            })
+            });
+            if tool == "agent_mission" {
+                if let Some(trace) = wire
+                    .pointer("/result/content/0/text")
+                    .and_then(Value::as_str)
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                    .and_then(|report| {
+                        Some(json!({
+                            "execution_trace_schema_version": report.get("execution_trace_schema_version")?,
+                            "execution_trace": report.get("execution_trace")?,
+                            "mission_status": report.get("mission_status")?,
+                            "returned_bytes": report.get("returned_bytes")?,
+                        }))
+                    })
+                {
+                    projection["mission_trace"] = trace;
+                }
+            }
+            projection
         };
         let _ = self.events.emit(outcome, tool, request_id, payload);
     }
@@ -859,5 +877,85 @@ mod tests {
         assert_eq!(deliveries.status, 200);
         let value: Value = serde_json::from_slice(&deliveries.body).unwrap();
         assert_eq!(value["page"]["deliveries"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn mission_execution_trace_survives_rest_and_event_projection() {
+        let mut router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let response = router.handle(request(
+            "POST",
+            "/v1/tools/agent_mission",
+            json!({
+                "mission_id": "api-trace-1",
+                "goal": "inspect the trace contract",
+                "steps": [
+                    {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}
+                ]
+            }),
+        ));
+        assert_eq!(response.status, 200);
+        let value: Value = serde_json::from_slice(&response.body).unwrap();
+        let trace: Value = serde_json::from_str(
+            value["mcp"]["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(trace["execution_trace"][0]["event"], "mission.started");
+        assert_eq!(trace["execution_trace"][1]["event"], "mission.completed");
+
+        let events = router.handle(request("GET", "/v1/events?after=0&limit=10", json!({})));
+        assert_eq!(events.status, 200);
+        let page: Value = serde_json::from_slice(&events.body).unwrap();
+        assert_eq!(page["page"]["events"].as_array().unwrap().len(), 1);
+        let projected: Value = page["page"]["events"][0]["payload"]["response"].clone();
+        assert_eq!(projected["result"]["isError"], false);
+        let projected_trace: Value =
+            serde_json::from_str(projected["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(
+            projected_trace["execution_trace_schema_version"],
+            "bioprism-devplat-mission-trace/0.1"
+        );
+    }
+
+    #[test]
+    fn oversized_mission_events_keep_trace_projection_when_raw_response_is_omitted() {
+        let mut router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let report = json!({
+            "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
+            "execution_trace": [{
+                "sequence": 0,
+                "event": "mission.completed",
+                "wave": null,
+                "step_id": null,
+                "tool": null,
+                "status": "succeeded",
+                "arguments_digest": null,
+                "bytes": 0,
+                "detail": null
+            }],
+            "mission_status": "succeeded",
+            "returned_bytes": 0,
+            "large_result": "x".repeat(70_000)
+        });
+        let wire = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "isError": false,
+                "content": [{"type": "text", "text": serde_json::to_string(&report).unwrap()}]
+            }
+        });
+        router.record_tool_event("request-oversized", "agent_mission", &wire);
+        let page = router.events.events(0, 10).unwrap();
+        assert_eq!(page.events.len(), 1);
+        assert_eq!(page.events[0].payload["response_omitted"], true);
+        assert_eq!(
+            page.events[0].payload["mission_trace"]["execution_trace"][0]["event"],
+            "mission.completed"
+        );
     }
 }

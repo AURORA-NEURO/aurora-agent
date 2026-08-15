@@ -103,7 +103,8 @@ request and catalogue digests, deterministic waves, per-step schema reports, JSO
 findings, recursion checks, execution allow-list findings, and parallel-wave budget checks without
 issuing a tool call. `execution_mode: "parallel_waves"` explicitly opts into bounded concurrent
 dispatch for independent steps; `max_parallelism` caps each batch at 16 or less, and serial execution
-remains the default. Pass
+remains the default. Executed `agentMission()` responses type the authoritative clock-free
+`execution_trace` with contiguous lifecycle, wave, refusal, block, and byte-accounting events. Pass
 the earlier `ToolCatalogue` snapshot to guarantee that mission review and subsequent checked calls
 refer to the same live schema set; the Rust `agent_mission` tool remains the execution authority.
 
