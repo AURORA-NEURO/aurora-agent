@@ -64,6 +64,9 @@ if (result.mcp.result?.isError) {
   mission assembly only after every need has one caller-selected candidate and explicit JSON
   arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is
   designed to feed `missionPreflight()` before `agentMission()`.
+- The Rust mission executor performs the final authoritative JSON Schema check against the live
+  `tools/list` definitions, including a second check after bindings are materialized; schema
+  refusals carry bounded JSON-pointer diagnostics and a schema digest before nested dispatch.
 - `eventStream` parses the gateway's bounded SSE snapshot and returns the `x-next-after` cursor;
   it is deliberately not a long-lived socket or an implicit reconnect loop.
 - Webhook delivery is poll/send/acknowledge: `deliveries`, `retry`, and `acknowledge` operate on

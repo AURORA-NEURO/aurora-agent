@@ -406,6 +406,464 @@ fn finish_cancelled_mission(report: MissionReport, context: &str) -> Result<Valu
     encode_mission_report(report, context)
 }
 
+const MAX_MISSION_SCHEMA_BYTES: usize = 1_000_000;
+const MAX_MISSION_SCHEMA_DEPTH: usize = 100;
+const MAX_MISSION_SCHEMA_ISSUES: usize = 64;
+
+#[derive(Debug, Clone)]
+struct MissionSchemaIssue {
+    path: String,
+    code: &'static str,
+    message: String,
+}
+
+#[derive(Debug, Clone)]
+struct MissionSchemaReport {
+    digest: String,
+    issues: Vec<MissionSchemaIssue>,
+}
+
+fn validate_mission_tool_arguments(
+    tool: &str,
+    arguments: &Value,
+) -> Result<Option<MissionSchemaReport>, String> {
+    let Some(definition) = tool_definitions()
+        .into_iter()
+        .find(|definition| definition.get("name").and_then(Value::as_str) == Some(tool))
+    else {
+        return Ok(None);
+    };
+    let schema = definition
+        .get("inputSchema")
+        .ok_or_else(|| format!("tool `{tool}` has no authoritative inputSchema"))?;
+    let schema_bytes = serde_json::to_vec(schema)
+        .map_err(|error| format!("cannot encode authoritative schema for `{tool}`: {error}"))?;
+    if schema_bytes.len() > MAX_MISSION_SCHEMA_BYTES {
+        return Err(format!(
+            "authoritative schema for `{tool}` exceeds the {MAX_MISSION_SCHEMA_BYTES}-byte safety bound"
+        ));
+    }
+    let digest = bioprism_ids::ContentHash::of_value(schema)
+        .map_err(|error| format!("cannot hash authoritative schema for `{tool}`: {error}"))?
+        .to_string();
+    let mut report = MissionSchemaReport {
+        digest,
+        issues: Vec::new(),
+    };
+    validate_mission_schema_value(arguments, schema, "", 0, &mut report);
+    Ok(Some(report))
+}
+
+fn schema_failure_detail(tool: &str, report: &MissionSchemaReport) -> Option<String> {
+    if report.issues.is_empty() {
+        return None;
+    }
+    let details = report
+        .issues
+        .iter()
+        .take(8)
+        .map(|issue| {
+            let path = if issue.path.is_empty() {
+                "$".to_string()
+            } else {
+                issue.path.clone()
+            };
+            format!("{} at {path}: {}", issue.code, issue.message)
+        })
+        .collect::<Vec<_>>();
+    let omitted = report.issues.len().saturating_sub(details.len());
+    let suffix = if omitted == 0 {
+        String::new()
+    } else {
+        format!("; {omitted} additional issue(s) omitted")
+    };
+    Some(format!(
+        "authoritative schema validation refused tool `{tool}` (schema_digest={}): {}{suffix}",
+        report.digest,
+        details.join("; ")
+    ))
+}
+
+fn push_mission_schema_issue(
+    report: &mut MissionSchemaReport,
+    path: &str,
+    code: &'static str,
+    message: impl Into<String>,
+) {
+    if report.issues.len() < MAX_MISSION_SCHEMA_ISSUES {
+        report.issues.push(MissionSchemaIssue {
+            path: path.into(),
+            code,
+            message: message.into(),
+        });
+    }
+}
+
+fn mission_schema_path(path: &str, segment: &str) -> String {
+    let escaped = segment.replace('~', "~0").replace('/', "~1");
+    format!("{path}/{escaped}")
+}
+
+fn mission_schema_type_matches(value: &Value, schema_type: &str) -> bool {
+    match schema_type {
+        "object" => value.is_object(),
+        "array" => value.is_array(),
+        "string" => value.is_string(),
+        "boolean" => value.is_boolean(),
+        "number" => value.is_number(),
+        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+        "null" => value.is_null(),
+        _ => true,
+    }
+}
+
+fn mission_schema_matches(value: &Value, schema: &Value) -> bool {
+    let mut report = MissionSchemaReport {
+        digest: String::new(),
+        issues: Vec::new(),
+    };
+    validate_mission_schema_value(value, schema, "", 0, &mut report);
+    report.issues.is_empty()
+}
+
+fn validate_mission_schema_value(
+    value: &Value,
+    schema: &Value,
+    path: &str,
+    depth: usize,
+    report: &mut MissionSchemaReport,
+) {
+    if depth > MAX_MISSION_SCHEMA_DEPTH {
+        push_mission_schema_issue(
+            report,
+            path,
+            "schema_depth_exceeded",
+            format!("schema nesting exceeds {MAX_MISSION_SCHEMA_DEPTH} levels"),
+        );
+        return;
+    }
+    let Some(schema_object) = schema.as_object() else {
+        if schema == &Value::Bool(false) {
+            push_mission_schema_issue(
+                report,
+                path,
+                "schema_false",
+                "the schema rejects every value",
+            );
+        }
+        return;
+    };
+
+    if let Some(types) = schema_object.get("type") {
+        let matches = types
+            .as_str()
+            .map(|schema_type| mission_schema_type_matches(value, schema_type))
+            .or_else(|| {
+                types.as_array().map(|types| {
+                    types
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .any(|schema_type| mission_schema_type_matches(value, schema_type))
+                })
+            })
+            .unwrap_or(false);
+        if !matches {
+            push_mission_schema_issue(
+                report,
+                path,
+                "type_mismatch",
+                format!("expected {}, received {}", types, mission_json_type(value)),
+            );
+            return;
+        }
+    }
+
+    if let Some(enum_values) = schema_object.get("enum").and_then(Value::as_array) {
+        if !enum_values.iter().any(|candidate| candidate == value) {
+            push_mission_schema_issue(
+                report,
+                path,
+                "enum_mismatch",
+                "value is not in the allowed enum",
+            );
+        }
+    }
+    if let Some(constant) = schema_object.get("const") {
+        if constant != value {
+            push_mission_schema_issue(
+                report,
+                path,
+                "const_mismatch",
+                "value does not equal the required constant",
+            );
+        }
+    }
+
+    if let Some(all_of) = schema_object.get("allOf").and_then(Value::as_array) {
+        for branch in all_of {
+            validate_mission_schema_value(value, branch, path, depth + 1, report);
+        }
+    }
+    if let Some(any_of) = schema_object.get("anyOf").and_then(Value::as_array) {
+        if !any_of
+            .iter()
+            .any(|branch| mission_schema_matches(value, branch))
+        {
+            push_mission_schema_issue(
+                report,
+                path,
+                "any_of_mismatch",
+                "value matches none of the allowed schemas",
+            );
+        }
+    }
+    if let Some(one_of) = schema_object.get("oneOf").and_then(Value::as_array) {
+        let matches = one_of
+            .iter()
+            .filter(|branch| mission_schema_matches(value, branch))
+            .count();
+        if matches != 1 {
+            push_mission_schema_issue(
+                report,
+                path,
+                "one_of_mismatch",
+                format!("value matches {matches} schemas; exactly one is required"),
+            );
+        }
+    }
+    if let Some(not_schema) = schema_object.get("not") {
+        if mission_schema_matches(value, not_schema) {
+            push_mission_schema_issue(
+                report,
+                path,
+                "not_mismatch",
+                "value matches a forbidden schema",
+            );
+        }
+    }
+
+    if let Some(object) = value.as_object() {
+        if let Some(required) = schema_object.get("required").and_then(Value::as_array) {
+            for required_name in required.iter().filter_map(Value::as_str) {
+                if !object.contains_key(required_name) {
+                    push_mission_schema_issue(
+                        report,
+                        path,
+                        "required_missing",
+                        format!("required property `{required_name}` is missing"),
+                    );
+                }
+            }
+        }
+        if let Some(properties) = schema_object.get("properties").and_then(Value::as_object) {
+            for (name, child_schema) in properties {
+                if let Some(child) = object.get(name) {
+                    let child_path = mission_schema_path(path, name);
+                    validate_mission_schema_value(
+                        child,
+                        child_schema,
+                        &child_path,
+                        depth + 1,
+                        report,
+                    );
+                }
+            }
+            if schema_object
+                .get("additionalProperties")
+                .and_then(Value::as_bool)
+                == Some(false)
+            {
+                for name in object.keys().filter(|name| !properties.contains_key(*name)) {
+                    push_mission_schema_issue(
+                        report,
+                        &mission_schema_path(path, name),
+                        "additional_property",
+                        "additional properties are not allowed",
+                    );
+                }
+            } else if let Some(additional_schema) = schema_object
+                .get("additionalProperties")
+                .filter(|value| value.is_object())
+            {
+                for (name, child) in object
+                    .iter()
+                    .filter(|(name, _)| !properties.contains_key(*name))
+                {
+                    let child_path = mission_schema_path(path, name);
+                    validate_mission_schema_value(
+                        child,
+                        additional_schema,
+                        &child_path,
+                        depth + 1,
+                        report,
+                    );
+                }
+            }
+        }
+        if let Some(minimum) = schema_object.get("minProperties").and_then(Value::as_u64) {
+            if object.len() < minimum as usize {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "min_properties",
+                    format!("object has fewer than {minimum} properties"),
+                );
+            }
+        }
+        if let Some(maximum) = schema_object.get("maxProperties").and_then(Value::as_u64) {
+            if object.len() > maximum as usize {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "max_properties",
+                    format!("object has more than {maximum} properties"),
+                );
+            }
+        }
+    }
+
+    if let Some(array) = value.as_array() {
+        if let Some(minimum) = schema_object.get("minItems").and_then(Value::as_u64) {
+            if array.len() < minimum as usize {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "min_items",
+                    format!("array has fewer than {minimum} items"),
+                );
+            }
+        }
+        if let Some(maximum) = schema_object.get("maxItems").and_then(Value::as_u64) {
+            if array.len() > maximum as usize {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "max_items",
+                    format!("array has more than {maximum} items"),
+                );
+            }
+        }
+        if schema_object.get("uniqueItems").and_then(Value::as_bool) == Some(true) {
+            for (index, item) in array.iter().enumerate() {
+                if array[..index].iter().any(|candidate| candidate == item) {
+                    push_mission_schema_issue(
+                        report,
+                        path,
+                        "unique_items",
+                        "array items must be unique",
+                    );
+                    break;
+                }
+            }
+        }
+        if let Some(item_schema) = schema_object.get("items") {
+            for (index, item) in array.iter().enumerate() {
+                let item_path = mission_schema_path(path, &index.to_string());
+                validate_mission_schema_value(item, item_schema, &item_path, depth + 1, report);
+            }
+        }
+    }
+
+    if let Some(string) = value.as_str() {
+        let length = string.chars().count();
+        if let Some(minimum) = schema_object.get("minLength").and_then(Value::as_u64) {
+            if length < minimum as usize {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "min_length",
+                    format!("string is shorter than {minimum} characters"),
+                );
+            }
+        }
+        if let Some(maximum) = schema_object.get("maxLength").and_then(Value::as_u64) {
+            if length > maximum as usize {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "max_length",
+                    format!("string is longer than {maximum} characters"),
+                );
+            }
+        }
+    }
+
+    if let Some(number) = value.as_f64() {
+        if let Some(minimum) = schema_object.get("minimum").and_then(Value::as_f64) {
+            if number < minimum {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "minimum",
+                    format!("number is below {minimum}"),
+                );
+            }
+        }
+        if let Some(maximum) = schema_object.get("maximum").and_then(Value::as_f64) {
+            if number > maximum {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "maximum",
+                    format!("number is above {maximum}"),
+                );
+            }
+        }
+        if let Some(minimum) = schema_object
+            .get("exclusiveMinimum")
+            .and_then(Value::as_f64)
+        {
+            if number <= minimum {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "exclusive_minimum",
+                    format!("number must be greater than {minimum}"),
+                );
+            }
+        }
+        if let Some(maximum) = schema_object
+            .get("exclusiveMaximum")
+            .and_then(Value::as_f64)
+        {
+            if number >= maximum {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "exclusive_maximum",
+                    format!("number must be less than {maximum}"),
+                );
+            }
+        }
+    }
+}
+
+fn mission_json_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(number) if number.is_i64() || number.is_u64() => "integer",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn validate_static_mission_schemas(request: &MissionRequest) -> Result<(), String> {
+    for step in &request.steps {
+        if !step.bindings.is_empty() {
+            continue;
+        }
+        if let Some(report) = validate_mission_tool_arguments(&step.tool, &step.arguments)? {
+            if let Some(detail) = schema_failure_detail(&step.tool, &report) {
+                return Err(detail);
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Server {
     pub fn new(root: PathBuf) -> Self {
         Server {
@@ -435,6 +893,8 @@ impl Server {
         let request: MissionRequest = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("invalid agent mission input: {error}"))?;
         plan_mission(&request).map_err(|error| format!("agent mission refused: {error}"))?;
+        validate_static_mission_schemas(&request)
+            .map_err(|error| format!("agent mission refused: {error}"))?;
         Ok(())
     }
 
@@ -11978,6 +12438,8 @@ impl Server {
             .map_err(|error| format!("invalid agent mission input: {error}"))?;
         let plan =
             plan_mission(&request).map_err(|error| format!("agent mission refused: {error}"))?;
+        validate_static_mission_schemas(&request)
+            .map_err(|error| format!("agent mission refused: {error}"))?;
         let mut report = MissionReport {
             schema_version: MISSION_SCHEMA_VERSION.into(),
             plan,
@@ -12006,6 +12468,7 @@ impl Server {
             "dependent work is blocked when its prerequisite refuses or exceeds budget".into(),
             "validated JSON-pointer bindings can pass structured upstream results into dependent arguments".into(),
             "each nested call records a content digest of its post-binding input arguments".into(),
+            "known tool arguments are checked against the authoritative tools/list schema before dispatch, including after bindings are materialized".into(),
         ],
             limitations: vec![
                 if request.policy.execution_mode == "parallel_waves" {
@@ -12174,6 +12637,42 @@ impl Server {
                         format!("cannot hash mission step `{}` arguments: {error}", step.id)
                     })?
                     .to_string();
+
+                if !step.bindings.is_empty() {
+                    if let Some(schema_report) =
+                        validate_mission_tool_arguments(&step.tool, &effective_arguments)?
+                    {
+                        if let Some(detail) = schema_failure_detail(&step.tool, &schema_report) {
+                            failed.insert(step.id.clone());
+                            report.refused += 1;
+                            if step.required {
+                                report.required_failures += 1;
+                            }
+                            report.results.push(MissionStepResult {
+                                id: step.id.clone(),
+                                tool: step.tool.clone(),
+                                status: "refused".into(),
+                                required: step.required,
+                                arguments_digest: Some(arguments_digest.clone()),
+                                bytes: 0,
+                                wire: None,
+                                error: Some(detail.clone()),
+                            });
+                            trace_event(
+                                &mut report,
+                                "step.refused",
+                                Some(wave_index),
+                                Some(step),
+                                Some("refused"),
+                                Some(arguments_digest),
+                                0,
+                                Some(detail),
+                            );
+                            abort |= step.required || request.policy.stop_on_error;
+                            continue;
+                        }
+                    }
+                }
 
                 trace_event(
                     &mut report,
@@ -12452,6 +12951,24 @@ impl Server {
                         format!("cannot hash mission step `{}` arguments: {error}", step.id)
                     })?
                     .to_string();
+                if !step.bindings.is_empty() {
+                    if let Some(schema_report) =
+                        validate_mission_tool_arguments(&step.tool, &effective_arguments)?
+                    {
+                        if let Some(detail) = schema_failure_detail(&step.tool, &schema_report) {
+                            if step.required || request.policy.stop_on_error {
+                                wave_abort = true;
+                            }
+                            pending.push(ParallelPending::Refused {
+                                step,
+                                arguments_digest: Some(arguments_digest),
+                                bytes: 0,
+                                error: detail,
+                            });
+                            continue;
+                        }
+                    }
+                }
                 pending.push(ParallelPending::Call {
                     step,
                     arguments: effective_arguments,

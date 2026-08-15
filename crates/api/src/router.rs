@@ -1339,6 +1339,35 @@ mod tests {
     }
 
     #[test]
+    fn asynchronous_mission_submission_rejects_known_tool_schema_mismatch() {
+        let mut router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let response = router.handle(request(
+            "POST",
+            "/v1/missions",
+            json!({
+                "mission_id": "api-schema-invalid",
+                "goal": "refuse invalid arguments before queueing",
+                "steps": [{
+                    "id": "compile",
+                    "domain": "fiber",
+                    "capability": "compile",
+                    "objective": "must be refused",
+                    "tool": "fiber_compile",
+                    "arguments": {"world": "fixture.json"}
+                }],
+                "policy": {"execute": true, "allowed_tools": ["fiber_compile"]}
+            }),
+        ));
+        assert_eq!(response.status, 422);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("authoritative schema validation refused"));
+    }
+
+    #[test]
     fn oversized_mission_events_keep_trace_projection_when_raw_response_is_omitted() {
         let mut router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();

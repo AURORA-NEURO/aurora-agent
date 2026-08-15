@@ -55,6 +55,11 @@ mission and wave lifecycle, step starts, completions, refusals, blocks, argument
 accounting; parallel thread completion order never changes that trace order.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
+The authoritative executor validates every known tool's materialized arguments against its
+`tools/list` JSON Schema before dispatch, with bounded depth, schema-size, and diagnostic limits.
+Static steps are checked at mission validation time; bound steps are checked again after dataflow
+materialization in both serial and parallel modes. Schema refusals carry a schema digest and
+JSON-pointer diagnostics and are distinct from the nested domain tool's own refusal envelope.
 `capability_discover` makes the complete cross-domain catalogue searchable by intent, domain, group,
 or tool and can attach the authoritative `tools/list` schemas for the ranked matches. The companion
 `capability_audit` proves that catalogue names and authoritative schemas remain in parity, reports

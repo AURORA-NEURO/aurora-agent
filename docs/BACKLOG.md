@@ -210,6 +210,10 @@ The mission layer now composes the shipped domain tools into a deterministic DAG
 preview/execute boundary, tool allow-list, side-effect policy, output budgets, and refusal-to-blocked
 dependency propagation. This materially improves agent usefulness across domains without claiming
 that distributed scheduling, durable queues, sandboxed arbitrary code, or external CI execution exist.
+The executor now closes the transport-contract gap as well: it performs bounded authoritative JSON
+Schema validation from the live MCP `tools/list` definitions before static mission acceptance and
+again after JSON-pointer bindings are materialized, refusing malformed serial or parallel calls
+with a schema digest and bounded diagnostics before nested dispatch.
 The capability-discovery layer now makes that catalogue searchable by explicit intent, domain, group,
 and tool, with digest-bound results and optional authoritative MCP input schemas; its scores are
 routing evidence only and do not grant permission or assert readiness.

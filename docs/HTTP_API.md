@@ -45,6 +45,12 @@ block, digest, and byte-accounting evidence.
 
 `POST /v1/missions` accepts the same JSON object as the `agent_mission` tool and returns `202`
 after the complete mission graph, policy, allow-list, and safety bounds have passed validation.
+Validation includes bounded authoritative JSON Schema preflight against the live `tools/list`
+definitions for every static step. Steps with RFC 6901 bindings are checked again after their
+upstream payloads are materialized, before serial or parallel nested dispatch. A schema refusal
+contains a schema digest and bounded JSON-pointer diagnostics; it is distinct from a refusal
+returned by the domain tool itself. Invalid submissions receive `422` and never enter the job
+registry.
 The response contains `mission_id`, `status: "queued"`, and poll/cancel links. `GET` returns
 `queued`, `running`, or a terminal status (`planned`, `succeeded`, `partial`, `failed`, or
 `cancelled`) plus the raw authoritative report once available. Mission IDs are unique within the

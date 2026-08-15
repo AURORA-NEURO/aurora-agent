@@ -3513,7 +3513,7 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
             "goal": "prepare a cross-domain evidence review",
             "steps": [
                 {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
-                {"id": "metrics", "domain": "metrics", "capability": "analytics", "objective": "prepare measurements", "tool": "metrics_analytics_audit", "depends_on": ["catalog"]}
+                {"id": "metrics", "domain": "metrics", "capability": "analytics", "objective": "prepare measurements", "tool": "metrics_analytics_audit", "arguments": {"observations": []}, "depends_on": ["catalog"]}
             ]
         }),
     );
@@ -3578,6 +3578,82 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     assert_eq!(
         executed["results"][1]["arguments_digest"],
         json!(expected_arguments_digest)
+    );
+}
+
+#[test]
+fn agent_mission_schema_preflight_refuses_materialized_binding_before_dispatch() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "mission-schema-serial",
+            "goal": "prove authoritative argument validation",
+            "steps": [
+                {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
+                {"id": "compile", "domain": "fiber", "capability": "compile", "objective": "must be refused before dispatch", "tool": "fiber_compile", "arguments": {"world": "fixture.json", "query": "fixture.query.json"}, "depends_on": ["catalog"], "bindings": [{"from_step": "catalog", "source_pointer": "", "target_pointer": "/query"}]}
+            ],
+            "policy": {"execute": true, "allowed_tools": ["workspace_capabilities", "fiber_compile"]}
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["mission_status"], json!("failed"));
+    assert_eq!(result["succeeded"], json!(1));
+    assert_eq!(result["refused"], json!(1));
+    assert_eq!(result["results"][1]["status"], json!("refused"));
+    assert!(result["results"][1]["error"]
+        .as_str()
+        .unwrap()
+        .contains("authoritative schema validation refused"));
+    assert!(result["results"][1]["error"]
+        .as_str()
+        .unwrap()
+        .contains("schema_digest="));
+    assert_eq!(
+        result["execution_trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|event| event["event"] == "step.started" && event["step_id"] == "compile")
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn agent_mission_parallel_schema_preflight_refuses_before_batch_launch() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "mission-schema-parallel",
+            "goal": "prove parallel schema refusal",
+            "steps": [
+                {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
+                {"id": "compile", "domain": "fiber", "capability": "compile", "objective": "must be refused before dispatch", "tool": "fiber_compile", "arguments": {"world": "fixture.json", "query": "fixture.query.json"}, "depends_on": ["catalog"], "bindings": [{"from_step": "catalog", "source_pointer": "", "target_pointer": "/query"}]}
+            ],
+            "policy": {"execute": true, "execution_mode": "parallel_waves", "max_parallelism": 2, "allowed_tools": ["workspace_capabilities", "fiber_compile"]}
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["mission_status"], json!("failed"));
+    assert_eq!(result["succeeded"], json!(1));
+    assert_eq!(result["refused"], json!(1));
+    assert_eq!(result["results"][1]["status"], json!("refused"));
+    assert!(result["results"][1]["error"]
+        .as_str()
+        .unwrap()
+        .contains("authoritative schema validation refused"));
+    assert_eq!(
+        result["execution_trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|event| event["event"] == "step.started" && event["step_id"] == "compile")
+            .count(),
+        0
     );
 }
 
