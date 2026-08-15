@@ -258,6 +258,13 @@ from .optional_readers import (
     read_ome_zarr,
 )
 from .workspace import AsyncWorkspace, Workspace
+from .publication import (
+    BioAtlasPublicationAuditReport,
+    PublicationCrossLayerReport,
+    PublicationReleaseRequestReport,
+    PublicationTargetReport,
+    bioatlas_publication_audit_report,
+)
 from .workbench import WorkbenchRequest
 from .tooling import (
     MAX_TOOL_ARGUMENT_DEPTH,
@@ -282,8 +289,12 @@ __all__ = [
     "ApiEvent",
     "BioCapabilityEvidenceAuditRequest",
     "BioCapabilityEvidenceAuditReport",
+    "BioAtlasPublicationAuditReport",
     "ClaimAuditRowReport",
     "ClaimInventoryReport",
+    "PublicationCrossLayerReport",
+    "PublicationReleaseRequestReport",
+    "PublicationTargetReport",
     "BioQlCompileRequest",
     "ApiClient",
     "ApiError",
@@ -389,6 +400,7 @@ __all__ = [
     "EvidenceReleasePostureReport",
     "EvidenceStatus",
     "biocapability_evidence_audit_report",
+    "bioatlas_publication_audit_report",
     "EventPage",
     "EventPersistenceStatus",
     "RouteReviewEvidence",

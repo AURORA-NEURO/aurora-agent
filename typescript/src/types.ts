@@ -443,6 +443,46 @@ export interface BioAtlasPublicationAuditArgs extends JsonObject {
   max_items?: number;
 }
 
+export interface PublicationTargetResult extends JsonObject {
+  target: string;
+  eligible: boolean;
+  blockers: string[];
+  notes: string[];
+}
+
+export interface PublicationReleaseRequestResult extends JsonObject {
+  present: boolean;
+  id?: string;
+  targets?: PublicationTargetResult[];
+  ready: boolean;
+  fail_closed?: boolean;
+  no_implicit_release: boolean;
+  reason?: string;
+}
+
+export interface PublicationCrossLayerResult extends JsonObject {
+  numeric_score_requires_evidence_audit: boolean;
+  numeric_score_evidence_ready: boolean;
+  atlas_aggregation_ready: boolean;
+  leaderboard_ranked_count: number;
+  leaderboard_unranked_count: number;
+  unranked_leaderboard_entries_remain_visible: boolean;
+  withheld_scores_are_not_zeroes: boolean;
+}
+
+export interface BioAtlasPublicationAuditResult extends JsonObject {
+  ok: boolean;
+  workflow: "bioatlas_publication_audit";
+  atlas: JsonObject;
+  evidence_audit: JsonObject | null;
+  card: JsonObject | null;
+  leaderboard: JsonObject | null;
+  release_request: PublicationReleaseRequestResult;
+  cross_layer: PublicationCrossLayerResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DeveloperDeliveryAuditArgs extends JsonObject {
   platform?: JsonObject;
   repository?: JsonObject;

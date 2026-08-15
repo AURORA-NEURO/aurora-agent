@@ -57,6 +57,33 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["declared evidence is not measured support"],
         limitations: ["no external dataset was inspected"],
       } } } });
+      if (path === "/v1/tools/bioatlas_publication_audit") return jsonResponse({ ok: true, tool: "bioatlas_publication_audit", request_id: "r17", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "bioatlas_publication_audit",
+        atlas: { ok: true, summary: { coverage_supports_aggregation: true } },
+        evidence_audit: null,
+        card: null,
+        leaderboard: null,
+        release_request: {
+          present: true,
+          id: "publication-1",
+          targets: [{ target: "atlas_profile", eligible: true, blockers: [], notes: [] }],
+          ready: true,
+          fail_closed: false,
+          no_implicit_release: true,
+        },
+        cross_layer: {
+          numeric_score_requires_evidence_audit: true,
+          numeric_score_evidence_ready: false,
+          atlas_aggregation_ready: true,
+          leaderboard_ranked_count: 3,
+          leaderboard_unranked_count: 1,
+          unranked_leaderboard_entries_remain_visible: true,
+          withheld_scores_are_not_zeroes: true,
+        },
+        guarantees: ["publication targets are explicit"],
+        limitations: ["no network publisher"],
+      } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
@@ -298,6 +325,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "local_delivery");
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });
   const evidenceAudit = await client.bioCapabilityEvidenceAudit({ evidence: [], claim_requests: [], metrics: {} });
+  const publicationAudit = await client.bioAtlasPublicationAudit({ atlas: { atlas_id: "atlas-1" }, release_request: { id: "publication-1", targets: ["atlas_profile"] } });
   const capabilityAudit = await client.capabilityAudit({ include_groups: false });
   const route = await client.capabilityRoute({ goal: "compose evidence", needs: [{ id: "oncology", query: "oncology" }] });
   const routeReview = await client.capabilityRouteReview({
@@ -312,6 +340,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(evidenceAudit.mcp.result.structuredContent.workflow, "biocapability_evidence_conditioned_profile");
   assert.equal(evidenceAudit.mcp.result.structuredContent.release_posture.ready_for_requested_claims, false);
   assert.equal(evidenceAudit.mcp.result.structuredContent.claim_requests.rows[0].fail_closed, true);
+  assert.equal(publicationAudit.mcp.result.structuredContent.workflow, "bioatlas_publication_audit");
+  assert.equal(publicationAudit.mcp.result.structuredContent.cross_layer.atlas_aggregation_ready, true);
+  assert.equal(publicationAudit.mcp.result.structuredContent.release_request.targets[0].target, "atlas_profile");
   assert.equal(capabilityAudit.mcp.result.structuredContent.workflow, "capability_audit");
   assert.equal(capabilityAudit.mcp.result.structuredContent.healthy, true);
   assert.equal(capabilityAudit.mcp.result.structuredContent.catalog_digest.length, 64);

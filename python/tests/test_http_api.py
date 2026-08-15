@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
 
 
 def developer_delivery_audit_payload() -> dict:
@@ -88,6 +88,36 @@ def biocapability_evidence_audit_payload() -> dict:
             "requires_explicit_claim_request": True,
             "numeric_scores_are_not_claims_without_evidence": True,
             "declared_evidence_is_visible_but_not_measured_support": True,
+        },
+        "guarantees": [],
+        "limitations": [],
+    }
+
+
+def bioatlas_publication_audit_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "bioatlas_publication_audit",
+        "atlas": {"ok": True},
+        "evidence_audit": None,
+        "card": None,
+        "leaderboard": None,
+        "release_request": {
+            "present": True,
+            "id": "publication-1",
+            "targets": [{"target": "atlas_profile", "eligible": True, "blockers": [], "notes": []}],
+            "ready": True,
+            "fail_closed": False,
+            "no_implicit_release": True,
+        },
+        "cross_layer": {
+            "numeric_score_requires_evidence_audit": True,
+            "numeric_score_evidence_ready": False,
+            "atlas_aggregation_ready": True,
+            "leaderboard_ranked_count": 1,
+            "leaderboard_unranked_count": 0,
+            "unranked_leaderboard_entries_remain_visible": True,
+            "withheld_scores_are_not_zeroes": True,
         },
         "guarantees": [],
         "limitations": [],
@@ -200,7 +230,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -455,6 +485,23 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertTrue(report.release_posture.requires_explicit_claim_request)
         audit.assert_called_once_with(request)
 
+    def test_http_typed_bioatlas_publication_report_delegates_to_raw_helper(self) -> None:
+        with patch.object(
+            ApiClient,
+            "bioatlas_publication_audit",
+            return_value=bioatlas_publication_audit_payload(),
+        ) as audit:
+            report = ApiClient(self.base_url).bioatlas_publication_audit_report(
+                {"atlas_id": "atlas-1"},
+                release_request={"id": "publication-1", "targets": ["atlas_profile"]},
+            )
+        self.assertIsInstance(report, BioAtlasPublicationAuditReport)
+        self.assertTrue(report.ready_for_requested_publication)
+        audit.assert_called_once_with(
+            {"atlas_id": "atlas-1"},
+            release_request={"id": "publication-1", "targets": ["atlas_profile"]},
+        )
+
     def test_http_typed_capability_audit_report_delegates_to_raw_helper(self) -> None:
         with patch.object(ApiClient, "capability_audit", return_value=capability_audit_payload()) as audit:
             report = ApiClient(self.base_url).capability_audit_report(include_groups=False)
@@ -606,6 +653,21 @@ class HttpApiClientTests(unittest.TestCase):
                 report = await client.biocapability_evidence_audit_report(request)
             self.assertFalse(report.ready_for_requested_claims)
             evidence_audit.assert_awaited_once_with(request)
+            with patch.object(
+                AsyncApiClient,
+                "bioatlas_publication_audit",
+                new_callable=AsyncMock,
+                return_value=bioatlas_publication_audit_payload(),
+            ) as publication_audit:
+                report = await client.bioatlas_publication_audit_report(
+                    {"atlas_id": "atlas-1"},
+                    release_request={"id": "publication-1", "targets": ["atlas_profile"]},
+                )
+            self.assertTrue(report.cross_layer.atlas_aggregation_ready)
+            publication_audit.assert_awaited_once_with(
+                {"atlas_id": "atlas-1"},
+                release_request={"id": "publication-1", "targets": ["atlas_profile"]},
+            )
             with patch.object(
                 AsyncApiClient,
                 "capability_audit",

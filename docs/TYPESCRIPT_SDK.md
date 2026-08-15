@@ -140,7 +140,9 @@ invariant flags, duplicate memberships, and optional per-group coverage; `bioCap
 returns typed `BioCapabilityEvidenceAuditResult` evidence rows, dimension rollups, claim blockers,
 omission accounting, optional subaudits, and explicit release posture; `developerDeliveryAudit`
 returns typed `DeveloperDeliveryAuditResult` readiness gates, explicit target blockers, release
-request state, and foreign-surface posture; `capabilityRoute`
+request state, and foreign-surface posture; `bioAtlasPublicationAudit` returns typed
+`BioAtlasPublicationAuditResult` atlas aggregation, score/evidence gates, leaderboard state, and
+explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected
 tools and arguments are supplied. The route response retains per-need candidate domains and a

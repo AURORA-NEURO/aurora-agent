@@ -57,6 +57,11 @@ invent defaults:
   when the caller supplies an id and target list.
 - `bioatlas_publication_audit(atlas, ...)` preserves optional evidence, card, leaderboard, and
   weighting contracts and never implies publication without explicit targets.
+- `BioAtlasPublicationAuditReport.from_wire(...)` plus the sync, async, and HTTP
+  `bioatlas_publication_audit_report(...)` helpers type atlas aggregation, evidence-conditioned
+  score gates, card/leaderboard availability, ranked/unranked counts, and explicit publication-target
+  blockers. A ready target is contract eligibility, not publication, clinical authority, or network
+  deployment.
 - `BioCapabilityEvidenceAuditRequest`, `EvidenceItem`, and `ClaimRequest` provide a bounded typed
   input for `Workspace.biocapability_evidence_audit(...)` and its async/HTTP counterparts. They
   enumerate the nine evidence dimensions, keep observed/reproduced support distinct from declared

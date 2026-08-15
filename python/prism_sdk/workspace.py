@@ -56,6 +56,7 @@ from .mission import (
     mission_from_route as assemble_mission_from_route,
     preflight_mission,
 )
+from .publication import BioAtlasPublicationAuditReport, bioatlas_publication_audit_report
 from .repository_requests import (
     RepositoryBundleRequest,
     RepositoryCatalogRequest,
@@ -641,6 +642,17 @@ class Workspace:
         if max_items is not None:
             arguments["max_items"] = max_items
         return self.tool("bioatlas_publication_audit", arguments)
+
+    def bioatlas_publication_audit_report(
+        self,
+        atlas: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> BioAtlasPublicationAuditReport:
+        """Return typed atlas, evidence, card, leaderboard, and publication gates."""
+
+        return bioatlas_publication_audit_report(
+            self.bioatlas_publication_audit(atlas, **kwargs)
+        )
 
     def repository_catalog(
         self,
@@ -1391,6 +1403,17 @@ class AsyncWorkspace:
         if kwargs.get("max_items") is not None:
             arguments["max_items"] = kwargs["max_items"]
         return (await self.client.call_tool("bioatlas_publication_audit", arguments)).require_ok()
+
+    async def bioatlas_publication_audit_report(
+        self,
+        atlas: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> BioAtlasPublicationAuditReport:
+        """Async typed atlas, evidence, card, leaderboard, and publication gates."""
+
+        return bioatlas_publication_audit_report(
+            await self.bioatlas_publication_audit(atlas, **kwargs)
+        )
 
     async def repository_catalog(
         self,

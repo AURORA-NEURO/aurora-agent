@@ -76,6 +76,7 @@ from .mission import (
     mission_from_route as assemble_mission_from_route,
     preflight_mission,
 )
+from .publication import BioAtlasPublicationAuditReport, bioatlas_publication_audit_report
 from .repository_requests import (
     RepositoryBundleRequest,
     RepositoryCatalogRequest,
@@ -683,6 +684,26 @@ class ApiClient:
         """Return typed evidence states, claim blockers, and release posture over HTTP."""
 
         return biocapability_evidence_audit_report(self.biocapability_evidence_audit(request))
+
+    def bioatlas_publication_audit(
+        self, atlas: Mapping[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
+        arguments: dict[str, Any] = {"atlas": dict(atlas)}
+        for key in ("weighting", "evidence_audit", "card", "leaderboard"):
+            if kwargs.get(key) is not None:
+                arguments[key] = dict(kwargs[key])
+        if kwargs.get("release_request") is not None:
+            arguments["release_request"] = dict(kwargs["release_request"])
+        if kwargs.get("max_items") is not None:
+            arguments["max_items"] = kwargs["max_items"]
+        return self.call_tool("bioatlas_publication_audit", arguments)
+
+    def bioatlas_publication_audit_report(
+        self, atlas: Mapping[str, Any], **kwargs: Any
+    ) -> BioAtlasPublicationAuditReport:
+        """Return typed publication-readiness evidence from the HTTP gateway."""
+
+        return bioatlas_publication_audit_report(self.bioatlas_publication_audit(atlas, **kwargs))
 
     def bioql_compile(
         self,
@@ -1485,6 +1506,20 @@ class AsyncApiClient:
 
         return biocapability_evidence_audit_report(
             await self.biocapability_evidence_audit(request)
+        )
+
+    async def bioatlas_publication_audit(
+        self, atlas: Mapping[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.bioatlas_publication_audit, atlas, **kwargs)
+
+    async def bioatlas_publication_audit_report(
+        self, atlas: Mapping[str, Any], **kwargs: Any
+    ) -> BioAtlasPublicationAuditReport:
+        """Async typed publication-readiness evidence from the HTTP gateway."""
+
+        return bioatlas_publication_audit_report(
+            await self.bioatlas_publication_audit(atlas, **kwargs)
         )
 
     async def bioql_compile(

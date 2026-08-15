@@ -18,6 +18,7 @@ import type {
   CapabilityRouteResult,
   AdapterPlanArgs,
   BioAtlasPublicationAuditArgs,
+  BioAtlasPublicationAuditResult,
   BioCapabilityEvidenceAuditArgs,
   BioCapabilityEvidenceAuditResult,
   CapabilitiesResponse,
@@ -227,8 +228,8 @@ export class ApiClient {
     return this.callTool<BioCapabilityEvidenceAuditResult>("biocapability_evidence_audit", args, options);
   }
 
-  async bioAtlasPublicationAudit(args: BioAtlasPublicationAuditArgs, options?: ClientRequestOptions) {
-    return this.callTool("bioatlas_publication_audit", args, options);
+  async bioAtlasPublicationAudit(args: BioAtlasPublicationAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioAtlasPublicationAuditResult>> {
+    return this.callTool<BioAtlasPublicationAuditResult>("bioatlas_publication_audit", args, options);
   }
 
   async traceOtelIngest(args: TraceOtelIngestArgs, options?: ClientRequestOptions) {

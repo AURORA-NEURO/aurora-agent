@@ -35,6 +35,8 @@ from prism_sdk import (
     EvidenceItem,
     EvidenceDimensionReport,
     biocapability_evidence_audit_report,
+    BioAtlasPublicationAuditReport,
+    bioatlas_publication_audit_report,
     capability_audit_report,
     capability_discover_report,
     capability_route_report,
@@ -381,6 +383,36 @@ def biocapability_request() -> BioCapabilityEvidenceAuditRequest:
     )
 
 
+def bioatlas_publication_audit_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "bioatlas_publication_audit",
+        "atlas": {"ok": True, "summary": {"coverage_supports_aggregation": True}},
+        "evidence_audit": None,
+        "card": None,
+        "leaderboard": None,
+        "release_request": {
+            "present": True,
+            "id": "publication-1",
+            "targets": [{"target": "atlas_profile", "eligible": True, "blockers": [], "notes": []}],
+            "ready": True,
+            "fail_closed": False,
+            "no_implicit_release": True,
+        },
+        "cross_layer": {
+            "numeric_score_requires_evidence_audit": True,
+            "numeric_score_evidence_ready": False,
+            "atlas_aggregation_ready": True,
+            "leaderboard_ranked_count": 3,
+            "leaderboard_unranked_count": 1,
+            "unranked_leaderboard_entries_remain_visible": True,
+            "withheld_scores_are_not_zeroes": True,
+        },
+        "guarantees": ["publication targets are explicit"],
+        "limitations": ["no network publisher"],
+    }
+
+
 class AnalyticsModelTests(unittest.TestCase):
     def test_biological_adapter_registry_distinguishes_dependency_states(self) -> None:
         request = AdapterPlanRequest(
@@ -703,6 +735,20 @@ class AnalyticsModelTests(unittest.TestCase):
         )
         self.assertEqual(report.evidence.item_count, 1)
 
+    def test_bioatlas_publication_audit_report_preserves_cross_layer_gates(self) -> None:
+        report = BioAtlasPublicationAuditReport.from_wire(bioatlas_publication_audit_payload())
+        self.assertTrue(report.ready_for_requested_publication)
+        self.assertTrue(report.cross_layer.atlas_aggregation_ready)
+        self.assertFalse(report.cross_layer.fully_ranked)
+        self.assertFalse(report.has_evidence_audit)
+        self.assertEqual(report.release_request.targets[0].target, "atlas_profile")
+
+    def test_bioatlas_publication_audit_report_extracts_http_projection(self) -> None:
+        report = bioatlas_publication_audit_report(
+            {"ok": True, "mcp": {"result": {"structuredContent": bioatlas_publication_audit_payload()}}}
+        )
+        self.assertEqual(report.cross_layer.leaderboard_ranked_count, 3)
+
     def test_capability_route_report_extracts_http_json_text_projection(self) -> None:
         envelope = {
             "ok": True,
@@ -785,6 +831,20 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             report = Workspace(None).biocapability_evidence_audit_report(request)  # type: ignore[arg-type]
         self.assertFalse(report.ready_for_requested_claims)
         audit.assert_called_once_with(request)
+
+    def test_sync_workspace_typed_bioatlas_publication_report(self) -> None:
+        with patch.object(
+            Workspace,
+            "bioatlas_publication_audit",
+            return_value=bioatlas_publication_audit_payload(),
+        ) as audit:
+            report = Workspace(None).bioatlas_publication_audit_report(  # type: ignore[arg-type]
+                {"atlas_id": "atlas-1"}, request_id="publication-1", targets=["atlas_profile"]
+            )
+        self.assertTrue(report.ready_for_requested_publication)
+        audit.assert_called_once_with(
+            {"atlas_id": "atlas-1"}, request_id="publication-1", targets=["atlas_profile"]
+        )
 
     def test_sync_workspace_typed_delivery_audit_report(self) -> None:
         with patch.object(
@@ -917,6 +977,21 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(report.claim_requests.requested, 1)
         audit.assert_awaited_once_with(request)
+
+    async def test_async_workspace_typed_bioatlas_publication_report(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "bioatlas_publication_audit",
+            new_callable=AsyncMock,
+            return_value=bioatlas_publication_audit_payload(),
+        ) as audit:
+            report = await AsyncWorkspace(None).bioatlas_publication_audit_report(  # type: ignore[arg-type]
+                {"atlas_id": "atlas-1"}, request_id="publication-1", targets=["atlas_profile"]
+            )
+        self.assertTrue(report.cross_layer.atlas_aggregation_ready)
+        audit.assert_awaited_once_with(
+            {"atlas_id": "atlas-1"}, request_id="publication-1", targets=["atlas_profile"]
+        )
 
     async def test_async_workspace_typed_delivery_audit_report(self) -> None:
         with patch.object(

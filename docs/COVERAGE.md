@@ -256,6 +256,10 @@ claim prerequisite validation, duplicate-ID rejection, omission accounting, clai
 subaudits, and sync/async/HTTP transport helpers. TypeScript exposes the same top-level result
 projection. Rust remains authoritative for metric comparability, release posture, and nested
 scientific audits.
+The typed `BioAtlasPublicationAuditReport` and TypeScript `BioAtlasPublicationAuditResult` then
+preserve the next publication boundary: atlas aggregation, evidence-conditioned numeric scores,
+card disclosure, leaderboard ranking, ranked/unranked counts, and explicit target blockers remain
+separate gates rather than collapsing into a publication score.
 It also exposes `BioQlCompileRequest` with bounded query and schema transport across sync MCP,
 async MCP, and HTTP; the compiler remains fail-closed and non-executing, with Rust retaining
 authority over schema, units, frames, temporal semantics, provenance, access labels, and cost.
