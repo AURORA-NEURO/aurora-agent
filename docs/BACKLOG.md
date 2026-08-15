@@ -187,7 +187,8 @@ and tool, with digest-bound results and optional authoritative MCP input schemas
 routing evidence only and do not grant permission or assert readiness.
 The companion `capability_audit` verifies that every catalogued callable has an authoritative
 transport schema and that every advertised schema is catalogued, while preserving intentional
-multi-group membership and per-domain coverage rows.
+multi-group membership and per-domain coverage rows. It also checks object input-schema shape,
+required-field closure, and schema-size bounds across the full advertised tool set.
 `capability_route` batches named cross-domain needs into a reproducible proposal with explicit
 versus ranked resolution status, bounded candidate unions, optional authoritative schemas, and an
 unambiguous no-execution boundary; the caller still reviews arguments before constructing a mission.

@@ -3619,12 +3619,19 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["advertised_tool_count"], json!(120));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
+    assert_eq!(result["schema_quality"]["checked"], json!(120));
+    assert_eq!(result["schema_quality"]["valid"], json!(120));
+    assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
         .unwrap()
         .is_empty());
     assert_eq!(
         result["invariants"]["multi_group_membership_is_allowed"],
+        json!(true)
+    );
+    assert_eq!(
+        result["invariants"]["all_input_schemas_are_well_formed"],
         json!(true)
     );
     assert_eq!(result["groups"].as_array().unwrap().len(), 28);

@@ -11416,6 +11416,87 @@ impl Server {
                 duplicate_schema_names.insert(name);
             }
         }
+        const MAX_SCHEMA_BYTES: usize = 1_000_000;
+        let mut schema_findings = Vec::new();
+        let mut valid_schema_count = 0usize;
+        let mut schema_bytes = 0usize;
+        for (name, definition) in &definition_names {
+            let Some(schema) = definition.get("inputSchema") else {
+                schema_findings.push(json!({
+                    "tool": name,
+                    "code": "missing_input_schema",
+                    "detail": "tool definition has no inputSchema member",
+                }));
+                continue;
+            };
+            let encoded_schema = serde_json::to_vec(schema)
+                .map_err(|error| format!("cannot encode schema for {name:?}: {error}"))?;
+            schema_bytes = schema_bytes.saturating_add(encoded_schema.len());
+            if encoded_schema.len() > MAX_SCHEMA_BYTES {
+                schema_findings.push(json!({
+                    "tool": name,
+                    "code": "input_schema_too_large",
+                    "bytes": encoded_schema.len(),
+                    "maximum": MAX_SCHEMA_BYTES,
+                }));
+            }
+            let Some(schema_object) = schema.as_object() else {
+                schema_findings.push(json!({
+                    "tool": name,
+                    "code": "input_schema_not_object",
+                    "detail": "inputSchema must be a JSON object",
+                }));
+                continue;
+            };
+            if schema_object.get("type").and_then(Value::as_str) != Some("object") {
+                schema_findings.push(json!({
+                    "tool": name,
+                    "code": "input_schema_wrong_type",
+                    "detail": "inputSchema.type must be object",
+                }));
+            }
+            let properties = schema_object.get("properties").and_then(Value::as_object);
+            let mut schema_valid = true;
+            if let Some(required) = schema_object.get("required") {
+                let Some(required) = required.as_array() else {
+                    schema_findings.push(json!({
+                        "tool": name,
+                        "code": "required_not_array",
+                        "detail": "inputSchema.required must be an array when supplied",
+                    }));
+                    continue;
+                };
+                for required_name in required {
+                    let Some(required_name) = required_name.as_str() else {
+                        schema_findings.push(json!({
+                            "tool": name,
+                            "code": "required_name_not_string",
+                            "detail": "every inputSchema.required member must be a string",
+                        }));
+                        schema_valid = false;
+                        continue;
+                    };
+                    if properties.is_none_or(|properties| !properties.contains_key(required_name)) {
+                        schema_findings.push(json!({
+                            "tool": name,
+                            "code": "required_property_missing",
+                            "field": required_name,
+                            "detail": "required field is absent from inputSchema.properties",
+                        }));
+                        schema_valid = false;
+                    }
+                }
+            }
+            if schema_object.get("type").and_then(Value::as_str) != Some("object") {
+                schema_valid = false;
+            }
+            if encoded_schema.len() > MAX_SCHEMA_BYTES {
+                schema_valid = false;
+            }
+            if schema_valid {
+                valid_schema_count += 1;
+            }
+        }
 
         let mut memberships: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut group_reports = Vec::new();
@@ -11456,6 +11537,7 @@ impl Server {
             .collect::<Vec<_>>();
         let every_catalog_tool_has_schema = catalog_only_tools.is_empty();
         let every_advertised_tool_is_catalogued = advertised_only_tools.is_empty();
+        let schemas_are_well_formed = schema_findings.is_empty();
         let duplicate_memberships = memberships
             .into_iter()
             .filter_map(|(tool, groups)| {
@@ -11468,7 +11550,8 @@ impl Server {
             .collect::<Vec<_>>();
         let healthy = every_catalog_tool_has_schema
             && every_advertised_tool_is_catalogued
-            && duplicate_schema_names.is_empty();
+            && duplicate_schema_names.is_empty()
+            && schemas_are_well_formed;
         let schema_names_are_unique = duplicate_schema_names.is_empty();
         let mut output = json!({
             "ok": true,
@@ -11484,10 +11567,18 @@ impl Server {
             "advertised_only_tools": advertised_only_tools,
             "duplicate_schema_names": duplicate_schema_names.into_iter().collect::<Vec<_>>(),
             "duplicate_group_memberships": duplicate_memberships,
+            "schema_quality": {
+                "checked": definition_names.len(),
+                "valid": valid_schema_count,
+                "total_bytes": schema_bytes,
+                "maximum_schema_bytes": MAX_SCHEMA_BYTES,
+                "findings": schema_findings,
+            },
             "invariants": {
                 "every_catalog_tool_has_authoritative_schema": every_catalog_tool_has_schema,
                 "every_advertised_tool_is_catalogued": every_advertised_tool_is_catalogued,
                 "schema_names_are_unique": schema_names_are_unique,
+                "all_input_schemas_are_well_formed": schemas_are_well_formed,
                 "multi_group_membership_is_allowed": true,
             },
         });

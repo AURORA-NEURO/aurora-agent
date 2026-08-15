@@ -54,6 +54,8 @@ argument slots, and each nested call records the content digest of its post-bind
 or tool and can attach the authoritative `tools/list` schemas for the ranked matches. The companion
 `capability_audit` proves that catalogue names and authoritative schemas remain in parity, reports
 catalog-only and uncatalogued tools, and keeps intentional multi-group membership explicit.
+It also validates every input schema's object shape, required/property consistency, and size bound,
+so a name-parity pass cannot conceal a malformed contract.
 `capability_route` batches named needs across those groups into a single route id, preserves each
 bounded search result, distinguishes explicit tool filters from ranked candidates, and never
 executes the proposed tools.

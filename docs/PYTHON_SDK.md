@@ -72,8 +72,8 @@ invent defaults:
   successful direct prerequisite into an existing argument slot.
 - `capability_discover(...)` searches the complete domain catalogue by intent, domain, group, or
   tool and can attach authoritative MCP schemas for the returned routing matches.
-- `capability_audit(include_groups=...)` verifies catalogue/schema parity and reports coverage
-  gaps and intentional multi-group membership.
+- `capability_audit(include_groups=...)` verifies catalogue/schema parity, input-schema quality,
+  coverage gaps, and intentional multi-group membership.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
