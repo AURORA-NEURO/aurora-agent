@@ -562,6 +562,7 @@ dependencies = [
  "bioprism-lab",
  "bioprism-ledger",
  "bioprism-lens",
+ "bioprism-megafactory",
  "bioprism-metrics",
  "bioprism-modalities",
  "bioprism-mutation",

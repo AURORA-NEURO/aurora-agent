@@ -24,6 +24,11 @@ bioevalx worldline/reproduction/trajectory checks, runtime effect authorization 
 verification, research-only oncology boundary and criteria-aware response checks, and stress
 family/report sweeps; these are transport integrations of existing in-tree contracts, not claims
 that the remaining SDK, UI, CI, OTLP, or service gaps are complete.
+The runtime transport now also runs bounded deterministic effect programs through record/replay,
+budget, fault, and fork checks. The million-scale transport exposes mechanistic twin discrepancy
+qualification plus distributed placement, attestation, locality, fencing, and duplicate-effect
+audits. These endpoints make existing Rust contracts agent-callable; they do not claim that real
+containers, workers, durable queues, external-state restoration, or biological calibration exist.
 The transport also exposes the deeper OncoWorld longitudinal-clock, integrated-classification, and
 identity-join contracts; these remain transport integrations of existing domain invariants and do
 not imply that clinical inference, identity or contamination oracles, or external data connectors

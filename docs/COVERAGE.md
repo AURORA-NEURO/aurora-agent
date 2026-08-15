@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 102 callable tools. That count is intentionally
+The MCP integration layer currently exposes 105 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -18,8 +18,11 @@ contract, and observability projection workflows. `factory_lifecycle_simulate`,
 `hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, and `release_audit` now
 compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
 durable queues, identity, signing, CI execution, UI, OTLP, and network publication explicit as
-unimplemented. None of these turns foreign Python, TypeScript, REST/gRPC, CI, UI, OTLP, or
-network-publication artifacts into implemented workspace code.
+unimplemented. `runtime_execution_simulate` adds deterministic record/replay, budget, fault, and
+fork evidence; `megafactory_twin_audit` and `megafactory_placement_audit` expose model-discrepancy,
+oracle-eligibility, placement, attestation, fencing, and duplicate-effect predicates. None of
+these turns foreign Python, TypeScript, REST/gRPC, CI, UI, OTLP, or network-publication artifacts
+into implemented workspace code.
 
 The table below is a snapshot; the script is the live source.
 

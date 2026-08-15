@@ -347,6 +347,14 @@ registry, bundle, quality, conformance, research-CI, operations, and pack-health
 retaining repository impact and developer-platform diagnostics as advisory evidence. These
 surfaces remain bounded and local: they do not create durable queues, identity providers, web UI,
 public-key signing, CI execution, deployment, or network publication.
+`runtime_execution_simulate` runs bounded serialized effect programs against the deterministic
+in-process world, returns policy and budget evidence, proves complete replay, and can open a forked
+suffix with observable state and divergence comparison. `megafactory_twin_audit` qualifies
+mechanistic counterfactuals against alternative models while withholding oracle status on sign
+instability; `megafactory_placement_audit` checks worker capability, attestation, oracle
+independence, locality transfer, fencing, and duplicate-effect classes. These remain local
+contract workflows: they do not provide containers, restoration of external state, real workers,
+durable fencing, biological calibration, or distributed scheduling.
 `trace_analyze` ingests native JSONL trajectories with explicit import loss, validates causal
 ordering, ranks decision-bearing review candidates, and compares lossless passing traces for first
 divergence. It returns review-gated `CellProposal` previews; it does not replay tools, minimize

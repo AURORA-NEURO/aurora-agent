@@ -98,6 +98,10 @@ use bioprism_lab::{
 };
 use bioprism_ledger::{ClassCounts, Event, EventLedger, SubjectLatest, TemporalCut};
 use bioprism_lens::{catalogue as lens_catalogue, run as run_lens, CohortLeakageLens, CohortSplit};
+use bioprism_megafactory::{
+    place as megafactory_place, DiscrepancyProbe, ExecutionLedger, FenceRegistry, MechanisticModel,
+    WorkRequest, WorkerProfile,
+};
 use bioprism_metrics::{
     CapabilityVector, ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting,
     PartialRanking, RankInstability, METRICS_SCHEMA_VERSION,
@@ -143,7 +147,11 @@ use bioprism_policy::{PolicyLabel, PolicyLattice, PolicyRule, Request as PolicyR
 use bioprism_prism::{minimize, minimize_world, preserves};
 use bioprism_registry::{gate_document, Policy as RegistryPolicy};
 use bioprism_routing::{EvidenceLedger, Fingerprint, RoutingPolicy};
-use bioprism_runtime::{EffectPolicy, EffectRequest, WorldTape};
+use bioprism_runtime::{
+    compare_suffixes, observable_state, open_suffix, BudgetController, BudgetPlan, EffectPolicy,
+    EffectRequest, Fault, Host, InProcessWorld, RecordingHost, ReplayHost, RuntimeResource,
+    WorldTape,
+};
 use bioprism_safety::model::section_13;
 use bioprism_safety::release::{MedicalBoundary, ReleaseGate, RequestedOutput, RiskAssessment};
 use bioprism_scale::corpus::{Corpus, GeneratedItem};
@@ -516,6 +524,8 @@ impl Server {
             })),
             "lens_leakage_check" => self.lens_leakage_check(&arguments),
             "scale_family_split_verify" => self.scale_family_split_verify(&arguments),
+            "megafactory_twin_audit" => self.megafactory_twin_audit(&arguments),
+            "megafactory_placement_audit" => self.megafactory_placement_audit(&arguments),
             "stewardship_review_check" => self.stewardship_review_check(&arguments),
             "quality_gate_run" => self.quality_gate_run(&arguments),
             "ledger_ingest" => self.ledger_ingest(&arguments),
@@ -548,6 +558,7 @@ impl Server {
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
+            "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
             "onco_boundary_check" => self.onco_boundary_check(&arguments),
             "onco_response_assess" => self.onco_response_assess(&arguments),
             "onco_worldline_view" => self.onco_worldline_view(&arguments),
@@ -3609,6 +3620,255 @@ impl Server {
         }
     }
 
+    fn megafactory_twin_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let reference = parse_mechanistic_model(
+            arguments
+                .get("reference")
+                .ok_or("reference is required and must be a MechanisticModel")?,
+            "reference",
+        )?;
+        let raw_alternatives = arguments
+            .get("alternatives")
+            .ok_or("alternatives is required and must be an array of MechanisticModel values")?;
+        let values = raw_alternatives
+            .as_array()
+            .ok_or("alternatives must be an array")?;
+        if values.is_empty() || values.len() > 64 {
+            return Err("alternatives must contain between 1 and 64 models".into());
+        }
+        let alternatives = values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| parse_mechanistic_model(value, &format!("alternatives[{index}]")))
+            .collect::<Result<Vec<_>, _>>()?;
+        if reference.compartments.len() > 64 {
+            return Err("models may contain at most 64 compartments".into());
+        }
+
+        let initial_value = arguments
+            .get("initial")
+            .ok_or("initial is required and must be an array of finite numbers")?;
+        let initial = initial_value
+            .as_array()
+            .ok_or("initial must be an array of finite numbers")?
+            .iter()
+            .map(|value| {
+                let number = value
+                    .as_f64()
+                    .ok_or("initial must contain only finite numbers")?;
+                if !number.is_finite() {
+                    return Err("initial must contain only finite numbers".to_string());
+                }
+                Ok(number)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        if initial.len() > 64 {
+            return Err("initial may contain at most 64 state values".into());
+        }
+        let steps = arguments
+            .get("steps")
+            .and_then(Value::as_u64)
+            .ok_or("steps is required and must be a non-negative integer")?;
+        if steps > 10_000 {
+            return Err("steps exceeds the 10000-step safety bound".into());
+        }
+        let intervention: bioprism_megafactory::Intervention = serde_json::from_value(
+            arguments
+                .get("intervention")
+                .cloned()
+                .ok_or("intervention is required and must be an Intervention")?,
+        )
+        .map_err(|error| format!("invalid intervention: {error}"))?;
+        let outcome_compartment = arguments
+            .get("outcome_compartment")
+            .and_then(Value::as_str)
+            .ok_or("outcome_compartment is required and must be a string")?;
+
+        let baseline = match reference.run(&initial, steps as usize, None) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "reference_simulation",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "a malformed state space or initial state never becomes a simulated oracle"
+                }))
+            }
+        };
+        let intervened = match reference.run(&initial, steps as usize, Some(&intervention)) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "intervention_simulation",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "an invalid intervention never produces a partial counterfactual"
+                }))
+            }
+        };
+        let probe = match DiscrepancyProbe::run(
+            &reference,
+            &alternatives,
+            &initial,
+            steps as usize,
+            &intervention,
+            outcome_compartment,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "discrepancy_probe",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "a counterfactual is not usable until every plausible model shares the state space and the probe runs"
+                }))
+            }
+        };
+
+        Ok(json!({
+            "ok": true,
+            "reference": reference,
+            "alternatives": alternatives,
+            "initial": initial,
+            "steps": steps,
+            "intervention": intervention,
+            "outcome_compartment": outcome_compartment,
+            "reference_baseline": baseline,
+            "reference_intervened": intervened,
+            "probe": probe,
+            "oracle_eligible": probe.is_usable_as_an_oracle(),
+            "headline": probe.headline(),
+            "guarantees": [
+                "every model is reconstructed through MechanisticModel::new so shape and misspecification validation cannot be bypassed by JSON",
+                "the reference effect remains explicitly under-model and carries its known misspecification",
+                "sign stability is required for oracle eligibility; magnitude range and disagreement models remain visible",
+                "the simulation is deterministic arithmetic over caller-supplied rates and does not claim biological truth"
+            ],
+            "limitations": [
+                "no stochastic calibration, observed-data fit, posterior, or real assay forward model is performed",
+                "the optional model set is caller-supplied and is not a guarantee that all plausible mechanisms were enumerated",
+                "this tool qualifies a simulated oracle; it does not publish a benchmark or execute a distributed factory"
+            ]
+        }))
+    }
+
+    fn megafactory_placement_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let job: FactoryJob = serde_json::from_value(
+            arguments
+                .get("job")
+                .cloned()
+                .ok_or("job is required and must be a serialized factory Job")?,
+        )
+        .map_err(|error| format!("invalid job: {error}"))?;
+        let request: WorkRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or("request is required and must be a serialized WorkRequest")?,
+        )
+        .map_err(|error| format!("invalid placement request: {error}"))?;
+        let worker: WorkerProfile = serde_json::from_value(
+            arguments
+                .get("worker")
+                .cloned()
+                .ok_or("worker is required and must be a serialized WorkerProfile")?,
+        )
+        .map_err(|error| format!("invalid worker profile: {error}"))?;
+        let commit_count = arguments
+            .get("commit_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(1);
+        if commit_count == 0 || commit_count > 100 {
+            return Err("commit_count must be between 1 and 100".into());
+        }
+        let item = arguments
+            .get("item")
+            .and_then(Value::as_str)
+            .unwrap_or(&job.id);
+        if item.is_empty() || item.chars().any(char::is_control) {
+            return Err("item must be non-empty and contain no control characters".into());
+        }
+        let placement = match megafactory_place(&job, &request, &worker) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "placement",
+                    "job": job,
+                    "request": request,
+                    "worker": worker,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "capability, attestation, oracle independence, and enclave transfer checks run before any commit ledger is touched"
+                }))
+            }
+        };
+
+        let supersede = arguments
+            .get("supersede_fence")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mut registry = FenceRegistry::new();
+        let first = registry.issue(&job.id);
+        let current = if supersede {
+            registry.issue(&job.id)
+        } else {
+            first
+        };
+        let stale_admission = supersede.then(|| registry.admit(&job.id, first));
+        let current_admission = registry.admit(&job.id, current);
+        let mut ledger = ExecutionLedger::new();
+        let mut commit_errors = Vec::new();
+        for _ in 0..commit_count {
+            if let Err(error) = ledger.commit(&registry, &job.id, item, current, job.idempotency) {
+                commit_errors.push(error.to_string());
+                break;
+            }
+        }
+        let duplicates = ledger.duplicates();
+        Ok(json!({
+            "ok": true,
+            "job": job,
+            "request": request,
+            "worker": worker,
+            "placement": placement,
+            "fencing": {
+                "first": first.get(),
+                "current": current.get(),
+                "superseded": supersede,
+                "stale_admission": stale_admission.map(|result| match result {
+                    Ok(()) => json!({ "ok": true }),
+                    Err(error) => json!({ "ok": false, "refusal": error.to_string(), "fail_closed": true }),
+                }),
+                "current_admission": match current_admission {
+                    Ok(()) => json!({ "ok": true }),
+                    Err(error) => json!({ "ok": false, "refusal": error.to_string(), "fail_closed": true }),
+                }
+            },
+            "ledger": {
+                "commits": ledger.commits(),
+                "executed_items": ledger.executed_items(),
+                "commit_errors": commit_errors,
+                "duplicates": duplicates,
+                "has_incidents": duplicates.has_incidents()
+            },
+            "guarantees": [
+                "placement is a predicate over declared capability, data locality, access tier, attestation, and oracle independence",
+                "non-local transfer is reported as bytes rather than hidden inside an accepted placement",
+                "fences are monotone and stale writes are refused before they reach the execution ledger",
+                "idempotent waste, compensable repeats, and non-idempotent incidents remain separate"
+            ],
+            "limitations": [
+                "the workflow is in-memory and does not schedule workers, move data, or provide a durable compare-and-set",
+                "commit_count is a deterministic duplicate simulation, not evidence that an external side effect happened",
+                "throughput, fairness, backpressure, and real attestation are outside this local predicate surface"
+            ]
+        }))
+    }
+
     fn stewardship_review_check(&self, arguments: &Value) -> Result<Value, String> {
         let raw_review = arguments
             .get("review")
@@ -6066,6 +6326,213 @@ impl Server {
             "limitations": [
                 "the tool verifies a supplied tape but does not replay it or contact a provider",
                 "artifact digests identify recorded content and do not prove external filesystem state"
+            ]
+        }))
+    }
+
+    fn runtime_execution_simulate(&self, arguments: &Value) -> Result<Value, String> {
+        let run = bioprism_ids::RunId::parse(
+            arguments
+                .get("run")
+                .and_then(Value::as_str)
+                .unwrap_or("mcp-runtime-run"),
+        )
+        .map_err(|error| format!("invalid run id: {error}"))?;
+        let policy: EffectPolicy = serde_json::from_value(
+            arguments
+                .get("policy")
+                .cloned()
+                .ok_or("policy is required and must be a serialized runtime EffectPolicy")?,
+        )
+        .map_err(|error| format!("invalid effect policy: {error}"))?;
+        let raw_requests = arguments
+            .get("requests")
+            .cloned()
+            .ok_or("requests is required and must be an array of EffectRequest values")?;
+        let request_values = raw_requests
+            .as_array()
+            .ok_or("requests must be an array of EffectRequest values")?;
+        if request_values.len() > 1_000 {
+            return Err("requests exceeds the 1000-effect safety bound".into());
+        }
+        let request_bytes = serde_json::to_vec(&raw_requests)
+            .map_err(|error| format!("cannot measure request envelope: {error}"))?;
+        if request_bytes.len() > 2_000_000 {
+            return Err("requests exceed the 2000000-byte safety bound".into());
+        }
+        let requests: Vec<EffectRequest> = request_values
+            .iter()
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("invalid effect request: {error}"))
+            })
+            .collect::<Result<_, _>>()?;
+        let budget_plan: Option<BudgetPlan> = arguments
+            .get("budget")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid runtime BudgetPlan: {error}"))?;
+        let world =
+            runtime_world_from_config(arguments.get("world").unwrap_or(&Value::Null), "world")?;
+        let mut recording = RecordingHost::new(run.clone(), world, policy.clone());
+        if let Some(plan) = &budget_plan {
+            recording = recording.with_budget(BudgetController::from_plan(plan));
+        }
+
+        let mut live_outcomes = Vec::new();
+        let mut execution_error = None;
+        for request in &requests {
+            match recording.perform(request.clone()) {
+                Ok(outcome) => live_outcomes.push(outcome.into_value()),
+                Err(error) => {
+                    execution_error = Some(error.to_string());
+                    break;
+                }
+            }
+        }
+        let (tape, world, journal, budget) = recording.into_parts();
+        let recorded_requests = tape.entries().len();
+        let mut replay_outcomes = Vec::new();
+        let mut replay_error = None;
+        let mut replay = ReplayHost::new(tape.clone());
+        for request in requests.iter().take(recorded_requests) {
+            match replay.perform(request.clone()) {
+                Ok(outcome) => replay_outcomes.push(outcome.into_value()),
+                Err(error) => {
+                    replay_error = Some(error.to_string());
+                    break;
+                }
+            }
+        }
+        let replay_finish = replay.finish();
+        if let Err(error) = &replay_finish {
+            replay_error = Some(error.to_string());
+        }
+        let replay_match = replay_error.is_none() && live_outcomes == replay_outcomes;
+        let budget_view = budget.as_ref().map(|controller| {
+            json!({
+                "accounting": controller.accounting(),
+                "warnings": controller.warnings(),
+                "aborted_on": controller.aborted_on(),
+                "fully_consumed_effects": controller.used(RuntimeResource::ToolCalls)
+            })
+        });
+
+        let fork = match arguments.get("fork") {
+            None | Some(Value::Null) => Value::Null,
+            Some(raw_fork) => {
+                let fork = raw_fork.as_object().ok_or("fork must be an object")?;
+                let step = fork
+                    .get("step")
+                    .and_then(Value::as_u64)
+                    .ok_or("fork.step is required and must be a non-negative integer")?;
+                let child_run = bioprism_ids::RunId::parse(
+                    fork.get("run")
+                        .and_then(Value::as_str)
+                        .unwrap_or("mcp-runtime-child"),
+                )
+                .map_err(|error| format!("invalid fork run id: {error}"))?;
+                let raw_suffix = fork.get("requests").cloned().unwrap_or_else(|| json!([]));
+                let suffix_values = raw_suffix
+                    .as_array()
+                    .ok_or("fork.requests must be an array")?;
+                if suffix_values.len() > 1_000 {
+                    return Err("fork.requests exceeds the 1000-effect safety bound".into());
+                }
+                let suffix: Vec<EffectRequest> = suffix_values
+                    .iter()
+                    .cloned()
+                    .map(|value| {
+                        serde_json::from_value(value)
+                            .map_err(|error| format!("invalid fork effect request: {error}"))
+                    })
+                    .collect::<Result<_, _>>()?;
+                if step > tape.len() {
+                    json!({
+                        "ok": false,
+                        "stage": "fork",
+                        "step": step,
+                        "refusal": format!("fork step {step} is beyond tape length {}", tape.len()),
+                        "fail_closed": true
+                    })
+                } else {
+                    let observed = observable_state(&tape, step).map_err(|error| {
+                        format!("cannot materialize observed fork state: {error}")
+                    })?;
+                    let fork_world = runtime_world_from_config(
+                        fork.get("world").unwrap_or(&Value::Null),
+                        "fork.world",
+                    )?;
+                    let mut suffix_host =
+                        open_suffix(&tape, step, child_run, fork_world, policy.clone())
+                            .map_err(|error| format!("cannot open fork suffix: {error}"))?;
+                    suffix_host.resume_at_fork();
+                    let mut suffix_outcomes = Vec::new();
+                    let mut suffix_error = None;
+                    for request in &suffix {
+                        match suffix_host.perform(request.clone()) {
+                            Ok(outcome) => suffix_outcomes.push(outcome.into_value()),
+                            Err(error) => {
+                                suffix_error = Some(error.to_string());
+                                break;
+                            }
+                        }
+                    }
+                    let child_tape = suffix_host
+                        .finish()
+                        .map_err(|error| format!("cannot finish fork suffix: {error}"))?;
+                    let comparison = compare_suffixes(&tape, &child_tape);
+                    json!({
+                        "ok": suffix_error.is_none(),
+                        "step": step,
+                        "inherited_steps": child_tape.inherited_steps(),
+                        "observed_state": observed,
+                        "suffix_outcomes": suffix_outcomes,
+                        "suffix_error": suffix_error,
+                        "child_tape": child_tape,
+                        "comparison": comparison,
+                        "guarantee": "the inherited prefix is read from the parent tape and is never re-performed by the fork host"
+                    })
+                }
+            }
+        };
+
+        Ok(json!({
+            "ok": true,
+            "run": run,
+            "request_count": requests.len(),
+            "recorded_requests": recorded_requests,
+            "live_outcomes": live_outcomes,
+            "execution_error": execution_error,
+            "tape": tape,
+            "world": {
+                "calls": world.calls(),
+                "task_millis": world.task_millis(),
+                "state_manifest": world.state_manifest(),
+                "file_changes": world.journal()
+            },
+            "policy_journal": journal,
+            "budget": budget_view,
+            "replay": {
+                "verified": replay_error.is_none(),
+                "matched": replay_match,
+                "outcomes": replay_outcomes,
+                "error": replay_error
+            },
+            "fork": fork,
+            "guarantees": [
+                "the supplied effect program runs only against the deterministic in-process world; no host filesystem, network, process, model, message, or payment endpoint is touched",
+                "every authorized effect is hash-chained with request, outcome, and performed-versus-simulated provenance",
+                "replay checks request identity and consumes the complete recorded prefix, so changed or truncated programs fail closed",
+                "budgets charge before an effect and report soft warnings separately from hard exhaustion",
+                "forks expose an observable state and inherit the prefix without re-performing it"
+            ],
+            "limitations": [
+                "the in-process world is not a container, subprocess, durable queue, or real provider",
+                "a fork starts its suffix source from the caller-supplied fork.world configuration; restoration of external state is not implied",
+                "this endpoint audits a bounded request trace and does not infer agent intent or biological validity"
             ]
         }))
     }
@@ -8869,6 +9336,131 @@ fn release_gate_outcome(kind: &str, result: &Value) -> Option<bool> {
     }
 }
 
+fn parse_mechanistic_model(raw: &Value, label: &str) -> Result<MechanisticModel, String> {
+    let parsed: MechanisticModel = serde_json::from_value(raw.clone())
+        .map_err(|error| format!("invalid {label} mechanistic model: {error}"))?;
+    MechanisticModel::new(
+        parsed.id,
+        parsed.compartments,
+        parsed.rates,
+        parsed.known_misspecification,
+    )
+    .map_err(|error| format!("invalid {label} mechanistic model: {error}"))
+}
+
+fn runtime_world_from_config(config: &Value, label: &str) -> Result<InProcessWorld, String> {
+    let object = match config {
+        Value::Null => None,
+        Value::Object(object) => Some(object),
+        _ => return Err(format!("{label} must be an object when supplied")),
+    };
+    let Some(object) = object else {
+        return Ok(InProcessWorld::new());
+    };
+    let encoded = serde_json::to_vec(config)
+        .map_err(|error| format!("cannot measure {label} configuration: {error}"))?;
+    if encoded.len() > 2_000_000 {
+        return Err(format!("{label} exceeds the 2000000-byte safety bound"));
+    }
+    let seed = object.get("seed").and_then(Value::as_u64).unwrap_or(0);
+    let clock_start = object
+        .get("clock_start")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let clock_tick = object
+        .get("clock_tick")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let mut world = InProcessWorld::new()
+        .with_seed(seed)
+        .with_clock_start(clock_start)
+        .with_clock_tick(clock_tick);
+
+    if let Some(raw_files) = object.get("base_files") {
+        let files = raw_files
+            .as_object()
+            .ok_or_else(|| format!("{label}.base_files must be an object of path to string"))?;
+        if files.len() > 1_000 {
+            return Err(format!(
+                "{label}.base_files exceeds the 1000-file safety bound"
+            ));
+        }
+        for (path, content) in files {
+            let content = content
+                .as_str()
+                .ok_or_else(|| format!("{label}.base_files values must be strings"))?;
+            world = world.with_base_file(path, content);
+        }
+    }
+    if let Some(raw_fixtures) = object.get("fixtures") {
+        let fixtures = raw_fixtures
+            .as_object()
+            .ok_or_else(|| format!("{label}.fixtures must map `METHOD URL` to string body"))?;
+        if fixtures.len() > 1_000 {
+            return Err(format!(
+                "{label}.fixtures exceeds the 1000-fixture safety bound"
+            ));
+        }
+        for (key, body) in fixtures {
+            let (method, url) = key
+                .split_once(' ')
+                .ok_or_else(|| format!("{label}.fixtures keys must be `METHOD URL`"))?;
+            let body = body
+                .as_str()
+                .ok_or_else(|| format!("{label}.fixtures values must be strings"))?;
+            world = world.with_fixture(method, url, body);
+        }
+    }
+    if let Some(raw_services) = object.get("services") {
+        let services = raw_services
+            .as_object()
+            .ok_or_else(|| format!("{label}.services must map `service.operation` to JSON"))?;
+        if services.len() > 1_000 {
+            return Err(format!(
+                "{label}.services exceeds the 1000-service safety bound"
+            ));
+        }
+        for (key, response) in services {
+            let (service, operation) = key
+                .split_once('.')
+                .ok_or_else(|| format!("{label}.services keys must be `service.operation`"))?;
+            world = world.with_service(service, operation, response.clone());
+        }
+    }
+    if let Some(raw_faults) = object.get("faults") {
+        let faults = raw_faults
+            .as_array()
+            .ok_or_else(|| format!("{label}.faults must be an array"))?;
+        if faults.len() > 1_000 {
+            return Err(format!(
+                "{label}.faults exceeds the 1000-fault safety bound"
+            ));
+        }
+        for raw_fault in faults {
+            let item = raw_fault
+                .as_object()
+                .ok_or_else(|| format!("{label}.faults entries must be objects"))?;
+            let call = item
+                .get("call")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| format!("{label}.faults.call is required"))?;
+            if call > 100_000 {
+                return Err(format!(
+                    "{label}.faults.call exceeds the 100000-call safety bound"
+                ));
+            }
+            let fault: Fault = serde_json::from_value(
+                item.get("fault")
+                    .cloned()
+                    .ok_or_else(|| format!("{label}.faults.fault is required"))?,
+            )
+            .map_err(|error| format!("invalid {label} fault: {error}"))?;
+            world = world.with_fault_at(call, fault);
+        }
+    }
+    Ok(world)
+}
+
 fn json_i128(raw: Option<&Value>, field: &str) -> Result<i128, String> {
     let value = raw.ok_or_else(|| format!("{field} is required and must be an integer"))?;
     if let Some(value) = value.as_i64() {
@@ -9072,6 +9664,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "megafactory_scale_and_oracles",
+            "domains": ["mechanistic twin simulation", "model discrepancy", "distributed placement", "oracle independence", "fencing and duplicate execution"],
+            "crates": ["bioprism-megafactory", "bioprism-scale", "bioprism-factory"],
+            "mcp_tools": ["megafactory_twin_audit", "megafactory_placement_audit", "scale_family_split_verify", "factory_lifecycle_simulate"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "mutation_and_causal_discovery",
             "domains": ["metamorphic testing", "causal divergence", "robustness"],
             "crates": ["bioprism-mutation", "bioprism-benchcompiler", "bioprism-stress", "bioprism-influence"],
@@ -9219,7 +9819,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "runtime_execution_and_replay",
             "domains": ["effect authorization", "sandbox posture", "hash-chained replay", "checkpoint verification"],
             "crates": ["bioprism-runtime", "bioprism-trace", "bioprism-store"],
-            "mcp_tools": ["runtime_effect_check", "runtime_tape_verify"],
+            "mcp_tools": ["runtime_effect_check", "runtime_tape_verify", "runtime_execution_simulate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -9836,6 +10436,38 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "megafactory_twin_audit",
+            "description": "Run a bounded mechanistic counterfactual and discrepancy probe over serialized million-scale factory models. Every model is revalidated through the constructor, effects remain under-model, alternative state-space mismatches refuse, sign instability withholds oracle eligibility, and the effect range stays visible beside the headline.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reference": { "type": "object", "description": "Serialized MechanisticModel with id, compartments, square rates, and non-empty known_misspecification." },
+                    "alternatives": { "type": "array", "minItems": 1, "maxItems": 64, "description": "Plausible alternative MechanisticModel values sharing the reference state space." },
+                    "initial": { "type": "array", "maxItems": 64, "description": "Finite initial compartment masses." },
+                    "steps": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "Number of deterministic state ticks." },
+                    "intervention": { "type": "object", "description": "Serialized Intervention holding one named compartment at a value." },
+                    "outcome_compartment": { "type": "string", "description": "Compartment whose intervened-minus-baseline effect is compared." }
+                },
+                "required": ["reference", "alternatives", "initial", "steps", "intervention", "outcome_compartment"]
+            }
+        }),
+        json!({
+            "name": "megafactory_placement_audit",
+            "description": "Audit one distributed million-scale placement against declared worker capability, data locality, access tier, attestation, oracle-domain independence, enclave transfer rules, monotone fencing, and duplicate execution classes. It is a local predicate workflow and never moves data or schedules a real worker.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "job": { "type": "object", "description": "Serialized factory Job, including resource_class and idempotency." },
+                    "request": { "type": "object", "description": "Serialized WorkRequest with data_locale, access_tier, oracle_domain, and input_bytes." },
+                    "worker": { "type": "object", "description": "Serialized WorkerProfile with factory capability, trust domain, locale, and attestation." },
+                    "item": { "type": "string", "description": "Optional committed item id; defaults to the job id." },
+                    "commit_count": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Deterministic number of commits used to expose duplicate classification; defaults to 1." },
+                    "supersede_fence": { "type": "boolean", "description": "Issue a newer fence and report stale-versus-current admission; defaults false." }
+                },
+                "required": ["job", "request", "worker"]
+            }
+        }),
+        json!({
             "name": "stewardship_review_check",
             "description": "Conclude a serialized evaluator review record under the stewardship contract. Returns a dimension-scoped approval only when independence, corpus support, mandatory findings, and failure conditions pass; otherwise preserves a typed refusal and never upgrades unreviewed dimensions to approval.",
             "inputSchema": {
@@ -10067,6 +10699,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "other_tape": { "type": "object", "description": "Optional second serialized WorldTape for earliest digest divergence." }
                 },
                 "required": ["tape"]
+            }
+        }),
+        json!({
+            "name": "runtime_execution_simulate",
+            "description": "Execute a bounded serialized effect request program against the deterministic in-process runtime, returning the recording tape, policy journal, virtual world changes, budget accounting, complete replay verification, and an optional counterfactual fork with observable state and suffix comparison. No host effect is reachable.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run": { "type": "string", "description": "Optional runtime RunId; defaults to mcp-runtime-run." },
+                    "policy": { "type": "object", "description": "Serialized EffectPolicy. Effect kinds must be declared explicitly; deny-by-default is recommended." },
+                    "requests": { "type": "array", "maxItems": 1000, "description": "Serialized EffectRequest sequence to record and replay." },
+                    "world": { "type": "object", "description": "Optional deterministic world config: seed, clock_start, clock_tick, base_files, fixtures keyed by `METHOD URL`, services keyed by `service.operation`, and call-indexed faults." },
+                    "budget": { "type": "object", "description": "Optional serialized BudgetPlan. Tool calls charge before effects and hard exhaustion is reported." },
+                    "fork": { "type": "object", "description": "Optional fork {step, run, requests, world}. The prefix is inherited from the recorded tape and never re-performed." }
+                },
+                "required": ["policy", "requests"]
             }
         }),
         json!({

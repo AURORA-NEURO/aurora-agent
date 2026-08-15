@@ -40,7 +40,8 @@ fn main() {
                     trace_analyze,\n\
                     lineage_audit, preanalytic_apply,\n\
                     contradiction_review,\n\
-                     lab_plan, lens_catalogue, lens_leakage_check, scale_family_split_verify, stewardship_review_check,\n\
+                     lab_plan, lens_catalogue, lens_leakage_check, scale_family_split_verify, megafactory_twin_audit,\n\
+                     megafactory_placement_audit, stewardship_review_check,\n\
                      quality_gate_run, ledger_ingest,\n\
                      fabric_synthesize,\n\
                      interweave_workflow_catalogue,\n\
@@ -48,7 +49,7 @@ fn main() {
                      oracle_reference_panel, oracle_missingness, bioeval_reference_audit,\n\
                      evaluation_worldline_audit,\n\
                      evaluation_reproduction_check, evaluation_trajectory_check,\n\
-                     runtime_effect_check, runtime_tape_verify, onco_boundary_check,\n\
+                     runtime_effect_check, runtime_tape_verify, runtime_execution_simulate, onco_boundary_check,\n\
                      onco_response_assess, onco_worldline_view, onco_classification_check,\n\
                      oncoworlds_identity_join, oncoworlds_model_transport,\n\
                      oncoworlds_methylation_classify, oncoworlds_methylation_compare,\n\

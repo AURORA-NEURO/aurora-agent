@@ -51,6 +51,7 @@ bioprism-lab = { workspace = true }
 bioprism-ledger = { workspace = true }
 bioprism-lens = { workspace = true }
 bioprism-modalities = { workspace = true }
+bioprism-megafactory = { workspace = true }
 bioprism-metrics = { workspace = true }
 bioprism-mutation = { workspace = true }
 bioprism-obligation = { workspace = true }

@@ -52,6 +52,9 @@ use bioprism_mcp::{
     serve, tool_definitions, Lifecycle, Request, Server, CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI,
     PROTOCOL_VERSION,
 };
+use bioprism_megafactory::{
+    AccessTier as PlacementAccessTier, Attestation, Locale, TrustDomain, WorkRequest, WorkerProfile,
+};
 use bioprism_onco::{
     AcquisitionTime, AvailabilityTime, BoundaryRequest, ClinicalObservation, ClinicalTrend, Clocks,
     Compartment, ConsentBasis, DirectionOfChange, EndpointKind, FollowUp, Histology,
@@ -95,7 +98,9 @@ use bioprism_routing::{
     ApprovedSet, Architecture as RoutingArchitecture, EvidenceLedger, Fingerprint,
     Observation as RoutingObservation, RoutingPolicy,
 };
-use bioprism_runtime::{EffectKind, EffectPolicy, EffectRequest, WorldTape};
+use bioprism_runtime::{
+    BudgetPlan, EffectKind, EffectPolicy, EffectRequest, Limit, RuntimeResource, WorldTape,
+};
 use bioprism_safety::release::{Rating, RiskAssessment, RiskDimension, SensitiveCategory};
 use bioprism_scale::corpus::GeneratedItem;
 use bioprism_scope::ScopeClass;
@@ -296,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 102);
+    assert_eq!(tools.len(), 105);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3448,6 +3453,196 @@ fn runtime_tape_verify_accepts_only_verified_chain_state() {
     assert_eq!(result["chain_verified"], json!(true));
     assert_eq!(result["entries"], json!(0));
     assert_eq!(result["simulated_steps"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn runtime_execution_simulate_records_replays_and_forks_without_live_effects() {
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([
+            EffectKind::ClockNow,
+            EffectKind::RandomBytes,
+            EffectKind::FileRead,
+            EffectKind::FileWrite,
+        ])
+        .allowing_path("/work/");
+    let budget = BudgetPlan::new().with(RuntimeResource::ToolCalls, Limit::hard(4));
+    let result = call(
+        &mut server(),
+        "runtime_execution_simulate",
+        json!({
+            "run": "run-execution-mcp",
+            "policy": serde_json::to_value(policy).unwrap(),
+            "requests": [
+                { "kind": "clock_now" },
+                { "kind": "file_read", "path": "/work/input.txt" },
+                { "kind": "random_bytes", "count": 4 },
+                { "kind": "file_write", "path": "/work/output.txt", "content": "done" }
+            ],
+            "world": {
+                "seed": 7,
+                "clock_start": 10,
+                "clock_tick": 2,
+                "base_files": { "/work/input.txt": "fixture" }
+            },
+            "budget": serde_json::to_value(budget).unwrap(),
+            "fork": {
+                "step": 2,
+                "run": "run-execution-child",
+                "requests": [{ "kind": "clock_now" }]
+            }
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["recorded_requests"], json!(4));
+    assert_eq!(result["replay"]["verified"], json!(true));
+    assert_eq!(result["replay"]["matched"], json!(true));
+    assert_eq!(result["world"]["calls"], json!(4));
+    assert_eq!(
+        result["world"]["file_changes"][0]["path"],
+        json!("/work/output.txt")
+    );
+    assert_eq!(result["fork"]["ok"], json!(true));
+    assert_eq!(result["fork"]["inherited_steps"], json!(2));
+    assert_eq!(result["fork"]["observed_state"]["fork_step"], json!(2));
+    assert!(result["fork"]["child_tape"]["lineage"].is_object());
+}
+
+#[test]
+fn runtime_execution_simulate_reports_budget_exhaustion_and_keeps_partial_replay_explicit() {
+    let policy = EffectPolicy::evaluation_default().declaring([EffectKind::ClockNow]);
+    let budget = BudgetPlan::new().with(RuntimeResource::ToolCalls, Limit::hard(1));
+    let result = call(
+        &mut server(),
+        "runtime_execution_simulate",
+        json!({
+            "policy": serde_json::to_value(policy).unwrap(),
+            "requests": [{ "kind": "clock_now" }, { "kind": "clock_now" }],
+            "budget": serde_json::to_value(budget).unwrap()
+        }),
+    );
+    assert_eq!(result["ok"], json!(true));
+    assert!(result["execution_error"]
+        .as_str()
+        .unwrap()
+        .contains("budget exhausted"));
+    assert_eq!(result["recorded_requests"], json!(1));
+    assert_eq!(result["replay"]["verified"], json!(true));
+    assert_eq!(result["budget"]["aborted_on"], json!("tool_calls"));
+}
+
+#[test]
+fn megafactory_twin_audit_requires_discrepancy_stable_direction_for_oracle_status() {
+    let model = json!({
+        "id": "reference",
+        "compartments": ["a", "b", "c"],
+        "rates": [[0.0, 0.0, 0.3], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+        "known_misspecification": "linear transfer has no saturation"
+    });
+    let stable = call(
+        &mut server(),
+        "megafactory_twin_audit",
+        json!({
+            "reference": model,
+            "alternatives": [
+                {
+                    "id": "faster",
+                    "compartments": ["a", "b", "c"],
+                    "rates": [[0.0, 0.0, 0.5], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                    "known_misspecification": "linear transfer has no saturation"
+                },
+                {
+                    "id": "slower",
+                    "compartments": ["a", "b", "c"],
+                    "rates": [[0.0, 0.0, 0.1], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                    "known_misspecification": "linear transfer has no saturation"
+                }
+            ],
+            "initial": [1.0, 5.0, 0.0],
+            "steps": 3,
+            "intervention": { "compartment": "a", "hold_at": 1.0 },
+            "outcome_compartment": "c"
+        }),
+    );
+    assert_eq!(stable["ok"], json!(true));
+    assert_eq!(stable["oracle_eligible"], json!(true));
+    assert_eq!(stable["probe"]["models_disagreeing"], json!([]));
+
+    let unstable = call(
+        &mut server(),
+        "megafactory_twin_audit",
+        json!({
+            "reference": {
+                "id": "reference",
+                "compartments": ["a", "b", "c"],
+                "rates": [[0.0, 0.0, 0.3], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                "known_misspecification": "linear transfer has no saturation"
+            },
+            "alternatives": [{
+                "id": "refilled",
+                "compartments": ["a", "b", "c"],
+                "rates": [[0.0, 0.0, 0.3], [0.9, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                "known_misspecification": "the refill compartment is treated as a source"
+            }],
+            "initial": [1.0, 5.0, 0.0],
+            "steps": 3,
+            "intervention": { "compartment": "a", "hold_at": 1.0 },
+            "outcome_compartment": "c"
+        }),
+    );
+    assert_eq!(unstable["ok"], json!(true));
+    assert_eq!(unstable["oracle_eligible"], json!(false));
+    assert!(unstable["headline"]
+        .as_str()
+        .unwrap()
+        .contains("not benchmark ground truth"));
+}
+
+#[test]
+fn megafactory_placement_audit_exposes_transfer_fencing_and_non_idempotent_duplicates() {
+    let job = Job::new(
+        "job-placement-mcp",
+        ResourceClass::Evaluate,
+        Idempotency::NonIdempotent,
+        json!({ "suite": "release" }),
+    );
+    let worker = WorkerProfile::new(
+        WorkerCapability::new("worker-mcp", vec![ResourceClass::Evaluate]),
+        TrustDomain::new("worker-domain"),
+        Locale::new("us"),
+        Attestation::Attested {
+            measurement: ContentHash::of_bytes(b"worker-image"),
+            vouched_by: "attestor".into(),
+        },
+    );
+    let request = WorkRequest {
+        data_locale: Locale::new("eu"),
+        access_tier: PlacementAccessTier::Restricted,
+        oracle_domain: TrustDomain::new("oracle-domain"),
+        input_bytes: 4096,
+    };
+    let result = call(
+        &mut server(),
+        "megafactory_placement_audit",
+        json!({
+            "job": serde_json::to_value(job).unwrap(),
+            "request": serde_json::to_value(request).unwrap(),
+            "worker": serde_json::to_value(worker).unwrap(),
+            "item": "item-1",
+            "commit_count": 2,
+            "supersede_fence": true
+        }),
+    );
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["placement"]["data_local"], json!(false));
+    assert_eq!(result["placement"]["transfer_bytes"], json!(4096));
+    assert_eq!(result["fencing"]["stale_admission"]["ok"], json!(false));
+    assert_eq!(result["fencing"]["current_admission"]["ok"], json!(true));
+    assert_eq!(
+        result["ledger"]["duplicates"]["repeated_effect_incidents"],
+        json!(1)
+    );
+    assert_eq!(result["ledger"]["has_incidents"], json!(true));
 }
 
 #[test]
