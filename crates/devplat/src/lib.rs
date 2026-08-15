@@ -11,16 +11,18 @@
 //!
 //! ```text
 //! process                 3  the design describes what a person does at an interface
-//! foreign artifact        5  code-bearing, but not Rust and not in this repository
-//! covered elsewhere       8  an existing crate already owns the substance
+//! foreign artifact        4  code-bearing, but not Rust and not in this repository
+//! covered elsewhere       9  an existing crate already owns the substance
 //! implemented here        4  predicates over an artifact this crate defines
 //! ```
 //!
 //! The middle bucket is the finding. It was expected — `crates/ops` needed the same category for
-//! its section — but not at this size: five of twenty remaining modules specify a real, precise,
+//! its section — but not at this size: four of twenty remaining modules specify a real, precise,
 //! testable artifact that simply is not a Rust crate. A Python distribution with nine importable
-//! packages. A TypeScript client generated from OpenAPI. A composite GitHub Action evaluated in
-//! somebody else's repository. Those are not vague and they are not process; they are elsewhere.
+//! packages. Composite GitHub Actions evaluated in somebody else's repository. Those are not
+//! vague and they are not process; they are elsewhere. The TypeScript client is now an in-tree
+//! integration artifact over `bioprism-api`, so its remaining concern is covered rather than
+//! counted as foreign.
 //! Calling them process would be as wrong as implementing them, and the difference matters to a
 //! contributor deciding what to work on.
 //!

@@ -10,8 +10,8 @@
 //! | verdict | count |
 //! |---|---|
 //! | [`Verdict::Process`] — the design describes what a person does at an interface | 3 |
-//! | [`Verdict::ForeignArtifact`] — code-bearing, but not Rust and not in this repository | 5 |
-//! | [`Verdict::CoveredElsewhere`] — an existing crate already owns the substance | 8 |
+//! | [`Verdict::ForeignArtifact`] — code-bearing, but not Rust and not in this repository | 4 |
+//! | [`Verdict::CoveredElsewhere`] — an existing crate already owns the substance | 9 |
 //! | [`Verdict::ImplementedHere`] — predicates over an artifact this crate defines | 4 |
 //!
 //! # The citation rule, in the type system
@@ -146,7 +146,10 @@ pub fn classification() -> Vec<ModuleVerdict> {
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,
             title: "TypeScript SDK",
-            verdict: foreign_row("TypeScript SDK"),
+            verdict: Verdict::CoveredElsewhere {
+                crates: vec!["bioprism-api"],
+                because: "the repository now ships a dependency-free TypeScript Fetch client over the bounded API gateway, with strict request/response limits, structured errors, SSE cursor parsing, webhook lifecycle helpers, and typed facades for the cross-domain workflows. It remains an integration SDK rather than a generated clone of every Rust domain type.",
+            },
         },
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,

@@ -1,0 +1,428 @@
+import { ApiError, ArgumentError, ProtocolError, ResponseTooLargeError, ToolRefusalError, TransportError, isObject } from "./errors.js";
+import { parseSse } from "./sse.js";
+import type {
+  ApiClientOptions,
+  ApiErrorBody,
+  BioAtlasPublicationAuditArgs,
+  BioCapabilityEvidenceAuditArgs,
+  CapabilitiesResponse,
+  ClientRequestOptions,
+  DeliveryMutationResponse,
+  DeliveriesResponse,
+  DeveloperDeliveryAuditArgs,
+  EventMetrics,
+  EventsResponse,
+  FetchLike,
+  HealthResponse,
+  HttpMethod,
+  JsonObject,
+  JsonValue,
+  MetricsProfileAuditArgs,
+  RestToolResponse,
+  RuntimeExecutionSimulateArgs,
+  SseSnapshot,
+  SubscribeOptions,
+  SubscriptionListResponse,
+  SubscriptionResponse,
+  ToolArguments,
+  ToolsResponse,
+  TraceOtelIngestArgs,
+} from "./types.js";
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RESPONSE_BYTES = 20_000_000;
+const DEFAULT_MAX_REQUEST_BYTES = 10_000_000;
+const MAX_EVENT_PAGE = 1_000;
+const MAX_REQUEST_ID_BYTES = 256;
+
+/**
+ * Fetch-based client for the bounded Prism API.
+ *
+ * The client keeps the raw REST/MCP envelope intact. A 2xx response means that the HTTP
+ * boundary accepted the request; it does not mean a scientific, safety, or release claim was
+ * accepted. Callers can inspect `mcp.result.isError`, `mcp.error`, and structured content, or use
+ * `requireToolSuccess` when a workflow explicitly wants an exception for a domain refusal.
+ */
+export class ApiClient {
+  readonly baseUrl: URL;
+  readonly bearerToken?: string;
+  readonly timeoutMs: number;
+  readonly maxResponseBytes: number;
+  readonly maxRequestBytes: number;
+
+  private readonly fetchImpl: FetchLike;
+  private readonly defaultHeaders: Readonly<Record<string, string>>;
+
+  constructor(options: ApiClientOptions) {
+    this.baseUrl = validateBaseUrl(options.baseUrl);
+    this.bearerToken = options.bearerToken;
+    this.timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, "timeoutMs");
+    this.maxResponseBytes = positiveInteger(options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES, "maxResponseBytes");
+    this.maxRequestBytes = positiveInteger(options.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES, "maxRequestBytes");
+    this.fetchImpl = options.fetch ?? resolveFetch();
+    this.defaultHeaders = validateHeaders(options.defaultHeaders ?? {});
+    if (this.bearerToken !== undefined) validateBearerToken(this.bearerToken);
+  }
+
+  /** Issue one bounded JSON request. Only JSON object responses are accepted. */
+  async request<T extends JsonObject = JsonObject>(
+    method: HttpMethod,
+    path: string,
+    payload?: JsonObject,
+    options: ClientRequestOptions = {},
+  ): Promise<T> {
+    const response = await this.execute(method, path, payload, options);
+    const text = await readResponseText(response, this.maxResponseBytes);
+    const parsed = parseJsonObject(text);
+    if (!response.ok) {
+      throw new ApiError(response.status, parsed as ApiErrorBody, response.headers.get("x-request-id") ?? undefined);
+    }
+    return parsed as T;
+  }
+
+  /** Issue a bounded request whose response is intentionally text, such as an SSE snapshot. */
+  async requestText(
+    method: HttpMethod,
+    path: string,
+    options: ClientRequestOptions = {},
+  ): Promise<{ response: Response; text: string }> {
+    const response = await this.execute(method, path, undefined, options);
+    const text = await readResponseText(response, this.maxResponseBytes);
+    if (!response.ok) {
+      let payload: JsonValue = text;
+      try {
+        payload = JSON.parse(text) as JsonValue;
+      } catch {
+        // Preserve a non-JSON gateway response as the error payload.
+      }
+      throw new ApiError(response.status, payload, response.headers.get("x-request-id") ?? undefined);
+    }
+    return { response, text };
+  }
+
+  async health(options?: ClientRequestOptions): Promise<HealthResponse> {
+    return this.request<HealthResponse>("GET", "/healthz", undefined, options);
+  }
+
+  async ready(options?: ClientRequestOptions): Promise<HealthResponse> {
+    return this.request<HealthResponse>("GET", "/readyz", undefined, options);
+  }
+
+  async capabilities(options?: ClientRequestOptions): Promise<CapabilitiesResponse> {
+    return this.request<CapabilitiesResponse>("GET", "/v1/capabilities", undefined, options);
+  }
+
+  async tools(options?: ClientRequestOptions): Promise<ToolsResponse["tools"]> {
+    const response = await this.request<ToolsResponse>("GET", "/v1/tools", undefined, options);
+    if (!Array.isArray(response.tools) || response.tools.some((tool) => !isObject(tool) || typeof tool.name !== "string")) {
+      throw new ProtocolError("HTTP API tools response has no object array with names");
+    }
+    return response.tools;
+  }
+
+  async metrics(options?: ClientRequestOptions): Promise<{ ok: boolean; metrics: EventMetrics }> {
+    return this.request("GET", "/v1/metrics", undefined, options);
+  }
+
+  /** Call any currently advertised or future MCP tool without losing its refusal envelope. */
+  async callTool<T extends JsonValue = JsonValue>(
+    name: string,
+    arguments_: ToolArguments = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<T>> {
+    const tool = pathSegment(name, "tool name");
+    if (!isObject(arguments_)) throw new ArgumentError("tool arguments must be a JSON object");
+    return this.request<RestToolResponse<T>>("POST", `/v1/tools/${encodeURIComponent(tool)}`, arguments_, options);
+  }
+
+  /** Convert an explicit domain refusal into a typed exception; successful results remain raw. */
+  requireToolSuccess<T extends JsonValue>(response: RestToolResponse<T>): RestToolResponse<T> {
+    if (!response.ok || response.mcp.error || response.mcp.result?.isError) {
+      throw new ToolRefusalError(response.tool, response);
+    }
+    return response;
+  }
+
+  async metricsProfileAudit(args: MetricsProfileAuditArgs, options?: ClientRequestOptions) {
+    return this.callTool("metrics_profile_audit", args, options);
+  }
+
+  async bioCapabilityEvidenceAudit(args: BioCapabilityEvidenceAuditArgs, options?: ClientRequestOptions) {
+    return this.callTool("biocapability_evidence_audit", args, options);
+  }
+
+  async bioAtlasPublicationAudit(args: BioAtlasPublicationAuditArgs, options?: ClientRequestOptions) {
+    return this.callTool("bioatlas_publication_audit", args, options);
+  }
+
+  async traceOtelIngest(args: TraceOtelIngestArgs, options?: ClientRequestOptions) {
+    return this.callTool("trace_otel_ingest", args, options);
+  }
+
+  async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions) {
+    return this.callTool("developer_delivery_audit", args, options);
+  }
+
+  async runtimeExecutionSimulate(args: RuntimeExecutionSimulateArgs, options?: ClientRequestOptions) {
+    return this.callTool("runtime_execution_simulate", args, options);
+  }
+
+  async events(after = 0, limit = 100, options?: ClientRequestOptions): Promise<EventsResponse> {
+    cursor(after, "after");
+    pageLimit(limit);
+    return this.request("GET", `/v1/events?after=${after}&limit=${limit}`, undefined, options);
+  }
+
+  /** Fetch the bounded SSE snapshot and parse each event without requiring an EventSource. */
+  async eventStream(after = 0, limit = 100, options?: ClientRequestOptions): Promise<SseSnapshot> {
+    cursor(after, "after");
+    pageLimit(limit);
+    const result = await this.requestText("GET", `/v1/events/stream?after=${after}&limit=${limit}`, options);
+    return {
+      contentType: result.response.headers.get("content-type") ?? "",
+      nextAfter: parseUnsignedHeader(result.response.headers.get("x-next-after"), "x-next-after"),
+      events: parseSse(result.text),
+      raw: result.text,
+    };
+  }
+
+  async listSubscriptions(options?: ClientRequestOptions): Promise<SubscriptionListResponse> {
+    return this.request("GET", "/v1/webhooks/subscriptions", undefined, options);
+  }
+
+  async subscribe(
+    endpoint: string,
+    secret: string,
+    options_: SubscribeOptions = {},
+    requestOptions?: ClientRequestOptions,
+  ): Promise<SubscriptionResponse> {
+    visible(endpoint, "endpoint", 2_048);
+    visible(secret, "secret", 4_096);
+    const payload: JsonObject = { endpoint, secret };
+    if (options_.subscriptionId !== undefined) payload.id = pathSegment(options_.subscriptionId, "subscription id");
+    if (options_.events !== undefined) {
+      if (options_.events.length < 1 || options_.events.length > 32) {
+        throw new ArgumentError("events must contain between 1 and 32 filters");
+      }
+      payload.events = options_.events.map((event) => visible(event, "event filter", 128));
+    }
+    return this.request("POST", "/v1/webhooks/subscriptions", payload, requestOptions);
+  }
+
+  async deliveries(subscriptionId: string, after = 0, limit = 100, options?: ClientRequestOptions): Promise<DeliveriesResponse> {
+    const id = pathSegment(subscriptionId, "subscription id");
+    cursor(after, "after");
+    pageLimit(limit);
+    return this.request("GET", `/v1/webhooks/subscriptions/${encodeURIComponent(id)}/deliveries?after=${after}&limit=${limit}`, undefined, options);
+  }
+
+  async acknowledge(subscriptionId: string, deliveryIds: readonly number[], options?: ClientRequestOptions): Promise<DeliveryMutationResponse> {
+    return this.deliveryMutation("ack", subscriptionId, deliveryIds, options);
+  }
+
+  async retry(subscriptionId: string, deliveryIds: readonly number[], options?: ClientRequestOptions): Promise<DeliveryMutationResponse> {
+    return this.deliveryMutation("retry", subscriptionId, deliveryIds, options);
+  }
+
+  async deleteSubscription(subscriptionId: string, options?: ClientRequestOptions): Promise<JsonObject> {
+    const id = pathSegment(subscriptionId, "subscription id");
+    return this.request("DELETE", `/v1/webhooks/subscriptions/${encodeURIComponent(id)}`, undefined, options);
+  }
+
+  private async deliveryMutation(
+    operation: "ack" | "retry",
+    subscriptionId: string,
+    deliveryIds: readonly number[],
+    options?: ClientRequestOptions,
+  ): Promise<DeliveryMutationResponse> {
+    const id = pathSegment(subscriptionId, "subscription id");
+    if (deliveryIds.length > 1_000 || deliveryIds.some((value) => !Number.isSafeInteger(value) || value < 1)) {
+      throw new ArgumentError("deliveryIds must contain positive safe integers and be at most 1000 items");
+    }
+    return this.request("POST", `/v1/webhooks/subscriptions/${encodeURIComponent(id)}/${operation}`, { delivery_ids: [...deliveryIds] }, options);
+  }
+
+  private async execute(
+    method: HttpMethod,
+    path: string,
+    payload: JsonObject | undefined,
+    options: ClientRequestOptions,
+  ): Promise<Response> {
+    if (!["GET", "POST", "DELETE", "OPTIONS"].includes(method)) throw new ArgumentError("unsupported HTTP method");
+    const target = originPath(this.baseUrl, path);
+    const headers: Record<string, string> = { Accept: "application/json", ...this.defaultHeaders };
+    if (payload !== undefined) {
+      assertJsonSafe(payload);
+      const encoded = JSON.stringify(payload);
+      const bytes = new TextEncoder().encode(encoded).byteLength;
+      if (bytes > this.maxRequestBytes) throw new ArgumentError(`request payload exceeded maxRequestBytes (${this.maxRequestBytes})`);
+      headers["Content-Type"] = "application/json";
+      return this.fetchWithTimeout(target, method, headers, encoded, options);
+    }
+    return this.fetchWithTimeout(target, method, headers, undefined, options);
+  }
+
+  private fetchWithTimeout(
+    target: URL,
+    method: HttpMethod,
+    headers: Record<string, string>,
+    body: string | undefined,
+    options: ClientRequestOptions,
+  ): Promise<Response> {
+    const requestHeaders = validateHeaders({ ...headers, ...options.headers });
+    if (this.bearerToken !== undefined) requestHeaders.Authorization = `Bearer ${this.bearerToken}`;
+    if (options.requestId !== undefined) requestHeaders["x-request-id"] = visible(options.requestId, "requestId", MAX_REQUEST_ID_BYTES);
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.timeoutMs);
+    const external = options.signal;
+    const abort = () => controller.abort();
+    external?.addEventListener("abort", abort, { once: true });
+    return this.fetchImpl(target, {
+      method,
+      headers: requestHeaders,
+      body,
+      signal: controller.signal,
+    }).catch((error: unknown) => {
+      if (timedOut) throw new TransportError(`HTTP API request timed out after ${this.timeoutMs}ms`, error);
+      if (external?.aborted) throw new TransportError("HTTP API request was aborted by the caller", error);
+      throw new TransportError("HTTP API request failed", error);
+    }).finally(() => {
+      clearTimeout(timer);
+      external?.removeEventListener("abort", abort);
+    });
+  }
+}
+
+function resolveFetch(): FetchLike {
+  if (typeof globalThis.fetch !== "function") {
+    throw new TransportError("No fetch implementation is available; pass fetch in ApiClient options");
+  }
+  return globalThis.fetch.bind(globalThis);
+}
+
+function validateBaseUrl(input: string | URL): URL {
+  let url: URL;
+  try {
+    url = new URL(input.toString());
+  } catch {
+    throw new ArgumentError("baseUrl must be an absolute http(s) URL");
+  }
+  if (!(["http:", "https:"].includes(url.protocol)) || !url.hostname) throw new ArgumentError("baseUrl must be an http(s) URL with a host");
+  if (url.pathname !== "/" || url.search || url.hash) throw new ArgumentError("baseUrl must not include a path, query, or fragment");
+  return url;
+}
+
+function originPath(baseUrl: URL, path: string): URL {
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\r") || path.includes("\n")) {
+    throw new ArgumentError("path must be an origin-form path without control-line breaks");
+  }
+  return new URL(path, baseUrl);
+}
+
+function validateBearerToken(token: string): void {
+  if (token.length < 16 || /\s/.test(token) || /[\r\n]/.test(token)) throw new ArgumentError("bearerToken must contain at least 16 visible characters");
+}
+
+function validateHeaders(headers: Readonly<Record<string, string>>): Record<string, string> {
+  const output: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (!name || /[\r\n]/.test(name) || /[\r\n]/.test(value)) throw new ArgumentError("HTTP headers must not contain control-line breaks");
+    output[name] = value;
+  }
+  return output;
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new ArgumentError(`${name} must be a positive safe integer`);
+  return value;
+}
+
+function cursor(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) throw new ArgumentError(`${name} must be a non-negative safe integer`);
+}
+
+function pageLimit(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_EVENT_PAGE) throw new ArgumentError("limit must be 1..=1000");
+}
+
+function visible(value: string, name: string, maxBytes: number): string {
+  if (typeof value !== "string" || value.length === 0 || /[\r\n]/.test(value) || new TextEncoder().encode(value).byteLength > maxBytes) {
+    throw new ArgumentError(`${name} must be non-empty, line-safe, and at most ${maxBytes} UTF-8 bytes`);
+  }
+  return value;
+}
+
+function pathSegment(value: string, name: string): string {
+  visible(value, name, 256);
+  if (value === "." || value === ".." || value.includes("/") || value.includes("\\")) throw new ArgumentError(`${name} must be a path-safe string`);
+  return value;
+}
+
+function parseUnsignedHeader(value: string | null, name: string): number | null {
+  if (value === null) return null;
+  if (!/^\d+$/.test(value)) throw new ProtocolError(`${name} is not an unsigned integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new ProtocolError(`${name} exceeds JavaScript safe integer range`);
+  return parsed;
+}
+
+function parseJsonObject(text: string): JsonObject {
+  if (!text) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new ProtocolError(`HTTP API returned invalid JSON: ${String(error)}`);
+  }
+  if (!isObject(parsed)) throw new ProtocolError("HTTP API response must be a JSON object");
+  return parsed as JsonObject;
+}
+
+function assertJsonSafe(value: unknown, depth = 0): void {
+  if (depth > 100) throw new ArgumentError("JSON payload nesting exceeds 100 levels");
+  if (typeof value === "number" && !Number.isFinite(value)) throw new ArgumentError("JSON payload contains a non-finite number");
+  if (typeof value === "bigint" || typeof value === "function" || typeof value === "symbol" || value === undefined) throw new ArgumentError("JSON payload contains an unsupported value");
+  if (Array.isArray(value)) {
+    value.forEach((item) => assertJsonSafe(item, depth + 1));
+  } else if (isObject(value)) {
+    Object.entries(value).forEach(([key, item]) => {
+      visible(key, "JSON object key", 1_024);
+      assertJsonSafe(item, depth + 1);
+    });
+  }
+}
+
+async function readResponseText(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) throw new ResponseTooLargeError(maxBytes);
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const item = await reader.read();
+      if (item.done) break;
+      bytes += item.value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel();
+        throw new ResponseTooLargeError(maxBytes);
+      }
+      chunks.push(decoder.decode(item.value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join("");
+  } catch (error) {
+    if (error instanceof ResponseTooLargeError) throw error;
+    throw new TransportError("HTTP API response could not be read", error);
+  } finally {
+    reader.releaseLock();
+  }
+}

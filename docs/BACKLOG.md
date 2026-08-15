@@ -1,6 +1,6 @@
 # Remaining backlog
 
-53 code-bearing blueprint modules are not yet cited by any crate or design note,
+51 code-bearing blueprint modules are not yet cited by any crate or design note,
 across 9 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.
 
@@ -132,7 +132,7 @@ providers, web pages, public-key signatures, CI runners, or deployment approvals
 optional SDK admission, conformance, provider capability, governance-document, conservative
 impact, and release evidence. Its explicit target matrix makes local delivery, guarded claims,
 foreign-artifact gaps, and missing evidence mechanically visible; it still does not implement the
-foreign Python/TypeScript SDKs, gRPC clients, GitHub Actions, CI runners, or authoring UI; the
+foreign Python authoring SDKs, gRPC clients, GitHub Actions, CI runners, or authoring UI; the
 Rust HTTP/event gateway and Python HTTP client are now present.
 The registry lifecycle and metrics profile surfaces are now callable too:
 `registry_lifecycle_simulate` replays attested pack publication, promotion, reassessment,
@@ -165,11 +165,10 @@ packages, and the remaining nine-distribution ergonomics are still absent and re
 unimplemented rather than being inferred from the transport client.
 
 
-## §11 Developer Platform — 10 uncovered
+## §11 Developer Platform — 9 uncovered
 
 - `11.04` Python Sdk
 - `11.05` Python Benchmark Authoring Sdk
-- `11.06` Typescript Sdk
 - `11.15` Evaluator Oracle And Mutation Sdk
 - `11.16` Environment And Pack Authoring Sdk
 - `11.17` Authoring Studio
@@ -216,11 +215,10 @@ unimplemented rather than being inferred from the transport client.
 - `14.24` Sustainability Finance And Public Benefit
 - `14.25` Periodic Program Review
 
-## §40 Build Ready Engineering Contracts — 7 uncovered
+## §40 Build Ready Engineering Contracts — 6 uncovered
 
 - `40.01` Technology Baseline
 - `40.02` Monorepo And Package Layout
-- `40.15` Typescript Sdk Contract
 - `40.40` Ci Cd And Release Automation
 - `40.41` First 100 Implementation Tickets
 - `40.43` Engineering Adr Register

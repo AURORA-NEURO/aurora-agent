@@ -1,4 +1,4 @@
-//! The fifty-three, transcribed.
+//! The fifty-one, transcribed.
 //!
 //! Every module `docs/BACKLOG.md` lists, with the verdict a classifying crate reached about it and
 //! the file that verdict was written in. Nothing here is a new judgement about a module a crate
@@ -122,10 +122,10 @@ pub fn residue() -> Result<Register, RegisterError> {
     Register::new(entries)
 }
 
-/// §11, thirteen modules, all classified by `crates/devplat`.
+/// §11's remaining modules, all classified by `crates/devplat`.
 ///
 /// The largest single bucket of foreign artifacts in the workspace and the reason the vocabulary
-/// needs the category at all: seven of these specify a real, precise, testable artifact that is
+/// needs the category at all: five of these specify a real, precise, testable artifact that is
 /// simply not a Rust crate. Calling them process would be as wrong as implementing them.
 fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
     let foreign_row = |needle: &str, reasoning: &str, surface: ForeignSurface| {
@@ -161,18 +161,6 @@ fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
                  is already enforced in Rust; what this module adds is decorator syntax, which is \
                  a property of a language this workspace does not ship.",
                 ForeignSurface::PythonPackage,
-            )?],
-        )?,
-        entry(
-            11,
-            6,
-            "Typescript Sdk",
-            vec![foreign_row(
-                "title: \"TypeScript SDK\",",
-                "A TypeScript client generated from OpenAPI. The workspace emits no OpenAPI \
-                 artifact, so there is nothing for the generator to read and nothing for a \
-                 generated client to be pinned to.",
-                ForeignSurface::TypeScriptPackage,
             )?],
         )?,
         entry(
@@ -775,19 +763,6 @@ fn engineering_contracts() -> Result<Vec<Entry>, RegisterError> {
                     Classification::discharged_by(["bioprism-services"])?,
                 )?,
             ],
-        )?,
-        entry(
-            40,
-            15,
-            "Typescript Sdk Contract",
-            vec![ops(
-                "TypeScript SDK Contract | code, **in another language",
-                "Genuinely code-bearing, and the code is TypeScript. Its first invariant pins \
-                 generated code to an API schema hash, and this workspace emits no such artifact, \
-                 so there is nothing to pin to. A Rust type named after a browser client would be \
-                 fiction.",
-                foreign(ForeignSurface::TypeScriptPackage),
-            )?],
         )?,
         entry(
             40,

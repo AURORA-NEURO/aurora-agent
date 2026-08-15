@@ -23,7 +23,7 @@
 //! | 40.39 | Security Threat Model and Hardening | **code, partial** — 2 of 5 invariants, [`hardening`] |
 //! | 40.42 | Alpha Acceptance Criteria | **code** — [`alpha`] |
 //! | 40.38 | Deployment Profiles and Infrastructure | **code, partial** — 1 of 4 invariants, [`config::DeploymentProfile`] |
-//! | — | TypeScript SDK Contract | code, **in another language and against an artifact this workspace does not emit** |
+//! | — | TypeScript SDK Contract | code, **covered by the in-tree dependency-free Fetch client in `typescript/`** |
 //! | — | CI/CD and Release Automation | code, **in a workflow file, and its three checkable clauses are owned elsewhere** |
 //! | — | Reference Technology Baseline | process |
 //! | — | Monorepo and Package Layout | process |

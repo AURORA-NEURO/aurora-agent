@@ -26,11 +26,14 @@ vendor conventions into compilable evidence. `runtime_execution_simulate` adds d
 record/replay, budget, fault, and
 fork evidence; `megafactory_twin_audit` and `megafactory_placement_audit` expose model-discrepancy,
 oracle-eligibility, placement, attestation, fencing, and duplicate-effect predicates. None of
-these turn foreign Python, TypeScript, gRPC, CI, UI, OTLP export, or network-publication artifacts
+these turn foreign Python, gRPC, CI, UI, OTLP export, or network-publication artifacts
 into implemented workspace code. `bioprism-api` now supplies a bounded REST/JSON-RPC gateway,
 cursor-based event/SSE snapshots, and a signed retryable webhook outbox over the same MCP
 dispatcher; it does not supply gRPC, TLS termination, durable storage, or an external delivery
-worker. `registry_lifecycle_simulate` adds a continuation-safe local
+worker. The repository also ships a dependency-free TypeScript Fetch SDK over that gateway, with
+bounded request/response handling, structured error types, SSE parsing, typed cross-domain
+facades, and webhook cursor lifecycle helpers; it does not clone every Rust domain type or add a
+browser secret store. `registry_lifecycle_simulate` adds a continuation-safe local
 publication log and artifact-integrity projection, while `metrics_profile_audit` adds the
 per-capability coverage and uncontested-lead projection used by honest public cards. Both remain
 in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
@@ -78,26 +81,27 @@ prose from the uncovered list before counting, which is why its figure was the c
 along. 702 + 57 = 759 now reconciles.
 
 
-Coverage is **93.0%** — 706 of 759 code-bearing modules. The remaining **53 are enumerated in
+Coverage is **93.3%** — 708 of 759 code-bearing modules. The remaining **51 are enumerated in
 `docs/BACKLOG.md` and explained in `crates/residue`**, which holds one typed verdict per module
 saying why no crate implements it, anchored to a sentence a classifying crate actually wrote. Its
 reconciliation against the backlog is a test, so the two cannot drift apart silently.
 
-The distribution over the 53: **37 process, 7 foreign artifact, 9 discharged elsewhere, and 1
-genuinely uncovered.** That last one is deliberate. `crates/bioethics` discharges §36's sandboxing
-module and in the same paragraph records that all thirteen of its required controls need a process
-boundary, a network stack or a scanner, none of which exists here — so the register carries a second
-verdict saying the control exists nowhere. A register reporting zero work remaining while the
-workspace has no sandbox would be the flattering answer, and this file's own rule forbids it.
+The primary distribution over the 51: **37 process, 5 foreign artifact, 9 discharged elsewhere,
+and 0 genuinely uncovered.** One module still carries work on a secondary reading. `crates/bioethics`
+discharges §36's sandboxing module and in the same paragraph records that all thirteen of its
+required controls need a process boundary, a network stack or a scanner, none of which exists here
+— so the register carries a second verdict saying the control exists nowhere. A report hiding that
+secondary work because the primary bucket is discharged would be the flattering answer, and this
+file's own rule forbids it.
 
 Three categories in that table were discovered rather than planned, each by a crate that read its
 section and refused to pad:
 
 - **Process** — describes what people do. `crates/stewardship` found 12 of §14's 18.
 - **Foreign artifact** — code-bearing, precise, testable, and not Rust and not in this repository.
-  `crates/devplat` found 7 of 20 in §11 and §19, including both GitHub Action modules and the Python
-  and TypeScript SDKs. The consequence is worth stating: the only two onboarding documents §11
-  actually writes out are entirely outside this repository.
+  `crates/devplat` now finds 4 of 20 in §11 and §19: the two GitHub Action modules and the two
+  Python surfaces. The TypeScript gateway client is now in this repository, while the remaining
+  Python authoring ergonomics stay explicitly outside it.
 - **Discharged elsewhere** — the content exists under a different section's id. **11 verdicts name
   their own author as the discharger**, a crate that built the capability without ever citing the
   module, which a token scan structurally cannot see.
@@ -136,13 +140,13 @@ state is a backlog whose residue is explained rather than empty.
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 706 |
-| **code-bearing coverage** | **93.0%** |
+| cited | 708 |
+| **code-bearing coverage** | **93.3%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 93.0% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 93.3% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 

@@ -4,6 +4,8 @@
 /python/build/
 /python/dist/
 /python/*.egg-info/
+/typescript/dist/
+/typescript/node_modules/
 
 /.eval-snapshot
 /.eval-work

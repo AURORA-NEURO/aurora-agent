@@ -266,6 +266,12 @@ integration foundation above the Rust kernel, not a claim that the full Python d
 benchmark-authoring, or statistics ecosystem is complete. `prism_sdk.ApiClient` and
 `AsyncApiClient` also speak the bounded HTTP gateway described in [`docs/HTTP_API.md`](docs/HTTP_API.md).
 
+For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
+dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,
+typed API errors, SSE cursor parsing, webhook outbox lifecycle, and typed facades for the evidence,
+BioAtlas, OTLP, runtime, and developer-delivery workflows. See [`docs/TYPESCRIPT_SDK.md`](docs/TYPESCRIPT_SDK.md)
+for the compatibility and secret-handling contract.
+
 The repository ships `bioprism-api` for deployments that need a network boundary:
 
 ```bash
