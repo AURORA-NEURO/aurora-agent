@@ -14,6 +14,7 @@ from .analytics import (
 )
 from .authoring import PackArtifact
 from .biological import AdapterPlanRequest
+from .bioql import BioQlCompileRequest
 from .client import Client
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ArgumentError
@@ -114,6 +115,23 @@ class Workspace:
         if not isinstance(request, BioCapabilityEvidenceAuditRequest):
             raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
         return self.tool("biocapability_evidence_audit", request.to_mcp_arguments())
+
+    def bioql_compile(
+        self,
+        query: str | BioQlCompileRequest,
+        schema: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compile BioQL against an explicit schema without executing the query."""
+
+        if isinstance(query, BioQlCompileRequest):
+            if schema is not None:
+                raise ArgumentError("schema must be omitted when query is a BioQlCompileRequest")
+            request = query
+        else:
+            if schema is None:
+                raise ArgumentError("schema is required when query is a string")
+            request = BioQlCompileRequest(query, schema)
+        return self.tool("bioql_compile", request.to_mcp_arguments())
 
     def developer_workbench(
         self,
@@ -461,6 +479,23 @@ class AsyncWorkspace:
         if not isinstance(request, BioCapabilityEvidenceAuditRequest):
             raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
         return await self.tool("biocapability_evidence_audit", request.to_mcp_arguments())
+
+    async def bioql_compile(
+        self,
+        query: str | BioQlCompileRequest,
+        schema: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.bioql_compile`."""
+
+        if isinstance(query, BioQlCompileRequest):
+            if schema is not None:
+                raise ArgumentError("schema must be omitted when query is a BioQlCompileRequest")
+            request = query
+        else:
+            if schema is None:
+                raise ArgumentError("schema is required when query is a string")
+            request = BioQlCompileRequest(query, schema)
+        return await self.tool("bioql_compile", request.to_mcp_arguments())
 
     async def developer_workbench(
         self,

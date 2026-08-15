@@ -62,6 +62,10 @@ invent defaults:
   enumerate the nine evidence dimensions, keep observed/reproduced support distinct from declared
   status, validate claim prerequisites and duplicate IDs, and preserve optional information-value,
   reference, temporal, and reproducibility subaudits without deciding scientific truth locally.
+- `BioQlCompileRequest` and `Workspace.bioql_compile(...)` provide the same bounded entry point
+  over sync MCP, async MCP, and HTTP. Query text and explicit schema JSON are size-checked locally;
+  lexical, unit/frame, temporal, provenance, access-label, and cost semantics remain authoritative
+  in Rust, and compilation never executes a query.
 - `compile_context(world, query, ...)` invokes `fiber_compile` while leaving policy/profile choices
   caller-controlled.
 - `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON

@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, ClaimRequest, EvidenceItem
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EvidenceItem
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -38,7 +38,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(size) or b"{}")
         if self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path == "/v1/tools/biocapability_evidence_audit":
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -91,6 +91,10 @@ class HttpApiClientTests(unittest.TestCase):
             client.biocapability_evidence_audit(evidence_request)["mcp"]["result"]["claim_requests"][0]["id"],
             "claim",
         )
+        self.assertEqual(
+            client.bioql_compile(BioQlCompileRequest("SELECT sample.id", {"schema_version": "v1"}))["mcp"]["result"]["query"],
+            "SELECT sample.id",
+        )
         self.assertEqual(client.events()["page"]["events"], [])
         with self.assertRaises(ApiError) as error:
             client.request("POST", "/v1/tools/refuse", {})
@@ -120,6 +124,10 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(
                 (await client.biocapability_evidence_audit(evidence_request))["mcp"]["result"]["max_items"],
                 100,
+            )
+            self.assertEqual(
+                (await client.bioql_compile("SELECT sample.id", {"schema_version": "v1"}))["mcp"]["result"]["schema"]["schema_version"],
+                "v1",
             )
 
         asyncio.run(run())

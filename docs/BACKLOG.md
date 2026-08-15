@@ -178,6 +178,10 @@ evidence dimensions, explicit status handling, dimension-specific support maps, 
 validation, duplicate-ID rejection, and sync/async/HTTP transport helpers. The Rust kernel still
 owns comparability, nested evidence audits, and release decisions; the Python models do not mint
 scientific support or publication authority.
+The same Python surface now exposes a bounded `bioql_compile()` bridge for explicit query/schema
+compilation over sync MCP, async MCP, and HTTP. Local validation only bounds strings and canonical
+JSON; Rust remains authoritative for BioQL syntax, schema, units, frames, clocks, provenance,
+access labels, and cost semantics, and the bridge never executes a query.
 The benchmark utility complements that kernel for Python notebooks: it separates measured from
 declared/missing/blocked rows, computes deterministic distribution summaries, performs direction-aware
 paired contrasts, and offers cluster-aware percentile bootstrap intervals with explicit assumptions.

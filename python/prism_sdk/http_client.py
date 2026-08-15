@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from .biological import AdapterPlanRequest
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ApiError, ArgumentError, TransportError
+from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 
 
@@ -238,6 +239,23 @@ class ApiClient:
             raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
         return self.call_tool("biocapability_evidence_audit", request.to_mcp_arguments())
 
+    def bioql_compile(
+        self,
+        query: str | BioQlCompileRequest,
+        schema: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compile BioQL through the HTTP gateway without executing it."""
+
+        if isinstance(query, BioQlCompileRequest):
+            if schema is not None:
+                raise ArgumentError("schema must be omitted when query is a BioQlCompileRequest")
+            request = query
+        else:
+            if schema is None:
+                raise ArgumentError("schema is required when query is a string")
+            request = BioQlCompileRequest(query, schema)
+        return self.call_tool("bioql_compile", request.to_mcp_arguments())
+
     def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         if after < 0 or not 1 <= limit <= 1000:
             raise ArgumentError("after must be non-negative and limit must be 1..=1000")
@@ -377,6 +395,23 @@ class AsyncApiClient:
         if not isinstance(request, BioCapabilityEvidenceAuditRequest):
             raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
         return await self.call_tool("biocapability_evidence_audit", request.to_mcp_arguments())
+
+    async def bioql_compile(
+        self,
+        query: str | BioQlCompileRequest,
+        schema: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.bioql_compile`."""
+
+        if isinstance(query, BioQlCompileRequest):
+            if schema is not None:
+                raise ArgumentError("schema must be omitted when query is a BioQlCompileRequest")
+            request = query
+        else:
+            if schema is None:
+                raise ArgumentError("schema is required when query is a string")
+            request = BioQlCompileRequest(query, schema)
+        return await self.call_tool("bioql_compile", request.to_mcp_arguments())
 
     async def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.events, after=after, limit=limit)

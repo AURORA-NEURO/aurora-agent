@@ -166,6 +166,9 @@ The Python SDK now exposes the same evidence-conditioned profile as a typed work
 evidence dimensions, explicit observed/reproduced/declared/missing states, support-field validation,
 claim prerequisite validation, duplicate-ID rejection, and sync/async/HTTP transport helpers. Rust
 remains authoritative for metric comparability, release posture, and nested scientific audits.
+It also exposes `BioQlCompileRequest` with bounded query and schema transport across sync MCP,
+async MCP, and HTTP; the compiler remains fail-closed and non-executing, with Rust retaining
+authority over schema, units, frames, temporal semantics, provenance, access labels, and cost.
 
 The table below is a snapshot; the script is the live source.
 

@@ -52,6 +52,7 @@ from .benchmark import (
     summarize_distribution,
 )
 from .bids import BidsAdapter, BidsAuditResult, BidsFinding, audit_bids
+from .bioql import BIOQL_SCHEMA, MAX_BIOQL_QUERY_BYTES, MAX_BIOQL_SCHEMA_BYTES, BioQlCompileRequest
 from .authoring import (
     AcceptanceResult,
     AuthoringError,
@@ -153,6 +154,7 @@ __version__ = "0.1.0"
 __all__ = [
     "ArgumentError",
     "BioCapabilityEvidenceAuditRequest",
+    "BioQlCompileRequest",
     "ApiClient",
     "ApiError",
     "AcceptanceResult",
@@ -166,6 +168,9 @@ __all__ = [
     "BidsAdapter",
     "BidsAuditResult",
     "BidsFinding",
+    "BIOQL_SCHEMA",
+    "MAX_BIOQL_QUERY_BYTES",
+    "MAX_BIOQL_SCHEMA_BYTES",
     "BootstrapInterval",
     "AsyncClient",
     "AsyncApiClient",
