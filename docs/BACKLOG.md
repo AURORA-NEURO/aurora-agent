@@ -227,6 +227,8 @@ NIfTI header and H5AD/Zarr metadata inspection, while keeping full array/matrix 
 missing dependencies explicit.
 Dependency-gated pydicom and pysam bindings now cover metadata-only DICOM, indexed/compressed VCF/BCF,
 and BAM/CRAM record projection when those packages are installed; absent packages remain explicit.
+The OME-Zarr route now reads and audits multiscale metadata directly from Zarr groups without
+loading image chunks or pixel values.
 
 
 ## §11 Developer Platform — 6 uncovered

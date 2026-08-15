@@ -98,6 +98,9 @@ The readers avoid full image-array and matrix-value materialization.
 The same dependency boundary now covers pydicom metadata-only DICOM and pysam indexed VCF/BCF plus
 BAM/CRAM records; each delegates to the corresponding projection audit and reports absent packages
 as typed unsupported execution rather than silently changing formats.
+The OME-Zarr route now inspects Zarr metadata directly and audits multiscale axes, level shapes,
+chunk bounds, spatial transforms, channel/label metadata, and provenance without reading image
+chunks or pixel values.
 The Python benchmark layer now complements Rust's descriptive metrics kernel with typed evidence
 rows, distribution summaries, direction-aware paired contrasts, and deterministic observation- or
 replicate-group bootstrap intervals. It preserves declared/missing/blocked populations and labels

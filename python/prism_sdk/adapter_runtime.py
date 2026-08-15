@@ -20,6 +20,7 @@ from .biological import AdapterDescriptor, AdapterRegistry
 from .dicom import audit_dicom
 from .errors import ArgumentError
 from .nifti import audit_nifti
+from .ome_zarr import audit_ome_zarr
 from .optional_readers import (
     OptionalDependencyUnavailable,
     read_alignment_file,
@@ -27,6 +28,7 @@ from .optional_readers import (
     read_dicom_projection,
     read_indexed_vcf,
     read_nifti_header,
+    read_ome_zarr,
 )
 from .vcf import parse_vcf
 
@@ -140,6 +142,7 @@ class AdapterRuntime:
             "bioprism.python.dicom",
             "bioprism.python.vcf_indexed",
             "bioprism.python.bam_cram",
+            "bioprism.python.ome_zarr",
         }
     )
 
@@ -326,6 +329,11 @@ class AdapterRuntime:
                 max_records=payload.get("max_records", 100_000),
                 max_items=request.max_items,
             )
+        if adapter_id == "bioprism.python.ome_zarr":
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("ome_zarr payload requires a string 'path'")
+            return read_ome_zarr(path, source_id=request.source_id, provenance=request.provenance, max_items=request.max_items)
         raise ArgumentError(f"no dispatch binding exists for {adapter_id!r}")
 
     @staticmethod

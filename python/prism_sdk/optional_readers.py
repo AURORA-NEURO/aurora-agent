@@ -18,6 +18,7 @@ from .authoring import content_digest
 from .dicom import audit_dicom
 from .errors import ArgumentError
 from .nifti import audit_nifti
+from .ome_zarr import audit_ome_zarr
 from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
 
 
@@ -564,6 +565,54 @@ def read_alignment_file(
             alignment_file.close()
 
 
+def read_ome_zarr(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read only OME-Zarr group attributes and array metadata through zarr."""
+
+    candidate = _path(path, field="OME-Zarr path", directory=True)
+    zarr = _import("zarr")
+    try:
+        group = zarr.open_group(str(candidate), mode="r")
+        attrs = dict(group.attrs)
+        multiscales = attrs.get("multiscales", [])
+        if not isinstance(multiscales, list):
+            multiscales = list(multiscales) if isinstance(multiscales, tuple) else []
+        projection: dict[str, Any] = {"multiscales": [], "omero": attrs.get("omero"), "labels": attrs.get("labels", {})}
+        for multiscale in multiscales:
+            if not isinstance(multiscale, Mapping):
+                projection["multiscales"].append(multiscale)
+                continue
+            datasets: list[dict[str, Any]] = []
+            for dataset in multiscale.get("datasets", []):
+                if not isinstance(dataset, Mapping):
+                    datasets.append(dataset)
+                    continue
+                dataset_path = dataset.get("path")
+                array = group[dataset_path] if isinstance(dataset_path, str) else None
+                if array is None:
+                    datasets.append(dict(dataset))
+                    continue
+                if hasattr(array, "shape") and hasattr(array, "chunks"):
+                    row = dict(dataset)
+                    row.update({"shape": [int(item) for item in array.shape], "chunks": [int(item) for item in array.chunks], "dtype": str(array.dtype)})
+                    datasets.append(row)
+                else:
+                    datasets.append(dict(dataset))
+            row = dict(multiscale)
+            row["datasets"] = datasets
+            projection["multiscales"].append(row)
+        return audit_ome_zarr(projection, source_id=source_id, provenance=provenance, max_items=max_items).to_wire()
+    except ArgumentError:
+        raise
+    except Exception as error:  # noqa: BLE001
+        raise ArgumentError(f"OME-Zarr metadata inspection failed for {path!r}: {error}") from error
+
+
 __all__ = [
     "MAX_READER_CATEGORIES",
     "MAX_READER_FILE_BYTES",
@@ -575,4 +624,5 @@ __all__ = [
     "read_dicom_projection",
     "read_indexed_vcf",
     "read_nifti_header",
+    "read_ome_zarr",
 ]

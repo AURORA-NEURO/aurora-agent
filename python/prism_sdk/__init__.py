@@ -78,6 +78,7 @@ from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
 from .mission import MissionBinding, MissionPolicy, MissionRequest, MissionStep
 from .nifti import NiftiAdapter, NiftiAuditResult, NiftiFinding, audit_nifti
+from .ome_zarr import OmeAuditResult, OmeFinding, OmeZarrAdapter, audit_ome_zarr
 from .oracle import (
     Admissibility,
     EvidenceTier,
@@ -106,6 +107,7 @@ from .optional_readers import (
     read_dicom_projection,
     read_indexed_vcf,
     read_nifti_header,
+    read_ome_zarr,
 )
 from .workspace import AsyncWorkspace, Workspace
 from .workbench import WorkbenchRequest
@@ -178,6 +180,9 @@ __all__ = [
     "NiftiAdapter",
     "NiftiAuditResult",
     "NiftiFinding",
+    "OmeAuditResult",
+    "OmeFinding",
+    "OmeZarrAdapter",
     "MissingnessAuditRequest",
     "OracleCombineRequest",
     "OracleManifest",
@@ -222,6 +227,7 @@ __all__ = [
     "audit_bids",
     "audit_dicom",
     "audit_nifti",
+    "audit_ome_zarr",
     "audit_anndata",
     "audit_alignments",
     "execute_projection",
@@ -234,6 +240,7 @@ __all__ = [
     "read_dicom_projection",
     "read_indexed_vcf",
     "read_nifti_header",
+    "read_ome_zarr",
     "paired_effect",
     "summarize_distribution",
     "validate_pack",

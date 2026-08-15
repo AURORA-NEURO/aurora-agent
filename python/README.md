@@ -96,6 +96,9 @@ loading image arrays or matrix values; missing optional packages remain typed re
 The same runtime has dependency-gated pydicom and pysam bindings for metadata-only DICOM,
 indexed/compressed VCF/BCF, and BAM/CRAM records. Each feeds the corresponding audited projection;
 absent pydicom/pysam packages produce explicit unsupported results.
+`OmeZarrAdapter`, `audit_ome_zarr()`, and `read_ome_zarr()` cover multiscale axes, level shapes,
+chunks, scale/translation transforms, channels, labels, and provenance using only Zarr metadata;
+image chunks and pixel values are not loaded.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates
