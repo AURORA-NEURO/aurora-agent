@@ -71,6 +71,11 @@ content moderation, clinical decision support, or medical-device authorization.
 conventional unit semantics, caveats, report digest, tagged first blocking reasons, and policy
 parity remain visible. The clients do not invent UCUM parsing, ontology hierarchy, coordinate
 registration, or source provenance; those remain caller/kernel boundaries.
+`hub_search` is now typed across both SDKs as well: the request retains federation/catalog/query
+evidence and bounds, while the report validates non-empty facet explanations, deduplicated match
+identity, near-miss counts, exact truncation accounting, authority standing, trust tiers, digest
+identity, and all five freshness outcomes. The clients do not turn caller-supplied registry
+membership into verified signatures or lexical facets into semantic similarity.
 `agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
 deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
 blocking dependent work, bounding output, and refusing side-effect confirmations by default. Serial

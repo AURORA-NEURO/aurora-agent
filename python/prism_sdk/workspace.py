@@ -98,6 +98,7 @@ from .safety import (
     safety_posture_report,
     safety_release_gate_report,
 )
+from .hub import HubSearchArgs, HubSearchReport, hub_search_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 
@@ -674,6 +675,23 @@ class Workspace:
         """Return typed comparability, conversion receipt, caveats, and blocking reason."""
 
         return measurement_compare_report(self.measurement_compare(request))
+
+    def hub_search(
+        self,
+        request: HubSearchArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Search bounded federated catalogs while preserving authority and freshness evidence."""
+
+        normalized = request if isinstance(request, HubSearchArgs) else HubSearchArgs.from_wire(request)
+        return self.tool("hub_search", normalized.to_mcp_arguments())
+
+    def hub_search_report(
+        self,
+        request: HubSearchArgs | Mapping[str, Any],
+    ) -> HubSearchReport:
+        """Return typed matches, near misses, facet reasons, and provenance."""
+
+        return hub_search_report(self.hub_search(request))
 
     def oracle_combine(
         self,
@@ -1618,6 +1636,23 @@ class AsyncWorkspace:
         """Return typed async measurement-comparability evidence."""
 
         return measurement_compare_report(await self.measurement_compare(request))
+
+    async def hub_search(
+        self,
+        request: HubSearchArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.hub_search`."""
+
+        normalized = request if isinstance(request, HubSearchArgs) else HubSearchArgs.from_wire(request)
+        return await self.tool("hub_search", normalized.to_mcp_arguments())
+
+    async def hub_search_report(
+        self,
+        request: HubSearchArgs | Mapping[str, Any],
+    ) -> HubSearchReport:
+        """Return typed async federated hub-search evidence."""
+
+        return hub_search_report(await self.hub_search(request))
 
     async def oracle_combine(
         self,

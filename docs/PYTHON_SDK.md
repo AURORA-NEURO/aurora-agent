@@ -268,6 +268,11 @@ invent defaults:
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit
   conversion and its exact/conventional status, retains caveats, validates the report digest, and
   exposes the first typed blocking reason rather than silently coercing values.
+- `HubSearchArgs` and `hub_search(...)` preserve caller-supplied federation, catalog, and exact
+  facet query declarations under the server's catalog/release/result bounds. `HubSearchReport`
+  types every match, non-empty facet explanation, near miss, trust tier, namespace authority,
+  freshness state, digest, and truncation count; mirror provenance is never collapsed into origin
+  authority and omitted exclusions cannot be mistaken for an exhaustive result.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

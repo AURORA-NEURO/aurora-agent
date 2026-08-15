@@ -188,6 +188,11 @@ of the result rather than being inferred from a green transport response.
 explicit conversion records, caveats, a report SHA-256, and the closed first-blocking reason
 vocabulary. The input preserves caller-supplied standards declarations as JSON so the Rust
 standards kernel remains authoritative for units, frames, builds, and ontology bindings.
+`hubSearch` returns `HubSearchResult` with typed exact-facet matches, required `why` evidence,
+near-miss exclusions, trust tier, authority provenance, freshness variants, and explicit bounded
+truncation. Federation and catalog values remain JSON inputs because the Rust hubapi owns their
+serialization and authority validation; the client does not invent registry membership or
+semantic-search claims.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

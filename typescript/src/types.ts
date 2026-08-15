@@ -1241,6 +1241,79 @@ export interface SafetyPostureResult extends JsonObject {
   threat_details?: SafetyThreatResult[];
 }
 
+export interface HubSearchArgs extends JsonObject {
+  federation: JsonObject;
+  catalogs: JsonObject[];
+  query: JsonObject;
+  max_items?: number;
+}
+
+export type HubTrustTier = "unranked" | "exploratory" | "generated_verified" | "reviewed" | "gold";
+
+export interface HubAuthoritativeAuthorityResult extends JsonObject {
+  authority: "authoritative";
+  registry: string;
+}
+
+export interface HubCarriedAuthorityResult extends JsonObject {
+  authority: "carried";
+  mirror: string;
+  origin: string;
+}
+
+export type HubAuthorityResult = HubAuthoritativeAuthorityResult | HubCarriedAuthorityResult;
+
+export interface HubStalenessBoundResult extends JsonObject {
+  max_lag_epochs: number;
+}
+
+export type HubFreshnessResult =
+  | { freshness: "authoritative" }
+  | { freshness: "within_bound" | "beyond_bound"; lag: number; bound: HubStalenessBoundResult; synced_at: number }
+  | { freshness: "undetermined"; bound: HubStalenessBoundResult; synced_at: number }
+  | { freshness: "ahead_of_reference"; synced_at: number; reference: number };
+
+export type HubWhyResult =
+  | { why: "namespace_matched"; namespace: string }
+  | { why: "keyword_matched"; keyword: string }
+  | { why: "term_in_name" | "term_in_summary"; term: string }
+  | { why: "tier_met"; required: HubTrustTier; observed: HubTrustTier; according_to: string }
+  | { why: "dependency_matched"; on: string }
+  | { why: "usable_by_a_new_dependent" };
+
+export interface HubSearchMatchResult extends JsonObject {
+  name: string;
+  version: string;
+  digest: string;
+  summary: string;
+  tier: HubTrustTier;
+  authority: HubAuthorityResult;
+  freshness: HubFreshnessResult;
+  why: HubWhyResult[];
+}
+
+export interface HubExcludedResult extends JsonObject {
+  name: string;
+  version: string;
+  failed: string;
+}
+
+export interface HubSearchResult extends JsonObject {
+  ok: boolean;
+  catalog_count: number;
+  release_count: number;
+  requested_limit: number | null;
+  effective_limit: number;
+  matches: HubSearchMatchResult[];
+  match_count: number;
+  excluded: HubExcludedResult[];
+  excluded_count: number;
+  omitted_excluded: number;
+  truncated: boolean;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface MeasurementCompareArgs extends JsonObject {
   left: JsonObject;
   right: JsonObject;

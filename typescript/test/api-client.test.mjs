@@ -275,6 +275,21 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["unit conversion is explicit"],
         limitations: ["caller-supplied declarations"],
       } } } });
+      if (path === "/v1/tools/hub_search") return jsonResponse({ ok: true, tool: "hub_search", request_id: "r22", mcp: { result: { structuredContent: {
+        ok: true,
+        catalog_count: 1,
+        release_count: 1,
+        requested_limit: null,
+        effective_limit: 100,
+        matches: [{ name: "bioprism/onco", version: "1.0.0", digest: "sha256:onco", summary: "oncology reference pack", tier: "reviewed", authority: { authority: "authoritative", registry: "origin" }, freshness: { freshness: "authoritative" }, why: [{ why: "keyword_matched", keyword: "onco" }] }],
+        match_count: 1,
+        excluded: [],
+        excluded_count: 0,
+        omitted_excluded: 0,
+        truncated: false,
+        guarantees: ["every match carries its matching facets, authority, tier, digest, and freshness"],
+        limitations: ["catalog contents are caller-supplied"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -458,6 +473,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const medical = await client.medicalBoundaryCheck({ output: { side: "clinical", category: "treatment_selection", label: "choose a treatment" } });
   const posture = await client.safetyPosture({ include_threats: false });
   const measurement = await client.measurementCompare({ left: { label: "left" }, right: { label: "right" }, require_bound_terms: false });
+  const hub = await client.hubSearch({ federation: { members: {} }, catalogs: [], query: { facets: [] }, max_items: 3 });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -494,6 +510,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(medical.mcp.result.structuredContent.admitted, false);
   assert.equal(posture.mcp.result.structuredContent.coverage.unmitigated, 4);
   assert.equal(measurement.mcp.result.structuredContent.report.verdict.verdict, "comparable");
+  assert.equal(hub.mcp.result.structuredContent.matches[0].authority.authority, "authoritative");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

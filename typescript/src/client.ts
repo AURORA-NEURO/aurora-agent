@@ -32,6 +32,8 @@ import type {
   MedicalBoundaryResult,
   SafetyPostureArgs,
   SafetyPostureResult,
+  HubSearchArgs,
+  HubSearchResult,
   MeasurementCompareArgs,
   MeasurementCompareResult,
   OpsAcceptanceArgs,
@@ -325,6 +327,10 @@ export class ApiClient {
 
   async safetyPosture(args: SafetyPostureArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<SafetyPostureResult>> {
     return this.callTool<SafetyPostureResult>("safety_posture", args, options);
+  }
+
+  async hubSearch(args: HubSearchArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubSearchResult>> {
+    return this.callTool<HubSearchResult>("hub_search", args, options);
   }
 
   async measurementCompare(args: MeasurementCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MeasurementCompareResult>> {

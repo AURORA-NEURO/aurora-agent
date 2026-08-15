@@ -99,6 +99,7 @@ from .safety import (
     safety_posture_report,
     safety_release_gate_report,
 )
+from .hub import HubSearchArgs, HubSearchReport, hub_search_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
@@ -858,6 +859,23 @@ class ApiClient:
         """Return typed HTTP measurement-comparability evidence."""
 
         return measurement_compare_report(self.measurement_compare(request))
+
+    def hub_search(
+        self,
+        request: HubSearchArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Search bounded federated catalogs through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubSearchArgs) else HubSearchArgs.from_wire(request)
+        return self.call_tool("hub_search", normalized.to_mcp_arguments())
+
+    def hub_search_report(
+        self,
+        request: HubSearchArgs | Mapping[str, Any],
+    ) -> HubSearchReport:
+        """Return typed HTTP federated hub-search evidence."""
+
+        return hub_search_report(self.hub_search(request))
 
     def biocapability_evidence_audit(
         self,
@@ -1846,6 +1864,23 @@ class AsyncApiClient:
         """Return typed async HTTP measurement-comparability evidence."""
 
         return measurement_compare_report(await self.measurement_compare(request))
+
+    async def hub_search(
+        self,
+        request: HubSearchArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.hub_search`."""
+
+        normalized = request if isinstance(request, HubSearchArgs) else HubSearchArgs.from_wire(request)
+        return await self.call_tool("hub_search", normalized.to_mcp_arguments())
+
+    async def hub_search_report(
+        self,
+        request: HubSearchArgs | Mapping[str, Any],
+    ) -> HubSearchReport:
+        """Return typed async HTTP federated hub-search evidence."""
+
+        return hub_search_report(await self.hub_search(request))
 
     async def biocapability_evidence_audit(
         self,
