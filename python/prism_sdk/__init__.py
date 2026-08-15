@@ -72,7 +72,15 @@ from .authoring import (
 )
 from .bed import BedAdapter, BedFinding, BedParseError, BedParseResult, parse_bed
 from .client import Client, ClientConfig
-from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
+from .capability import (
+    CapabilityQuery,
+    CapabilityRouteCoverage,
+    CapabilityRouteNeed,
+    CapabilityRouteNeedReport,
+    CapabilityRouteReport,
+    CapabilityRouteRequest,
+    capability_route_report,
+)
 from .context_requests import (
     CONTEXT_REQUEST_SCHEMA,
     MAX_CONTEXT_HANDLE_BYTES,
@@ -356,7 +364,11 @@ __all__ = [
     "CalibrationObservation",
     "CapabilityQuery",
     "CapabilityRouteNeed",
+    "CapabilityRouteNeedReport",
+    "CapabilityRouteCoverage",
+    "CapabilityRouteReport",
     "CapabilityRouteRequest",
+    "capability_route_report",
     "CONTEXT_REQUEST_SCHEMA",
     "MAX_CONTEXT_HANDLE_BYTES",
     "MAX_CONTEXT_PATH_BYTES",

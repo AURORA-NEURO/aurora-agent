@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from prism_sdk import (
     AdapterPlanRequest,
@@ -13,8 +15,10 @@ from prism_sdk import (
     AsyncWorkspace,
     CalibrationObservation,
     CapabilityQuery,
+    CapabilityRouteReport,
     CapabilityRouteNeed,
     CapabilityRouteRequest,
+    capability_route_report,
     Client,
     MetricObservation,
     MissionBinding,
@@ -54,6 +58,49 @@ def observation() -> MetricObservation:
         latency_ms=20.0,
         evidence=AnalyticsEvidence.REPRODUCED,
     )
+
+
+def route_report_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "capability_route",
+        "route_id": "r" * 64,
+        "catalog_digest": "c" * 64,
+        "goal": "compose evidence",
+        "needs": [
+            {
+                "id": "oncology",
+                "resolution": "ranked_candidates",
+                "candidate_groups": ["oncology"],
+                "candidate_domains": ["oncology"],
+                "candidate_tools": ["oncology_search"],
+                "search": {"matches": [{"group": {"id": "oncology"}}]},
+            }
+        ],
+        "unresolved_needs": [],
+        "recommended_tools": ["oncology_search"],
+        "recommended_tool_count": 1,
+        "recommended_tool_overflow": 0,
+        "route_coverage": {
+            "needs_total": 1,
+            "needs_resolved": 1,
+            "needs_unresolved": 0,
+            "candidate_group_count": 1,
+            "candidate_groups": ["oncology"],
+            "candidate_domain_count": 1,
+            "candidate_domains": ["oncology"],
+            "candidate_tool_count": 1,
+            "posture": "routing evidence only",
+        },
+        "schema_attachment": {
+            "requested": True,
+            "returned": 1,
+            "missing": [],
+        },
+        "execution": "not_started",
+        "guarantees": ["no routed tool was executed"],
+        "limitations": ["candidate ranking is not authorization"],
+    }
 
 
 class AnalyticsModelTests(unittest.TestCase):
@@ -296,6 +343,32 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             CapabilityRouteRequest("goal", [{"id": "same"}, {"id": "same"}])
 
+    def test_capability_route_report_validates_direct_projection_and_coverage(self) -> None:
+        report = CapabilityRouteReport.from_wire(route_report_payload())
+        self.assertTrue(report.route_coverage.fully_resolved)
+        self.assertEqual(report.resolved_needs[0].candidate_domains, ("oncology",))
+        self.assertEqual(report.candidate_domains, ("oncology",))
+        self.assertEqual(report.to_dict()["route_id"], "r" * 64)
+
+    def test_capability_route_report_extracts_http_json_text_projection(self) -> None:
+        envelope = {
+            "ok": True,
+            "mcp": {
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(route_report_payload())}]
+                }
+            },
+        }
+        report = capability_route_report(envelope)
+        self.assertEqual(report.goal, "compose evidence")
+        self.assertEqual(report.route_coverage.candidate_domain_count, 1)
+
+    def test_capability_route_report_rejects_inconsistent_coverage(self) -> None:
+        payload = route_report_payload()
+        payload["route_coverage"]["needs_resolved"] = 0
+        with self.assertRaises(ArgumentError):
+            CapabilityRouteReport.from_wire(payload)
+
 
 class AnalyticsWorkspaceTests(unittest.TestCase):
     def test_sync_workspace_sends_typed_analytics_request(self) -> None:
@@ -349,6 +422,18 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             )
         self.assertEqual(result["echo"]["goal"], "compose evidence")
         self.assertEqual(result["echo"]["needs"][0]["id"], "oncology")
+
+    def test_sync_workspace_typed_capability_route_report_delegates_to_raw_route(self) -> None:
+        with patch.object(Workspace, "capability_route", return_value=route_report_payload()) as route:
+            report = Workspace(None).capability_route_report("compose evidence", [{"id": "oncology"}])  # type: ignore[arg-type]
+        self.assertTrue(report.route_coverage.fully_resolved)
+        route.assert_called_once_with(
+            "compose evidence",
+            [{"id": "oncology"}],
+            max_candidates_per_need=10,
+            max_tools=128,
+            include_tools=False,
+        )
 
     def test_sync_workspace_exposes_adapter_planning(self) -> None:
         with Client(command(), timeout=2) as client:
@@ -404,6 +489,25 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 [CapabilityRouteNeed("release", CapabilityQuery(tool="bundle_verify"))],
             )
         self.assertEqual(result["echo"]["needs"][0]["tool"], "bundle_verify")
+
+    async def test_async_workspace_typed_capability_route_report_delegates_to_raw_route(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "capability_route",
+            new_callable=AsyncMock,
+            return_value=route_report_payload(),
+        ) as route:
+            report = await AsyncWorkspace(None).capability_route_report(  # type: ignore[arg-type]
+                "compose evidence", [{"id": "oncology"}]
+            )
+        self.assertEqual(report.recommended_tools, ("oncology_search",))
+        route.assert_awaited_once_with(
+            "compose evidence",
+            [{"id": "oncology"}],
+            max_candidates_per_need=10,
+            max_tools=128,
+            include_tools=False,
+        )
 
     async def test_async_workspace_exposes_adapter_planning(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

@@ -534,7 +534,10 @@ conservative incoming-dependent closure and typed propagation stops for a change
 affected task routes retained as explicit invalidation evidence rather than a semantic-diff claim.
 Cross-domain `capability_route` responses additionally report per-need candidate domains and an
 aggregate `route_coverage` ledger, allowing the agent to see whether its proposed route spans the
-intended domains before constructing an explicit mission.
+intended domains before constructing an explicit mission. The Python SDK exposes the same evidence
+through `CapabilityRouteReport.from_wire(...)` and sync/async `capability_route_report(...)` helpers;
+they reconcile the per-need counts, candidate ledgers, and bounded recommendation overflow while
+preserving the raw route for audit.
 
 ## Evaluating a context policy
 

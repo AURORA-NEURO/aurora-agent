@@ -118,6 +118,13 @@ invent defaults:
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates. Its raw result also
   includes per-need candidate domains and a `route_coverage` ledger for resolved/unresolved needs.
+- `CapabilityRouteReport.from_wire(...)` validates that route-level counts reconcile with per-need
+  evidence, recommended-tool overflow, and the aggregate domain/group/tool ledger. The
+  `capability_route_report(...)` parser accepts either a decoded stdio payload or an HTTP REST
+  envelope; `Workspace.capability_route_report(...)`, `AsyncWorkspace.capability_route_report(...)`,
+  `ApiClient.capability_route_report(...)`, and its async counterpart provide bounded typed views
+  without executing any candidate. `report.route_coverage.fully_resolved` is routing evidence only,
+  not authorization, domain validity, or scientific readiness.
 - `mission_from_route(route, mission_id, selections, policy=...)` converts that route into a
   provenance-preserving `MissionAssembly` only after every need has one caller-selected candidate,
   explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or

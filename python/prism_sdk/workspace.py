@@ -16,7 +16,13 @@ from .authoring import PackArtifact
 from .biological import AdapterPlanRequest
 from .bioql import BioQlCompileRequest
 from .client import Client
-from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
+from .capability import (
+    CapabilityQuery,
+    CapabilityRouteNeed,
+    CapabilityRouteReport,
+    CapabilityRouteRequest,
+    capability_route_report,
+)
 from .context_requests import (
     ContextLayer,
     FiberCompileRequest,
@@ -361,6 +367,27 @@ class Workspace:
             include_tools,
         )
         return self.tool("capability_route", request.to_mcp_arguments())
+
+    def capability_route_report(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> CapabilityRouteReport:
+        """Return a validated typed view over a non-executing route proposal."""
+
+        return capability_route_report(
+            self.capability_route(
+                goal,
+                needs,
+                max_candidates_per_need=max_candidates_per_need,
+                max_tools=max_tools,
+                include_tools=include_tools,
+            )
+        )
 
     def adapter_plan(
         self,
@@ -1009,6 +1036,27 @@ class AsyncWorkspace:
             include_tools,
         )
         return await self.tool("capability_route", request.to_mcp_arguments())
+
+    async def capability_route_report(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> CapabilityRouteReport:
+        """Async counterpart to :meth:`Workspace.capability_route_report`."""
+
+        return capability_route_report(
+            await self.capability_route(
+                goal,
+                needs,
+                max_candidates_per_need=max_candidates_per_need,
+                max_tools=max_tools,
+                include_tools=include_tools,
+            )
+        )
 
     async def adapter_plan(
         self,
