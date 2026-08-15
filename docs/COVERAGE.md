@@ -61,7 +61,7 @@ bounded search result, distinguishes explicit tool filters from ranked candidate
 executes the proposed tools.
 `adapter_plan` makes the biological-format boundary callable: it matches explicit source formats
 and source shapes against native CSV/inventory adapters and Python-delegated DICOM, NIfTI/BIDS,
-AnnData/Zarr, VCF, FASTA, FASTQ, GFF3, PDB, mzML, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
+AnnData/Zarr, VCF, FASTA, FASTQ, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
 distinguishes missing from unchecked optional dependencies before execution; it never sniffs
 content, fetches sources, imports packages, or claims that heavyweight parsing has occurred.
 The Python adapter layer now also contains a bounded text VCF reader: it validates the complete
@@ -120,6 +120,10 @@ boundaries without disclosing annotation values or feature identifiers.
 The dependency-free PDB route audits fixed-column atoms, models, chains, residues, coordinates,
 alternate locations, crystallographic metadata, resolution, CONECT edges, and bounded geometry
 without emitting raw structure records.
+The dependency-free SDF/MOL route audits bounded MDL V2000 molecular graphs, fixed-column atom and
+bond rows, elements, formal charge/isotope/radical properties, connected components, coordinate
+summaries, duplicate data fields, and source-bound molecule/graph digests without emitting molecule
+names, property values, or raw records. V3000 records are refused explicitly.
 The OME-Zarr route now inspects Zarr metadata directly and audits multiscale axes, level shapes,
 chunk bounds, spatial transforms, channel/label metadata, and provenance without reading image
 chunks or pixel values.

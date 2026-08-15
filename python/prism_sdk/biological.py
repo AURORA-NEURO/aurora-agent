@@ -417,6 +417,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free bounded PDB fixed-column reader validating models, coordinates, chains, residues, and connectivity without disclosing raw structure records.",
         ),
         _descriptor(
+            "bioprism.python.sdf_text",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("chemical/x-mdl-sdfile", "chemical/x-mdl-molfile", "text/sdf"),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("content_uninterpreted", "coordinate_frame_not_carried", "ontology_term_unmapped", "provenance_unavailable"),
+            ("subject", "sample", "molecule", "atom", "bond", "assay"),
+            "Dependency-free bounded SDF/MOL V2000 reader validating molecular graph counts, properties, connectivity, and coordinates without disclosing raw records.",
+        ),
+        _descriptor(
             "bioprism.python.fhir_ndjson",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/fhir+ndjson",),

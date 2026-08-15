@@ -502,6 +502,24 @@ impl AdapterRegistry {
                 "Dependency-free bounded PDB fixed-column reader validating models, coordinates, chains, residues, and connectivity without disclosing raw structure records.",
             ),
             descriptor(
+                "bioprism.python.sdf_text",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["chemical/x-mdl-sdfile", "chemical/x-mdl-molfile", "text/sdf"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ContentUninterpreted,
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::ProvenanceUnavailable,
+                ],
+                &["subject", "sample", "molecule", "atom", "bond", "assay"],
+                None,
+                "Dependency-free bounded SDF/MOL V2000 reader validating molecular graph counts, properties, connectivity, and coordinates without disclosing raw records.",
+            ),
+            descriptor(
                 "bioprism.python.fhir_ndjson",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -1042,6 +1060,26 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.pdb_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_sdf_selects_the_dependency_free_python_reader() {
+        let plan = AdapterRegistry::default()
+            .plan(request(Some("chemical/x-mdl-sdfile"), SourceKind::Bytes))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.sdf_text")
         );
         assert_eq!(
             plan.selected_adapter

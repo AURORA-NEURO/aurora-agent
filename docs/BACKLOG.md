@@ -220,7 +220,7 @@ The alignment projection route now covers reference dictionaries, CIGAR accounti
 bounds, flags, pairing, sorting, and coverage without decoding BAM/CRAM payloads, indexes, or
 reference bases.
 The typed Python adapter runtime now closes the concrete execution handoff across the parsed VCF,
-BIDS, DICOM, NIfTI, AnnData, alignment, FASTA, FASTQ, GFF3, PDB, mzML, OME-Zarr, and FHIR routes, normalizes outcome states and
+BIDS, DICOM, NIfTI, AnnData, alignment, FASTA, FASTQ, GFF3, PDB, SDF/MOL, mzML, OME-Zarr, and FHIR routes, normalizes outcome states and
 document digests, and refuses raw-byte routes explicitly when their optional binary-reader binding
 is absent.
 The verified optional-reader layer now binds installed nibabel and anndata environments for raw
@@ -248,6 +248,10 @@ without disclosing annotation values or feature identifiers.
 The PDB route now audits fixed-column atoms, models, chains, residues, coordinates, alternate
 locations, crystallographic cells, resolution, CONECT edges, and bounded geometry without emitting
 raw structure records.
+The SDF/MOL route now audits bounded MDL V2000 molecular graphs, atom and bond counts, element
+symbols, formal charge/isotope/radical property blocks, connected components, coordinate summaries,
+duplicate data fields, and source-bound molecule/graph digests without emitting names, property
+values, or raw records. V3000 is explicitly refused until a separate bounded implementation exists.
 
 
 ## §11 Developer Platform — 6 uncovered

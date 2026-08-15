@@ -63,7 +63,7 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
 `AdapterRegistry` and `adapter_plan()` add a dependency-free format boundary for tabular and
-biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, FASTA, FASTQ, GFF3, PDB, mzML, BAM/CRAM, OME-Zarr, and FHIR routes
+biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, FASTA, FASTQ, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes
 are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and
 semantic-loss declarations remain visible before parsing. The planners never sniff or fetch bytes.
 `BidsAdapter` and `audit_bids()` add a dependency-free BIDS manifest path: they validate bounded
@@ -125,6 +125,11 @@ cycles, directives, and embedded FASTA boundaries are audited without disclosing
 `parse_pdb()` and `read_pdb()` add a dependency-free structural-biology boundary: fixed-column atom
 fields, models, chains, residues, coordinates, alternate locations, crystallographic cells, resolution,
 CONECT edges, and geometry summaries are audited without emitting raw structure records.
+`parse_sdf()` and `read_sdf()` add a dependency-free small-molecule boundary for bounded MDL V2000
+records: atom/bond counts, elements, formal charges, isotopes, radicals, connected components,
+coordinates, duplicate data fields, and source-bound molecule/graph digests are audited without
+disclosing molecule names, property values, or raw molfile records. V3000 records are refused
+explicitly instead of being guessed.
 `parse_mzml()` and `read_mzml()` add a dependency-free mass-spectrometry boundary: bounded XML,
 spectrum identity, declared counts, MS levels, scan-time summaries, binary-array types, compression,
 precision, and encoded-length evidence are retained while binary m/z/intensity/time arrays are never

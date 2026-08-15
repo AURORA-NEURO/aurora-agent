@@ -82,7 +82,7 @@ invent defaults:
   semantic-loss and scope surface. `Workspace.adapter_plan(...)`, `ApiClient.adapter_plan(...)`,
   and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
   fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
-  OME-Zarr, FASTA, FASTQ, GFF3, PDB, mzML, and FHIR readers remain responsible for source-specific conformance in the Python layer.
+  OME-Zarr, FASTA, FASTQ, GFF3, PDB, SDF/MOL, mzML, and FHIR readers remain responsible for source-specific conformance in the Python layer.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and
@@ -118,7 +118,7 @@ invent defaults:
   explicit semantic-loss surfaces rather than being guessed.
 - `AdapterRuntime`, `ProjectionRequest`, and `execute_projection(...)` close the planning-to-
   execution handoff for the concrete parsed projection routes across VCF, BIDS, DICOM, NIfTI,
-  AnnData, alignment, OME-Zarr, and FHIR. The envelope normalizes succeeded, lossy,
+  AnnData, alignment, FASTA, FASTQ, GFF3, PDB, SDF/MOL, mzML, OME-Zarr, and FHIR. The envelope normalizes succeeded, lossy,
   invalid, blocked, rejected, and unsupported states, carries the authoritative adapter descriptor,
   preserves the audit document digest, and returns typed unsupported outcomes when a selected raw
   reader is unavailable. Payload values are not echoed in the request envelope.
@@ -161,6 +161,11 @@ invent defaults:
   boundary. They validate fixed-column atoms, models, chains, residues, coordinates, alternate
   locations, crystallographic metadata, resolution, and CONECT references while retaining only
   bounded geometry summaries and source-bound structure digests.
+- `SdfAdapter`, `parse_sdf(...)`, and `read_sdf(...)` provide a dependency-free small-molecule
+  boundary for bounded MDL V2000 records. They validate atom/bond counts and fixed columns, element
+  symbols, formal charge/isotope/radical property blocks, connectivity, coordinate summaries, and
+  duplicate data fields while retaining source-bound molecule/graph digests. Molecule names,
+  property values, and raw records are never emitted; V3000 records are explicitly refused.
 - `MzmlAdapter`, `parse_mzml(...)`, and `read_mzml(...)` provide a dependency-free mass-spectrometry
   metadata boundary. They validate bounded XML, spectrum IDs and counts, MS levels, binary-array
   declarations, compression, precision, and encoded lengths without decoding binary arrays or

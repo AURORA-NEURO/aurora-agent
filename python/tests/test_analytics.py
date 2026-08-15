@@ -172,6 +172,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(pdb.executable)
         self.assertEqual(pdb.selected_adapter.id, "bioprism.python.pdb_text")
 
+        sdf = AdapterRegistry().plan(
+            AdapterPlanRequest("molecules", SourceKind.BYTES, declared_format="chemical/x-mdl-sdfile"),
+            check_environment=False,
+        )
+        self.assertTrue(sdf.executable)
+        self.assertEqual(sdf.selected_adapter.id, "bioprism.python.sdf_text")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)

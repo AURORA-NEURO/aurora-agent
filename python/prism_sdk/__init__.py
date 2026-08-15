@@ -92,6 +92,7 @@ from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
 from .mzml import MzmlAdapter, MzmlFinding, MzmlParseError, MzmlParseResult, parse_mzml
 from .pdb import PdbAdapter, PdbFinding, PdbParseError, PdbParseResult, parse_pdb
+from .sdf import SdfAdapter, SdfFinding, SdfParseError, SdfParseResult, parse_sdf
 from .mission import MissionBinding, MissionPolicy, MissionRequest, MissionStep
 from .nifti import NiftiAdapter, NiftiAuditResult, NiftiFinding, audit_nifti
 from .ome_zarr import OmeAuditResult, OmeFinding, OmeZarrAdapter, audit_ome_zarr
@@ -129,6 +130,7 @@ from .optional_readers import (
     read_indexed_vcf,
     read_mzml,
     read_pdb,
+    read_sdf,
     read_nifti_header,
     read_ome_zarr,
 )
@@ -202,6 +204,10 @@ __all__ = [
     "PdbFinding",
     "PdbParseError",
     "PdbParseResult",
+    "SdfAdapter",
+    "SdfFinding",
+    "SdfParseError",
+    "SdfParseResult",
     "Independence",
     "Judgement",
     "JudgementBuilder",
@@ -291,6 +297,7 @@ __all__ = [
     "parse_mzml",
     "parse_gff3",
     "parse_pdb",
+    "parse_sdf",
     "parse_fhir_json",
     "parse_fhir_ndjson",
     "read_anndata_projection",
@@ -302,6 +309,7 @@ __all__ = [
     "read_gff3",
     "read_mzml",
     "read_pdb",
+    "read_sdf",
     "read_indexed_vcf",
     "read_nifti_header",
     "read_ome_zarr",

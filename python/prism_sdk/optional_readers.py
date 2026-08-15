@@ -25,6 +25,7 @@ from .mzml import MAX_MZML_BYTES, parse_mzml
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
 from .pdb import MAX_PDB_BYTES, parse_pdb
+from .sdf import MAX_SDF_BYTES, parse_sdf
 from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
 from .gff3 import MAX_GFF3_BYTES, parse_gff3
 
@@ -763,6 +764,33 @@ def read_pdb(
         raise ArgumentError(f"PDB read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_sdf(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_molecules: int = 100_000,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded SDF/MOL V2000 records and return the molecular-graph audit."""
+
+    candidate = _path(path, field="SDF path")
+    if candidate.stat().st_size > MAX_SDF_BYTES:
+        raise ArgumentError(f"SDF path exceeds the {MAX_SDF_BYTES}-byte reader limit")
+    try:
+        return parse_sdf(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            max_molecules=max_molecules,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"SDF read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_ome_zarr(
     path: str,
     *,
@@ -827,6 +855,7 @@ __all__ = [
     "read_gff3",
     "read_mzml",
     "read_pdb",
+    "read_sdf",
     "read_indexed_vcf",
     "read_nifti_header",
     "read_ome_zarr",
