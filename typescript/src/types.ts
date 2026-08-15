@@ -253,6 +253,13 @@ export interface MetricsProfileAuditArgs extends JsonObject {
   max_items?: number;
 }
 
+export interface MetricsAnalyticsAuditArgs extends JsonObject {
+  observations: JsonValue[];
+  pairs?: JsonValue[];
+  calibration?: JsonValue[];
+  calibration_bins?: number;
+}
+
 export interface BioCapabilityEvidenceAuditArgs extends JsonObject {
   metrics?: JsonObject;
   vectors?: JsonValue[];

@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 114);
+    assert_eq!(tools.len(), 115);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -2019,6 +2019,119 @@ fn metrics_profile_audit_keeps_unmeasured_capabilities_and_uncontested_leads_vis
         .find(|row| row["system"] == json!("system-b"))
         .unwrap();
     assert_eq!(system_b["unmeasured_capability_count"], json!(1));
+}
+
+#[test]
+fn metrics_analytics_audit_keeps_domains_missingness_and_paired_contrasts_typed() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "metrics_analytics_audit",
+        json!({
+            "observations": [
+                {
+                    "id": "verification-1",
+                    "dimension": "verification",
+                    "domain": "oncology",
+                    "system": "agent-a",
+                    "value": 0.80,
+                    "direction": "higher_is_better",
+                    "unit": "fraction",
+                    "condition": "pack/4",
+                    "replicate_group": "world-1",
+                    "cost": 4.0,
+                    "latency_ms": 20.0,
+                    "evidence": "observed"
+                },
+                {
+                    "id": "verification-2",
+                    "dimension": "verification",
+                    "domain": "oncology",
+                    "system": "agent-a",
+                    "value": 0.90,
+                    "direction": "higher_is_better",
+                    "unit": "fraction",
+                    "condition": "pack/4",
+                    "replicate_group": "world-2",
+                    "cost": 5.0,
+                    "latency_ms": 25.0,
+                    "evidence": "reproduced"
+                },
+                {
+                    "id": "verification-missing",
+                    "dimension": "verification",
+                    "domain": "oncology",
+                    "system": "agent-a",
+                    "value": 0.0,
+                    "direction": "higher_is_better",
+                    "unit": "fraction",
+                    "condition": "pack/4",
+                    "evidence": "missing"
+                }
+            ],
+            "pairs": [
+                {
+                    "id": "robustness-1",
+                    "dimension": "robustness",
+                    "domain": "oncology",
+                    "baseline": 0.90,
+                    "variant": 0.72,
+                    "direction": "higher_is_better",
+                    "tolerance": 0.20,
+                    "evidence": "observed"
+                },
+                {
+                    "id": "cross-modal-1",
+                    "dimension": "cross_modal_consistency",
+                    "domain": "oncology",
+                    "baseline": 0.80,
+                    "variant": 0.82,
+                    "direction": "higher_is_better",
+                    "tolerance": 0.05,
+                    "evidence": "reproduced"
+                }
+            ],
+            "calibration": [
+                { "id": "forecast-1", "domain": "oncology", "predicted": 0.9, "observed": 1.0, "evidence": "observed" },
+                { "id": "forecast-2", "domain": "oncology", "predicted": 0.1, "observed": 0.0, "evidence": "declared" }
+            ],
+            "calibration_bins": 5
+        }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["workflow"], json!("metrics_descriptive_analytics"));
+    assert_eq!(payload["coverage"]["measured_observations"], json!(2));
+    assert_eq!(payload["coverage"]["excluded_observations"], json!(1));
+    assert_eq!(payload["dimensions"][0]["values"]["count"], json!(2));
+    assert_eq!(payload["paired"].as_array().unwrap().len(), 2);
+    assert_eq!(payload["calibration"]["measured"], json!(1));
+    assert!(payload["caveats"].as_array().unwrap().len() >= 4);
+}
+
+#[test]
+fn metrics_analytics_audit_refuses_mixed_direction_with_a_structured_tool_error() {
+    let mut server = server();
+    let response = call(
+        &mut server,
+        "metrics_analytics_audit",
+        json!({
+            "observations": [
+                {
+                    "id": "one", "dimension": "latency", "domain": "runtime", "system": "a",
+                    "value": 10.0, "direction": "lower_is_better", "unit": "ms", "condition": "v1", "evidence": "observed"
+                },
+                {
+                    "id": "two", "dimension": "latency", "domain": "runtime", "system": "a",
+                    "value": 0.5, "direction": "higher_is_better", "unit": "fraction", "condition": "v1", "evidence": "observed"
+                }
+            ]
+        }),
+    );
+    assert_eq!(response["ok"], json!(false));
+    assert!(response["error"]
+        .as_str()
+        .unwrap()
+        .contains("metrics analytics refused"));
 }
 
 #[test]

@@ -2,8 +2,9 @@
 
 This document covers blueprint modules **11.04** (Python SDK), **11.05** (Python benchmark
 authoring SDK), **11.15** (evaluator/oracle/mutation SDK), and **11.16** (environment and pack
-authoring SDK). The package remains dependency-free and keeps Rust authoritative for canonical
-bytes, scientific invariants, oracle decisions, and release gates.
+authoring SDK). It also documents the typed client for the metrics analytics bridge. The package
+remains dependency-free and keeps Rust authoritative for canonical bytes, scientific invariants,
+metric arithmetic, oracle decisions, and release gates.
 
 The repository ships `python/prism_sdk`, a standard-library client for the Rust MCP server. It is
 the integration layer above the deterministic kernel described by [ADR-001](ADR-001-language-strategy.md):
@@ -66,6 +67,47 @@ invent defaults:
 gateway: health/capability discovery, REST tool calls, cursor-based event pages, and signed
 webhook subscription/delivery acknowledgement. They preserve status and JSON error payloads in
 `ApiError` and do not recreate Rust domain semantics.
+
+## Metrics analytics across domains
+
+`MetricObservation`, `PairedObservation`, and `CalibrationObservation` are small typed request
+models for the Rust `metrics_analytics_audit` kernel. They deliberately use caller-owned
+`dimension`, `domain`, `unit`, and `condition` strings, so one request can describe verification,
+oncology, multimodal agreement, translation, runtime cost, or multi-agent coordination without a
+new SDK release for every domain:
+
+```python
+from prism_sdk import (
+    AnalyticsDirection,
+    CalibrationObservation,
+    MetricObservation,
+)
+
+report = workspace.metrics_analytics_audit(
+    [MetricObservation(
+        id="world-1",
+        dimension="verification",
+        domain="oncology",
+        system="agent-a",
+        value=0.82,
+        direction=AnalyticsDirection.HIGHER_IS_BETTER,
+        unit="fraction",
+        condition="pack/4",
+        replicate_group="parent-world-1",
+        cost=4.2,
+        latency_ms=180.0,
+        evidence="reproduced",
+    )],
+    calibration=[CalibrationObservation("forecast-1", "oncology", 0.9, 1.0)],
+)
+```
+
+The response preserves measured versus declared/missing/blocked populations, descriptive
+performance/cost/latency summaries, replicate spread, paired deltas and retention for robustness
+or cross-modal/translation/design review, and equal-width calibration bins with Brier and expected
+calibration error. `Workspace` and `AsyncWorkspace` send exact wire models; they do not impute
+missing rows, pool dependent trials, run an assay, infer a causal effect, or convert a contrast
+into clinical evidence. An empty measured population stays `null` rather than becoming zero.
 
 ## Authoring packs, cells, and mutations
 
@@ -167,11 +209,11 @@ uncertainty, future-evidence firewalls, reproducibility divergence, and bounded 
 properties. These helpers never locally choose a biological truth or convert an abstention into a
 negative result.
 
-The package deliberately does not claim to implement DICOM/NIfTI/AnnData/VCF readers, benchmark
+The package deliberately does not claim to implement DICOM/NIfTI/AnnData/VCF readers, inferential
 statistics, OTLP export, a notebook UI, or CI deployment. The repository now ships a bounded REST
 gateway, pack/cell/mutation authoring contracts, and oracle/evaluation request contracts, but gRPC,
-durable event storage, external webhook delivery, biological format adapters, benchmark statistics,
-and those domain artifacts remain separate contracts.
+durable event storage, external webhook delivery, biological format adapters, statistical
+estimators, and those domain artifacts remain separate contracts.
 
 ## Verification
 

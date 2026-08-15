@@ -26,6 +26,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       const path = new URL(String(input)).pathname;
       if (path === "/v1/tools") return jsonResponse({ tools: [{ name: "echo", description: "test", inputSchema: { type: "object" } }] });
       if (path === "/v1/tools/echo") return jsonResponse({ ok: true, tool: "echo", request_id: "r1", mcp: { result: { structuredContent: { value: 3 } } }, guarantee: "shared" });
+      if (path === "/v1/tools/metrics_analytics_audit") return jsonResponse({ ok: true, tool: "metrics_analytics_audit", request_id: "r3", mcp: { result: { structuredContent: { workflow: "metrics_descriptive_analytics" } } } });
       if (path === "/v1/tools/refuse") return jsonResponse({ ok: true, tool: "refuse", request_id: "r2", mcp: { result: { isError: true, structuredContent: { reason: "blocked" } } }, guarantee: "shared" });
       return jsonResponse({ ok: true });
     },
@@ -36,6 +37,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(response.mcp.result.structuredContent.value, 3);
   assert.equal(seen.at(-1).init.headers.Authorization, "Bearer 0123456789abcdef");
   assert.equal(seen.at(-1).init.headers["x-request-id"], "request-1");
+  const analytics = await client.metricsAnalyticsAudit({ observations: [{ id: "one" }] });
+  assert.equal(analytics.mcp.result.structuredContent.workflow, "metrics_descriptive_analytics");
   await assert.rejects(client.callTool("unsafe/name"), ArgumentError);
   await assert.rejects(async () => client.requireToolSuccess(await client.callTool("refuse")), ToolRefusalError);
 });

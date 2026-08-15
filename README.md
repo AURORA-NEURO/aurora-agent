@@ -125,7 +125,7 @@ carries a typed verdict in [`crates/residue`](crates/residue) explaining why not
 | [`bioprism-lens`](crates/lens) | 03,33,42,43 | Graph lens grammar: the typed lens catalogue behind the evaluation hub, and the non-visual contract |
 | [`bioprism-mcp`](crates/mcp) | 11,43 | Model Context Protocol server exposing the FIBER context compiler to agents |
 | [`bioprism-megafactory`](crates/megafactory) | 35 | Section 35 remainder: million-scale factory modules scale and factory did not claim |
-| [`bioprism-metrics`](crates/metrics) | 03,33,43 | BioCapability metrics: aggregation rules, comparability of scores, and what a capability number may not claim |
+| [`bioprism-metrics`](crates/metrics) | 03,33,43 | BioCapability metrics: aggregation/comparability, bounded descriptive analytics, and what a capability number may not claim |
 | [`bioprism-modalities`](crates/modalities) | 28,30,43 | Modality data standards: what each assay family measures, what it cannot, and when two modalities are comparable |
 | [`bioprism-mutation`](crates/mutation) | 03,40 | Metamorphic mutations with executable postconditions, lineage, deduplication and effective-diversity accounting |
 | [`bioprism-obligation`](crates/obligation) | 39 | Decision obligation graph, BioContext capsule and the token budget controller |

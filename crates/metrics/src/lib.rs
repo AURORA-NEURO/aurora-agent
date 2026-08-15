@@ -86,6 +86,8 @@
 //! - [`comparability`] — first-blocking-dimension refusal, and the comparison report.
 //! - [`ranking`] — partial order, refusal, recorded totalisation, rank instability.
 //! - [`gate`] — release predicates with met / violated / unevaluable outcomes.
+//! - [`analytics`] — bounded domain-neutral descriptive summaries, paired contrasts, replicate
+//!   spread, cost/latency, and calibration arithmetic over caller-supplied observations.
 //!
 //! # What this crate does not do
 //!
@@ -94,8 +96,10 @@
 //! - **No real measurements.** There is no dataset, no fixture pack and no shipped grid. The tests
 //!   construct grids by hand precisely so that no number in this crate is mistaken for evidence.
 //! - **No statistical inference library.** No estimator, no bootstrap, no significance test, no
-//!   variance model. [`interval::Interval`] carries an interval a caller computed elsewhere,
-//!   together with the method and clustering unit that make it interpretable.
+//!   inferential variance model. [`interval::Interval`] carries an interval a caller computed
+//!   elsewhere, together with the method and clustering unit that make it interpretable.
+//!   [`analytics`] reports descriptive population variance and equal-width calibration summaries;
+//!   neither is an uncertainty interval or a fitted scientific model.
 //!   `bioprism-atlas` declines intervals for the same reason and this crate does not paper over it:
 //!   a grid built by [`grid::CapabilityGrid::from_atlas`] reports uncertainty gates as
 //!   *unevaluable*, which is the truthful verdict.
@@ -105,6 +109,7 @@
 //!   pack-4 score. Rescoring is a re-evaluation, not a conversion.
 
 pub mod aggregate;
+pub mod analytics;
 pub mod comparability;
 pub mod conditions;
 pub mod error;
@@ -117,6 +122,13 @@ pub mod weighting;
 pub use aggregate::{
     AggregationRule, BareScore, Coverage, CoveredAggregate, CoveredAggregateFields, UnmeasuredCell,
     WorstCell,
+};
+pub use analytics::{
+    analyse as analyse_analytics, AnalyticsCoverage, AnalyticsError, AnalyticsInput,
+    AnalyticsReport, CalibrationBin, CalibrationObservation, CalibrationSummary, DescriptiveStats,
+    DimensionSummary, Direction as AnalyticsDirection, EvidenceState as AnalyticsEvidenceState,
+    MetricObservation, PairSummary, PairedObservation, ANALYTICS_SCHEMA_VERSION,
+    MAX_ANALYTICS_ROWS,
 };
 pub use comparability::{
     aggregates_comparable, comparable, comparable_under, grids_comparable, ComparabilityPolicy,
@@ -138,8 +150,8 @@ pub use interval::{
 };
 pub use ranking::{
     breakdown, compare, compare_under, CapabilityBreakdown, CapabilityVector,
-    CollapsedIncomparability, Dominance, Instability, PairRelation, PartialRanking, RankInstability,
-    RankedSystem, SystemId, TotalRanking, Unorderable,
+    CollapsedIncomparability, Dominance, Instability, PairRelation, PartialRanking,
+    RankInstability, RankedSystem, SystemId, TotalRanking, Unorderable,
 };
 pub use weighting::{DeclaredWeighting, DeclaredWeightingFields};
 

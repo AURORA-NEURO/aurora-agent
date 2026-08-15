@@ -17,6 +17,7 @@ import type {
   HttpMethod,
   JsonObject,
   JsonValue,
+  MetricsAnalyticsAuditArgs,
   MetricsProfileAuditArgs,
   RestToolResponse,
   RuntimeExecutionSimulateArgs,
@@ -145,6 +146,10 @@ export class ApiClient {
 
   async metricsProfileAudit(args: MetricsProfileAuditArgs, options?: ClientRequestOptions) {
     return this.callTool("metrics_profile_audit", args, options);
+  }
+
+  async metricsAnalyticsAudit(args: MetricsAnalyticsAuditArgs, options?: ClientRequestOptions) {
+    return this.callTool("metrics_analytics_audit", args, options);
   }
 
   async bioCapabilityEvidenceAudit(args: BioCapabilityEvidenceAuditArgs, options?: ClientRequestOptions) {

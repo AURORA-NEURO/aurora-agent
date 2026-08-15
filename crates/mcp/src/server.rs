@@ -108,9 +108,9 @@ use bioprism_megafactory::{
     WorkRequest, WorkerProfile,
 };
 use bioprism_metrics::{
-    breakdown as metrics_breakdown, CapabilityVector,
+    analyse_analytics, breakdown as metrics_breakdown, AnalyticsInput, CapabilityVector,
     ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting, PartialRanking,
-    RankInstability, METRICS_SCHEMA_VERSION,
+    RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
 };
 use bioprism_modalities::{catalog::all as all_modalities, Modality, Resolution};
 use bioprism_mutation::{
@@ -516,6 +516,7 @@ impl Server {
             "research_ci_check" => self.research_ci_check(&arguments),
             "capability_rank" => self.capability_rank(&arguments),
             "metrics_profile_audit" => self.metrics_profile_audit(&arguments),
+            "metrics_analytics_audit" => self.metrics_analytics_audit(&arguments),
             "biocapability_evidence_audit" => self.biocapability_evidence_audit(&arguments),
             "safety_release_gate" => self.safety_release_gate(&arguments),
             "medical_boundary_check" => self.medical_boundary_check(&arguments),
@@ -3602,6 +3603,43 @@ impl Server {
             });
             output["rank_instability"] = json!(instability);
         }
+        Ok(output)
+    }
+
+    /// Run the domain-neutral section-33 descriptive analytics kernel.
+    ///
+    /// This sits beside `metrics_profile_audit` rather than replacing it: the profile tool audits
+    /// capability vectors and partial orders, while this tool audits measured scalar rows, paired
+    /// contrasts, and probability forecasts. The input remains caller-supplied and the response
+    /// says so explicitly; no causal, clinical, or universal claim is inferred here.
+    fn metrics_analytics_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode metrics analytics input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("metrics analytics input exceeds the 20000000-byte safety bound".into());
+        }
+        let input: AnalyticsInput = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid metrics analytics input: {error}"))?;
+        let report = analyse_analytics(&input)
+            .map_err(|error| format!("metrics analytics refused: {error}"))?;
+        let mut output = serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode metrics analytics report: {error}"))?;
+        output["ok"] = json!(true);
+        output["workflow"] = json!("metrics_descriptive_analytics");
+        output["guarantees"] = json!([
+            "observed and reproduced rows contribute to summaries; declared, missing, blocked, and not-applicable rows remain visible and excluded",
+            "all domains share one bounded arithmetic kernel while dimension, direction, unit, and condition coordinates remain attached",
+            "paired outputs are explicit descriptive contrasts suitable for robustness, cross-modal, translation, causal-design, or coordination review",
+            "calibration outputs retain bins, Brier error, and expected calibration error instead of collapsing forecasts to a pass/fail label",
+            "empty measured populations remain null summaries rather than zero performance",
+        ]);
+        output["limitations"] = json!([
+            "the tool does not run evaluations, assays, models, agents, or acquisitions",
+            "paired deltas and retention are not causal effects, clinical validation, or a universal score",
+            "no missing-value imputation, dependency correction, confidence interval estimation, or external data access occurs",
+            "calibration uses caller-supplied bounded outcomes and equal-width bins; it does not fit or validate a probabilistic model",
+        ]);
+        output["analytics_schema_version"] = json!(ANALYTICS_SCHEMA_VERSION);
         Ok(output)
     }
 
@@ -13519,7 +13557,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "atlas_metrics_and_research_ci",
             "domains": ["capability metrics", "partial rankings", "weight sensitivity", "research CI", "claim publication checks"],
             "crates": ["bioprism-atlas", "bioprism-metrics", "bioprism-atlasx", "bioprism-atlashub"],
-            "mcp_tools": ["atlas_report", "capability_rank", "metrics_profile_audit", "biocapability_evidence_audit", "research_ci_check"],
+            "mcp_tools": ["atlas_report", "capability_rank", "metrics_profile_audit", "metrics_analytics_audit", "biocapability_evidence_audit", "research_ci_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -13946,6 +13984,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound repeated response rows; defaults to 100." }
                 },
                 "required": ["vectors"]
+            }
+        }),
+        json!({
+            "name": "metrics_analytics_audit",
+            "description": "Run bounded descriptive analytics over caller-supplied scalar observations, paired baseline/variant contrasts, and probability forecasts. Returns per-dimension performance/cost/latency and replicate summaries, robustness or cross-modal retention/agreement, translation or design contrasts, coordination deltas, calibration bins, and explicit excluded-evidence counts. It never imputes missing values, runs an assay, infers a causal effect, or emits a universal score.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "observations": { "type": "array", "maxItems": 10000, "description": "Scalar rows with id, dimension, domain, system, value, direction, unit, condition, evidence, and optional replicate_group/cost/latency_ms. Only observed and reproduced rows contribute." },
+                    "pairs": { "type": "array", "maxItems": 10000, "description": "Optional paired rows with id, dimension, domain, baseline, variant, direction, tolerance, and evidence. Deltas are descriptive contrasts." },
+                    "calibration": { "type": "array", "maxItems": 10000, "description": "Optional bounded forecast rows with id, domain, predicted, observed in [0,1], evidence, and optional group." },
+                    "calibration_bins": { "type": "integer", "minimum": 2, "maximum": 100, "description": "Equal-width bins for calibration; defaults to 10." }
+                },
+                "required": ["observations"]
             }
         }),
         json!({

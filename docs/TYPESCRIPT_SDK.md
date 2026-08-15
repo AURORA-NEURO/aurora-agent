@@ -76,15 +76,16 @@ tools before the TypeScript package has a convenience method.
 Convenience methods currently cover:
 
 - `traceOtelIngest`: bounded OTLP JSON import with semantic-loss reporting;
-- `metricsProfileAudit` and `bioCapabilityEvidenceAudit`: missingness-aware capability and evidence
-  posture;
+- `metricsProfileAudit` and `metricsAnalyticsAudit`: missingness-aware capability profiles plus
+  bounded scalar, paired-contrast, cost/latency, replicate, and calibration analytics;
+- `bioCapabilityEvidenceAudit`: evidence posture;
 - `bioAtlasPublicationAudit`: atlas, evidence, card, and leaderboard release gates;
 - `developerDeliveryAudit`: developer-platform delivery evidence;
 - `runtimeExecutionSimulate`: deterministic replay, budget, fault, and fork evidence.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of 114 tool schemas.
+families without maintaining a fragile partial clone of 115 tool schemas.
 
 ## Events and webhooks
 

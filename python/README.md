@@ -48,7 +48,9 @@ See [`docs/HTTP_API.md`](../docs/HTTP_API.md) for the route and delivery contrac
 
 The package also includes dependency-free authoring builders for digest-bound benchmark packs,
 set-valued decision cells, deterministic metamorphic mutations, versioned oracle manifests,
-evidence judgements, reference panels, and evaluation requests. They validate local JSON and
-cross-field invariants, then let `Workspace` delegate final decisions to the Rust kernel through
-`pack_health_assess()`, `mutation_family()`, `oracle_combine()`, and the evaluation helpers. See
+evidence judgements, reference panels, evaluation requests, and typed metrics observations,
+paired contrasts, and calibration forecasts. They validate local JSON and cross-field invariants,
+then let `Workspace` delegate final decisions and arithmetic to the Rust kernel through
+`pack_health_assess()`, `mutation_family()`, `oracle_combine()`,
+`metrics_analytics_audit()`, and the evaluation helpers. See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

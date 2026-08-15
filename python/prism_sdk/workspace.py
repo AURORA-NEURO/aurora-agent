@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from .async_client import AsyncClient
+from .analytics import (
+    AnalyticsRequest,
+    CalibrationObservation,
+    MetricObservation,
+    PairedObservation,
+    analytics_request,
+)
 from .authoring import PackArtifact
 from .client import Client
 from .errors import ArgumentError
@@ -74,6 +81,24 @@ class Workspace:
             world, include_worlds=include_worlds, max_worlds=max_worlds
         )
         return self.tool("mutation_family", arguments)
+
+    def metrics_analytics_audit(
+        self,
+        observations: Sequence[MetricObservation | Mapping[str, Any]],
+        *,
+        pairs: Sequence[PairedObservation | Mapping[str, Any]] = (),
+        calibration: Sequence[CalibrationObservation | Mapping[str, Any]] = (),
+        calibration_bins: int = 10,
+    ) -> dict[str, Any]:
+        """Run bounded descriptive metrics analytics in the Rust kernel."""
+
+        request = analytics_request(
+            observations,
+            pairs=pairs,
+            calibration=calibration,
+            calibration_bins=calibration_bins,
+        )
+        return self.tool("metrics_analytics_audit", request.to_mcp_arguments())
 
     def oracle_combine(
         self,
@@ -290,6 +315,24 @@ class AsyncWorkspace:
             world, include_worlds=include_worlds, max_worlds=max_worlds
         )
         return await self.tool("mutation_family", arguments)
+
+    async def metrics_analytics_audit(
+        self,
+        observations: Sequence[MetricObservation | Mapping[str, Any]],
+        *,
+        pairs: Sequence[PairedObservation | Mapping[str, Any]] = (),
+        calibration: Sequence[CalibrationObservation | Mapping[str, Any]] = (),
+        calibration_bins: int = 10,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.metrics_analytics_audit`."""
+
+        request: AnalyticsRequest = analytics_request(
+            observations,
+            pairs=pairs,
+            calibration=calibration,
+            calibration_bins=calibration_bins,
+        )
+        return await self.tool("metrics_analytics_audit", request.to_mcp_arguments())
 
     async def oracle_combine(
         self,

@@ -168,7 +168,10 @@ contracts: it builds versioned oracle manifests and judgements, preserves tier d
 admissibility, validates distributions and findings, and exposes the oracle mesh, reference-panel,
 missingness, worldline, reproduction, trajectory, and reference-standard tools. Rust still owns
 combination and scientific decisions; the remaining Python backlog is biological adapters,
-benchmark statistics, and full distribution ergonomics.
+benchmark statistics, and full distribution ergonomics. The metrics layer now additionally exposes
+bounded descriptive analytics for scalar observations, paired robustness/cross-modal/translation
+contrasts, replicate spread, cost/latency, and calibration; those summaries remain descriptive and
+do not replace inferential statistics or external evidence acquisition.
 
 
 ## §11 Developer Platform — 6 uncovered

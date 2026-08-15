@@ -6,6 +6,15 @@ JSON without recreating domain semantics or silently converting refusals into or
 """
 
 from .async_client import AsyncClient
+from .analytics import (
+    AnalyticsDirection,
+    AnalyticsEvidence,
+    AnalyticsRequest,
+    CalibrationObservation,
+    MetricObservation,
+    PairedObservation,
+    analytics_request,
+)
 from .authoring import (
     AcceptanceResult,
     AuthoringError,
@@ -72,6 +81,9 @@ __all__ = [
     "AsyncApiClient",
     "AsyncWorkspace",
     "Admissibility",
+    "AnalyticsDirection",
+    "AnalyticsEvidence",
+    "AnalyticsRequest",
     "AuthoringError",
     "DecisionCell",
     "DecisionCellBuilder",
@@ -85,10 +97,12 @@ __all__ = [
     "JudgementBuilder",
     "Client",
     "ClientConfig",
+    "CalibrationObservation",
     "LifecycleError",
     "InputRef",
     "MutationPlan",
     "MutationSpec",
+    "MetricObservation",
     "MissingnessAuditRequest",
     "OracleCombineRequest",
     "OracleManifest",
@@ -99,6 +113,7 @@ __all__ = [
     "ProcessExited",
     "PackArtifact",
     "PackBuilder",
+    "PairedObservation",
     "ProtocolError",
     "RemoteError",
     "ResponseTimeout",
@@ -116,6 +131,7 @@ __all__ = [
     "canonical_bytes",
     "canonical_json",
     "content_digest",
+    "analytics_request",
     "validate_pack",
     "__version__",
 ]
