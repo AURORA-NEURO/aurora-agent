@@ -45,3 +45,9 @@ page = api.events(after=0, limit=100)
 the signed webhook outbox. HTTP failures raise `ApiError` with the status and structured payload;
 the client does not retry domain refusals or treat a transport `2xx` as scientific acceptance.
 See [`docs/HTTP_API.md`](../docs/HTTP_API.md) for the route and delivery contract.
+
+The package also includes dependency-free authoring builders for digest-bound benchmark packs,
+set-valued decision cells, and the deterministic metamorphic mutation suite. They validate local
+JSON and cross-field invariants, then let `Workspace.pack_health_assess()` and
+`Workspace.mutation_family()` delegate final decisions to the Rust kernel. See
+[`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

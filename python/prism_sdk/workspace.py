@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from .async_client import AsyncClient
+from .authoring import PackArtifact
 from .client import Client
 from .errors import ArgumentError
 
@@ -27,6 +28,42 @@ class Workspace:
 
     def tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return self.client.call_tool(name, arguments).require_ok()
+
+    def pack_health_assess(
+        self,
+        pack: PackArtifact | Mapping[str, Any],
+        observations: Mapping[str, Any],
+        *,
+        policy: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run the authoritative Rust pack-health gate over a locally authored PackIr."""
+
+        artifact = pack if isinstance(pack, PackArtifact) else PackArtifact.from_document(pack)
+        return self.tool("pack_health_assess", artifact.to_mcp_arguments(observations, policy))
+
+    def pack_catalogue(self, *, section: str | None = None, max_items: int | None = None) -> dict[str, Any]:
+        arguments: dict[str, Any] = {}
+        if section is not None:
+            arguments["section"] = section
+        if max_items is not None:
+            arguments["max_items"] = max_items
+        return self.tool("pack_catalogue", arguments)
+
+    def mutation_family(
+        self,
+        world: str,
+        *,
+        include_worlds: bool = False,
+        max_worlds: int | None = None,
+    ) -> dict[str, Any]:
+        """Run the server's standard metamorphic suite with explicit bounded disclosure."""
+
+        from .authoring import MutationPlan
+
+        arguments = MutationPlan.standard().standard_tool_arguments(
+            world, include_worlds=include_worlds, max_worlds=max_worlds
+        )
+        return self.tool("mutation_family", arguments)
 
     def developer_delivery_audit(
         self,
@@ -139,6 +176,42 @@ class AsyncWorkspace:
 
     async def tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return (await self.client.call_tool(name, arguments)).require_ok()
+
+    async def pack_health_assess(
+        self,
+        pack: PackArtifact | Mapping[str, Any],
+        observations: Mapping[str, Any],
+        *,
+        policy: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.pack_health_assess`."""
+
+        artifact = pack if isinstance(pack, PackArtifact) else PackArtifact.from_document(pack)
+        return await self.tool("pack_health_assess", artifact.to_mcp_arguments(observations, policy))
+
+    async def pack_catalogue(self, *, section: str | None = None, max_items: int | None = None) -> dict[str, Any]:
+        arguments: dict[str, Any] = {}
+        if section is not None:
+            arguments["section"] = section
+        if max_items is not None:
+            arguments["max_items"] = max_items
+        return await self.tool("pack_catalogue", arguments)
+
+    async def mutation_family(
+        self,
+        world: str,
+        *,
+        include_worlds: bool = False,
+        max_worlds: int | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.mutation_family`."""
+
+        from .authoring import MutationPlan
+
+        arguments = MutationPlan.standard().standard_tool_arguments(
+            world, include_worlds=include_worlds, max_worlds=max_worlds
+        )
+        return await self.tool("mutation_family", arguments)
 
     async def developer_delivery_audit(
         self,

@@ -10,8 +10,8 @@
 //! | verdict | count |
 //! |---|---|
 //! | [`Verdict::Process`] — the design describes what a person does at an interface | 3 |
-//! | [`Verdict::ForeignArtifact`] — code-bearing, but not Rust and not in this repository | 4 |
-//! | [`Verdict::CoveredElsewhere`] — an existing crate already owns the substance | 9 |
+//! | [`Verdict::ForeignArtifact`] — code-bearing, but not Rust and not in this repository | 3 |
+//! | [`Verdict::CoveredElsewhere`] — an existing crate already owns the substance | 10 |
 //! | [`Verdict::ImplementedHere`] — predicates over an artifact this crate defines | 4 |
 //!
 //! # The citation rule, in the type system
@@ -116,7 +116,7 @@ const REFERENCE_EXAMPLES: u8 = 19;
 
 /// The twenty modules, classified.
 ///
-/// The order is section then blueprint order. The five [`Verdict::ForeignArtifact`] rows take
+/// The order is section then blueprint order. The three [`Verdict::ForeignArtifact`] rows take
 /// their surfaces from [`foreign_subjects`], so the census and the classification cannot drift
 /// apart — a test asserts the two agree.
 pub fn classification() -> Vec<ModuleVerdict> {
@@ -141,7 +141,10 @@ pub fn classification() -> Vec<ModuleVerdict> {
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,
             title: "Python Benchmark Authoring SDK",
-            verdict: foreign_row("Python Benchmark Authoring SDK"),
+            verdict: Verdict::CoveredElsewhere {
+                crates: vec!["bioprism-packs", "bioprism-benchcompiler", "bioprism-mutation"],
+                because: "the repository now ships a dependency-free Python authoring layer that builds digest-bound PackIr, DecisionCell, and deterministic MutationPlan documents, validates their cross-field invariants, and forwards final health and mutation checks to the authoritative Rust tools. The Python ergonomics are now in-tree while the Rust crates remain the owners of scientific semantics.",
+            },
         },
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,

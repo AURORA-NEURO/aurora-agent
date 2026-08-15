@@ -1,5 +1,9 @@
 # Python SDK
 
+This document covers blueprint modules **11.04** (Python SDK) and **11.05** (Python benchmark
+authoring SDK). The package remains dependency-free and keeps Rust authoritative for canonical
+bytes, scientific invariants, oracle decisions, and release gates.
+
 The repository ships `python/prism_sdk`, a standard-library client for the Rust MCP server. It is
 the integration layer above the deterministic kernel described by [ADR-001](ADR-001-language-strategy.md):
 Python can orchestrate and author requests, while Rust remains the owner of canonical bytes,
@@ -62,10 +66,67 @@ gateway: health/capability discovery, REST tool calls, cursor-based event pages,
 webhook subscription/delivery acknowledgement. They preserve status and JSON error payloads in
 `ApiError` and do not recreate Rust domain semantics.
 
+## Authoring packs, cells, and mutations
+
+The authoring layer constructs the exact JSON shapes consumed by the Rust pack, decision-cell, and
+mutation crates. It validates local invariants before a request is sent and computes the same
+canonical SHA-256 content address as `bioprism-ids`:
+
+```python
+from prism_sdk import (
+    DecisionCellBuilder,
+    InputRef,
+    PackBuilder,
+    Workspace,
+)
+
+pack = (
+    PackBuilder(
+        pack_id="demo.pack",
+        version=(1, 0, 0),
+        schema_range=(1, 2),
+        title="Decision evidence",
+        measures="sufficiency of evidence selection",
+        blueprint_module="15.01",
+        axis="mechanism",
+        capabilities=[{"agent": "evidence_acquisition"}],
+        domains=["science"],
+        owners=["aurora"],
+        license="Apache-2.0",
+    )
+    .parent("world:demo", 3)
+    .decision_family("smallest-sufficient-context")
+    .mutation_relation("preserves_verdict")
+    .oracle("deterministic")
+    .authored_instances(8)
+    .build()
+)
+
+cell = (
+    DecisionCellBuilder(
+        "cell-1",
+        "select evidence",
+        InputRef.from_document("world.json", {"world": 1}),
+        InputRef.from_document("query.json", {"query": 1}),
+    )
+    .accepting("valid", "equivalent")
+    .requiring_witness("closure")
+    .build()
+)
+```
+
+`PackArtifact.to_mcp_arguments()` prepares a digest-bound `pack_health_assess` request;
+`Workspace.pack_health_assess()` then delegates health, calibration, contamination, and
+reportability to Rust. `MutationPlan.standard()` mirrors the deterministic Rust suite and
+`Workspace.mutation_family()` runs it against a root-confined world. The authoring layer never
+marks a benchmark healthy, a mutation postcondition held, or a cell scientifically correct on its
+own. `DecisionCell.accepts()` only evaluates the declared set-valued contract: wrong verdicts,
+missing witnesses, and incomplete protected closure remain distinct failures.
+
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData/VCF readers, benchmark
 statistics, OTLP export, a notebook UI, or CI deployment. The repository now ships a bounded REST
-gateway, but gRPC, durable event storage, external webhook delivery, and those domain artifacts
-remain separate contracts.
+gateway and the pack/cell/mutation authoring contracts, but gRPC, durable event storage, external
+webhook delivery, and those domain artifacts remain separate contracts.
 
 ## Verification
 

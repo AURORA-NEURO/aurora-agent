@@ -81,12 +81,12 @@ prose from the uncovered list before counting, which is why its figure was the c
 along. 702 + 57 = 759 now reconciles.
 
 
-Coverage is **93.3%** — 708 of 759 code-bearing modules. The remaining **51 are enumerated in
+Coverage is **93.4%** — 709 of 759 code-bearing modules. The remaining **50 are enumerated in
 `docs/BACKLOG.md` and explained in `crates/residue`**, which holds one typed verdict per module
 saying why no crate implements it, anchored to a sentence a classifying crate actually wrote. Its
 reconciliation against the backlog is a test, so the two cannot drift apart silently.
 
-The primary distribution over the 51: **37 process, 5 foreign artifact, 9 discharged elsewhere,
+The primary distribution over the 50: **37 process, 4 foreign artifact, 9 discharged elsewhere,
 and 0 genuinely uncovered.** One module still carries work on a secondary reading. `crates/bioethics`
 discharges §36's sandboxing module and in the same paragraph records that all thirteen of its
 required controls need a process boundary, a network stack or a scanner, none of which exists here
@@ -99,9 +99,9 @@ section and refused to pad:
 
 - **Process** — describes what people do. `crates/stewardship` found 12 of §14's 18.
 - **Foreign artifact** — code-bearing, precise, testable, and not Rust and not in this repository.
-  `crates/devplat` now finds 4 of 20 in §11 and §19: the two GitHub Action modules and the two
-  Python surfaces. The TypeScript gateway client is now in this repository, while the remaining
-  Python authoring ergonomics stay explicitly outside it.
+  `crates/devplat` now finds 3 of 20 in §11 and §19: the two GitHub Action modules and the full
+  Python SDK surface. The TypeScript gateway and Python authoring clients are now in this
+  repository over authoritative Rust contracts.
 - **Discharged elsewhere** — the content exists under a different section's id. **11 verdicts name
   their own author as the discharger**, a crate that built the capability without ever citing the
   module, which a token scan structurally cannot see.
@@ -140,13 +140,13 @@ state is a backlog whose residue is explained rather than empty.
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 708 |
-| **code-bearing coverage** | **93.3%** |
+| cited | 709 |
+| **code-bearing coverage** | **93.4%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 93.3% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 93.4% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 

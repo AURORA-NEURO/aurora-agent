@@ -1,4 +1,4 @@
-//! The fifty-one, transcribed.
+//! The fifty, transcribed.
 //!
 //! Every module `docs/BACKLOG.md` lists, with the verdict a classifying crate reached about it and
 //! the file that verdict was written in. Nothing here is a new judgement about a module a crate
@@ -148,18 +148,6 @@ fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
                 "A Python distribution with nine importable packages. Precise, code-bearing and \
                  unwritable here: no Rust type can be the module, and nothing in this repository \
                  can look for `prism.compiler.mine` now or ever.",
-                ForeignSurface::PythonPackage,
-            )?],
-        )?,
-        entry(
-            11,
-            5,
-            "Python Benchmark Authoring Sdk",
-            vec![foreign_row(
-                "title: \"Python Benchmark Authoring SDK\",",
-                "The authoring ergonomics of the same Python distribution. The contract underneath \
-                 is already enforced in Rust; what this module adds is decorator syntax, which is \
-                 a property of a language this workspace does not ship.",
                 ForeignSurface::PythonPackage,
             )?],
         )?,

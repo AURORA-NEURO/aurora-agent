@@ -254,11 +254,11 @@ pub struct ForeignSubject {
 
 /// The developer-platform subjects that are code-bearing but not Rust and not in this repository.
 ///
-/// Four of them. This is the largest single group in [`crate::classify::classification`] and the
+/// Three of them. This is the largest single group in [`crate::classify::classification`] and the
 /// reason this crate exists in the shape it does: a section can be two-thirds unimplemented in a
 /// Rust workspace without a single line of it being vague.
 pub fn foreign_subjects() -> Vec<ForeignSubject> {
-    let entries: [(&'static str, SurfaceKind, &'static str, &'static str); 4] = [
+    let entries: [(&'static str, SurfaceKind, &'static str, &'static str); 3] = [
         (
             "Python SDK",
             SurfaceKind::PythonPackage,
@@ -266,14 +266,6 @@ pub fn foreign_subjects() -> Vec<ForeignSubject> {
             "the module specifies nine importable distributions, Python 3.12 typing, async-first \
              methods with sync facades, and entry-point discovery. None of that has a Rust \
              rendering; a Rust type mirroring it would be a translation nobody imports.",
-        ),
-        (
-            "Python Benchmark Authoring SDK",
-            SurfaceKind::PythonPackage,
-            "prism.packs",
-            "decorators and builder APIs over notebook helpers that emit experiment declarations. \
-             The contract it protects is the serialized IR, which this workspace already owns; \
-             what is left is the Python ergonomics layer.",
         ),
         (
             "GitHub Action for Consumer Repositories",

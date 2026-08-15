@@ -1,6 +1,6 @@
 # Remaining backlog
 
-51 code-bearing blueprint modules are not yet cited by any crate or design note,
+50 code-bearing blueprint modules are not yet cited by any crate or design note,
 across 9 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.
 
@@ -132,7 +132,7 @@ providers, web pages, public-key signatures, CI runners, or deployment approvals
 optional SDK admission, conformance, provider capability, governance-document, conservative
 impact, and release evidence. Its explicit target matrix makes local delivery, guarded claims,
 foreign-artifact gaps, and missing evidence mechanically visible; it still does not implement the
-foreign Python authoring SDKs, gRPC clients, GitHub Actions, CI runners, or authoring UI; the
+foreign full Python SDK surface, gRPC clients, GitHub Actions, CI runners, or authoring UI; the
 Rust HTTP/event gateway and Python HTTP client are now present.
 The registry lifecycle and metrics profile surfaces are now callable too:
 `registry_lifecycle_simulate` replays attested pack publication, promotion, reassessment,
@@ -160,15 +160,14 @@ delivery worker remain explicitly absent.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full
-Python SDK backlog: biological format adapters, benchmark-authoring decorators, statistical
-packages, and the remaining nine-distribution ergonomics are still absent and remain foreign or
-unimplemented rather than being inferred from the transport client.
+Python SDK backlog: biological format adapters, benchmark statistics, and the remaining
+nine-distribution ergonomics are still absent and remain foreign or unimplemented rather than
+being inferred from the transport or authoring clients.
 
 
-## §11 Developer Platform — 9 uncovered
+## §11 Developer Platform — 8 uncovered
 
 - `11.04` Python Sdk
-- `11.05` Python Benchmark Authoring Sdk
 - `11.15` Evaluator Oracle And Mutation Sdk
 - `11.16` Environment And Pack Authoring Sdk
 - `11.17` Authoring Studio
