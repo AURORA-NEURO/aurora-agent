@@ -384,6 +384,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free bounded FASTQ reader validating complete records, quality lengths, and paired-read evidence without disclosing read content.",
         ),
         _descriptor(
+            "bioprism.python.sam_text",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/sam", "text/sam", "text/x-sam"),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("content_uninterpreted", "coordinate_frame_not_carried", "type_undetermined", "provenance_unavailable"),
+            ("subject", "sample", "reference", "read", "alignment", "assay"),
+            "Dependency-free bounded SAM reader validating headers, CIGAR semantics, coordinate bounds, mate flags, optional-tag types, and sort order without disclosing raw alignment content.",
+        ),
+        _descriptor(
             "bioprism.python.fasta_text",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/fasta", "text/fasta", "text/x-fasta"),

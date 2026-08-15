@@ -63,7 +63,7 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
 `AdapterRegistry` and `adapter_plan()` add a dependency-free format boundary for tabular and
-biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, FASTA, FASTQ, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes
+biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, FASTA, FASTQ, SAM, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes
 are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and
 semantic-loss declarations remain visible before parsing. The planners never sniff or fetch bytes.
 `BidsAdapter` and `audit_bids()` add a dependency-free BIDS manifest path: they validate bounded
@@ -116,6 +116,11 @@ echoed in the projection.
 `parse_fastq()` and `read_fastq()` add a dependency-free sequencing-read boundary: multiline records,
 quality lengths, printable quality ranges, duplicate identifiers, and paired-read completeness are
 validated while read identifiers, bases, and qualities remain source-bound digests or aggregates.
+`parse_sam()` and `read_sam()` add a dependency-free alignment boundary: headers and sequence
+dictionaries, flags and mate evidence, CIGAR query/reference accounting, coordinate bounds, typed
+optional tags, and declared coordinate sort order are audited without disclosing read names,
+reference labels, sequences, qualities, or tag values. Binary BAM/CRAM remains a separate
+dependency-gated route.
 `parse_fasta()` and `read_fasta()` add a dependency-free reference/assembly boundary: multiline
 records, duplicate sequence identifiers, optional nucleotide/protein alphabet claims, lengths, symbol
 counts, and GC bases are audited while sequence strings and headers remain source-bound digests.

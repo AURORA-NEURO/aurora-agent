@@ -449,6 +449,24 @@ impl AdapterRegistry {
                 "Dependency-free bounded FASTQ reader validating complete records, quality lengths, and paired-read evidence without disclosing read content.",
             ),
             descriptor(
+                "bioprism.python.sam_text",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/sam", "text/sam", "text/x-sam"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ContentUninterpreted,
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::TypeUndetermined,
+                    LossKind::ProvenanceUnavailable,
+                ],
+                &["subject", "sample", "reference", "read", "alignment", "assay"],
+                None,
+                "Dependency-free bounded SAM reader validating headers, CIGAR semantics, coordinate bounds, mate flags, optional-tag types, and sort order without disclosing raw alignment content.",
+            ),
+            descriptor(
                 "bioprism.python.fasta_text",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -980,6 +998,26 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.fastq_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_sam_selects_the_dependency_free_python_reader() {
+        let plan = AdapterRegistry::default()
+            .plan(request(Some("text/sam"), SourceKind::Bytes))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.sam_text")
         );
         assert_eq!(
             plan.selected_adapter

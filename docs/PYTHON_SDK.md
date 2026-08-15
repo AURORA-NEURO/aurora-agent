@@ -82,7 +82,7 @@ invent defaults:
   semantic-loss and scope surface. `Workspace.adapter_plan(...)`, `ApiClient.adapter_plan(...)`,
   and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
   fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
-  OME-Zarr, FASTA, FASTQ, GFF3, PDB, SDF/MOL, mzML, and FHIR readers remain responsible for source-specific conformance in the Python layer.
+  OME-Zarr, FASTA, FASTQ, SAM, GFF3, PDB, SDF/MOL, mzML, and FHIR readers remain responsible for source-specific conformance in the Python layer.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and
@@ -149,6 +149,11 @@ invent defaults:
   boundary. Multiline records, sequence/quality length equality, printable quality bounds, duplicate
   read identifiers, paired-read completeness, and source-bound read/sequence/quality digests are
   retained without disclosing base or quality strings.
+- `SamAdapter`, `parse_sam(...)`, and `read_sam(...)` provide a dependency-free text-alignment
+  boundary. They validate SAM headers and sequence dictionaries, flag and mate consistency, CIGAR
+  semantics, coordinate bounds, typed optional tags, and declared coordinate sort order while
+  retaining only bounded counts, source-bound digests, and privacy-safe alignment previews. BAM/CRAM
+  decoding and indexing remain separate dependency-gated capabilities.
 - `FastaAdapter`, `parse_fasta(...)`, and `read_fasta(...)` provide a dependency-free reference and
   assembly boundary. They validate multiline record framing, duplicate identifiers, optional
   nucleotide/protein alphabet claims, lengths, symbol counts, and nucleotide GC totals without

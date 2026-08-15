@@ -144,6 +144,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(fastq.executable)
         self.assertEqual(fastq.selected_adapter.id, "bioprism.python.fastq_text")
 
+        sam = AdapterRegistry().plan(
+            AdapterPlanRequest("alignments", SourceKind.BYTES, declared_format="text/sam"),
+            check_environment=False,
+        )
+        self.assertTrue(sam.executable)
+        self.assertEqual(sam.selected_adapter.id, "bioprism.python.sam_text")
+
         mzml = AdapterRegistry().plan(
             AdapterPlanRequest("proteomics", SourceKind.BYTES, declared_format="application/mzml"),
             check_environment=False,

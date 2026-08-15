@@ -61,7 +61,7 @@ bounded search result, distinguishes explicit tool filters from ranked candidate
 executes the proposed tools.
 `adapter_plan` makes the biological-format boundary callable: it matches explicit source formats
 and source shapes against native CSV/inventory adapters and Python-delegated DICOM, NIfTI/BIDS,
-AnnData/Zarr, VCF, FASTA, FASTQ, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
+AnnData/Zarr, VCF, FASTA, FASTQ, SAM, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
 distinguishes missing from unchecked optional dependencies before execution; it never sniffs
 content, fetches sources, imports packages, or claims that heavyweight parsing has occurred.
 The Python adapter layer now also contains a bounded text VCF reader: it validates the complete
@@ -108,6 +108,10 @@ same cross-record reference auditor, with record counts and byte bounds retained
 The dependency-free FASTQ route validates complete multiline records, sequence/quality lengths,
 printable quality ranges, duplicate read identifiers, and paired-read completeness; read identifiers,
 bases, and qualities are source-bound digests or aggregate summaries rather than disclosed content.
+The dependency-free SAM route validates bounded headers and sequence dictionaries, flags and mate
+consistency, CIGAR query/reference accounting, coordinate bounds, optional-tag types, and declared
+coordinate sort order without emitting read names, reference labels, sequences, qualities, or tag
+values. Binary BAM/CRAM remains separate and dependency-gated.
 The dependency-free mzML route audits bounded XML, spectrum identity and declared counts, MS levels,
 scan-time summaries, binary-array type/compression/precision declarations, and encoded lengths; it
 never decodes or emits m/z, intensity, or time arrays.

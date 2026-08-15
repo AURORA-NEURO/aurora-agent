@@ -25,6 +25,7 @@ from .mzml import MAX_MZML_BYTES, parse_mzml
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
 from .pdb import MAX_PDB_BYTES, parse_pdb
+from .sam import MAX_SAM_BYTES, parse_sam
 from .sdf import MAX_SDF_BYTES, parse_sdf
 from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
 from .gff3 import MAX_GFF3_BYTES, parse_gff3
@@ -791,6 +792,37 @@ def read_sdf(
         raise ArgumentError(f"SDF read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_sam(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_records: int = 1_000_000,
+    max_headers: int = 100_000,
+    max_items: int = 1_000,
+    max_tags: int = 100_000,
+) -> Mapping[str, Any]:
+    """Read bounded SAM text and return the dependency-free alignment audit."""
+
+    candidate = _path(path, field="SAM path")
+    if candidate.stat().st_size > MAX_SAM_BYTES:
+        raise ArgumentError(f"SAM path exceeds the {MAX_SAM_BYTES}-byte reader limit")
+    try:
+        return parse_sam(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            max_records=max_records,
+            max_headers=max_headers,
+            max_items=max_items,
+            max_tags=max_tags,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"SAM read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_ome_zarr(
     path: str,
     *,
@@ -855,6 +887,7 @@ __all__ = [
     "read_gff3",
     "read_mzml",
     "read_pdb",
+    "read_sam",
     "read_sdf",
     "read_indexed_vcf",
     "read_nifti_header",

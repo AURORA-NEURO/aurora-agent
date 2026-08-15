@@ -27,6 +27,7 @@ from .fhir import audit_fhir
 from .gff3 import parse_gff3
 from .mzml import parse_mzml
 from .pdb import parse_pdb
+from .sam import parse_sam
 from .sdf import parse_sdf
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
@@ -43,6 +44,7 @@ from .optional_readers import (
     read_indexed_vcf,
     read_mzml,
     read_pdb,
+    read_sam,
     read_sdf,
     read_nifti_header,
     read_ome_zarr,
@@ -358,6 +360,7 @@ class AdapterRuntime:
             "bioprism.python.dicom",
             "bioprism.python.fasta_text",
             "bioprism.python.fastq_text",
+            "bioprism.python.sam_text",
             "bioprism.python.fhir_manifest",
             "bioprism.python.fhir_json",
             "bioprism.python.fhir_ndjson",
@@ -662,6 +665,32 @@ class AdapterRuntime:
                 provenance=request.provenance,
                 max_molecules=payload.get("max_molecules", 100_000),
                 max_items=request.max_items,
+            )
+        if adapter_id == "bioprism.python.sam_text":
+            if "text" in payload:
+                text = payload.get("text")
+                if not isinstance(text, (str, bytes)):
+                    raise ArgumentError("sam_text payload requires text or bytes under 'text'")
+                return parse_sam(
+                    text,
+                    source_id=request.source_id,
+                    provenance=request.provenance,
+                    max_records=payload.get("max_records", 1_000_000),
+                    max_headers=payload.get("max_headers", 100_000),
+                    max_items=request.max_items,
+                    max_tags=payload.get("max_tags", 100_000),
+                ).to_wire()
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("sam_text payload requires 'text' or a string 'path'")
+            return read_sam(
+                path,
+                source_id=request.source_id,
+                provenance=request.provenance,
+                max_records=payload.get("max_records", 1_000_000),
+                max_headers=payload.get("max_headers", 100_000),
+                max_items=request.max_items,
+                max_tags=payload.get("max_tags", 100_000),
             )
         if adapter_id == "bioprism.python.nifti_metadata":
             images = payload.get("images")
