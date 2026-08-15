@@ -279,7 +279,9 @@ For browser and Node consumers, [`typescript/`](typescript/README.md) provides t
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,
 typed API errors, SSE cursor parsing, webhook outbox lifecycle, and typed facades for the evidence,
 BioAtlas, OTLP, runtime, and developer-delivery workflows. See [`docs/TYPESCRIPT_SDK.md`](docs/TYPESCRIPT_SDK.md)
-for the compatibility, workbench, mission, and secret-handling contract.
+for the compatibility, workbench, mission, secret-handling, and schema-aware full-catalogue
+invocation contract. `toolCatalogue()` and `planTool()` make arbitrary domain calls reviewable
+before `toolChecked()` executes them; remote refusals remain visible rather than becoming success.
 
 The repository ships `bioprism-api` for deployments that need a network boundary:
 

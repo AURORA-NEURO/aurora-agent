@@ -91,6 +91,12 @@ Convenience methods currently cover:
 - `telemetryProject`: redacted telemetry projection with explicit treatment policy, trace, and
   optional observed-metric evidence fields.
 
+The complete live tool surface is also available through `toolCatalogue()`, `planTool()`, and
+`toolChecked()`. The catalogue is bounded and SHA-256 addressed from `/v1/tools`; plans are
+side-effect free and enforce only conservative transport-shape rules. Unsupported JSON Schema
+features are warnings rather than hidden validation, and `toolChecked()` keeps structured MCP
+refusals in the same raw response envelope as `callTool()`.
+
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
 families without maintaining a fragile partial clone of 121 tool schemas. `capabilityDiscover`

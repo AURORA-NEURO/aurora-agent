@@ -1,5 +1,6 @@
 import { ApiError, ArgumentError, ProtocolError, ResponseTooLargeError, ToolRefusalError, TransportError, isObject } from "./errors.js";
 import { parseSse } from "./sse.js";
+import { ToolCatalogue } from "./tooling.js";
 import type {
   ApiClientOptions,
   ApiErrorBody,
@@ -35,6 +36,7 @@ import type {
   SubscriptionListResponse,
   SubscriptionResponse,
   TelemetryProjectArgs,
+  ToolCallPlan,
   ToolArguments,
   ToolsResponse,
   TraceOtelIngestArgs,
@@ -144,6 +146,32 @@ export class ApiClient {
     const tool = pathSegment(name, "tool name");
     if (!isObject(arguments_)) throw new ArgumentError("tool arguments must be a JSON object");
     return this.request<RestToolResponse<T>>("POST", `/v1/tools/${encodeURIComponent(tool)}`, arguments_, options);
+  }
+
+  /** Snapshot the authoritative live tool catalogue and bind it to a SHA-256 digest. */
+  async toolCatalogue(options?: ClientRequestOptions): Promise<ToolCatalogue> {
+    return ToolCatalogue.fromDefinitions(await this.tools(options));
+  }
+
+  /** Produce a no-side-effect, transport-shape-checked plan for any advertised tool. */
+  async planTool(
+    name: string,
+    arguments_: ToolArguments = {},
+    catalogue?: ToolCatalogue,
+  ): Promise<ToolCallPlan> {
+    const snapshot = catalogue ?? await this.toolCatalogue();
+    return snapshot.plan(name, arguments_);
+  }
+
+  /** Execute a checked plan while preserving the raw REST/MCP refusal envelope. */
+  async toolChecked<T extends JsonValue = JsonValue>(
+    name: string,
+    arguments_: ToolArguments = {},
+    options?: ClientRequestOptions,
+    catalogue?: ToolCatalogue,
+  ): Promise<RestToolResponse<T>> {
+    const plan = await this.planTool(name, arguments_, catalogue);
+    return this.callTool<T>(plan.tool, plan.arguments, options);
   }
 
   /** Convert an explicit domain refusal into a typed exception; successful results remain raw. */

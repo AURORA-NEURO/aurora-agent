@@ -60,6 +60,29 @@ export interface ToolDefinition {
   [key: string]: JsonValue;
 }
 
+export interface ToolValidationIssue {
+  path: string;
+  code: string;
+  message: string;
+}
+
+export interface ToolValidationReport {
+  tool: string;
+  schemaDigest: string;
+  issues: readonly ToolValidationIssue[];
+  warnings: readonly ToolValidationIssue[];
+  ok: boolean;
+  fullyChecked: boolean;
+}
+
+export interface ToolCallPlan {
+  tool: string;
+  definition: ToolDefinition;
+  arguments: JsonObject;
+  report: ToolValidationReport;
+  schemaDigest: string;
+}
+
 export interface ToolsResponse extends JsonObject {
   api_version: string;
   tools: ToolDefinition[];

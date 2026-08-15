@@ -5,6 +5,8 @@ import {
   ApiError,
   ArgumentError,
   ResponseTooLargeError,
+  ToolCatalogue,
+  ToolSchemaError,
   ToolRefusalError,
   parseSse,
 } from "../dist/index.js";
@@ -24,7 +26,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     fetch: async (input, init) => {
       seen.push({ input: String(input), init });
       const path = new URL(String(input)).pathname;
-      if (path === "/v1/tools") return jsonResponse({ tools: [{ name: "echo", description: "test", inputSchema: { type: "object" } }] });
+      if (path === "/v1/tools") return jsonResponse({ tools: [{ name: "echo", description: "test", inputSchema: { type: "object", required: ["value"], properties: { value: { type: "integer" }, mode: { type: "string", enum: ["safe", "fast"] } } } }] });
       if (path === "/v1/tools/echo") return jsonResponse({ ok: true, tool: "echo", request_id: "r1", mcp: { result: { structuredContent: { value: 3 } } }, guarantee: "shared" });
       if (path === "/v1/tools/metrics_analytics_audit") return jsonResponse({ ok: true, tool: "metrics_analytics_audit", request_id: "r3", mcp: { result: { structuredContent: { workflow: "metrics_descriptive_analytics" } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
@@ -43,6 +45,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   });
 
   assert.equal((await client.tools())[0].name, "echo");
+  const catalogue = await client.toolCatalogue();
+  assert.equal(catalogue.definitions.length, 1);
+  assert.equal(catalogue.digest.length, 64);
+  const plan = await client.planTool("echo", { value: 3, mode: "safe" }, catalogue);
+  assert.equal(plan.tool, "echo");
+  assert.equal(plan.report.fullyChecked, true);
+  await assert.rejects(client.planTool("echo", { value: "not-an-integer" }, catalogue), ToolSchemaError);
+  const checked = await client.toolChecked("echo", { value: 4 }, undefined, catalogue);
+  assert.equal(checked.mcp.result.structuredContent.value, 3);
   const response = await client.callTool("echo", { value: 3 }, { requestId: "request-1" });
   assert.equal(response.mcp.result.structuredContent.value, 3);
   assert.equal(seen.at(-1).init.headers.Authorization, "Bearer 0123456789abcdef");
@@ -89,6 +100,27 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   assert.deepEqual(parseSse("data: a\ndata: b\n\n"), [{ data: "a\nb" }]);
   assert.throws(() => parseSse("retry: nope\n\n"), /retry/);
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
+});
+
+test("tool catalogue keeps unsupported schema features visible", async () => {
+  const catalogue = await ToolCatalogue.fromDefinitions([
+    {
+      name: "union",
+      description: "test",
+      inputSchema: {
+        type: "object",
+        properties: { value: { anyOf: [{ type: "string" }, { type: "integer" }] } },
+        dependentSchemas: { value: { required: ["other"] } },
+      },
+    },
+  ]);
+  const accepted = catalogue.validate("union", { value: 3 });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.fullyChecked, false);
+  assert.equal(accepted.warnings.some((issue) => issue.code === "unsupported_schema_keyword"), true);
+  const rejected = catalogue.validate("union", { value: [] });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.issues.some((issue) => issue.code === "anyOf_no_match"), true);
 });
 
 test("structured HTTP errors and response ceilings stay typed", async () => {

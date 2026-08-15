@@ -42,6 +42,11 @@ if (result.mcp.result?.isError) {
   changed-module impact requests explicit; `telemetryProject` preserves the event, treatment
   policy, trace, and optional observed-metric boundary without silently treating projected
   telemetry as a claim.
+- `toolCatalogue()` snapshots the live `/v1/tools` definitions into a bounded SHA-256 catalogue;
+  `planTool()` performs conservative JSON-shape preflight without a POST; and `toolChecked()`
+  executes the reviewed call while preserving the raw refusal envelope. This covers every current
+  or future domain even when no handwritten helper exists. Unsupported schema keywords remain
+  warnings, and preflight never represents domain validity, authorization, or scientific success.
 - `eventStream` parses the gateway's bounded SSE snapshot and returns the `x-next-after` cursor;
   it is deliberately not a long-lived socket or an implicit reconnect loop.
 - Webhook delivery is poll/send/acknowledge: `deliveries`, `retry`, and `acknowledge` operate on

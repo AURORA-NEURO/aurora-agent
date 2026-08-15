@@ -7,7 +7,7 @@ export class PrismSdkError extends Error {
 
 /** The caller supplied an invalid, unsafe, or unbounded argument. */
 export class ArgumentError extends PrismSdkError {
-  override readonly name = "ArgumentError";
+  override readonly name: string = "ArgumentError";
 }
 
 /** The fetch implementation could not complete a bounded transport operation. */
