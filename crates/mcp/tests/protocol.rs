@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 112);
+    assert_eq!(tools.len(), 113);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3091,6 +3091,73 @@ fn developer_platform_status_verifies_local_contracts_and_marks_foreign_artifact
     );
     assert_eq!(detailed["detail_mode"], json!("full"));
     assert!(detailed["details"]["developer_contract"].is_array());
+}
+
+#[test]
+fn developer_delivery_audit_composes_local_health_and_blocks_missing_evidence() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "release_request": {
+                "id": "delivery-1",
+                "targets": [
+                    "local_delivery",
+                    "developer_platform",
+                    "developer_claims",
+                    "repository_scope",
+                    "sdk_admission",
+                    "conformance",
+                    "provider_capability",
+                    "governance_schema",
+                    "release"
+                ]
+            }
+        }),
+    );
+    assert_eq!(payload["__isError"], json!(false));
+    assert_eq!(payload["readiness"]["platform_checks_clean"], json!(true));
+    assert_eq!(payload["readiness"]["repository_scope_clean"], json!(false));
+    assert_eq!(payload["readiness"]["local_delivery_ready"], json!(false));
+    assert_eq!(
+        payload["external_surface_posture"]["foreign_artifacts_present"],
+        json!(true)
+    );
+    assert_eq!(payload["release_request"]["ready"], json!(false));
+    let targets = payload["release_request"]["targets"].as_array().unwrap();
+    let sdk = targets
+        .iter()
+        .find(|row| row["target"] == json!("sdk_admission"))
+        .unwrap();
+    assert_eq!(sdk["available"], json!(false));
+    assert_eq!(sdk["eligible"], json!(false));
+    let claims = targets
+        .iter()
+        .find(|row| row["target"] == json!("developer_claims"))
+        .unwrap();
+    assert_eq!(claims["eligible"], json!(false));
+    assert_eq!(
+        claims["blockers"][0],
+        json!("unguarded_developer_claims_present")
+    );
+
+    let no_request = call(&mut server, "developer_delivery_audit", json!({}));
+    assert_eq!(no_request["release_request"]["present"], json!(false));
+    assert_eq!(no_request["release_request"]["ready"], json!(false));
+
+    let duplicate = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "release_request": {
+                "id": "duplicate",
+                "targets": ["local_delivery", "local_delivery"]
+            }
+        }),
+    );
+    assert_eq!(duplicate["__isError"], json!(true));
+    assert!(duplicate["error"].as_str().unwrap().contains("duplicate"));
 }
 
 #[test]

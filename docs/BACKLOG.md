@@ -128,6 +128,11 @@ unranked reasons. `release_audit` composes registry, bundle, quality, conformanc
 operations, pack-health, repository-impact, and developer-platform evidence into a strict required
 gate plus advisory projection. These are bounded local workflows, not durable queues, identity
 providers, web pages, public-key signatures, CI runners, or deployment approvals.
+`developer_delivery_audit` now composes the developer-platform and repository baselines with
+optional SDK admission, conformance, provider capability, governance-document, conservative
+impact, and release evidence. Its explicit target matrix makes local delivery, guarded claims,
+foreign-artifact gaps, and missing evidence mechanically visible; it still does not implement the
+foreign Python/TypeScript SDKs, REST/gRPC/event clients, GitHub Actions, CI runners, or authoring UI.
 The registry lifecycle and metrics profile surfaces are now callable too:
 `registry_lifecycle_simulate` replays attested pack publication, promotion, reassessment,
 supersession, withdrawal, lookup, revision history, and index integrity, while

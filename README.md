@@ -444,6 +444,10 @@ audit and declared change-impact surfaces while keeping foreign SDK/CI artifacts
 `sdk_registry_check` validates serialized plugin manifests, computes whole/core digests, reports
 attributed trust evidence, and attempts deterministic registry admission under an explicit host
 policy; invalid declarations and capability conflicts return no partial resolution.
+`developer_delivery_audit` composes those local platform and repository contracts with optional
+impact, SDK admission, conformance, provider, governance-document, and release evidence. It
+requires explicit readiness targets, keeps missing foreign SDK/CI artifacts visible, and never
+turns a partial green result or an unguarded walkthrough claim into a release.
 `workspace_capabilities` reports every
 major biological, evaluation, mutation, safety, orchestration, operations and documentation
 surface with its actual transport, while `repository_catalog`/`repository_bundle` provide bounded,

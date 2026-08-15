@@ -622,6 +622,7 @@ impl Server {
             "sdk_registry_check" => self.sdk_registry_check(&arguments),
             "governance_schema_check" => self.governance_schema_check(&arguments),
             "developer_platform_status" => self.developer_platform_status(&arguments),
+            "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -11131,6 +11132,459 @@ impl Server {
         Ok(result)
     }
 
+    fn developer_delivery_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure developer-delivery input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("developer-delivery input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let empty = json!({});
+        let platform =
+            self.developer_platform_status(arguments.get("platform").unwrap_or(&empty))?;
+        let repository = self.repository_catalog(arguments.get("repository").unwrap_or(&empty))?;
+        let repository_impact = match arguments.get("repository_impact") {
+            Some(raw) => Some(self.repository_impact(raw)?),
+            None => None,
+        };
+        let sdk = match arguments.get("sdk") {
+            Some(raw) => Some(self.sdk_registry_check(raw)?),
+            None => None,
+        };
+        let conformance = match arguments.get("conformance") {
+            Some(raw) => Some(self.conformance_run(raw)?),
+            None => None,
+        };
+        let provider = match arguments.get("provider") {
+            Some(raw) => Some(self.provider_capability_gate(raw)?),
+            None => None,
+        };
+        let governance = match arguments.get("governance") {
+            Some(raw) => Some(self.governance_schema_check(raw)?),
+            None => None,
+        };
+        let release = match arguments.get("release") {
+            Some(raw) => Some(self.release_audit(raw)?),
+            None => None,
+        };
+
+        let platform_ok = platform.get("ok").and_then(Value::as_bool).unwrap_or(false);
+        let platform_checks_clean = platform_ok
+            && platform
+                .get("cookbook")
+                .and_then(|value| value.get("verification"))
+                .and_then(|value| value.get("clean"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            && platform
+                .get("diagnostic_catalogue")
+                .and_then(|value| value.get("clean"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            && platform
+                .get("exit_code_audit")
+                .and_then(|value| value.get("clean"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let unguarded_claims = platform
+            .get("devplat")
+            .and_then(|value| value.get("unguarded_claims"))
+            .and_then(Value::as_u64)
+            .unwrap_or(u64::MAX);
+        let platform_ready = platform_checks_clean;
+        let developer_claims_ready = platform_ready && unguarded_claims == 0;
+
+        let repository_ready = repository
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && repository
+                .get("unresolved_links")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                == 0
+            && repository
+                .get("out_of_corpus_links")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                == 0
+            && repository
+                .get("unreadable_front_matter")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                == 0
+            && repository
+                .get("lint")
+                .and_then(|value| value.get("errors"))
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                == 0;
+        let repository_impact_ready = repository_impact
+            .as_ref()
+            .map(|value| {
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+                    && value
+                        .get("scan")
+                        .and_then(|scan| scan.get("unresolved_links"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                        == 0
+                    && value
+                        .get("scan")
+                        .and_then(|scan| scan.get("out_of_corpus_links"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                        == 0
+                    && value
+                        .get("scan")
+                        .and_then(|scan| scan.get("unreadable_front_matter"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                        == 0
+            })
+            .unwrap_or(false);
+
+        let sdk_ready = sdk
+            .as_ref()
+            .map(|value| {
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+                    && value
+                        .get("manifest_count")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                        > 0
+                    && value
+                        .get("registry")
+                        .and_then(|registry| registry.get("registration_count"))
+                        .and_then(Value::as_u64)
+                        == value.get("manifest_count").and_then(Value::as_u64)
+            })
+            .unwrap_or(false);
+        let conformance_ready = conformance
+            .as_ref()
+            .map(|value| {
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+                    && value
+                        .get("release_decision")
+                        .and_then(|decision| decision.get("decision"))
+                        .and_then(Value::as_str)
+                        == Some("release")
+            })
+            .unwrap_or(false);
+        let provider_ready = provider
+            .as_ref()
+            .map(|value| {
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+                    && value
+                        .get("gate")
+                        .and_then(|gate| gate.get("outcome"))
+                        .and_then(Value::as_str)
+                        == Some("cleared")
+            })
+            .unwrap_or(false);
+        let governance_ready = governance
+            .as_ref()
+            .map(|value| {
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+                    && value.get("mode").and_then(Value::as_str) == Some("document")
+                    && value
+                        .get("conforms")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    && value
+                        .get("is_clean")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        let release_ready = release
+            .as_ref()
+            .map(|value| {
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+                    && value
+                        .get("release_ready")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        let local_delivery_ready = platform_ready && repository_ready;
+
+        let mut release_request = if let Some(raw_request) = arguments.get("release_request") {
+            let request = raw_request
+                .as_object()
+                .ok_or("release_request must be an object")?;
+            let request_id = request
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or("release_request.id must be a non-empty string")?;
+            let raw_targets = request
+                .get("targets")
+                .and_then(Value::as_array)
+                .ok_or("release_request.targets must be an array")?;
+            if raw_targets.is_empty() || raw_targets.len() > 16 {
+                return Err("release_request.targets must contain between 1 and 16 entries".into());
+            }
+
+            let mut seen = BTreeSet::new();
+            let mut target_rows = Vec::with_capacity(raw_targets.len());
+            for raw_target in raw_targets {
+                let target = raw_target
+                    .as_str()
+                    .ok_or("release_request.targets must contain strings")?;
+                if !seen.insert(target.to_string()) {
+                    return Err(format!(
+                        "release_request.targets contains duplicate {target:?}"
+                    ));
+                }
+                let (available, eligible, blockers, notes) = match target {
+                    "local_delivery" => (
+                        true,
+                        local_delivery_ready,
+                        if local_delivery_ready {
+                            vec![]
+                        } else {
+                            let mut blockers = Vec::new();
+                            if !platform_ready {
+                                blockers.push("developer_platform_not_clean".to_string());
+                            }
+                            if !repository_ready {
+                                blockers.push("repository_scope_not_clean".to_string());
+                            }
+                            blockers
+                        },
+                        vec![
+                            "local delivery binds platform contract health to repository graph health"
+                                .to_string(),
+                        ],
+                    ),
+                    "developer_platform" => (
+                        true,
+                        platform_ready,
+                        if platform_ready {
+                            vec![]
+                        } else {
+                            vec!["developer_platform_checks_not_clean".to_string()]
+                        },
+                        vec![
+                            "foreign SDK, CI, REST/gRPC, and UI artifacts remain explicit limitations"
+                                .to_string(),
+                        ],
+                    ),
+                    "developer_claims" => (
+                        true,
+                        developer_claims_ready,
+                        if developer_claims_ready {
+                            vec![]
+                        } else if !platform_ready {
+                            vec!["developer_platform_checks_not_clean".to_string()]
+                        } else {
+                            vec!["unguarded_developer_claims_present".to_string()]
+                        },
+                        vec![
+                            "unguarded walkthrough claims are never converted into release evidence"
+                                .to_string(),
+                        ],
+                    ),
+                    "repository_scope" => (
+                        true,
+                        repository_ready,
+                        if repository_ready {
+                            vec![]
+                        } else {
+                            vec!["repository_graph_or_lint_not_clean".to_string()]
+                        },
+                        vec![
+                            "scope readiness requires a bounded scan with no unresolved or unreadable graph health findings"
+                                .to_string(),
+                        ],
+                    ),
+                    "repository_impact" => (
+                        repository_impact.is_some(),
+                        repository_impact_ready,
+                        if repository_impact.is_none() {
+                            vec!["repository_impact_arguments_missing".to_string()]
+                        } else if repository_impact_ready {
+                            vec![]
+                        } else {
+                            vec!["repository_impact_scan_not_clean".to_string()]
+                        },
+                        vec![
+                            "impact is conservative incoming-dependent closure, not a semantic diff"
+                                .to_string(),
+                        ],
+                    ),
+                    "sdk_admission" => (
+                        sdk.is_some(),
+                        sdk_ready,
+                        if sdk.is_none() {
+                            vec!["sdk_arguments_missing".to_string()]
+                        } else if sdk_ready {
+                            vec![]
+                        } else {
+                            vec!["sdk_registry_admission_not_clean".to_string()]
+                        },
+                        vec![
+                            "registration success does not imply trust, isolation, signature verification, or runtime conformance"
+                                .to_string(),
+                        ],
+                    ),
+                    "conformance" => (
+                        conformance.is_some(),
+                        conformance_ready,
+                        if conformance.is_none() {
+                            vec!["conformance_arguments_missing".to_string()]
+                        } else if conformance_ready {
+                            vec![]
+                        } else {
+                            vec!["conformance_release_decision_not_release".to_string()]
+                        },
+                        vec![
+                            "fixture verification and the declared equal-engineering baseline remain part of the conformance evidence"
+                                .to_string(),
+                        ],
+                    ),
+                    "provider_capability" => (
+                        provider.is_some(),
+                        provider_ready,
+                        if provider.is_none() {
+                            vec!["provider_arguments_missing".to_string()]
+                        } else if provider_ready {
+                            vec![]
+                        } else {
+                            vec!["provider_capability_gate_not_cleared".to_string()]
+                        },
+                        vec![
+                            "untested and failed required capabilities both block; measurements are not pass/fail claims"
+                                .to_string(),
+                        ],
+                    ),
+                    "governance_schema" => (
+                        governance.is_some(),
+                        governance_ready,
+                        if governance.is_none() {
+                            vec!["governance_arguments_missing".to_string()]
+                        } else if governance_ready {
+                            vec![]
+                        } else {
+                            vec!["governance_document_not_clean".to_string()]
+                        },
+                        vec![
+                            "schema catalog presence is not treated as document conformance"
+                                .to_string(),
+                        ],
+                    ),
+                    "release" => (
+                        release.is_some(),
+                        release_ready,
+                        if release.is_none() {
+                            vec!["release_arguments_missing".to_string()]
+                        } else if release_ready {
+                            vec![]
+                        } else {
+                            vec!["release_audit_not_ready".to_string()]
+                        },
+                        vec![
+                            "release readiness is the conjunction of named required checks and never a score"
+                                .to_string(),
+                        ],
+                    ),
+                    other => {
+                        return Err(format!(
+                            "unknown release target {other:?}; choose local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release"
+                        ));
+                    }
+                };
+                target_rows.push(json!({
+                    "target": target,
+                    "available": available,
+                    "eligible": eligible,
+                    "blockers": blockers,
+                    "notes": notes,
+                }));
+            }
+            let ready = target_rows.iter().all(|row| {
+                row.get("eligible")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            });
+            json!({
+                "present": true,
+                "id": request_id,
+                "targets": target_rows,
+                "ready": ready,
+                "fail_closed": !ready,
+                "no_implicit_release": true,
+            })
+        } else {
+            json!({
+                "present": false,
+                "ready": false,
+                "reason": "release_request is required to make a delivery readiness claim",
+                "no_implicit_release": true,
+            })
+        };
+        release_request["available_target_count"] = json!(10);
+
+        let foreign_subject_count = platform
+            .get("devplat")
+            .and_then(|value| value.get("foreign_subject_count"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        Ok(json!({
+            "ok": true,
+            "workflow": "developer_delivery_audit",
+            "platform": platform,
+            "repository": repository,
+            "repository_impact": repository_impact,
+            "sdk": sdk,
+            "conformance": conformance,
+            "provider": provider,
+            "governance": governance,
+            "release": release,
+            "readiness": {
+                "platform_checks_clean": platform_ready,
+                "unguarded_claims": unguarded_claims,
+                "developer_claims_ready": developer_claims_ready,
+                "repository_scope_clean": repository_ready,
+                "repository_impact_clean": repository_impact_ready,
+                "sdk_admission_clean": sdk_ready,
+                "conformance_release": conformance_ready,
+                "provider_capability_gate_cleared": provider_ready,
+                "governance_document_clean": governance_ready,
+                "release_audit_ready": release_ready,
+                "local_delivery_ready": local_delivery_ready,
+            },
+            "external_surface_posture": {
+                "foreign_subject_count": foreign_subject_count,
+                "foreign_artifacts_present": foreign_subject_count > 0,
+                "foreign_artifacts_are_not_inferred": true,
+                "unverified_surface_families": [
+                    "python_sdk",
+                    "typescript_sdk",
+                    "rest_grpc_clients",
+                    "event_streams_and_webhooks",
+                    "github_actions_and_ci_execution",
+                    "authoring_studio_ui",
+                ],
+            },
+            "release_request": release_request,
+            "guarantees": [
+                "local platform and repository health are composed without turning foreign artifacts into implemented claims",
+                "SDK admission, conformance, provider capability, governance, impact, and release evidence remain independently inspectable",
+                "missing optional evidence blocks only the explicit target that depends on it",
+                "a readiness claim is emitted only for explicit requested targets; no score, count, or partial green result creates an implicit release",
+                "all delegated checks remain bounded and side-effect free; no package is published, signed, deployed, fetched, or executed by this workflow",
+            ],
+            "limitations": [
+                "the workflow does not implement foreign Python/TypeScript SDKs, REST/gRPC/event clients, GitHub Actions, CI runners, or authoring UIs",
+                "repository readiness is graph and lint health, not proof that every prose requirement is implemented",
+                "SDK registry admission validates serialized declarations but does not dynamically load or sandbox plugins",
+                "conformance and provider outputs are evidence for delivery review, not clinical, scientific, security, or production approval",
+            ],
+        }))
+    }
+
     fn safety_posture(&self, arguments: &Value) -> Result<Value, String> {
         let include_threats = arguments
             .get("include_threats")
@@ -12986,7 +13440,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "developer_and_release_contracts",
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -14450,6 +14904,25 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "include_details": { "type": "boolean", "description": "Include full catalogue, verification, lint and change-impact records; defaults to false for bounded discovery." },
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows returned in each repeated diagnostic/contract list; defaults to 100." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "developer_delivery_audit",
+            "description": "Compose a fail-closed developer delivery readiness workflow from local developer-platform health, repository graph/lint scope, optional conservative impact, SDK registry admission, conformance, provider capability, governance-document, and release evidence. Explicit targets are required for readiness; missing optional evidence blocks only the target that depends on it, unguarded claims and foreign SDK/CI artifacts remain visible, and no score or partial green result implies release.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "platform": { "type": "object", "description": "Optional exact arguments for developer_platform_status; omitted runs its bounded summary check." },
+                    "repository": { "type": "object", "description": "Optional exact arguments for repository_catalog; omitted scans the full bounded repository catalog." },
+                    "repository_impact": { "type": "object", "description": "Optional exact arguments for repository_impact, including changed and optionally route(s). Required for the repository_impact target." },
+                    "sdk": { "type": "object", "description": "Optional exact arguments for sdk_registry_check, including serialized PluginManifest values and optional policy. Required for sdk_admission." },
+                    "conformance": { "type": "object", "description": "Optional exact arguments for conformance_run. Required for conformance readiness." },
+                    "provider": { "type": "object", "description": "Optional exact arguments for provider_capability_gate. Required for provider_capability readiness." },
+                    "governance": { "type": "object", "description": "Optional exact arguments for governance_schema_check. A document-mode conforming result is required for governance_schema readiness; a catalog result is not enough." },
+                    "release": { "type": "object", "description": "Optional exact arguments for release_audit. Required for release readiness." },
+                    "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release. Omit it to receive no readiness claim." }
                 },
                 "required": []
             }
