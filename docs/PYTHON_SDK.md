@@ -208,6 +208,13 @@ invent defaults:
   and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
   fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
   OME-Zarr, FASTA, FASTQ, SAM, GFF3, PDB, SDF/MOL, mzML, and FHIR readers remain responsible for source-specific conformance in the Python layer.
+- `AdapterPlanReport.from_wire(...)` plus `adapter_plan_report(...)`,
+  `Workspace.adapter_plan_report(...)`, `AsyncWorkspace.adapter_plan_report(...)`, and the
+  corresponding HTTP helpers project the complete authoritative envelope: selected descriptor,
+  every candidate status/reason, optional dependency posture, conformance level, accepted formats,
+  scope dimensions, declared semantic-loss kinds, and non-executing limitations. The projection
+  reconciles top-level and nested `executable` state and keeps a dependency-blocked candidate
+  distinguishable from an unsupported format or source shape.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

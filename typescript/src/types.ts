@@ -738,6 +738,52 @@ export interface AdapterPlanArgs extends JsonObject {
   available_dependencies?: string[];
 }
 
+/** One authoritative adapter route, including its declared semantic-loss boundary. */
+export interface AdapterDescriptorResult extends JsonObject {
+  id: string;
+  version: string;
+  execution: "native" | "python_delegated";
+  accepted_formats: string[];
+  accepts_undeclared_format: boolean;
+  source_kinds: ("bytes" | "directory")[];
+  conformance_level: "parse" | "normalize" | "execute" | "stream" | "replay";
+  declared_loss_kinds: string[];
+  scope_dimensions: string[];
+  optional_dependency: string | null;
+  description: string;
+}
+
+/** A candidate route and the explicit reason it is ready or refused. */
+export interface AdapterPlanCandidateResult extends JsonObject {
+  adapter: AdapterDescriptorResult;
+  status: "ready" | "unsupported_format" | "unsupported_source_kind" | "unsupported_conformance" | "dependency_unknown" | "dependency_missing";
+  reasons: string[];
+}
+
+/** Full serialized adapter plan, preserving request, candidates, and limitations. */
+export interface AdapterPlanProjectionResult extends JsonObject {
+  schema: string;
+  request: JsonObject;
+  selected_adapter: AdapterDescriptorResult | null;
+  executable: boolean;
+  candidates: AdapterPlanCandidateResult[];
+  limitations: string[];
+}
+
+/** Typed `adapter_plan` envelope returned by MCP/REST. */
+export interface AdapterPlanResult extends JsonObject {
+  ok: boolean;
+  workflow: "adapter_plan";
+  plan_id: string;
+  registry: string;
+  executable: boolean;
+  selected_adapter: JsonObject | null;
+  plan: AdapterPlanProjectionResult;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;

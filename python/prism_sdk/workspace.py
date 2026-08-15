@@ -13,7 +13,7 @@ from .analytics import (
     analytics_request,
 )
 from .authoring import PackArtifact
-from .biological import AdapterPlanRequest
+from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
 from .bioql import BioQlCompileRequest
 from .client import Client
 from .capability import (
@@ -483,6 +483,27 @@ class Workspace:
             available_dependencies,
         )
         return self.tool("adapter_plan", request.to_mcp_arguments())
+
+    def adapter_plan_report(
+        self,
+        source_id: str,
+        source_kind: str,
+        *,
+        declared_format: str | None = None,
+        required_conformance: str | None = None,
+        available_dependencies: Sequence[str] | None = None,
+    ) -> AdapterPlanReport:
+        """Return typed adapter candidates, dependencies, conformance, and loss boundaries."""
+
+        return adapter_plan_report(
+            self.adapter_plan(
+                source_id,
+                source_kind,
+                declared_format=declared_format,
+                required_conformance=required_conformance,
+                available_dependencies=available_dependencies,
+            )
+        )
 
     def oracle_combine(
         self,
@@ -1260,6 +1281,27 @@ class AsyncWorkspace:
             available_dependencies,
         )
         return await self.tool("adapter_plan", request.to_mcp_arguments())
+
+    async def adapter_plan_report(
+        self,
+        source_id: str,
+        source_kind: str,
+        *,
+        declared_format: str | None = None,
+        required_conformance: str | None = None,
+        available_dependencies: Sequence[str] | None = None,
+    ) -> AdapterPlanReport:
+        """Async typed adapter candidates, dependencies, conformance, and loss boundaries."""
+
+        return adapter_plan_report(
+            await self.adapter_plan(
+                source_id,
+                source_kind,
+                declared_format=declared_format,
+                required_conformance=required_conformance,
+                available_dependencies=available_dependencies,
+            )
+        )
 
     async def oracle_combine(
         self,

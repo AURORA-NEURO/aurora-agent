@@ -147,9 +147,12 @@ batches named needs into a non-executing, digest-bound route proposal; `missionF
 fully resolved route into a provenance-preserving explicit mission only after caller-selected
 tools and arguments are supplied. The route response retains per-need candidate domains and a
 `route_coverage` ledger so a caller can see which domains contributed evidence before selecting
-tools. `adapterPlan` selects native
-or Python-delegated biological and clinical source routes—including FHIR—by explicit format and source shape while preserving
-dependency and semantic-loss boundaries.
+tools. `adapterPlan` returns a typed `AdapterPlanResult` that selects native or Python-delegated
+biological and clinical source routes—including FHIR—by explicit format and source shape while
+preserving the complete candidate list, refusal reasons, dependency posture, conformance level,
+accepted formats, scope dimensions, and semantic-loss boundaries. Its nested `plan` remains
+planning evidence with `execution: "not_started"`; a selected route is not authorization or
+source-specific conformance.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

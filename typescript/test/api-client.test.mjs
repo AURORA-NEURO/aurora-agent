@@ -159,7 +159,25 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       } } } });
       if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started", route_coverage: { needs_total: 1, needs_resolved: 1, needs_unresolved: 0, candidate_group_count: 1, candidate_groups: ["testing"], candidate_domain_count: 1, candidate_domains: ["verification"], candidate_tool_count: 1, posture: "routing evidence only" } } } } });
       if (path === "/v1/tools/capability_route_review") return jsonResponse({ ok: true, tool: "capability_route_review", request_id: "r9", mcp: { result: { structuredContent: { workflow: "capability_route_review", review_id: "v".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [["oncology"]], schema_review: { requested: true, checked: 1, valid: true, fully_checked: true } } } } });
-      if (path === "/v1/tools/adapter_plan") return jsonResponse({ ok: true, tool: "adapter_plan", request_id: "r10", mcp: { result: { structuredContent: { workflow: "adapter_plan", executable: true } } } });
+      if (path === "/v1/tools/adapter_plan") return jsonResponse({ ok: true, tool: "adapter_plan", request_id: "r10", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "adapter_plan",
+        plan_id: "p".repeat(64),
+        registry: "bioprism-adapter-registry/0.1",
+        executable: true,
+        selected_adapter: { id: "bioprism.tabular", execution: "native", version: "0.1.0", conformance_level: "normalize", optional_dependency: null, declared_loss_kinds: ["precision_reduced"], scope_dimensions: ["subject"] },
+        plan: {
+          schema: "bioprism-adapter-registry/0.1",
+          request: { source_id: "scan-1", source_kind: "bytes", declared_format: "application/dicom" },
+          selected_adapter: { id: "bioprism.tabular", version: "0.1.0", execution: "native", accepted_formats: ["application/dicom"], accepts_undeclared_format: true, source_kinds: ["bytes"], conformance_level: "normalize", declared_loss_kinds: ["precision_reduced"], scope_dimensions: ["subject"], optional_dependency: null, description: "bounded tabular adapter" },
+          executable: true,
+          candidates: [{ adapter: { id: "bioprism.tabular", version: "0.1.0", execution: "native", accepted_formats: ["application/dicom"], accepts_undeclared_format: true, source_kinds: ["bytes"], conformance_level: "normalize", declared_loss_kinds: ["precision_reduced"], scope_dimensions: ["subject"], optional_dependency: null, description: "bounded tabular adapter" }, status: "ready", reasons: ["native adapter is available in this runtime"] }],
+          limitations: ["source-specific conformance remains required"],
+        },
+        execution: "not_started",
+        guarantees: ["format matching is explicit"],
+        limitations: ["does not execute adapters"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -355,6 +373,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.deepEqual(routeReview.mcp.result.structuredContent.dependency_waves, [["oncology"]]);
   assert.equal(routeReview.mcp.result.structuredContent.schema_review.valid, true);
   assert.equal(adapter.mcp.result.structuredContent.workflow, "adapter_plan");
+  assert.equal(adapter.mcp.result.structuredContent.plan.candidates[0].status, "ready");
+  assert.equal(adapter.mcp.result.structuredContent.selected_adapter.id, "bioprism.tabular");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

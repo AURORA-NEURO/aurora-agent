@@ -12,8 +12,9 @@ from __future__ import annotations
 import importlib.util
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
+from .capability import _route_mapping, _route_strings, _route_text, _tool_payload
 from .errors import ArgumentError
 
 
@@ -192,6 +193,224 @@ class AdapterPlan:
             "candidates": [candidate.to_wire() for candidate in self.candidates],
             "limitations": list(self.limitations),
         }
+
+
+def _adapter_report_bool(name: str, value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise ArgumentError(f"{name} must be a boolean")
+    return value
+
+
+def _validate_adapter_summary(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the compact selected-adapter summary in the outer envelope."""
+
+    raw = _route_mapping("adapter plan selected_adapter", value)
+    execution = _route_text("adapter selected execution", raw.get("execution"))
+    if execution not in {item.value for item in AdapterExecution}:
+        raise ArgumentError(f"unknown adapter selected execution: {execution!r}")
+    conformance = _route_text("adapter selected conformance_level", raw.get("conformance_level"))
+    if conformance not in {item.value for item in ConformanceLevel}:
+        raise ArgumentError(f"unknown adapter selected conformance level: {conformance!r}")
+    dependency = raw.get("optional_dependency")
+    if dependency is not None:
+        _route_text("adapter selected optional_dependency", dependency)
+    _route_text("adapter selected id", raw.get("id"))
+    _route_text("adapter selected version", raw.get("version"))
+    _route_strings("adapter selected declared_loss_kinds", raw.get("declared_loss_kinds", []))
+    _route_strings("adapter selected scope_dimensions", raw.get("scope_dimensions", []))
+    return raw
+
+
+@dataclass(frozen=True)
+class AdapterDescriptorReport:
+    """Transport projection of one adapter route and its semantic-loss boundary."""
+
+    raw: dict[str, Any]
+    id: str
+    version: str
+    execution: str
+    accepted_formats: tuple[str, ...]
+    accepts_undeclared_format: bool
+    source_kinds: tuple[str, ...]
+    conformance_level: str
+    declared_loss_kinds: tuple[str, ...]
+    scope_dimensions: tuple[str, ...]
+    optional_dependency: str | None
+    description: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "AdapterDescriptorReport":
+        raw = _route_mapping("adapter descriptor", value)
+        execution = _route_text("adapter execution", raw.get("execution"))
+        if execution not in {item.value for item in AdapterExecution}:
+            raise ArgumentError(f"unknown adapter execution: {execution!r}")
+        source_kinds = _route_strings("adapter source_kinds", raw.get("source_kinds", []))
+        if any(kind not in {item.value for item in SourceKind} for kind in source_kinds):
+            raise ArgumentError("adapter source_kinds contains an unknown source kind")
+        conformance_level = _route_text("adapter conformance_level", raw.get("conformance_level"))
+        if conformance_level not in {item.value for item in ConformanceLevel}:
+            raise ArgumentError(f"unknown adapter conformance level: {conformance_level!r}")
+        raw_dependency = raw.get("optional_dependency")
+        optional_dependency = None if raw_dependency is None else _route_text(
+            "adapter optional_dependency", raw_dependency
+        )
+        return cls(
+            raw=raw,
+            id=_route_text("adapter id", raw.get("id")),
+            version=_route_text("adapter version", raw.get("version")),
+            execution=execution,
+            accepted_formats=_route_strings("adapter accepted_formats", raw.get("accepted_formats", [])),
+            accepts_undeclared_format=_adapter_report_bool(
+                "adapter accepts_undeclared_format", raw.get("accepts_undeclared_format")
+            ),
+            source_kinds=source_kinds,
+            conformance_level=conformance_level,
+            declared_loss_kinds=_route_strings(
+                "adapter declared_loss_kinds", raw.get("declared_loss_kinds", [])
+            ),
+            scope_dimensions=_route_strings("adapter scope_dimensions", raw.get("scope_dimensions", [])),
+            optional_dependency=optional_dependency,
+            description=_route_text("adapter description", raw.get("description")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class AdapterPlanCandidateReport:
+    """One candidate route with explicit status and refusal reasons."""
+
+    raw: dict[str, Any]
+    adapter: AdapterDescriptorReport
+    status: str
+    reasons: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "AdapterPlanCandidateReport":
+        raw = _route_mapping("adapter plan candidate", value)
+        status = _route_text("adapter candidate status", raw.get("status"))
+        if status not in {item.value for item in PlanStatus}:
+            raise ArgumentError(f"unknown adapter plan status: {status!r}")
+        return cls(
+            raw=raw,
+            adapter=AdapterDescriptorReport.from_wire(raw.get("adapter")),
+            status=status,
+            reasons=_route_strings("adapter candidate reasons", raw.get("reasons", [])),
+        )
+
+    @property
+    def executable(self) -> bool:
+        return self.status == PlanStatus.READY.value
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class AdapterPlanProjection:
+    """Full serialized plan with candidates, selected route, and limitations."""
+
+    raw: dict[str, Any]
+    request: dict[str, Any]
+    selected_adapter: AdapterDescriptorReport | None
+    executable: bool
+    candidates: tuple[AdapterPlanCandidateReport, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "AdapterPlanProjection":
+        raw = _route_mapping("adapter plan projection", value)
+        raw_selected = raw.get("selected_adapter")
+        selected_adapter = None if raw_selected is None else AdapterDescriptorReport.from_wire(raw_selected)
+        executable = _adapter_report_bool("adapter plan executable", raw.get("executable"))
+        raw_candidates = raw.get("candidates", [])
+        if not isinstance(raw_candidates, Sequence) or isinstance(raw_candidates, (str, bytes)):
+            raise ArgumentError("adapter plan candidates must be an array")
+        candidates = tuple(AdapterPlanCandidateReport.from_wire(candidate) for candidate in raw_candidates)
+        if executable != (selected_adapter is not None):
+            raise ArgumentError("adapter plan executable state does not reconcile with selected_adapter")
+        return cls(
+            raw=raw,
+            request=_route_mapping("adapter plan request", raw.get("request", {})),
+            selected_adapter=selected_adapter,
+            executable=executable,
+            candidates=candidates,
+            limitations=_route_strings("adapter plan limitations", raw.get("limitations", [])),
+        )
+
+    @property
+    def dependency_blocked(self) -> bool:
+        return any(candidate.status in {
+            PlanStatus.DEPENDENCY_MISSING.value,
+            PlanStatus.DEPENDENCY_UNKNOWN.value,
+        } for candidate in self.candidates)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class AdapterPlanReport:
+    """Authoritative adapter-plan envelope with typed route and loss evidence."""
+
+    raw: dict[str, Any]
+    plan_id: str
+    registry: str
+    executable: bool
+    selected_adapter: dict[str, Any] | None
+    plan: AdapterPlanProjection
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "AdapterPlanReport":
+        raw = _route_mapping("adapter plan report", value)
+        if raw.get("ok") is False:
+            raise ArgumentError("adapter plan report is not successful")
+        if raw.get("workflow") != "adapter_plan":
+            raise ArgumentError("adapter plan workflow is invalid")
+        executable = _adapter_report_bool("adapter plan report executable", raw.get("executable"))
+        raw_selected = raw.get("selected_adapter")
+        selected_adapter = None if raw_selected is None else _validate_adapter_summary(raw_selected)
+        plan = AdapterPlanProjection.from_wire(raw.get("plan", {}))
+        if executable != plan.executable or (selected_adapter is not None) != executable:
+            raise ArgumentError("adapter plan envelope does not reconcile with the nested plan")
+        if executable and selected_adapter is not None and plan.selected_adapter is not None:
+            if selected_adapter["id"] != plan.selected_adapter.id:
+                raise ArgumentError("adapter plan selected adapter ids do not reconcile")
+        execution = _route_text("adapter plan execution", raw.get("execution"))
+        if execution != "not_started":
+            raise ArgumentError("adapter plan execution must remain not_started")
+        return cls(
+            raw=raw,
+            plan_id=_route_text("adapter plan id", raw.get("plan_id")),
+            registry=_route_text("adapter plan registry", raw.get("registry")),
+            executable=executable,
+            selected_adapter=selected_adapter,
+            plan=plan,
+            execution=execution,
+            guarantees=_route_strings("adapter plan guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("adapter plan report limitations", raw.get("limitations", [])),
+        )
+
+    @property
+    def selected_adapter_id(self) -> str | None:
+        return None if self.selected_adapter is None else self.selected_adapter.get("id")
+
+    @property
+    def candidate_count(self) -> int:
+        return len(self.plan.candidates)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def adapter_plan_report(value: Mapping[str, Any]) -> AdapterPlanReport:
+    """Parse a direct adapter-plan result or an HTTP tool envelope."""
+
+    return AdapterPlanReport.from_wire(_tool_payload(value, "adapter_plan"))
 
 
 def _descriptor(
@@ -632,14 +851,19 @@ def adapter_plan(
 
 __all__ = [
     "AdapterDescriptor",
+    "AdapterDescriptorReport",
     "AdapterExecution",
     "AdapterPlan",
+    "AdapterPlanCandidateReport",
     "AdapterPlanCandidate",
+    "AdapterPlanProjection",
     "AdapterPlanRequest",
+    "AdapterPlanReport",
     "AdapterRegistry",
     "ConformanceLevel",
     "PlanStatus",
     "REGISTRY_SCHEMA",
     "SourceKind",
     "adapter_plan",
+    "adapter_plan_report",
 ]

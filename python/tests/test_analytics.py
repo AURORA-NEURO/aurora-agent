@@ -7,7 +7,11 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from prism_sdk import (
+    AdapterDescriptorReport,
     AdapterPlanRequest,
+    AdapterPlanCandidateReport,
+    AdapterPlanProjection,
+    AdapterPlanReport,
     AdapterRegistry,
     AnalyticsDirection,
     AnalyticsEvidence,
@@ -41,6 +45,7 @@ from prism_sdk import (
     capability_discover_report,
     capability_route_report,
     capability_route_review_report,
+    adapter_plan_report,
     Client,
     MetricObservation,
     MissionBinding,
@@ -413,6 +418,59 @@ def bioatlas_publication_audit_payload() -> dict:
     }
 
 
+def adapter_plan_payload() -> dict:
+    descriptor = {
+        "id": "bioprism.tabular",
+        "version": "0.1.0",
+        "execution": "native",
+        "accepted_formats": ["text/csv"],
+        "accepts_undeclared_format": True,
+        "source_kinds": ["bytes"],
+        "conformance_level": "normalize",
+        "declared_loss_kinds": ["precision_reduced"],
+        "scope_dimensions": ["subject"],
+        "optional_dependency": None,
+        "description": "bounded tabular adapter",
+    }
+    return {
+        "ok": True,
+        "workflow": "adapter_plan",
+        "plan_id": "p" * 64,
+        "registry": "bioprism-adapter-registry/0.1",
+        "executable": True,
+        "selected_adapter": {
+            "id": descriptor["id"],
+            "execution": descriptor["execution"],
+            "version": descriptor["version"],
+            "conformance_level": descriptor["conformance_level"],
+            "optional_dependency": descriptor["optional_dependency"],
+            "declared_loss_kinds": descriptor["declared_loss_kinds"],
+            "scope_dimensions": descriptor["scope_dimensions"],
+        },
+        "plan": {
+            "schema": "bioprism-adapter-registry/0.1",
+            "request": {
+                "source_id": "table-1",
+                "source_kind": "bytes",
+                "declared_format": "text/csv",
+            },
+            "selected_adapter": descriptor,
+            "executable": True,
+            "candidates": [
+                {
+                    "adapter": descriptor,
+                    "status": "ready",
+                    "reasons": ["native adapter is available in this runtime"],
+                }
+            ],
+            "limitations": ["source-specific conformance remains required"],
+        },
+        "execution": "not_started",
+        "guarantees": ["format matching is explicit"],
+        "limitations": ["does not execute adapters"],
+    }
+
+
 class AnalyticsModelTests(unittest.TestCase):
     def test_biological_adapter_registry_distinguishes_dependency_states(self) -> None:
         request = AdapterPlanRequest(
@@ -558,6 +616,29 @@ class AnalyticsModelTests(unittest.TestCase):
             check_environment=False,
         )
         self.assertFalse(plan.executable)
+
+    def test_adapter_plan_report_preserves_route_loss_and_dependency_surface(self) -> None:
+        report = AdapterPlanReport.from_wire(adapter_plan_payload())
+        self.assertTrue(report.executable)
+        self.assertEqual(report.selected_adapter_id, "bioprism.tabular")
+        self.assertEqual(report.candidate_count, 1)
+        self.assertIsInstance(report.plan.selected_adapter, AdapterDescriptorReport)
+        self.assertIsInstance(report.plan.candidates[0], AdapterPlanCandidateReport)
+        self.assertEqual(report.plan.candidates[0].adapter.declared_loss_kinds, ("precision_reduced",))
+        self.assertFalse(report.plan.dependency_blocked)
+        self.assertIsInstance(AdapterPlanProjection.from_wire(adapter_plan_payload()["plan"]), AdapterPlanProjection)
+
+    def test_adapter_plan_report_extracts_http_projection(self) -> None:
+        report = adapter_plan_report({"ok": True, "mcp": {"result": {"structuredContent": adapter_plan_payload()}}})
+        self.assertEqual(report.plan.request["declared_format"], "text/csv")
+        self.assertEqual(report.plan.candidates[0].status, "ready")
+
+    def test_adapter_plan_report_rejects_outer_inner_selection_drift(self) -> None:
+        payload = adapter_plan_payload()
+        payload["selected_adapter"] = dict(payload["selected_adapter"])
+        payload["selected_adapter"]["id"] = "bioprism.other"
+        with self.assertRaises(ArgumentError):
+            AdapterPlanReport.from_wire(payload)
 
     def test_models_emit_the_exact_rust_wire_shape(self) -> None:
         request = analytics_request(
@@ -948,6 +1029,23 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(result["echo"]["source_id"], "scan-1")
         self.assertEqual(result["echo"]["available_dependencies"], ["pydicom"])
 
+    def test_sync_workspace_typed_adapter_plan_report_delegates_to_raw_plan(self) -> None:
+        with patch.object(Workspace, "adapter_plan", return_value=adapter_plan_payload()) as plan:
+            report = Workspace(None).adapter_plan_report(  # type: ignore[arg-type]
+                "table-1",
+                "bytes",
+                declared_format="text/csv",
+                available_dependencies=["pandas"],
+            )
+        self.assertEqual(report.selected_adapter_id, "bioprism.tabular")
+        plan.assert_called_once_with(
+            "table-1",
+            "bytes",
+            declared_format="text/csv",
+            required_conformance=None,
+            available_dependencies=["pandas"],
+        )
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -1108,6 +1206,28 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 available_dependencies=["pysam"],
             )
         self.assertEqual(result["echo"]["declared_format"], "text/vcf")
+
+    async def test_async_workspace_typed_adapter_plan_report_delegates_to_raw_plan(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "adapter_plan",
+            new_callable=AsyncMock,
+            return_value=adapter_plan_payload(),
+        ) as plan:
+            report = await AsyncWorkspace(None).adapter_plan_report(  # type: ignore[arg-type]
+                "table-1",
+                "bytes",
+                declared_format="text/csv",
+                available_dependencies=["pandas"],
+            )
+        self.assertTrue(report.executable)
+        plan.assert_awaited_once_with(
+            "table-1",
+            "bytes",
+            declared_format="text/csv",
+            required_conformance=None,
+            available_dependencies=["pandas"],
+        )
 
 
 if __name__ == "__main__":

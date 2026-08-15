@@ -148,6 +148,11 @@ and source shapes against native CSV/inventory adapters and Python-delegated DIC
 AnnData/Zarr, VCF, FASTA, FASTQ, SAM, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
 distinguishes missing from unchecked optional dependencies before execution; it never sniffs
 content, fetches sources, imports packages, or claims that heavyweight parsing has occurred.
+The Python `AdapterPlanReport` and TypeScript `AdapterPlanResult` projections preserve the full
+selected descriptor, candidate statuses and refusal reasons, accepted formats, source kinds,
+conformance level, dependency posture, scope dimensions, semantic-loss vocabulary, and nested
+non-executing limitations across MCP and HTTP. This makes biological and clinical route selection
+auditable even when no adapter is executable.
 The Python adapter layer now also contains a bounded text VCF reader: it validates the complete
 record stream, preserves raw INFO/FORMAT spellings beside typed projections, retains source and
 line hashes, and reports reference-build, provenance, type, and precision limitations without

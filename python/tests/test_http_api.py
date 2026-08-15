@@ -7,7 +7,42 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+
+
+def adapter_plan_payload() -> dict:
+    descriptor = {
+        "id": "bioprism.tabular",
+        "version": "0.1.0",
+        "execution": "native",
+        "accepted_formats": ["text/csv"],
+        "accepts_undeclared_format": True,
+        "source_kinds": ["bytes"],
+        "conformance_level": "normalize",
+        "declared_loss_kinds": ["precision_reduced"],
+        "scope_dimensions": ["subject"],
+        "optional_dependency": None,
+        "description": "bounded tabular adapter",
+    }
+    return {
+        "ok": True,
+        "workflow": "adapter_plan",
+        "plan_id": "p" * 64,
+        "registry": "bioprism-adapter-registry/0.1",
+        "executable": True,
+        "selected_adapter": {"id": "bioprism.tabular", "execution": "native", "version": "0.1.0", "conformance_level": "normalize", "optional_dependency": None, "declared_loss_kinds": ["precision_reduced"], "scope_dimensions": ["subject"]},
+        "plan": {
+            "schema": "bioprism-adapter-registry/0.1",
+            "request": {"source_id": "table-1", "source_kind": "bytes", "declared_format": "text/csv"},
+            "selected_adapter": descriptor,
+            "executable": True,
+            "candidates": [{"adapter": descriptor, "status": "ready", "reasons": ["native adapter is available in this runtime"]}],
+            "limitations": ["source-specific conformance remains required"],
+        },
+        "execution": "not_started",
+        "guarantees": ["format matching is explicit"],
+        "limitations": ["does not execute adapters"],
+    }
 
 
 def developer_delivery_audit_payload() -> dict:
@@ -509,6 +544,21 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertTrue(report.schema_quality.fully_valid)
         audit.assert_called_once_with(include_groups=False)
 
+    def test_http_typed_adapter_plan_report_delegates_to_raw_helper(self) -> None:
+        with patch.object(ApiClient, "adapter_plan", return_value=adapter_plan_payload()) as plan:
+            report = ApiClient(self.base_url).adapter_plan_report(
+                "table-1", "bytes", declared_format="text/csv"
+            )
+        self.assertIsInstance(report, AdapterPlanReport)
+        self.assertEqual(report.selected_adapter_id, "bioprism.tabular")
+        plan.assert_called_once_with(
+            "table-1",
+            "bytes",
+            declared_format="text/csv",
+            required_conformance=None,
+            available_dependencies=None,
+        )
+
     def test_http_arguments_and_async_facade(self) -> None:
         with self.assertRaises(ArgumentError):
             ApiClient(self.base_url, bearer_token="short")
@@ -561,6 +611,22 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(
                 (await client.adapter_plan("variants", "bytes", declared_format="text/vcf"))["mcp"]["result"]["declared_format"],
                 "text/vcf",
+            )
+            with patch.object(
+                AsyncApiClient,
+                "adapter_plan",
+                new_callable=AsyncMock,
+                return_value=adapter_plan_payload(),
+            ) as plan:
+                report = await client.adapter_plan_report("table-1", "bytes", declared_format="text/csv")
+            self.assertIsInstance(report, AdapterPlanReport)
+            self.assertEqual(report.plan.candidates[0].status, "ready")
+            plan.assert_awaited_once_with(
+                "table-1",
+                "bytes",
+                declared_format="text/csv",
+                required_conformance=None,
+                available_dependencies=None,
             )
             evidence_request = BioCapabilityEvidenceAuditRequest(
                 [EvidenceItem("grounding", "evidence_grounding", "observed", support={"source": "ledger", "scope": "pack/1"})],

@@ -17,6 +17,7 @@ import type {
   CapabilityRouteReviewResult,
   CapabilityRouteResult,
   AdapterPlanArgs,
+  AdapterPlanResult,
   BioAtlasPublicationAuditArgs,
   BioAtlasPublicationAuditResult,
   BioCapabilityEvidenceAuditArgs,
@@ -276,8 +277,8 @@ export class ApiClient {
     return this.callTool<CapabilityRouteReviewResult>("capability_route_review", args, options);
   }
 
-  async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions) {
-    return this.callTool("adapter_plan", args, options);
+  async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterPlanResult>> {
+    return this.callTool<AdapterPlanResult>("adapter_plan", args, options);
   }
 
   async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AgentMissionReport>> {
