@@ -169,6 +169,10 @@ remains authoritative for metric comparability, release posture, and nested scie
 It also exposes `BioQlCompileRequest` with bounded query and schema transport across sync MCP,
 async MCP, and HTTP; the compiler remains fail-closed and non-executing, with Rust retaining
 authority over schema, units, frames, temporal semantics, provenance, access labels, and cost.
+The Python SDK also exposes bounded envelope models and sync/async/HTTP helpers for
+`world_claim_check`, `lab_plan`, and `routing_decide`; serialized world/lab/routing semantics remain
+Rust-owned, including provenance support, privacy boundaries, evidence reachability, abstention, and
+safe defaults.
 
 The table below is a snapshot; the script is the live source.
 

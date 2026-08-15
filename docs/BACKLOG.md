@@ -182,6 +182,10 @@ The same Python surface now exposes a bounded `bioql_compile()` bridge for expli
 compilation over sync MCP, async MCP, and HTTP. Local validation only bounds strings and canonical
 JSON; Rust remains authoritative for BioQL syntax, schema, units, frames, clocks, provenance,
 access labels, and cost semantics, and the bridge never executes a query.
+Typed Python envelopes now also cover `world_claim_check`, `lab_plan`, and `routing_decide` across
+sync MCP, async MCP, and HTTP. They keep serialized provenance, obligation/action graphs, routing
+fingerprints, evidence ledgers, budgets, and task identity bounded and explicit without duplicating
+Rust's support, privacy, reachability, abstention, or safe-default decisions.
 The benchmark utility complements that kernel for Python notebooks: it separates measured from
 declared/missing/blocked rows, computes deterministic distribution summaries, performs direction-aware
 paired contrasts, and offers cluster-aware percentile bootstrap intervals with explicit assumptions.

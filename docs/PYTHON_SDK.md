@@ -66,6 +66,11 @@ invent defaults:
   over sync MCP, async MCP, and HTTP. Query text and explicit schema JSON are size-checked locally;
   lexical, unit/frame, temporal, provenance, access-label, and cost semantics remain authoritative
   in Rust, and compilation never executes a query.
+- `WorldClaimCheckRequest`, `LabPlanRequest`, and `RoutingDecisionRequest` expose typed envelope
+  helpers for world support checks, no-execution acquisition planning, and unseen-task routing over
+  sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and
+  task identity while leaving provenance support, privacy crossings, reachability, abstention, and
+  safe-default decisions to Rust.
 - `compile_context(world, query, ...)` invokes `fiber_compile` while leaving policy/profile choices
   caller-controlled.
 - `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON

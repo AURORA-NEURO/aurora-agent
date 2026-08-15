@@ -73,6 +73,15 @@ from .authoring import (
 from .client import Client, ClientConfig
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .dicom import DicomAdapter, DicomAuditResult, DicomFinding, audit_dicom
+from .domain_requests import (
+    MAX_DOMAIN_REQUEST_BYTES,
+    MAX_LAB_ACTIONS,
+    MAX_LAB_ITEMS,
+    MAX_ROUTING_EVIDENCE,
+    LabPlanRequest,
+    RoutingDecisionRequest,
+    WorldClaimCheckRequest,
+)
 from .errors import (
     ApiError,
     ArgumentError,
@@ -237,6 +246,13 @@ __all__ = [
     "DicomAdapter",
     "DicomAuditResult",
     "DicomFinding",
+    "LabPlanRequest",
+    "RoutingDecisionRequest",
+    "WorldClaimCheckRequest",
+    "MAX_DOMAIN_REQUEST_BYTES",
+    "MAX_LAB_ACTIONS",
+    "MAX_LAB_ITEMS",
+    "MAX_ROUTING_EVIDENCE",
     "EVIDENCE_DIMENSIONS",
     "EVIDENCE_STATUSES",
     "EvidenceItem",

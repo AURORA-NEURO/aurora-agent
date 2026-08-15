@@ -261,7 +261,7 @@ resources, so a client can build valid documents and route work without reading 
 The repository also ships a dependency-free Python client in [`python/`](python/README.md). It
 supports synchronous and asyncio MCP sessions, enforces the initialize/initialized lifecycle,
 keeps transport/protocol/remote-refusal errors distinct, bounds JSON-RPC frames, and provides thin
-helpers for `developer_delivery_audit`, `developer_workbench`, `agent_mission`, `capability_discover`, `capability_audit`, `capability_route`, `biocapability_evidence_audit`, `bioql_compile`, `bioatlas_publication_audit`, and `fiber_compile`. It is an
+helpers for `developer_delivery_audit`, `developer_workbench`, `agent_mission`, `capability_discover`, `capability_audit`, `capability_route`, `biocapability_evidence_audit`, `bioql_compile`, `world_claim_check`, `lab_plan`, `routing_decide`, `bioatlas_publication_audit`, and `fiber_compile`. It is an
 integration foundation above the Rust kernel, not a claim that the full Python data-adapter,
 benchmark-statistics, or biological-format ecosystem is complete. Its authoring layer now builds
 digest-bound packs, decision cells, deterministic mutation plans, versioned oracle judgements,

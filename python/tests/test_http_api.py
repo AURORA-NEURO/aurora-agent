@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EvidenceItem
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EvidenceItem, LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -38,7 +38,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(size) or b"{}")
         if self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -95,6 +95,18 @@ class HttpApiClientTests(unittest.TestCase):
             client.bioql_compile(BioQlCompileRequest("SELECT sample.id", {"schema_version": "v1"}))["mcp"]["result"]["query"],
             "SELECT sample.id",
         )
+        self.assertEqual(
+            client.world_claim_check(WorldClaimCheckRequest({"top": "observed"}, {"kind": "biology"}))["mcp"]["result"]["provenance"]["top"],
+            "observed",
+        )
+        self.assertEqual(
+            client.lab_plan(LabPlanRequest({"obligations": []}, [{"id": "assay"}], {"tokens": 1}))["mcp"]["result"]["actions"][0]["id"],
+            "assay",
+        )
+        self.assertEqual(
+            client.routing_decide(RoutingDecisionRequest({"features": {}}, [{"task_id": "other"}], {"safe_default": "abstain"}))["mcp"]["result"]["policy"]["safe_default"],
+            "abstain",
+        )
         self.assertEqual(client.events()["page"]["events"], [])
         with self.assertRaises(ApiError) as error:
             client.request("POST", "/v1/tools/refuse", {})
@@ -128,6 +140,10 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(
                 (await client.bioql_compile("SELECT sample.id", {"schema_version": "v1"}))["mcp"]["result"]["schema"]["schema_version"],
                 "v1",
+            )
+            self.assertEqual(
+                (await client.routing_decide({"features": {}}, [{"task_id": "other"}], {"safe_default": "abstain"}, task_id="new"))["mcp"]["result"]["task_id"],
+                "new",
             )
 
         asyncio.run(run())

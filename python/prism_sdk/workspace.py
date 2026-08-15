@@ -19,6 +19,7 @@ from .client import Client
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ArgumentError
 from .evidence import BioCapabilityEvidenceAuditRequest
+from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
 from .mission import MissionPolicy, MissionRequest, MissionStep
 from .oracle import (
     EvidenceTier,
@@ -132,6 +133,66 @@ class Workspace:
                 raise ArgumentError("schema is required when query is a string")
             request = BioQlCompileRequest(query, schema)
         return self.tool("bioql_compile", request.to_mcp_arguments())
+
+    def world_claim_check(
+        self,
+        provenance: Mapping[str, Any] | WorldClaimCheckRequest,
+        claim: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Check a serialized claim against world provenance without inventing support."""
+
+        if isinstance(provenance, WorldClaimCheckRequest):
+            if claim is not None:
+                raise ArgumentError("claim must be omitted when provenance is a WorldClaimCheckRequest")
+            request = provenance
+        else:
+            if claim is None:
+                raise ArgumentError("claim is required when provenance is a mapping")
+            request = WorldClaimCheckRequest(provenance, claim)
+        return self.tool("world_claim_check", request.to_mcp_arguments())
+
+    def lab_plan(
+        self,
+        graph: Mapping[str, Any] | LabPlanRequest,
+        actions: Sequence[Mapping[str, Any]] | None = None,
+        budget: Mapping[str, Any] | None = None,
+        *,
+        marginal_value_floor: float = 0.0,
+        hypotheses: Mapping[str, Any] | None = None,
+        observations: Mapping[str, Any] | None = None,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Plan evidence acquisition while preserving the no-execution boundary."""
+
+        if isinstance(graph, LabPlanRequest):
+            if actions is not None or budget is not None:
+                raise ArgumentError("actions and budget must be omitted when graph is a LabPlanRequest")
+            request = graph
+        else:
+            if actions is None or budget is None:
+                raise ArgumentError("actions and budget are required when graph is a mapping")
+            request = LabPlanRequest(graph, actions, budget, marginal_value_floor, hypotheses, observations, max_items)
+        return self.tool("lab_plan", request.to_mcp_arguments())
+
+    def routing_decide(
+        self,
+        fingerprint: Mapping[str, Any] | RoutingDecisionRequest,
+        evidence: Sequence[Mapping[str, Any]] | None = None,
+        policy: Mapping[str, Any] | None = None,
+        *,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Route an unseen task using an approved architecture policy and evidence ledger."""
+
+        if isinstance(fingerprint, RoutingDecisionRequest):
+            if evidence is not None or policy is not None or task_id is not None:
+                raise ArgumentError("other routing arguments must be omitted when fingerprint is a RoutingDecisionRequest")
+            request = fingerprint
+        else:
+            if evidence is None or policy is None:
+                raise ArgumentError("evidence and policy are required when fingerprint is a mapping")
+            request = RoutingDecisionRequest(fingerprint, evidence, policy, task_id)
+        return self.tool("routing_decide", request.to_mcp_arguments())
 
     def developer_workbench(
         self,
@@ -496,6 +557,66 @@ class AsyncWorkspace:
                 raise ArgumentError("schema is required when query is a string")
             request = BioQlCompileRequest(query, schema)
         return await self.tool("bioql_compile", request.to_mcp_arguments())
+
+    async def world_claim_check(
+        self,
+        provenance: Mapping[str, Any] | WorldClaimCheckRequest,
+        claim: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.world_claim_check`."""
+
+        if isinstance(provenance, WorldClaimCheckRequest):
+            if claim is not None:
+                raise ArgumentError("claim must be omitted when provenance is a WorldClaimCheckRequest")
+            request = provenance
+        else:
+            if claim is None:
+                raise ArgumentError("claim is required when provenance is a mapping")
+            request = WorldClaimCheckRequest(provenance, claim)
+        return await self.tool("world_claim_check", request.to_mcp_arguments())
+
+    async def lab_plan(
+        self,
+        graph: Mapping[str, Any] | LabPlanRequest,
+        actions: Sequence[Mapping[str, Any]] | None = None,
+        budget: Mapping[str, Any] | None = None,
+        *,
+        marginal_value_floor: float = 0.0,
+        hypotheses: Mapping[str, Any] | None = None,
+        observations: Mapping[str, Any] | None = None,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.lab_plan`."""
+
+        if isinstance(graph, LabPlanRequest):
+            if actions is not None or budget is not None:
+                raise ArgumentError("actions and budget must be omitted when graph is a LabPlanRequest")
+            request = graph
+        else:
+            if actions is None or budget is None:
+                raise ArgumentError("actions and budget are required when graph is a mapping")
+            request = LabPlanRequest(graph, actions, budget, marginal_value_floor, hypotheses, observations, max_items)
+        return await self.tool("lab_plan", request.to_mcp_arguments())
+
+    async def routing_decide(
+        self,
+        fingerprint: Mapping[str, Any] | RoutingDecisionRequest,
+        evidence: Sequence[Mapping[str, Any]] | None = None,
+        policy: Mapping[str, Any] | None = None,
+        *,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.routing_decide`."""
+
+        if isinstance(fingerprint, RoutingDecisionRequest):
+            if evidence is not None or policy is not None or task_id is not None:
+                raise ArgumentError("other routing arguments must be omitted when fingerprint is a RoutingDecisionRequest")
+            request = fingerprint
+        else:
+            if evidence is None or policy is None:
+                raise ArgumentError("evidence and policy are required when fingerprint is a mapping")
+            request = RoutingDecisionRequest(fingerprint, evidence, policy, task_id)
+        return await self.tool("routing_decide", request.to_mcp_arguments())
 
     async def developer_workbench(
         self,
