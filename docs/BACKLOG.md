@@ -213,6 +213,9 @@ without decoding pixels. Indexed/compressed VCF, binary DICOM transfer syntaxes,
 interpretation, AnnData/Zarr, BAM/CRAM, and OME-Zarr remain separate format-specific adapters rather
 than being hidden behind a generic parser claim. The NIfTI projection route now covers header/affine
 semantics without claiming to decode arrays, compression, extensions, or BIDS sidecars.
+The AnnData/Zarr projection route now covers dimensions, index identity, annotations, sparse metadata,
+embeddings, pairwise matrices, raw dimensions, and safe `uns` summaries without claiming to decode
+HDF5/Zarr chunks or matrix values.
 
 
 ## §11 Developer Platform — 6 uncovered

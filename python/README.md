@@ -78,6 +78,10 @@ is blocking; pixel decoding remains an explicit optional-reader responsibility.
 `NiftiAdapter` and `audit_nifti()` add the header/affine counterpart: shape, datatype, qform/sform,
 affine invertibility, voxel-size agreement, units, axis codes, series consistency, provenance, and
 privacy-safe affine digests are checked without reading image arrays or compressed files.
+`AnnDataAdapter` and `audit_anndata()` add the single-cell/multimodal projection counterpart:
+`n_obs`/`n_vars`, X/layer sparse metadata, obs/var indices and annotations, embeddings, pairwise
+matrices, raw dimensions, `uns` summaries, provenance, and index digests are checked without reading
+HDF5/Zarr chunks or matrix values.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

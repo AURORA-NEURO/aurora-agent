@@ -99,6 +99,11 @@ invent defaults:
   series consistency, and coordinate-frame provenance. The result returns an affine digest rather
   than raw matrices in its summary, separates structural validity from publishability, and makes
   clear that image arrays, compression, extensions, and BIDS sidecars were not decoded.
+- `AnnDataAdapter` and `audit_anndata(...)` provide a bounded parsed projection audit for `n_obs`/
+  `n_vars`, X/layer sparse structure, obs/var index identity, annotation lengths and categories,
+  obsm/varm embeddings, obsp/varp pairwise matrices, raw dimensions, and safe `uns` summaries. It
+  returns index digests rather than index values, separates structural validity from provenance-
+  gated publishability, and does not read HDF5/Zarr chunks or matrix payloads.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and
@@ -262,10 +267,10 @@ negative result.
 
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData, indexed/compressed VCF,
 binary BIDS image parsing, inferential statistics, OTLP export, a notebook UI, or CI deployment. It
-now ships bounded text VCF, BIDS manifest, parsed DICOM metadata, and parsed NIfTI header/affine
-audits plus descriptive/cluster-bootstrap utilities above the Rust kernel. The repository still
-keeps gRPC, durable event storage, external webhook delivery, heavyweight binary biological readers,
-and statistical estimators as separate contracts.
+now ships bounded text VCF, BIDS manifest, parsed DICOM metadata, parsed NIfTI header/affine, and
+parsed AnnData/Zarr matrix audits plus descriptive/cluster-bootstrap utilities above the Rust kernel.
+The repository still keeps gRPC, durable event storage, external webhook delivery, heavyweight binary
+biological readers, and statistical estimators as separate contracts.
 
 ## Verification
 

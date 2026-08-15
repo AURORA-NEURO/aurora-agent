@@ -6,6 +6,7 @@ JSON without recreating domain semantics or silently converting refusals into or
 """
 
 from .async_client import AsyncClient
+from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .analytics import (
     AnalyticsDirection,
     AnalyticsEvidence,
@@ -125,6 +126,9 @@ __all__ = [
     "AnalyticsDirection",
     "AnalyticsEvidence",
     "AnalyticsRequest",
+    "AnnDataAdapter",
+    "AnnDataAuditResult",
+    "AnnDataFinding",
     "AuthoringError",
     "DecisionCell",
     "DecisionCellBuilder",
@@ -202,6 +206,7 @@ __all__ = [
     "audit_bids",
     "audit_dicom",
     "audit_nifti",
+    "audit_anndata",
     "bootstrap_mean",
     "parse_vcf",
     "paired_effect",

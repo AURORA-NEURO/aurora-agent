@@ -318,6 +318,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Python-owned AnnData/Zarr adapter route preserving obs/var/uns provenance.",
         ),
         _descriptor(
+            "bioprism.python.anndata_metadata",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/anndata-manifest",),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("coordinate_frame_not_carried", "provenance_unavailable", "content_uninterpreted", "type_undetermined"),
+            ("subject", "cell", "feature", "assay", "embedding"),
+            "Dependency-free audit of parsed AnnData/Zarr dimensions, indices, annotations, layers, embeddings, and sparse matrix metadata; payloads remain uninterpreted.",
+        ),
+        _descriptor(
             "bioprism.python.vcf_text",
             AdapterExecution.PYTHON_DELEGATED,
             ("text/vcf", "text/x-vcf", "application/vcf"),

@@ -338,6 +338,24 @@ impl AdapterRegistry {
                 "Python-owned AnnData/Zarr adapter route preserving obs/var/uns provenance.",
             ),
             descriptor(
+                "bioprism.python.anndata_metadata",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/anndata-manifest"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "cell", "feature", "assay", "embedding"],
+                None,
+                "Dependency-free audit of parsed AnnData/Zarr dimensions, indices, annotations, layers, embeddings, and sparse matrix metadata; payloads remain uninterpreted.",
+            ),
+            descriptor(
                 "bioprism.python.vcf_text",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -718,6 +736,29 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.nifti_metadata")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn parsed_anndata_manifest_selects_the_dependency_free_matrix_auditor() {
+        let plan = AdapterRegistry::default()
+            .plan(request(
+                Some("application/anndata-manifest"),
+                SourceKind::Bytes,
+            ))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.anndata_metadata")
         );
         assert_eq!(
             plan.selected_adapter

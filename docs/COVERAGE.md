@@ -80,6 +80,10 @@ The parsed NIfTI projection audit now checks bounded shape and datatype declarat
 invertibility and last-row invariants, qform/sform agreement, voxel-size consistency, units, axis
 codes, series consistency, and coordinate/provenance loss. It emits affine digests and does not
 decode arrays, compression, extensions, or BIDS sidecars.
+The parsed AnnData/Zarr projection audit now checks `n_obs`/`n_vars`, X/layer sparse shapes and
+indices, obs/var index uniqueness, annotation lengths/categories, obsm/varm and obsp/varp shapes,
+raw dimensions, `uns` kinds, provenance, and bounded disclosure without reading matrix values or
+store chunks.
 The Python benchmark layer now complements Rust's descriptive metrics kernel with typed evidence
 rows, distribution summaries, direction-aware paired contrasts, and deterministic observation- or
 replicate-group bootstrap intervals. It preserves declared/missing/blocked populations and labels
