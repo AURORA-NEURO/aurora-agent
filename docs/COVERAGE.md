@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 105 callable tools. That count is intentionally
+The MCP integration layer currently exposes 107 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -22,7 +22,10 @@ unimplemented. `runtime_execution_simulate` adds deterministic record/replay, bu
 fork evidence; `megafactory_twin_audit` and `megafactory_placement_audit` expose model-discrepancy,
 oracle-eligibility, placement, attestation, fencing, and duplicate-effect predicates. None of
 these turns foreign Python, TypeScript, REST/gRPC, CI, UI, OTLP, or network-publication artifacts
-into implemented workspace code.
+into implemented workspace code. `registry_lifecycle_simulate` adds a continuation-safe local
+publication log and artifact-integrity projection, while `metrics_profile_audit` adds the
+per-capability coverage and uncontested-lead projection used by honest public cards. Both remain
+in-memory integrations of existing Rust contracts.
 
 The table below is a snapshot; the script is the live source.
 

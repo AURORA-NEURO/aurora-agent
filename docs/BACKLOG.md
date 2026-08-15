@@ -106,6 +106,13 @@ unranked reasons. `release_audit` composes registry, bundle, quality, conformanc
 operations, pack-health, repository-impact, and developer-platform evidence into a strict required
 gate plus advisory projection. These are bounded local workflows, not durable queues, identity
 providers, web pages, public-key signatures, CI runners, or deployment approvals.
+The registry lifecycle and metrics profile surfaces are now callable too:
+`registry_lifecycle_simulate` replays attested pack publication, promotion, reassessment,
+supersession, withdrawal, lookup, revision history, and index integrity, while
+`metrics_profile_audit` exposes per-capability leaders, measured/unmeasured populations,
+per-system holes, and optional weighting sensitivity. They make existing local contracts
+continuation-safe and public-card-ready; they do not add network registry transport, signing,
+estimators, statistical inference, or a rendered UI.
 
 
 ## §11 Developer Platform — 12 uncovered

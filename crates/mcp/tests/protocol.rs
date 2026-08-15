@@ -93,7 +93,7 @@ use bioprism_packs::{
     SchemaRange, SystemObservation, WorldId,
 };
 use bioprism_policy::{Consent, Purpose, PurposeSet};
-use bioprism_registry::TrustTier;
+use bioprism_registry::{BenchmarkPack, TrustTier};
 use bioprism_routing::{
     ApprovedSet, Architecture as RoutingArchitecture, EvidenceLedger, Fingerprint,
     Observation as RoutingObservation, RoutingPolicy,
@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 105);
+    assert_eq!(tools.len(), 107);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1114,6 +1114,85 @@ fn registry_gate_fails_closed_on_an_unattested_document() {
 }
 
 #[test]
+fn registry_lifecycle_keeps_invalid_packs_and_independent_actions_explicit() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "registry_lifecycle_simulate",
+        json!({
+            "packs": [{ "not": "an attested benchmark pack" }],
+            "actions": [
+                { "op": "publish", "pack_index": 0, "tier": "exploratory" },
+                { "op": "resolve", "name": "missing@0.1.0" },
+                { "op": "verify_all" }
+            ],
+            "include_index": true
+        }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["packs"][0]["valid"], json!(false));
+    assert_eq!(payload["actions"][0]["ok"], json!(false));
+    assert_eq!(payload["actions"][0]["fail_closed"], json!(true));
+    assert_eq!(payload["actions"][1]["ok"], json!(true));
+    assert_eq!(payload["actions"][1]["result"]["found"], json!(false));
+    assert_eq!(payload["actions"][2]["result"]["clean"], json!(true));
+    assert_eq!(payload["final"]["artifact_count"], json!(0));
+    assert!(payload["registry"].is_object());
+    assert!(payload["guarantees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("continu")));
+}
+
+#[test]
+fn registry_lifecycle_returns_continuation_state_and_preserves_withdrawal_history() {
+    let pack = attested_minimal_registry_pack();
+    let mut server = server();
+    let first = call(
+        &mut server,
+        "registry_lifecycle_simulate",
+        json!({
+            "packs": [pack],
+            "actions": [
+                { "op": "publish", "pack_index": 0, "tier": "unranked" },
+                { "op": "resolve", "name": "mcp/demo@0.1.0" }
+            ]
+        }),
+    );
+    assert_eq!(first["actions"][0]["ok"], json!(true));
+    let digest = first["actions"][0]["result"]["digest"]
+        .as_str()
+        .expect("publish returns digest");
+    assert_eq!(first["actions"][1]["result"]["digest"], json!(digest));
+    assert_eq!(first["final"]["integrity_clean"], json!(true));
+
+    let resumed = call(
+        &mut server,
+        "registry_lifecycle_simulate",
+        json!({
+            "index": first["registry"],
+            "actions": [
+                { "op": "inspect", "digest": digest },
+                { "op": "withdraw", "digest": digest, "reason": "fixture lifecycle complete" },
+                { "op": "history", "digest": digest },
+                { "op": "verify_all" }
+            ]
+        }),
+    );
+    assert_eq!(
+        resumed["initial_integrity"]["operations_allowed"],
+        json!(true)
+    );
+    assert_eq!(resumed["actions"][0]["result"]["found"], json!(true));
+    assert_eq!(resumed["actions"][1]["ok"], json!(true));
+    assert_eq!(resumed["actions"][2]["result"]["event_count"], json!(2));
+    assert_eq!(resumed["actions"][3]["result"]["clean"], json!(true));
+    assert_eq!(resumed["final"]["artifact_count"], json!(1));
+    assert_eq!(resumed["final"]["log_count"], json!(2));
+}
+
+#[test]
 fn operations_catalog_executes_topology_parity_and_keeps_metric_debt_explicit() {
     let mut server = server();
     let payload = call(&mut server, "operations_catalog", json!({ "max_items": 2 }));
@@ -1240,6 +1319,16 @@ fn metric_vector(system: &str, verify: f64, safety: f64, pack: &str) -> Value {
     })
 }
 
+fn attested_minimal_registry_pack() -> Value {
+    BenchmarkPack::builder("mcp/demo", "0.1.0")
+        .intended_use("MCP lifecycle protocol fixture")
+        .publisher("mcp-test")
+        .build()
+        .expect("minimal pack builds")
+        .attest()
+        .expect("minimal pack attests")
+}
+
 #[test]
 fn capability_rank_preserves_dominance_tradeoffs_and_condition_refusals() {
     let mut server = server();
@@ -1324,6 +1413,44 @@ fn capability_rank_preserves_dominance_tradeoffs_and_condition_refusals() {
     assert_eq!(weighted["total_order"]["leaders"], json!(["system-a"]));
     assert_eq!(weighted["total_order"]["overwrote_a_refusal"], json!(false));
     assert!(weighted["rank_instability"]["instability"].is_object());
+}
+
+#[test]
+fn metrics_profile_audit_keeps_unmeasured_capabilities_and_uncontested_leads_visible() {
+    let mut server = server();
+    let mut incomplete = metric_vector("system-b", 0.7, 0.6, "pack/4");
+    incomplete["grid"]["cells"]
+        .as_object_mut()
+        .unwrap()
+        .remove("safety.boundary");
+    let payload = call(
+        &mut server,
+        "metrics_profile_audit",
+        json!({
+            "vectors": [
+                metric_vector("system-a", 0.9, 0.8, "pack/4"),
+                incomplete
+            ]
+        }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["summary"]["capability_count"], json!(2));
+    assert_eq!(payload["summary"]["uncontested_lead_count"], json!(1));
+    let rows = payload["per_capability"]["rows"].as_array().unwrap();
+    let safety = rows
+        .iter()
+        .find(|row| row["capability"] == json!("safety.boundary"))
+        .expect("safety row is retained");
+    assert_eq!(safety["best"], json!(["system-a"]));
+    assert_eq!(safety["unmeasured_for"], json!(["system-b"]));
+    assert_eq!(safety["lead_is_uncontested"], json!(true));
+    let system_b = payload["per_system"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["system"] == json!("system-b"))
+        .unwrap();
+    assert_eq!(system_b["unmeasured_capability_count"], json!(1));
 }
 
 fn risk_assessment(ratings: Value) -> Value {

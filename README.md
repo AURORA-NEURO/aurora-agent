@@ -263,11 +263,16 @@ The same server exposes the broader workspace: `world_validate` checks a world b
 vertical slices, `modality_catalog` exposes assay resolution and failure-mode contracts,
 `mutation_family` validates metamorphic families with effective diversity, `prism_minimize` reduces
 and re-checks a diagnostic world, `registry_gate` fail-closes attested benchmark packs,
+`registry_lifecycle_simulate` replays the local content-addressed publication lifecycle with
+continuation state, append-only events, supersession, withdrawal, promotion, demotion and integrity
+verification,
 `operations_catalog` executes the local/team topology parity and service-contract audit while
 keeping undefined metrics explicit,
 `capability_rank` compares serialized metric vectors without collapsing holes or trade-offs and
 can apply a declared weighting with sensitivity evidence, while `research_ci_check` runs the
 claim, split, figure, regression, environment, egress, non-claim and provenance predicates,
+`metrics_profile_audit` emits per-capability leaders, measured populations, missing systems and
+uncontested-lead warnings for public-card construction without inventing a scalar score,
 `policy_screen` enforces caller-supplied policy rules before selection and preserves typed
 refusals, `safety_release_gate` applies the complete dual-use risk gate with unrated dimensions
 still blocking, `hub_search` performs bounded federated exact-facet discovery with authority and
