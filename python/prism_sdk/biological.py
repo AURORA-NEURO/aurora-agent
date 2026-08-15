@@ -373,6 +373,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free audit of parsed BAM/CRAM records, CIGAR accounting, coordinates, flags, pairing, sort order, and coverage; read payloads remain uninterpreted.",
         ),
         _descriptor(
+            "bioprism.python.fhir_ndjson",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/fhir+ndjson",),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("provenance_unavailable", "ontology_term_unmapped", "content_uninterpreted", "type_undetermined"),
+            ("subject", "encounter", "resource", "terminology", "time"),
+            "Dependency-free bounded FHIR Bulk Data NDJSON reader with complete-record validation and privacy-safe reference projection.",
+        ),
+        _descriptor(
             "bioprism.python.fhir_json",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/fhir+json",),

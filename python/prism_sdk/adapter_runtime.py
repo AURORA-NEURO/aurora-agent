@@ -29,6 +29,7 @@ from .optional_readers import (
     read_anndata_projection,
     read_dicom_projection,
     read_fhir_json,
+    read_fhir_ndjson,
     read_indexed_vcf,
     read_nifti_header,
     read_ome_zarr,
@@ -258,6 +259,7 @@ class AdapterRuntime:
             "bioprism.python.dicom",
             "bioprism.python.fhir_manifest",
             "bioprism.python.fhir_json",
+            "bioprism.python.fhir_ndjson",
             "bioprism.python.vcf_indexed",
             "bioprism.python.bam_cram",
             "bioprism.python.ome_zarr",
@@ -407,6 +409,17 @@ class AdapterRuntime:
             if not isinstance(path, str):
                 raise ArgumentError("fhir_json payload requires a string 'path'")
             return read_fhir_json(path, source_id=request.source_id, provenance=request.provenance, max_items=request.max_items)
+        if adapter_id == "bioprism.python.fhir_ndjson":
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("fhir_ndjson payload requires a string 'path'")
+            return read_fhir_ndjson(
+                path,
+                source_id=request.source_id,
+                provenance=request.provenance,
+                max_records=payload.get("max_records", 100_000),
+                max_items=request.max_items,
+            )
         if adapter_id == "bioprism.python.nifti_metadata":
             images = payload.get("images")
             if not isinstance(images, Sequence) or isinstance(images, (str, bytes)):

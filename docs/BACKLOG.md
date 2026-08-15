@@ -230,10 +230,10 @@ Dependency-gated pydicom and pysam bindings now cover metadata-only DICOM, index
 and BAM/CRAM record projection when those packages are installed; absent packages remain explicit.
 The OME-Zarr route now reads and audits multiscale metadata directly from Zarr groups without
 loading image chunks or pixel values.
-The FHIR route now reads dependency-free JSON resources and Bundles, checks bounded resource and
-reference structure, protects identifiers with source-bound digests, and keeps profile validation,
-terminology expansion, clinical interpretation, and external reference resolution explicitly
-outside its conformance claim.
+The FHIR route now reads dependency-free JSON resources, Bundles, and Bulk Data NDJSON, checks
+bounded resource and reference structure across every record, protects identifiers with
+source-bound digests, and keeps profile validation, terminology expansion, clinical interpretation,
+and external reference resolution explicitly outside its conformance claim.
 
 
 ## §11 Developer Platform — 6 uncovered

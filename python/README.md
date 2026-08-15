@@ -109,8 +109,9 @@ absent pydicom/pysam packages produce explicit unsupported results.
 `OmeZarrAdapter`, `audit_ome_zarr()`, and `read_ome_zarr()` cover multiscale axes, level shapes,
 chunks, scale/translation transforms, channels, labels, and provenance using only Zarr metadata;
 image chunks and pixel values are not loaded.
-The FHIR JSON reader is dependency-free and uses the same auditor for raw files and parsed
-documents; no patient identifiers are echoed in its projection.
+The FHIR JSON and Bulk Data NDJSON readers are dependency-free and use the same auditor for raw
+files and parsed documents; every NDJSON record is validated, and no patient identifiers are
+echoed in the projection.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

@@ -24,6 +24,8 @@ FHIR_SCHEMA = "bioprism-python-fhir/0.1"
 FHIR_ADAPTER = "bioprism.python.fhir_manifest"
 FHIR_ADAPTER_VERSION = "0.1.0"
 FHIR_JSON_ADAPTER = "bioprism.python.fhir_json"
+FHIR_NDJSON_ADAPTER = "bioprism.python.fhir_ndjson"
+FHIR_NDJSON_FORMAT = "application/fhir+ndjson"
 MAX_FHIR_BYTES = 50_000_000
 MAX_FHIR_RESOURCES = 100_000
 MAX_FHIR_ITEMS = 1_000
@@ -529,6 +531,13 @@ def _reject_constant(value: str) -> None:
     raise ValueError(f"non-standard JSON constant {value!r}")
 
 
+def _parse_json_object(text: str) -> Mapping[str, Any]:
+    document = json.loads(text, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+    if not isinstance(document, Mapping):
+        raise ValueError("FHIR JSON root must be an object")
+    return document
+
+
 def parse_fhir_json(
     payload: str | bytes,
     *,
@@ -555,18 +564,80 @@ def parse_fhir_json(
     else:
         raise ArgumentError("FHIR JSON payload must be text or bytes")
     try:
-        document = json.loads(text, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+        document = _parse_json_object(text)
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise ArgumentError(f"FHIR JSON could not be parsed: {error}") from error
-    if not isinstance(document, Mapping):
-        raise ArgumentError("FHIR JSON root must be an object")
     return audit_fhir(document, source_id=source_id, provenance=provenance, max_items=max_items)
+
+
+def parse_fhir_ndjson(
+    payload: str | bytes,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_bytes: int = MAX_FHIR_BYTES,
+    max_records: int = MAX_FHIR_RESOURCES,
+    max_items: int = MAX_FHIR_ITEMS,
+) -> FhirAuditResult:
+    """Parse bounded FHIR Bulk Data NDJSON and audit the complete resource collection."""
+
+    if isinstance(max_records, bool) or not isinstance(max_records, int) or not 1 <= max_records <= MAX_FHIR_RESOURCES:
+        raise ArgumentError(f"max_records must be between 1 and {MAX_FHIR_RESOURCES}")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_FHIR_BYTES:
+        raise ArgumentError(f"max_bytes must be between 1 and {MAX_FHIR_BYTES}")
+    if isinstance(payload, bytes):
+        if len(payload) > max_bytes:
+            raise ArgumentError(f"FHIR NDJSON exceeds the {max_bytes}-byte limit")
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ArgumentError(f"FHIR NDJSON is not valid UTF-8: {error}") from error
+    elif isinstance(payload, str):
+        if len(payload.encode("utf-8")) > max_bytes:
+            raise ArgumentError(f"FHIR NDJSON exceeds the {max_bytes}-byte limit")
+        text = payload
+    else:
+        raise ArgumentError("FHIR NDJSON payload must be text or bytes")
+    lines = text.splitlines()
+    if not lines:
+        raise ArgumentError("FHIR NDJSON must contain at least one resource")
+    if len(lines) > max_records:
+        raise ArgumentError(f"FHIR NDJSON contains more than the {max_records}-record limit")
+    resources: list[Mapping[str, Any]] = []
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            raise ArgumentError(f"FHIR NDJSON line {line_number} is empty")
+        try:
+            resources.append(_parse_json_object(line))
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ArgumentError(f"FHIR NDJSON line {line_number} could not be parsed: {error}") from error
+    synthetic_bundle = {
+        "resourceType": "Bundle",
+        "type": "collection",
+        "entry": [{"resource": resource} for resource in resources],
+    }
+    result = audit_fhir(synthetic_bundle, source_id=source_id, provenance=provenance, max_items=max_items)
+    document = result.to_wire()
+    manifest = dict(document["manifest"])
+    manifest.update(
+        {
+            "adapter": FHIR_NDJSON_ADAPTER,
+            "declared_format": FHIR_NDJSON_FORMAT,
+            "record_count": len(resources),
+            "bytes_read": True,
+        }
+    )
+    document["manifest"] = manifest
+    document["document_digest"] = content_digest(document)
+    return FhirAuditResult(document)
 
 
 __all__ = [
     "FHIR_ADAPTER",
     "FHIR_ADAPTER_VERSION",
     "FHIR_JSON_ADAPTER",
+    "FHIR_NDJSON_ADAPTER",
+    "FHIR_NDJSON_FORMAT",
     "FHIR_SCHEMA",
     "FhirAdapter",
     "FhirAuditResult",
@@ -577,4 +648,5 @@ __all__ = [
     "MAX_FHIR_RESOURCES",
     "audit_fhir",
     "parse_fhir_json",
+    "parse_fhir_ndjson",
 ]

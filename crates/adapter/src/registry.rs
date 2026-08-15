@@ -432,6 +432,24 @@ impl AdapterRegistry {
                 "Dependency-free audit of parsed BAM/CRAM records, CIGAR accounting, coordinates, flags, pairing, sort order, and coverage; read payloads remain uninterpreted.",
             ),
             descriptor(
+                "bioprism.python.fhir_ndjson",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/fhir+ndjson"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "encounter", "resource", "terminology", "time"],
+                None,
+                "Dependency-free bounded FHIR Bulk Data NDJSON reader with complete-record validation and privacy-safe reference projection.",
+            ),
+            descriptor(
                 "bioprism.python.fhir_json",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -851,6 +869,7 @@ mod tests {
         for (format, expected) in [
             ("application/fhir+json", "bioprism.python.fhir_json"),
             ("application/fhir-manifest", "bioprism.python.fhir_manifest"),
+            ("application/fhir+ndjson", "bioprism.python.fhir_ndjson"),
         ] {
             let plan = registry
                 .plan(request(Some(format), SourceKind::Bytes))

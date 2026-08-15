@@ -98,9 +98,10 @@ The readers avoid full image-array and matrix-value materialization.
 The same dependency boundary now covers pydicom metadata-only DICOM and pysam indexed VCF/BCF plus
 BAM/CRAM records; each delegates to the corresponding projection audit and reports absent packages
 as typed unsupported execution rather than silently changing formats. The dependency-free FHIR
-route adds clinical interoperability coverage: it audits Bundle structure, resource identity,
-profile declarations, privacy-safe references, duplicate keys, and provenance without claiming
-profile or terminology conformance.
+route covers JSON resources, Bundles, and Bulk Data NDJSON: it audits every resource record for
+identity, bounded structure, profile declarations, privacy-safe references, duplicate keys, and
+provenance without claiming profile or terminology conformance. NDJSON is normalized through the
+same cross-record reference auditor, with record counts and byte bounds retained in the manifest.
 The OME-Zarr route now inspects Zarr metadata directly and audits multiscale axes, level shapes,
 chunk bounds, spatial transforms, channel/label metadata, and provenance without reading image
 chunks or pixel values.

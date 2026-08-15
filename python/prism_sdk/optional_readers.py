@@ -18,7 +18,7 @@ from .anndata import audit_anndata
 from .authoring import content_digest
 from .dicom import audit_dicom
 from .errors import ArgumentError
-from .fhir import MAX_FHIR_BYTES, parse_fhir_json
+from .fhir import MAX_FHIR_BYTES, parse_fhir_json, parse_fhir_ndjson
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
 from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
@@ -592,6 +592,33 @@ def read_fhir_json(
         raise ArgumentError(f"FHIR JSON read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_fhir_ndjson(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_records: int = 100_000,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded UTF-8 FHIR Bulk Data NDJSON and audit all resource records."""
+
+    candidate = _path(path, field="FHIR NDJSON path")
+    if candidate.stat().st_size > MAX_FHIR_BYTES:
+        raise ArgumentError(f"FHIR NDJSON path exceeds the {MAX_FHIR_BYTES}-byte reader limit")
+    try:
+        return parse_fhir_ndjson(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            max_records=max_records,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"FHIR NDJSON read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_ome_zarr(
     path: str,
     *,
@@ -650,6 +677,7 @@ __all__ = [
     "read_anndata_projection",
     "read_dicom_projection",
     "read_fhir_json",
+    "read_fhir_ndjson",
     "read_indexed_vcf",
     "read_nifti_header",
     "read_ome_zarr",

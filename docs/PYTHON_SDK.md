@@ -140,9 +140,10 @@ invent defaults:
   route: they validate axes, level shapes, chunks, scale/translation transforms, OME channels,
   labels, and provenance, then inspect only Zarr group/array metadata. Image chunks and pixel values
   are never loaded by the reader.
-- `read_fhir_json(...)` is a bounded raw-file binding for UTF-8 FHIR JSON. It rejects duplicate
-  object keys and non-standard JSON numbers before delegating to the same FHIR auditor, so a raw
-  clinical document cannot silently take a different validation path than a parsed manifest.
+- `read_fhir_json(...)` and `read_fhir_ndjson(...)` are bounded raw-file bindings for UTF-8 FHIR
+  JSON and Bulk Data NDJSON. They reject duplicate object keys and non-standard JSON numbers,
+  validate every NDJSON record, and delegate to the same FHIR auditor, so a raw clinical document
+  cannot silently take a different validation path than a parsed manifest.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and

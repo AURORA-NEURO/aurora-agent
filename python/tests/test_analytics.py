@@ -130,6 +130,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(fhir_json.executable)
         self.assertEqual(fhir_json.selected_adapter.id, "bioprism.python.fhir_json")
 
+        fhir_ndjson = AdapterRegistry().plan(
+            AdapterPlanRequest("clinical-bulk", SourceKind.BYTES, declared_format="application/fhir+ndjson"),
+            check_environment=False,
+        )
+        self.assertTrue(fhir_ndjson.executable)
+        self.assertEqual(fhir_ndjson.selected_adapter.id, "bioprism.python.fhir_ndjson")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)
