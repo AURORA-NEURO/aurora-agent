@@ -88,6 +88,10 @@ The parsed BAM/CRAM alignment projection audit now checks explicit reference dic
 query/reference accounting, 0-based coordinate bounds, flags, primary mate pairing, coordinate
 sort order, mapping qualities, coverage, and reference-build/provenance loss without decoding read
 payloads, indexes, or reference bases.
+The Python adapter runtime now executes all six concrete parsed-projection routes through one
+bounded request/result envelope, preserves adapter descriptors and document digests, classifies
+lossy/invalid/blocked/rejected outcomes, and explicitly refuses raw-byte routes without silently
+falling back or sniffing content.
 The Python benchmark layer now complements Rust's descriptive metrics kernel with typed evidence
 rows, distribution summaries, direction-aware paired contrasts, and deterministic observation- or
 replicate-group bootstrap intervals. It preserves declared/missing/blocked populations and labels

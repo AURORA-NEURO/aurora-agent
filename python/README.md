@@ -86,6 +86,10 @@ HDF5/Zarr chunks or matrix values.
 reference dictionaries, CIGAR spans, 0-based coordinate bounds, flags, mate pairing, sort order,
 mapping qualities, coverage, reference-build provenance, and read-identity digests are checked
 without decoding sequences, qualities, auxiliary tags, indexes, or reference bases.
+`AdapterRuntime`, `ProjectionRequest`, and `execute_projection()` provide one typed gateway over
+all six concrete projection audits. They normalize successful, lossy, invalid, blocked, rejected,
+and unsupported outcomes; raw-byte routes refuse explicitly until an optional reader binding exists,
+and the request envelope records payload keys rather than echoing payload values.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

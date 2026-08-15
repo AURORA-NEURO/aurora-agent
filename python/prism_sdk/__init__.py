@@ -8,6 +8,7 @@ JSON without recreating domain semantics or silently converting refusals into or
 from .async_client import AsyncClient
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
+from .adapter_runtime import AdapterExecutionResult, AdapterRuntime, ProjectionRequest, RuntimeStatus, execute_projection
 from .analytics import (
     AnalyticsDirection,
     AnalyticsEvidence,
@@ -133,6 +134,8 @@ __all__ = [
     "AlignmentAdapter",
     "AlignmentAuditResult",
     "AlignmentFinding",
+    "AdapterExecutionResult",
+    "AdapterRuntime",
     "AuthoringError",
     "DecisionCell",
     "DecisionCellBuilder",
@@ -212,6 +215,9 @@ __all__ = [
     "audit_nifti",
     "audit_anndata",
     "audit_alignments",
+    "execute_projection",
+    "ProjectionRequest",
+    "RuntimeStatus",
     "bootstrap_mean",
     "parse_vcf",
     "paired_effect",

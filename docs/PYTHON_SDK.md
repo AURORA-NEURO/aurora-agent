@@ -109,6 +109,12 @@ invent defaults:
   reference spans, coordinate bounds, flags, primary mate pairing, coordinate sort order, mapping
   qualities, and per-reference coverage. Read identities are source-bound digests; sequences,
   qualities, auxiliary tags, indexes, and reference bases are not decoded.
+- `AdapterRuntime`, `ProjectionRequest`, and `execute_projection(...)` close the planning-to-
+  execution handoff for all six concrete projection routes: VCF, BIDS, DICOM metadata, NIfTI
+  metadata, AnnData metadata, and alignment metadata. The envelope normalizes succeeded, lossy,
+  invalid, blocked, rejected, and unsupported states, carries the authoritative adapter descriptor,
+  preserves the audit document digest, and refuses catalogued raw-byte routes until their optional
+  binary reader binding exists. Payload values are not echoed in the request envelope.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and

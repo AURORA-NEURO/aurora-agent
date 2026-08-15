@@ -219,6 +219,9 @@ HDF5/Zarr chunks or matrix values.
 The alignment projection route now covers reference dictionaries, CIGAR accounting, coordinate
 bounds, flags, pairing, sorting, and coverage without decoding BAM/CRAM payloads, indexes, or
 reference bases.
+The typed Python adapter runtime now closes the concrete execution handoff across those six parsed
+routes, normalizes outcome states and document digests, and refuses raw-byte routes explicitly when
+their optional binary-reader binding is absent.
 
 
 ## §11 Developer Platform — 6 uncovered
