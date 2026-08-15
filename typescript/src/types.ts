@@ -596,6 +596,22 @@ export interface MissionPersistenceStatus extends JsonObject {
   flush: string;
 }
 
+export interface EventPersistenceStatus extends JsonObject {
+  ok: boolean;
+  enabled: boolean;
+  file_present: boolean;
+  file_bytes: number | null;
+  schema_version: number;
+  max_file_bytes: number;
+  retained_events: number;
+  next_event_id: number;
+  dropped_events: number;
+  subscriptions_durable: false;
+  webhook_deliveries_durable: false;
+  recovery_policy: string;
+  flush: string;
+}
+
 export interface MissionStepPreflight extends JsonObject {
   id: string;
   tool: string;

@@ -21,7 +21,7 @@ pub mod router;
 
 pub use events::{
     ApiEvent, DeliveryPage, DeliveryView, EventLog, EventMetrics, EventPage, SubscriptionView,
-    WebhookEnvelope,
+    WebhookEnvelope, EVENT_STATE_SCHEMA_VERSION, MAX_EVENT_STATE_FILE_BYTES,
 };
 pub use http::{read_request, HttpError, HttpRequest, HttpResponse};
 pub use router::{

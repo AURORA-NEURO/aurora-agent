@@ -111,7 +111,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
-from .events import ApiEvent, DeliveryPage, DeliveryView, EventPage, MAX_EVENT_PAGE, SseEvent, SseSnapshot, parse_sse
+from .events import ApiEvent, DeliveryPage, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, SseEvent, SseSnapshot, parse_sse
 from .evidence import (
     BioCapabilityEvidenceAuditRequest,
     ClaimRequest,
@@ -347,6 +347,7 @@ __all__ = [
     "EvidenceItem",
     "EvidenceStatus",
     "EventPage",
+    "EventPersistenceStatus",
     "MAX_EVENT_PAGE",
     "SseEvent",
     "SseSnapshot",

@@ -68,6 +68,10 @@ checkpoint. Terminal jobs restore their retained progress, traces, and size-limi
 queued/running jobs become explicit `failed` records with `recovered_after_restart` after a
 restart, never falsely claiming that interrupted work resumed. This is restart-aware mission
 inspection, not durable event storage, distributed scheduling, or effect rollback.
+An independent optional `--event-state` path now checkpoints retained event rows and cursor
+continuity under the same 64 MiB bound. It intentionally excludes webhook secrets, subscriptions,
+and pending deliveries; the API and both SDKs expose status/flush checks so operators can verify
+which recovery boundary is enabled instead of inferring it from a 2xx response.
 Python now exposes typed inventory pages plus bounded sync/async waits that retain the last live
 job on timeout; TypeScript exposes the same wait contract with abortable polling and a typed timeout
 error. These helpers coordinate every domain mission without claiming durable scheduling.

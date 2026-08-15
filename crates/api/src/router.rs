@@ -5,7 +5,9 @@
 //! the event/webhook outbox.  A REST call and an MCP `tools/call` therefore reach exactly the same
 //! Rust implementation and produce the same evidence-bearing result.
 
-use crate::events::{EventLog, EventMetrics, MAX_FILTERS};
+use crate::events::{
+    EventLog, EventMetrics, EVENT_STATE_SCHEMA_VERSION, MAX_EVENT_STATE_FILE_BYTES, MAX_FILTERS,
+};
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
 use serde_json::{json, Value};
@@ -39,6 +41,8 @@ pub struct ApiConfig {
     /// Event cursors remain process-local; this path only restores mission status, bounded
     /// trace rows, progress, and size-bounded result metadata after an API restart.
     pub mission_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for the bounded event cursor only.
+    pub event_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -49,6 +53,7 @@ impl Default for ApiConfig {
             event_capacity: DEFAULT_EVENT_CAPACITY,
             bearer_token: None,
             mission_state_path: None,
+            event_state_path: None,
         }
     }
 }
@@ -76,6 +81,13 @@ impl ApiConfig {
         {
             return Err("mission_state_path must not be empty".into());
         }
+        if self
+            .event_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("event_state_path must not be empty".into());
+        }
         Ok(())
     }
 }
@@ -88,6 +100,7 @@ pub struct ApiRouter {
     next_request_id: AtomicU64,
     mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
     mission_persistence: Arc<MissionPersistence>,
+    event_persistence: Arc<EventPersistence>,
 }
 
 struct MissionJob {
@@ -99,6 +112,29 @@ struct MissionPersistence {
     path: Option<PathBuf>,
     jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
     lock: Mutex<()>,
+}
+
+struct EventPersistence {
+    path: Option<PathBuf>,
+    events: Arc<Mutex<EventLog>>,
+    lock: Mutex<()>,
+}
+
+impl EventPersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| "event persistence lock is unavailable".to_string())?;
+        let events = self
+            .events
+            .lock()
+            .map_err(|_| "event log is unavailable".to_string())?;
+        events.checkpoint_to_path(path)
+    }
 }
 
 impl MissionPersistence {
@@ -334,7 +370,10 @@ impl MissionJobState {
 impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
         config.validate()?;
-        let events = Arc::new(Mutex::new(EventLog::new(config.event_capacity)?));
+        let events = Arc::new(Mutex::new(EventLog::from_checkpoint_path(
+            config.event_capacity,
+            config.event_state_path.as_deref(),
+        )?));
         let restored_jobs = load_mission_jobs(config.mission_state_path.as_deref())?;
         let mut server = bioprism_mcp::Server::new(root);
         let initialize = Request {
@@ -362,6 +401,11 @@ impl ApiRouter {
             jobs: Arc::clone(&mission_jobs),
             lock: Mutex::new(()),
         });
+        let event_persistence = Arc::new(EventPersistence {
+            path: config.event_state_path.clone(),
+            events: Arc::clone(&events),
+            lock: Mutex::new(()),
+        });
         let router = Self {
             server,
             mission_executor,
@@ -370,9 +414,15 @@ impl ApiRouter {
             next_request_id: AtomicU64::new(1),
             mission_jobs,
             mission_persistence,
+            event_persistence,
         };
         if router.config.mission_state_path.is_some() {
             router.persist_mission_registry()?;
+        }
+        if router.config.event_state_path.is_some() {
+            router.event_persistence.persist().map_err(|error| {
+                format!("event state checkpoint failed during startup: {error}")
+            })?;
         }
         Ok(router)
     }
@@ -432,6 +482,8 @@ impl ApiRouter {
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
+            ("GET", "/v1/events/persistence") => self.event_persistence_status(),
+            ("POST", "/v1/events/persistence/flush") => self.flush_event_persistence(&request_id),
             ("GET", "/v1/missions") => self.mission_inventory(&request, &request_id),
             ("GET", "/v1/missions/persistence") => self.mission_persistence_status(),
             ("POST", "/v1/missions/persistence/flush") => {
@@ -513,6 +565,50 @@ impl ApiRouter {
         )
     }
 
+    fn event_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.event_state_path.is_some();
+        let file_bytes = self
+            .config
+            .event_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let metrics = self.event_metrics();
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema_version": EVENT_STATE_SCHEMA_VERSION,
+                "max_file_bytes": MAX_EVENT_STATE_FILE_BYTES,
+                "retained_events": metrics.retained_events,
+                "next_event_id": metrics.next_event_id,
+                "dropped_events": metrics.dropped_events,
+                "subscriptions_durable": false,
+                "webhook_deliveries_durable": false,
+                "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established",
+                "flush": "/v1/events/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_event_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.event_state_path.is_none() {
+            return self.error(
+                409,
+                "event_persistence_disabled",
+                "configure --event-state before flushing an event snapshot",
+                request_id,
+            );
+        }
+        match self.event_persistence.persist() {
+            Ok(_) => self.event_persistence_status(),
+            Err(error) => self.error(503, "event_persistence_unavailable", &error, request_id),
+        }
+    }
+
     fn flush_mission_persistence(&self, request_id: &str) -> HttpResponse {
         if self.config.mission_state_path.is_none() {
             return self.error(
@@ -592,6 +688,7 @@ impl ApiRouter {
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
+                    "event_persistence": "/v1/events/persistence",
                     "webhooks": "/v1/webhooks/subscriptions"
                 }
             }),
@@ -619,6 +716,7 @@ impl ApiRouter {
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
+                    "durable_event_snapshots": self.config.event_state_path.is_some(),
                     "signed_webhook_outbox": true,
                     "grpc": false,
                     "tls": false,
@@ -630,6 +728,7 @@ impl ApiRouter {
                     "event_capacity": self.config.event_capacity,
                     "mission_state_file_bytes": MAX_MISSION_STATE_FILE_BYTES,
                     "persisted_mission_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
+                    "event_state_file_bytes": MAX_EVENT_STATE_FILE_BYTES,
                     "webhook_filters": MAX_FILTERS
                 }
             }),
@@ -907,6 +1006,7 @@ impl ApiRouter {
         let progress_state = Arc::clone(&state);
         let mission_events = Arc::clone(&self.events);
         let persistence = Arc::clone(&self.mission_persistence);
+        let event_persistence = Arc::clone(&self.event_persistence);
         let mission_subject = mission_id.clone();
         let mission_request_id = request_id.to_string();
         let observer = Arc::new(move |event: Value| {
@@ -922,6 +1022,7 @@ impl ApiRouter {
                     json!({ "mission_id": mission_subject.clone(), "trace": event }),
                 );
             }
+            let _ = event_persistence.persist();
         });
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
         let worker_persistence = Arc::clone(&self.mission_persistence);
@@ -1722,6 +1823,7 @@ impl ApiRouter {
         if let Ok(mut events) = self.events.lock() {
             let _ = events.emit(outcome, tool, request_id, payload);
         }
+        let _ = self.event_persistence.persist();
     }
 
     fn error(&self, status: u16, code: &str, message: &str, request_id: &str) -> HttpResponse {
@@ -1761,6 +1863,8 @@ impl ApiRouter {
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
                     "/v1/events": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "cursor page" } } } },
                     "/v1/events/stream": { "get": { "responses": { "200": { "description": "bounded Server-Sent Events snapshot" } } } },
+                    "/v1/events/persistence": { "get": { "responses": { "200": { "description": "event cursor checkpoint status" } } } },
+                    "/v1/events/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded event cursor checkpoint" } } } },
                     "/v1/webhooks/subscriptions": { "get": { "responses": { "200": { "description": "subscriptions" } } }, "post": { "responses": { "201": { "description": "subscription" } } } }
                 },
                 "x-contract": {
@@ -2412,6 +2516,40 @@ mod tests {
             (MAX_PERSISTED_MISSION_RESULT_BYTES + 3) as u64
         );
         assert!(persisted["result_omitted"]["sha256"].as_str().is_some());
+    }
+
+    #[test]
+    fn durable_event_state_restores_tool_cursor_but_not_webhook_state() {
+        let path = test_state_path("events");
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                event_state_path: Some(path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let call = router.handle(request("POST", "/v1/tools/modality_catalog", json!({})));
+        assert_eq!(call.status, 200);
+        let persistence = router.handle(request("GET", "/v1/events/persistence", json!({})));
+        let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
+        assert_eq!(persistence["enabled"], true);
+        assert_eq!(persistence["subscriptions_durable"], false);
+        assert_eq!(router.event_metrics().retained_events, 1);
+
+        let restored = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                event_state_path: Some(path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(restored.event_metrics().retained_events, 1);
+        assert_eq!(restored.event_metrics().next_event_id, 2);
+        let flush = restored.handle(request("POST", "/v1/events/persistence/flush", json!({})));
+        assert_eq!(flush.status, 200);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

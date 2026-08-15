@@ -28,7 +28,7 @@ from .context_requests import (
     ProjectionBundleRequest,
 )
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
-from .events import MAX_EVENT_PAGE, DeliveryPage, EventPage, SseSnapshot, parse_sse
+from .events import MAX_EVENT_PAGE, DeliveryPage, EventPage, EventPersistenceStatus, SseSnapshot, parse_sse
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
@@ -764,6 +764,18 @@ class ApiClient:
             raise TransportError("HTTP API x-next-after header is not an unsigned integer")
         return SseSnapshot(headers.get("content-type", ""), next_after, parse_sse(raw), raw)
 
+    def event_persistence(self) -> EventPersistenceStatus:
+        """Inspect the optional restart-aware event cursor checkpoint."""
+
+        return EventPersistenceStatus.from_wire(self.request("GET", "/v1/events/persistence"))
+
+    def flush_event_persistence(self) -> EventPersistenceStatus:
+        """Force an event cursor checkpoint and return typed bounded status."""
+
+        return EventPersistenceStatus.from_wire(
+            self.request("POST", "/v1/events/persistence/flush", {})
+        )
+
     def subscribe(
         self,
         endpoint: str,
@@ -955,6 +967,16 @@ class AsyncApiClient:
         """Async bounded SSE snapshot with the same cursor contract as the sync client."""
 
         return await asyncio.to_thread(self.client.event_stream, after=after, limit=limit)
+
+    async def event_persistence(self) -> EventPersistenceStatus:
+        """Async inspection of the optional event cursor checkpoint."""
+
+        return await asyncio.to_thread(self.client.event_persistence)
+
+    async def flush_event_persistence(self) -> EventPersistenceStatus:
+        """Async forced event cursor checkpoint with typed bounded status."""
+
+        return await asyncio.to_thread(self.client.flush_event_persistence)
 
     async def mission_inventory(self, *, status: str | None = None, limit: int = 100) -> MissionInventoryPage:
         """Async typed bounded mission inventory."""

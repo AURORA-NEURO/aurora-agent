@@ -145,6 +145,8 @@ invent defaults:
   active jobs are refused so cleanup cannot discard in-flight work.
   `mission_persistence()` and `flush_mission_persistence()` provide typed operator checks for
   the optional checkpoint without implying durable event cursors or webhook delivery state.
+  `event_persistence()` and `flush_event_persistence()` provide the corresponding typed event
+  cursor checkpoint check; subscription secrets and pending deliveries are explicitly non-durable.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the
   complete live MCP catalogue, including domains that do not yet have a handwritten convenience
   method. The catalogue is copied from `tools/list` or `/v1/tools`, deduplicated, bounded, and

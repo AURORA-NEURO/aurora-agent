@@ -1,6 +1,6 @@
 //! `bioprism-api` — bounded HTTP/REST and event gateway.
 //!
-//! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>]`
+//! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--event-state <file>]`
 
 use bioprism_api::{serve, ApiConfig, ApiRouter};
 use std::net::TcpListener;
@@ -13,6 +13,7 @@ fn main() {
     let mut root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut token = None;
     let mut mission_state_path = None;
+    let mut event_state_path = None;
     let mut max_body_bytes = ApiConfig::default().max_body_bytes;
     let mut event_capacity = ApiConfig::default().event_capacity;
 
@@ -29,6 +30,9 @@ fn main() {
             "--token" => token = Some(value("--token", &mut arguments)),
             "--mission-state" => {
                 mission_state_path = Some(PathBuf::from(value("--mission-state", &mut arguments)))
+            }
+            "--event-state" => {
+                event_state_path = Some(PathBuf::from(value("--event-state", &mut arguments)))
             }
             "--max-body-bytes" => {
                 max_body_bytes = value("--max-body-bytes", &mut arguments)
@@ -49,11 +53,12 @@ fn main() {
             "-h" | "--help" => {
                 println!(
                     "bioprism-api — bounded HTTP/REST and event gateway\n\n\
-                     USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>]\n\n\
+                     USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--event-state <file>]\n\n\
                      GET /healthz and /readyz are public. Other /v1 routes require --token when configured.\n\
                      REST tools: POST /v1/tools/<name> with a JSON object body.\n\
                      JSON-RPC: POST /v1/rpc. Events: GET /v1/events or /v1/events/stream.\n\
                      Missions: POST /v1/missions; --mission-state enables bounded restart-aware snapshots.\n\
+                     Events: --event-state enables bounded cursor checkpoints; subscriptions/deliveries remain non-durable.\n\
                      Webhooks: register, poll signed deliveries, retry, and acknowledge.\n\
                      The gateway does not terminate TLS, speak gRPC, or send arbitrary outbound requests."
                 );
@@ -75,6 +80,7 @@ fn main() {
         event_capacity,
         bearer_token: token,
         mission_state_path,
+        event_state_path,
         ..ApiConfig::default()
     };
     let router = match ApiRouter::new(root, config) {

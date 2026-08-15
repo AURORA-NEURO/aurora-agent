@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EventPage, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -49,10 +49,14 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/v1/events/persistence":
+            self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": "/v1/events/persistence/flush"})
         elif self.path.startswith("/v1/events"):
             self._send(200, {"ok": True, "page": {"events": [], "after": 0, "next_after": 0, "oldest": None, "newest": None, "gap": False, "dropped_events": 0}})
         elif self.path.startswith("/v1/missions?"):
             self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "progress": {"phase": "succeeded", "current_wave": 0, "total_steps": 1, "completed_steps": 1, "active_steps": 0, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "trace_sequence": 4, "last_event": "mission.completed"}, "summary": {"total_steps": 1, "completed_steps": 1, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "result_available": True}, "poll": "/v1/missions/async-1", "cancel": "/v1/missions/async-1/cancel", "trace": "/v1/missions/async-1/trace"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
+        elif self.path == "/v1/missions/persistence":
+            self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "event_log_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "terminal snapshots restore; queued and running jobs fail explicitly after restart", "flush": "/v1/missions/persistence/flush"})
         elif self.path.startswith("/v1/missions/async-1/trace"):
             self._send(200, {"ok": True, "mission_id": "async-1", "trace_schema_version": "bioprism-devplat-mission-trace/0.1", "events": [{"sequence": 0, "event": "mission.started", "wave": None, "step_id": None, "tool": None, "status": "running", "arguments_digest": None, "bytes": 0, "detail": None}, {"sequence": 1, "event": "mission.completed", "wave": None, "step_id": None, "tool": None, "status": "succeeded", "arguments_digest": None, "bytes": 14, "detail": None}], "after": 0, "next_after": 2, "oldest": 0, "newest": 1, "gap": False, "dropped_events": 0, "terminal": True, "limit": 100, "truncated": False})
         elif self.path == "/v1/missions/async-1":
@@ -71,6 +75,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "queued", "cancel_requested": False})
         elif self.path == "/v1/missions/async-1/cancel":
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "running", "cancel_requested": True, "cancel_reason": body.get("reason")})
+        elif self.path in {"/v1/missions/persistence/flush", "/v1/events/persistence/flush"}:
+            self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
         elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project"}:
@@ -146,6 +152,8 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertIsInstance(typed_inventory, MissionInventoryPage)
         self.assertTrue(typed_inventory.missions[0].terminal)
         self.assertEqual(typed_inventory.missions[0].progress.completed_steps, 1)
+        self.assertIsInstance(client.mission_persistence(), MissionPersistenceStatus)
+        self.assertIsInstance(client.flush_mission_persistence(), MissionPersistenceStatus)
         with self.assertRaises(ArgumentError):
             client.wait_mission("async-1", timeout=0)
         with self.assertRaises(MissionWaitTimeout) as wait_error:
@@ -236,6 +244,8 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertIsInstance(stream, SseSnapshot)
         self.assertEqual(stream.next_after, 1)
         self.assertEqual(stream.events[0].event, "mission.trace")
+        self.assertIsInstance(client.event_persistence(), EventPersistenceStatus)
+        self.assertIsInstance(client.flush_event_persistence(), EventPersistenceStatus)
         with self.assertRaises(ArgumentError):
             client.event_page(after=True)
         with self.assertRaises(ApiError) as error:

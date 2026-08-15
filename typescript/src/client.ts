@@ -21,6 +21,7 @@ import type {
   DeveloperDeliveryAuditArgs,
   DeveloperWorkbenchArgs,
   EventMetrics,
+  EventPersistenceStatus,
   EventsResponse,
   FetchLike,
   HealthResponse,
@@ -149,6 +150,16 @@ export class ApiClient {
 
   async metrics(options?: ClientRequestOptions): Promise<{ ok: boolean; metrics: EventMetrics }> {
     return this.request("GET", "/v1/metrics", undefined, options);
+  }
+
+  /** Inspect whether restart-aware event cursor snapshots are enabled and within bounds. */
+  async eventPersistence(options?: ClientRequestOptions): Promise<EventPersistenceStatus> {
+    return this.request<EventPersistenceStatus>("GET", "/v1/events/persistence", undefined, options);
+  }
+
+  /** Force a bounded event cursor checkpoint; subscriptions and deliveries remain non-durable. */
+  async flushEventPersistence(options?: ClientRequestOptions): Promise<EventPersistenceStatus> {
+    return this.request<EventPersistenceStatus>("POST", "/v1/events/persistence/flush", {}, options);
   }
 
   /** Call any currently advertised or future MCP tool without losing its refusal envelope. */

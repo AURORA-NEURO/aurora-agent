@@ -14,7 +14,7 @@ canonical serialization, and scientific contracts.
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token 0123456789abcdef \
-  --mission-state .local/mission-state.json
+  --mission-state .local/mission-state.json --event-state .local/event-state.json
 ```
 
 In another terminal:
@@ -127,6 +127,8 @@ polling and returns only a terminal `MissionJob`; `MissionWaitTimeoutError` carr
 authoritative live snapshot so an operator can resume or cancel without losing progress.
 `missionPersistence()` and `flushMissionPersistence()` expose the same bounded checkpoint status
 and explicit flush/readiness check for operator tooling.
+`eventPersistence()` and `flushEventPersistence()` provide the event-cursor equivalent while
+typing the explicit non-durability of webhook subscriptions and pending deliveries.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain

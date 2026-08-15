@@ -5,7 +5,7 @@ available as a library (`bioprism_api::ApiRouter`) and as the `bioprism-api` bin
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes> \
-  --mission-state .local/mission-state.json
+  --mission-state .local/mission-state.json --event-state .local/event-state.json
 ```
 
 The gateway is intentionally bounded and one-request-per-connection. Headers default to 32 KiB,
@@ -31,6 +31,8 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/rpc` | JSON-RPC/MCP-compatible request envelope for tools, resources, and lifecycle |
 | `GET /v1/events?after=N&limit=M` | Cursor page with retention-gap and dropped-event evidence |
 | `GET /v1/events/stream?after=N&limit=M` | A bounded Server-Sent Events snapshot, not an unbounded connection |
+| `GET /v1/events/persistence` | Inspect bounded event cursor checkpoint status |
+| `POST /v1/events/persistence/flush` | Force an event cursor checkpoint and verify its write |
 | `GET /v1/webhooks/subscriptions` | Subscription catalogue with secrets omitted |
 | `POST /v1/webhooks/subscriptions` | Register an `http(s)` endpoint, event filters, and signing secret |
 | `GET .../{id}/deliveries` | Poll signed pending envelopes by delivery cursor |
@@ -73,6 +75,13 @@ subscriptions, and pending deliveries remain process-local.
 registry size, bounds, and the non-durable event/delivery distinction. The authenticated
 `POST /v1/missions/persistence/flush` route gives operators an explicit write/readiness check;
 it returns `409` when no state path was configured and `503` when the checkpoint cannot be written.
+
+Pass `--event-state <file>` to checkpoint the retained event cursor as a separate bounded JSON
+document. It restores event IDs, retention-gap accounting, and retained tool/mission events, but
+never writes webhook secrets, subscriptions, or pending deliveries. `GET /v1/events/persistence`
+and its authenticated `POST /v1/events/persistence/flush` counterpart expose the file bound,
+cursor metrics, and this non-durable delivery distinction. Event persistence and mission
+persistence are independent: an operator can enable either, both, or neither.
 
 ## Asynchronous missions
 

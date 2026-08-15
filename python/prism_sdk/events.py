@@ -108,6 +108,55 @@ class EventPage:
 
 
 @dataclass(frozen=True)
+class EventPersistenceStatus:
+    """Typed operator view over the optional event-cursor checkpoint."""
+
+    raw: dict[str, Any]
+    enabled: bool
+    file_present: bool
+    file_bytes: int | None
+    schema_version: int
+    max_file_bytes: int
+    retained_events: int
+    next_event_id: int
+    dropped_events: int
+    recovery_policy: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EventPersistenceStatus":
+        raw = _mapping("event persistence status", value)
+
+        def non_negative(name: str) -> int:
+            return _non_negative(f"event persistence {name}", raw.get(name))
+
+        enabled = raw.get("enabled")
+        file_present = raw.get("file_present")
+        if not isinstance(enabled, bool) or not isinstance(file_present, bool):
+            raise ArgumentError("event persistence enabled and file_present must be booleans")
+        file_bytes = raw.get("file_bytes")
+        if file_bytes is not None:
+            file_bytes = _non_negative("event persistence file_bytes", file_bytes)
+        recovery_policy = _text("event persistence recovery_policy", raw.get("recovery_policy"))
+        if raw.get("subscriptions_durable") is not False or raw.get("webhook_deliveries_durable") is not False:
+            raise ArgumentError("event persistence must make subscriptions and deliveries non-durable")
+        return cls(
+            raw,
+            enabled,
+            file_present,
+            file_bytes,
+            non_negative("schema_version"),
+            non_negative("max_file_bytes"),
+            non_negative("retained_events"),
+            non_negative("next_event_id"),
+            non_negative("dropped_events"),
+            recovery_policy,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class DeliveryView:
     """One signed webhook outbox delivery, including its retry attempt."""
 
@@ -248,6 +297,7 @@ __all__ = [
     "MAX_EVENT_PAGE",
     "ApiEvent",
     "EventPage",
+    "EventPersistenceStatus",
     "DeliveryView",
     "DeliveryPage",
     "SseEvent",

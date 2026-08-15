@@ -309,7 +309,7 @@ The repository ships `bioprism-api` for deployments that need a network boundary
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <visible-token> \
-  --mission-state .local/mission-state.json
+  --mission-state .local/mission-state.json --event-state .local/event-state.json
 ```
 
 It exposes the exact MCP tool catalogue through REST and JSON-RPC, bounded health/capability
@@ -317,8 +317,9 @@ routes, cursor-addressable event pages/SSE snapshots, signed webhook outbox regi
 and acknowledgement. `--mission-state` adds an optional bounded, atomic checkpoint for mission
 status, progress, traces, and size-limited result metadata; interrupted queued/running missions
 are marked failed after restart instead of being falsely resumed. Event cursors, subscriptions,
-and pending deliveries remain process-local. It deliberately reports gRPC, TLS termination,
-durable event storage, distributed scheduling, and external delivery as absent rather than
+and pending deliveries remain process-local. `--event-state` separately checkpoints the bounded
+event cursor while never persisting webhook secrets or delivery state. It deliberately reports
+gRPC, TLS termination, distributed scheduling, and external delivery as absent rather than
 inferring them from an HTTP listener.
 The serving path uses one immutable shared router across connection threads, atomically allocates
 request IDs, and clones ready MCP dispatch sessions per request. Mission, event, subscription, and

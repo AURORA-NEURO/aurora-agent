@@ -6,7 +6,7 @@
 //! does not open arbitrary outbound sockets: an operator-owned delivery worker can poll the
 //! outbox, send the signed envelope, and acknowledge it with the same idempotent cursor.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, VecDeque};
@@ -17,8 +17,10 @@ pub const MAX_ENDPOINT_BYTES: usize = 2048;
 pub const MAX_SECRET_BYTES: usize = 4096;
 pub const MAX_FILTERS: usize = 32;
 pub const MAX_RETRY_ATTEMPTS: u32 = 10;
+pub const EVENT_STATE_SCHEMA_VERSION: u64 = 1;
+pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApiEvent {
     pub id: u64,
     pub event_type: String,
@@ -127,6 +129,155 @@ impl EventLog {
             dropped_events: 0,
             dropped_deliveries: 0,
         })
+    }
+
+    /// Restore only the retained event cursor from an optional bounded checkpoint.
+    ///
+    /// Subscriptions, signing secrets, and pending deliveries are intentionally not restored.
+    /// They are operator-owned delivery state and must be re-established explicitly after a
+    /// process restart rather than silently resurrecting credentials from a JSON snapshot.
+    pub fn from_checkpoint_path(
+        capacity: usize,
+        path: Option<&std::path::Path>,
+    ) -> Result<Self, String> {
+        let Some(path) = path else {
+            return Self::new(capacity);
+        };
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Self::new(capacity)
+            }
+            Err(error) => return Err(format!("event state snapshot could not be read: {error}")),
+        };
+        if bytes.len() > MAX_EVENT_STATE_FILE_BYTES {
+            return Err(format!(
+                "event state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_EVENT_STATE_FILE_BYTES
+            ));
+        }
+        let document: Value = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("event state snapshot is invalid JSON: {error}"))?;
+        let schema_version = document
+            .get("schema_version")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "event state snapshot has no schema_version".to_string())?;
+        if schema_version != EVENT_STATE_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported event state schema version {schema_version}; expected {EVENT_STATE_SCHEMA_VERSION}"
+            ));
+        }
+        let mut log = Self::new(capacity)?;
+        log.next_event_id = document
+            .get("next_event_id")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "event state snapshot has no next_event_id".to_string())?;
+        log.dropped_events = document
+            .get("dropped_events")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let events = document
+            .get("events")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "event state snapshot has no events array".to_string())?;
+        let retained = events
+            .iter()
+            .rev()
+            .take(capacity)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
+        if retained.len() < events.len() {
+            log.dropped_events = log
+                .dropped_events
+                .saturating_add((events.len() - retained.len()) as u64);
+        }
+        let mut previous_id = None;
+        for value in retained {
+            let event: ApiEvent = serde_json::from_value(value).map_err(|error| {
+                format!("event state snapshot contains an invalid event: {error}")
+            })?;
+            validate_token(&event.event_type, MAX_EVENT_TYPE_BYTES, "event_type")?;
+            validate_token(&event.subject, 256, "subject")?;
+            validate_token(&event.request_id, 256, "request_id")?;
+            if event.id == 0 || previous_id.is_some_and(|previous| event.id <= previous) {
+                return Err("event state snapshot event ids must be strictly increasing".into());
+            }
+            previous_id = Some(event.id);
+            log.events.push_back(event);
+        }
+        if let Some(last_id) = previous_id {
+            log.next_event_id = log.next_event_id.max(last_id.saturating_add(1));
+        }
+        if log.next_event_id == 0 {
+            return Err("event state snapshot next_event_id must not overflow".into());
+        }
+        Ok(log)
+    }
+
+    /// Atomically write a bounded event-only checkpoint. Secrets and delivery state never enter it.
+    pub fn checkpoint_to_path(&self, path: &std::path::Path) -> Result<usize, String> {
+        let mut events = self.events.iter().cloned().collect::<Vec<_>>();
+        let mut dropped_events = self.dropped_events;
+        loop {
+            let document = json!({
+                "schema_version": EVENT_STATE_SCHEMA_VERSION,
+                "next_event_id": self.next_event_id,
+                "dropped_events": dropped_events,
+                "events": events,
+                "subscriptions_durable": false,
+                "webhook_deliveries_durable": false,
+            });
+            let bytes = serde_json::to_vec_pretty(&document)
+                .map_err(|error| format!("event state could not be serialized: {error}"))?;
+            if bytes.len() <= MAX_EVENT_STATE_FILE_BYTES {
+                if let Some(parent) = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                {
+                    std::fs::create_dir_all(parent).map_err(|error| {
+                        format!("event state directory could not be created: {error}")
+                    })?;
+                }
+                let filename = path
+                    .file_name()
+                    .ok_or_else(|| "event_state_path must name a file".to_string())?
+                    .to_string_lossy();
+                let temporary = path.with_file_name(format!(".{filename}.tmp"));
+                std::fs::write(&temporary, &bytes).map_err(|error| {
+                    format!("event state temporary file could not be written: {error}")
+                })?;
+                if let Err(first_error) = std::fs::rename(&temporary, path) {
+                    #[cfg(windows)]
+                    {
+                        let _ = std::fs::remove_file(path);
+                        std::fs::rename(&temporary, path).map_err(|second_error| {
+                            format!(
+                                "event state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                            )
+                        })?;
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        return Err(format!(
+                            "event state snapshot could not be installed: {first_error}"
+                        ));
+                    }
+                }
+                return Ok(bytes.len());
+            }
+            if events.is_empty() {
+                return Err(format!(
+                    "event state snapshot cannot fit within the {}-byte bound",
+                    MAX_EVENT_STATE_FILE_BYTES
+                ));
+            }
+            events.remove(0);
+            dropped_events = dropped_events.saturating_add(1);
+        }
     }
 
     pub fn emit(
@@ -581,5 +732,31 @@ mod tests {
             .register_subscription(None, "https://example.test", None, "short")
             .is_err());
         assert!(log.events(0, 0).is_err());
+    }
+
+    #[test]
+    fn event_checkpoint_restores_cursor_continuity_without_delivery_secrets() {
+        let path =
+            std::env::temp_dir().join(format!("bioprism-event-state-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut log = EventLog::new(2).unwrap();
+        log.emit("tool.completed", "one", "req-1", json!({"n": 1}))
+            .unwrap();
+        log.emit("tool.completed", "two", "req-2", json!({"n": 2}))
+            .unwrap();
+        log.emit("tool.completed", "three", "req-3", json!({"n": 3}))
+            .unwrap();
+        let bytes = log.checkpoint_to_path(&path).unwrap();
+        assert!(bytes > 0);
+
+        let restored = EventLog::from_checkpoint_path(2, Some(&path)).unwrap();
+        let page = restored.events(0, 10).unwrap();
+        assert!(page.gap);
+        assert_eq!(page.events.len(), 2);
+        assert_eq!(page.events[0].id, 2);
+        assert_eq!(restored.metrics().next_event_id, 4);
+        assert_eq!(restored.metrics().subscriptions, 0);
+        assert_eq!(restored.metrics().pending_deliveries, 0);
+        let _ = std::fs::remove_file(path);
     }
 }
