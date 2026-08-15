@@ -120,6 +120,7 @@ class MissionPreflightTests(unittest.TestCase):
             policy={
                 "execute": True,
                 "execution_mode": "parallel_waves",
+                "max_parallelism": 2,
                 "allowed_tools": ["echo", "audit"],
                 "max_step_output_bytes": 2_000_000,
                 "max_total_output_bytes": 4_000_000,
@@ -128,6 +129,7 @@ class MissionPreflightTests(unittest.TestCase):
         report = preflight_mission(request, catalogue())
         self.assertTrue(report.ok)
         self.assertEqual(report.execution_mode, "parallel_waves")
+        self.assertEqual(report.max_parallelism, 2)
         self.assertEqual(report.waves, (("audit", "echo"),))
         self.assertEqual(report.to_dict()["execution_mode"], "parallel_waves")
 
@@ -142,6 +144,18 @@ class MissionPreflightTests(unittest.TestCase):
         )
         self.assertFalse(invalid_mode.ok)
         self.assertTrue(any("execution_mode" in issue for issue in invalid_mode.issues))
+
+        invalid_parallelism = preflight_mission(
+            MissionRequest(
+                "mission-bad-parallelism",
+                "reject an unsafe concurrency ceiling",
+                [MissionStep("one", "data", "read", "one", "echo", {"value": 1})],
+                policy={"execution_mode": "parallel_waves", "max_parallelism": 17},
+            ),
+            catalogue(),
+        )
+        self.assertFalse(invalid_parallelism.ok)
+        self.assertTrue(any("max_parallelism" in issue for issue in invalid_parallelism.issues))
 
         under_budget = MissionRequest(
             "mission-under-budget",

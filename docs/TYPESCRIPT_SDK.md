@@ -102,7 +102,8 @@ refusals in the same raw response envelope as `callTool()`.
 request and catalogue digests, deterministic waves, per-step schema reports, JSON-pointer binding
 findings, recursion checks, execution allow-list findings, and parallel-wave budget checks without
 issuing a tool call. `execution_mode: "parallel_waves"` explicitly opts into bounded concurrent
-dispatch for independent steps; serial execution remains the default. Pass
+dispatch for independent steps; `max_parallelism` caps each batch at 16 or less, and serial execution
+remains the default. Pass
 the earlier `ToolCatalogue` snapshot to guarantee that mission review and subsequent checked calls
 refer to the same live schema set; the Rust `agent_mission` tool remains the execution authority.
 

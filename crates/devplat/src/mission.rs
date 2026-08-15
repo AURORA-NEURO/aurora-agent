@@ -45,6 +45,10 @@ fn default_execution_mode() -> String {
     "serial".into()
 }
 
+fn default_max_parallelism() -> usize {
+    MAX_PARALLEL_WAVE_WIDTH
+}
+
 fn empty_object() -> Value {
     Value::Object(Map::new())
 }
@@ -137,6 +141,9 @@ pub struct MissionPolicy {
     /// independent DAG wave concurrently after reserving its worst-case output budget.
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
+    /// Maximum number of independent steps dispatched at once in a parallel wave.
+    #[serde(default = "default_max_parallelism")]
+    pub max_parallelism: usize,
     /// Tools that may execute. Required and non-empty when `execute` is true.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
@@ -152,6 +159,7 @@ impl Default for MissionPolicy {
             max_step_output_bytes: default_max_step_output_bytes(),
             max_total_output_bytes: default_max_total_output_bytes(),
             execution_mode: default_execution_mode(),
+            max_parallelism: default_max_parallelism(),
             allowed_tools: Vec::new(),
         }
     }
@@ -183,6 +191,12 @@ impl MissionPolicy {
         if !matches!(self.execution_mode.as_str(), "serial" | "parallel_waves") {
             return Err(MissionError::InvalidExecutionMode {
                 mode: self.execution_mode.clone(),
+            });
+        }
+        if !(1..=MAX_PARALLEL_WAVE_WIDTH).contains(&self.max_parallelism) {
+            return Err(MissionError::InvalidLimit {
+                field: "policy.max_parallelism",
+                value: self.max_parallelism,
             });
         }
         if self.allowed_tools.len() > MAX_ALLOWED_TOOLS {
@@ -491,6 +505,7 @@ pub struct MissionPlan {
     pub steps: Vec<MissionStepPlan>,
     pub execution: String,
     pub execution_mode: String,
+    pub max_parallelism: usize,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
 }
@@ -656,6 +671,7 @@ pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionErro
         }
         .into(),
         execution_mode: request.policy.execution_mode.clone(),
+        max_parallelism: request.policy.max_parallelism,
         guarantees: vec![
             "step dependencies are validated and ordered deterministically".into(),
             "execution requires an explicit tool allow-list and is opt-in".into(),
@@ -665,8 +681,10 @@ pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionErro
         limitations: vec![
             "the planner does not infer missing arguments or scientific meaning".into(),
             if request.policy.execution_mode == "parallel_waves" {
-                "independent steps in each wave execute concurrently in the bounded server process"
-                    .into()
+                format!(
+                    "independent steps in each wave execute in bounded batches of at most {} in the server process",
+                    request.policy.max_parallelism
+                )
             } else {
                 "parallel waves are reported for scheduling; the MCP adapter executes serially"
                     .into()
@@ -769,8 +787,10 @@ mod tests {
         value.policy.execution_mode = "parallel_waves".into();
         value.policy.max_step_output_bytes = 2_000_000;
         value.policy.max_total_output_bytes = 4_000_000;
+        value.policy.max_parallelism = 2;
         let plan = plan_mission(&value).unwrap();
         assert_eq!(plan.execution_mode, "parallel_waves");
+        assert_eq!(plan.max_parallelism, 2);
         assert_eq!(plan.waves[0].len(), 2);
 
         value.policy.max_total_output_bytes = 3_000_000;
@@ -783,6 +803,15 @@ mod tests {
         assert!(matches!(
             plan_mission(&value),
             Err(MissionError::InvalidExecutionMode { .. })
+        ));
+        value.policy.execution_mode = "parallel_waves".into();
+        value.policy.max_parallelism = MAX_PARALLEL_WAVE_WIDTH + 1;
+        assert!(matches!(
+            plan_mission(&value),
+            Err(MissionError::InvalidLimit {
+                field: "policy.max_parallelism",
+                ..
+            })
         ));
     }
 

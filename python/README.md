@@ -69,9 +69,9 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 `mission_preflight()` now reviews that graph locally against a live `ToolCatalogue`: it reports
 content digests, deterministic waves, missing/cyclic dependencies, binding targets, execution
 allow-list and side-effect policy findings, and per-step schema warnings before any mission POST.
-Set `MissionPolicy(execution_mode="parallel_waves")` to request bounded concurrent dispatch for
-independent steps in each wave; serial execution remains the default, and preflight reserves the
-worst-case per-wave output budget before the Rust executor can launch it.
+Set `MissionPolicy(execution_mode="parallel_waves", max_parallelism=4)` to request bounded
+concurrent batches for independent steps in each wave; serial execution remains the default, and
+preflight reserves the worst-case per-wave output budget before the Rust executor can launch it.
 It is a transport and orchestration review only; the Rust `agent_mission` tool remains authoritative
 for actual execution and refusal propagation. `mission_from_route()` then turns a completed
 `capability_route()` response into a provenance-preserving `MissionAssembly`, but only after the

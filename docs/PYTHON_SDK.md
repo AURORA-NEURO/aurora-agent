@@ -100,8 +100,9 @@ invent defaults:
   `MissionStep` and `MissionPolicy` preserve domain labels, dependencies, explicit execution
   allow-lists, side-effect posture, refusal propagation, and output budgets; the server remains the
   authority for ordering and execution. Set `execution_mode="parallel_waves"` for bounded concurrent
-  dispatch of independent steps in each deterministic wave; serial execution is the default and the
-  executor reserves the worst-case wave output budget before launching work. `MissionBinding` can route a JSON-pointer field from a
+  dispatch of independent steps in each deterministic wave (`max_parallelism` is capped at 16);
+  serial execution is the default and the executor reserves the worst-case wave output budget before
+  launching work. `MissionBinding` can route a JSON-pointer field from a
   successful direct prerequisite into an existing argument slot.
 - `mission_preflight(request, catalogue=...)` adds a no-side-effect client review before mission
   dispatch. It returns a request digest, live-catalogue digest, deterministic waves, per-step

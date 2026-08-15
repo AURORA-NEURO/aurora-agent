@@ -44,6 +44,7 @@ interface NormalStep {
 interface NormalPolicy {
   execute: boolean;
   executionMode: "serial" | "parallel_waves";
+  maxParallelism: number;
   stopOnError: boolean;
   allowSideEffects: boolean;
   allowedTools: string[];
@@ -281,6 +282,7 @@ export async function preflightMission(
     catalogue_digest: catalogue.digest,
     execution: policy.execute && policyValid ? "authorized" : "planned",
     execution_mode: policy.executionMode,
+    max_parallelism: policy.maxParallelism,
     ok,
     fully_checked: fullyChecked,
     ordered_steps: waves.flat(),
@@ -449,6 +451,7 @@ function normalisePolicy(raw: AgentMissionPolicy | undefined, issues: string[]):
     : policy.execution_mode === "serial" || policy.execution_mode === "parallel_waves"
       ? policy.execution_mode
       : (issues.push("policy.execution_mode must be serial or parallel_waves"), "serial");
+  const maxParallelism = boundedNumber(policy.max_parallelism, MAX_PARALLEL_WAVE_WIDTH, MAX_PARALLEL_WAVE_WIDTH, "policy.max_parallelism", issues);
   const stopOnError = booleanValue(policy.stop_on_error, true, "policy.stop_on_error", issues);
   const allowSideEffects = booleanValue(policy.allow_side_effects, false, "policy.allow_side_effects", issues);
   const maxSteps = boundedNumber(policy.max_steps, 64, MAX_MISSION_STEPS, "policy.max_steps", issues);
@@ -467,7 +470,7 @@ function normalisePolicy(raw: AgentMissionPolicy | undefined, issues: string[]):
       else allowedTools.push(tool);
     }
   }
-  return { execute, executionMode, stopOnError, allowSideEffects, allowedTools, maxSteps, maxStepOutputBytes, maxTotalOutputBytes };
+  return { execute, executionMode, maxParallelism, stopOnError, allowSideEffects, allowedTools, maxSteps, maxStepOutputBytes, maxTotalOutputBytes };
 }
 
 function booleanValue(value: unknown, fallback: boolean, name: string, issues: string[]): boolean {

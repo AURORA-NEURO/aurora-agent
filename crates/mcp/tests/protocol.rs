@@ -3574,13 +3574,15 @@ fn agent_mission_executes_independent_parallel_waves_with_deterministic_reportin
             "goal": "run independent discovery and protocol inspections",
             "steps": [
                 {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
-                {"id": "protocol", "domain": "orchestration", "capability": "catalogue", "objective": "inspect protocol", "tool": "weave_protocol_catalog", "arguments": {"context": null}}
+                {"id": "protocol", "domain": "orchestration", "capability": "catalogue", "objective": "inspect protocol", "tool": "weave_protocol_catalog", "arguments": {"context": null}},
+                {"id": "protocol-extra", "domain": "orchestration", "capability": "catalogue", "objective": "inspect protocol again", "tool": "weave_protocol_catalog", "arguments": {"context": null}}
             ],
             "policy": {
                 "execute": true,
                 "execution_mode": "parallel_waves",
+                "max_parallelism": 2,
                 "allowed_tools": ["workspace_capabilities", "weave_protocol_catalog"],
-                "max_step_output_bytes": 5000000,
+                "max_step_output_bytes": 3000000,
                 "max_total_output_bytes": 10000000
             }
         }),
@@ -3588,17 +3590,23 @@ fn agent_mission_executes_independent_parallel_waves_with_deterministic_reportin
     assert_eq!(executed["__isError"], json!(false));
     assert_eq!(executed["execution"], json!("executed"));
     assert_eq!(executed["plan"]["execution_mode"], json!("parallel_waves"));
+    assert_eq!(executed["plan"]["max_parallelism"], json!(2));
     assert_eq!(executed["plan"]["waves"].as_array().unwrap().len(), 1);
-    assert_eq!(executed["plan"]["waves"][0], json!(["catalog", "protocol"]));
+    assert_eq!(
+        executed["plan"]["waves"][0],
+        json!(["catalog", "protocol", "protocol-extra"])
+    );
     assert_eq!(executed["mission_status"], json!("succeeded"));
-    assert_eq!(executed["succeeded"], json!(2));
+    assert_eq!(executed["succeeded"], json!(3));
     assert_eq!(executed["refused"], json!(0));
     assert_eq!(executed["blocked"], json!(0));
-    assert_eq!(executed["results"].as_array().unwrap().len(), 2);
+    assert_eq!(executed["results"].as_array().unwrap().len(), 3);
     assert_eq!(executed["results"][0]["id"], json!("catalog"));
     assert_eq!(executed["results"][0]["status"], json!("succeeded"));
     assert_eq!(executed["results"][1]["id"], json!("protocol"));
     assert_eq!(executed["results"][1]["status"], json!("succeeded"));
+    assert_eq!(executed["results"][2]["id"], json!("protocol-extra"));
+    assert_eq!(executed["results"][2]["status"], json!("succeeded"));
 }
 
 #[test]

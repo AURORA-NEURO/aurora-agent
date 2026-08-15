@@ -11866,7 +11866,10 @@ impl Server {
         ],
             limitations: vec![
                 if request.policy.execution_mode == "parallel_waves" {
-                    "independent steps in each wave are dispatched concurrently after a worst-case output reservation".into()
+                    format!(
+                        "independent steps in each wave are dispatched in bounded batches of at most {} after a worst-case output reservation",
+                        request.policy.max_parallelism
+                    )
                 } else {
                     "the MCP adapter executes the deterministic plan serially, even when waves are parallelizable".into()
                 },
@@ -12196,11 +12199,10 @@ impl Server {
                     ParallelPending::Blocked { .. } | ParallelPending::Refused { .. } => None,
                 })
                 .collect::<Vec<_>>();
-            let mut call_results = if call_entries.is_empty() {
-                BTreeMap::new()
-            } else {
-                std::thread::scope(|scope| {
-                    let handles = call_entries
+            let mut call_results = BTreeMap::new();
+            for batch in call_entries.chunks(request.policy.max_parallelism) {
+                let batch_results = std::thread::scope(|scope| {
+                    let handles = batch
                         .iter()
                         .map(|(step, arguments)| {
                             let step = *step;
@@ -12219,8 +12221,9 @@ impl Server {
                         results.insert(id, result);
                     }
                     Ok::<_, String>(results)
-                })?
-            };
+                })?;
+                call_results.extend(batch_results);
+            }
 
             for item in pending {
                 match item {
@@ -16388,9 +16391,10 @@ pub fn tool_definitions() -> Vec<Value> {
                     },
                     "policy": {
                         "type": "object",
-                        "description": "Optional policy: execute, stop_on_error, allow_side_effects, max_steps, max_step_output_bytes, max_total_output_bytes, execution_mode, and allowed_tools. Execution requires an explicit non-empty allow-list; parallel_waves also reserves each wave's worst-case output budget.",
+                        "description": "Optional policy: execute, stop_on_error, allow_side_effects, max_steps, max_step_output_bytes, max_total_output_bytes, execution_mode, max_parallelism, and allowed_tools. Execution requires an explicit non-empty allow-list; parallel_waves also reserves each wave's worst-case output budget and batches calls at max_parallelism.",
                         "properties": {
-                            "execution_mode": { "type": "string", "enum": ["serial", "parallel_waves"], "default": "serial" }
+                            "execution_mode": { "type": "string", "enum": ["serial", "parallel_waves"], "default": "serial" },
+                            "max_parallelism": { "type": "integer", "minimum": 1, "maximum": 16, "default": 16, "description": "Maximum independent calls launched concurrently in a parallel wave." }
                         }
                     }
                 },

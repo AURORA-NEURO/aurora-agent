@@ -52,7 +52,8 @@ if (result.mcp.result?.isError) {
   request and catalogue digests, deterministic dependency waves, JSON-pointer binding findings,
   execution allow-list failures, execution-mode budget checks, and per-step schema reports before
   `agentMission()` is sent. `execution_mode: "parallel_waves"` is an explicit opt-in for bounded
-  concurrent dispatch of independent steps; serial execution remains the default.
+  concurrent dispatch of independent steps; `max_parallelism` caps each batch at 16 or less, and
+  serial execution remains the default.
 - `missionFromRoute()` converts a completed `capabilityRoute()` response into a provenance-preserving
   mission assembly only after every need has one caller-selected candidate and explicit JSON
   arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is

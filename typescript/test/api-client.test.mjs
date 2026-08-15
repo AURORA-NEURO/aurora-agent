@@ -121,6 +121,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     policy: {
       execute: true,
       execution_mode: "parallel_waves",
+      max_parallelism: 2,
       allowed_tools: ["echo"],
       max_step_output_bytes: 2_000_000,
       max_total_output_bytes: 4_000_000,
@@ -128,6 +129,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   }, catalogue);
   assert.equal(parallel.ok, true);
   assert.equal(parallel.execution_mode, "parallel_waves");
+  assert.equal(parallel.max_parallelism, 2);
   assert.deepEqual(parallel.waves, [["first", "second"]]);
   const invalidMode = await client.missionPreflight({
     mission_id: "mission-invalid-mode",
@@ -137,6 +139,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   }, catalogue);
   assert.equal(invalidMode.ok, false);
   assert.equal(invalidMode.issues.some((issue) => issue.includes("execution_mode")), true);
+  const invalidParallelism = await client.missionPreflight({
+    mission_id: "mission-invalid-parallelism",
+    goal: "reject an unsafe concurrency ceiling",
+    steps: [{ id: "only", domain: "workspace", capability: "discovery", objective: "only", tool: "echo", arguments: { value: 3 } }],
+    policy: { execution_mode: "parallel_waves", max_parallelism: 17 },
+  }, catalogue);
+  assert.equal(invalidParallelism.ok, false);
+  assert.equal(invalidParallelism.issues.some((issue) => issue.includes("max_parallelism")), true);
   const cycle = await client.missionPreflight({
     mission_id: "mission-cycle",
     goal: "reject a cycle",

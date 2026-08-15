@@ -63,6 +63,7 @@ class MissionPolicy:
     max_step_output_bytes: int = 2_000_000
     max_total_output_bytes: int = 10_000_000
     execution_mode: str = "serial"
+    max_parallelism: int = MAX_PARALLEL_WAVE_WIDTH
     allowed_tools: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -77,11 +78,13 @@ class MissionPolicy:
             ("max_steps", self.max_steps),
             ("max_step_output_bytes", self.max_step_output_bytes),
             ("max_total_output_bytes", self.max_total_output_bytes),
+            ("max_parallelism", self.max_parallelism),
         ):
             maximum = {
                 "max_steps": MAX_MISSION_STEPS,
                 "max_step_output_bytes": MAX_STEP_OUTPUT_BYTES,
                 "max_total_output_bytes": MAX_TOTAL_OUTPUT_BYTES,
+                "max_parallelism": MAX_PARALLEL_WAVE_WIDTH,
             }[name]
             if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= maximum:
                 raise ArgumentError(f"{name} must be between 1 and {maximum}")
@@ -115,6 +118,7 @@ class MissionPolicy:
             "max_step_output_bytes": self.max_step_output_bytes,
             "max_total_output_bytes": self.max_total_output_bytes,
             "execution_mode": self.execution_mode,
+            "max_parallelism": self.max_parallelism,
             "allowed_tools": list(self.allowed_tools),
         }
 
@@ -513,6 +517,7 @@ class MissionPreflight:
     catalogue_digest: str
     execution: str
     execution_mode: str
+    max_parallelism: int
     waves: tuple[tuple[str, ...], ...]
     steps: tuple[MissionStepPreflight, ...]
     issues: tuple[str, ...] = ()
@@ -550,6 +555,7 @@ class MissionPreflight:
             "catalogue_digest": self.catalogue_digest,
             "execution": self.execution,
             "execution_mode": self.execution_mode,
+            "max_parallelism": self.max_parallelism,
             "ok": self.ok,
             "fully_checked": self.fully_checked,
             "ordered_steps": list(self.ordered_steps),
@@ -733,6 +739,7 @@ def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> Miss
         catalogue_digest=catalogue.digest,
         execution="authorized" if policy.execute else "planned",
         execution_mode=policy.execution_mode,
+        max_parallelism=policy.max_parallelism,
         waves=tuple(waves),
         steps=tuple(step_results),
         issues=tuple(dict.fromkeys(issues)),
@@ -757,6 +764,7 @@ def _mission_policy(value: MissionPolicy | Mapping[str, Any] | None) -> MissionP
         max_step_output_bytes=raw.get("max_step_output_bytes", 2_000_000),
         max_total_output_bytes=raw.get("max_total_output_bytes", 10_000_000),
         execution_mode=raw.get("execution_mode", "serial"),
+        max_parallelism=raw.get("max_parallelism", MAX_PARALLEL_WAVE_WIDTH),
         allowed_tools=tuple(allowed),
     )
 
