@@ -160,18 +160,24 @@ delivery worker remain explicitly absent.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full
-Python SDK backlog: biological format adapters, benchmark statistics, and the remaining
-nine-distribution ergonomics are still absent and remain foreign or unimplemented rather than
-being inferred from the transport or authoring clients.
+Python SDK backlog: heavyweight biological format adapters and the remaining nine-distribution
+ergonomics remain foreign or unimplemented rather than being inferred from the transport or
+authoring clients; bounded text VCF and benchmark distribution utilities are now concrete first
+steps above that boundary.
 The Python layer now also covers the evaluator/oracle/mutation and environment/pack authoring
 contracts: it builds versioned oracle manifests and judgements, preserves tier demotion and
 admissibility, validates distributions and findings, and exposes the oracle mesh, reference-panel,
 missingness, worldline, reproduction, trajectory, and reference-standard tools. Rust still owns
-combination and scientific decisions; the remaining Python backlog is biological adapters,
-benchmark statistics, and full distribution ergonomics. The metrics layer now additionally exposes
+combination and scientific decisions; the remaining Python backlog is heavyweight biological
+adapters and full distribution ergonomics. The metrics layer now additionally exposes
 bounded descriptive analytics for scalar observations, paired robustness/cross-modal/translation
 contrasts, replicate spread, cost/latency, and calibration; those summaries remain descriptive and
 do not replace inferential statistics or external evidence acquisition.
+The benchmark utility complements that kernel for Python notebooks: it separates measured from
+declared/missing/blocked rows, computes deterministic distribution summaries, performs direction-aware
+paired contrasts, and offers cluster-aware percentile bootstrap intervals with explicit assumptions.
+It remains descriptive and does not turn resampling into a significance test, causal estimator, or
+clinical claim.
 The developer workbench now provides an authoritative Rust contract for the implementable core of
 the remaining authoring-platform idea: sessions carry artifact cards, notebook cells, dependency
 ordering, logical change history, stale-digest findings, evidence-aware dashboard rows, and a

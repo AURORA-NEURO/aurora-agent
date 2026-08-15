@@ -68,6 +68,10 @@ The Python adapter layer now also contains a bounded text VCF reader: it validat
 record stream, preserves raw INFO/FORMAT spellings beside typed projections, retains source and
 line hashes, and reports reference-build, provenance, type, and precision limitations without
 inventing an indexed/compressed reader or a reference genome.
+The Python benchmark layer now complements Rust's descriptive metrics kernel with typed evidence
+rows, distribution summaries, direction-aware paired contrasts, and deterministic observation- or
+replicate-group bootstrap intervals. It preserves declared/missing/blocked populations and labels
+the bootstrap as descriptive rather than inferential or causal.
 These remain in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
 key completeness, dependency-graph invalidation, partial unknown-region handling, fail-closed
 misses, and explicit re-proving; `storage_lifecycle_simulate` adds deterministic tiering, pin

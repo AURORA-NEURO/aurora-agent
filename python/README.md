@@ -71,5 +71,10 @@ and typed VCF validation, preserves raw values, hashes source and disclosed reco
 reference-build, provenance, type, and precision limitations with source locations. It validates
 the full record stream even when callers request only a bounded preview; indexed or compressed VCF
 access remains an explicit `pysam` adapter responsibility.
+`BenchmarkObservation`, `summarize_distribution()`, and `paired_effect()` provide reproducible
+notebook-side distribution and paired-contrast ergonomics across agent, biological, multimodal,
+operations, and coordination domains. They keep unmeasured evidence out of arithmetic and make
+bootstrap seed, confidence, resampling unit, and limitations explicit; they do not perform
+significance testing or causal inference.
 See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

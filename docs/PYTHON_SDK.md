@@ -89,6 +89,12 @@ invent defaults:
   each disclosed line; and emits source-located coordinate-frame, provenance, type, and precision
   losses. It validates all records while bounding disclosed variants and loss rows, and it does not
   pretend to provide indexed/compressed/random-access functionality that belongs to `pysam`.
+- `BenchmarkObservation`, `summarize_distribution(...)`, `PairedBenchmarkObservation`, and
+  `paired_effect(...)` provide dependency-free notebook statistics across agent, oncology,
+  multimodal, infrastructure, and coordination domains. They preserve measured versus declared,
+  missing, blocked, and not-applicable rows; use deterministic quantiles and sample variance;
+  optionally compute a specified-seed percentile bootstrap over observations or declared replicate
+  groups; and retain limitations about exchangeability, causal interpretation, and clinical use.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP
@@ -238,11 +244,11 @@ uncertainty, future-evidence firewalls, reproducibility divergence, and bounded 
 properties. These helpers never locally choose a biological truth or convert an abstention into a
 negative result.
 
-The package deliberately does not claim to implement DICOM/NIfTI/AnnData/VCF readers, inferential
-statistics, OTLP export, a notebook UI, or CI deployment. The repository now ships a bounded REST
-gateway, pack/cell/mutation authoring contracts, and oracle/evaluation request contracts, but gRPC,
-durable event storage, external webhook delivery, biological format adapters, statistical
-estimators, and those domain artifacts remain separate contracts.
+The package deliberately does not claim to implement DICOM/NIfTI/AnnData, indexed/compressed VCF,
+inferential statistics, OTLP export, a notebook UI, or CI deployment. It now ships a bounded text
+VCF reader and descriptive/cluster-bootstrap utilities above the Rust kernel. The repository still
+keeps gRPC, durable event storage, external webhook delivery, heavyweight biological readers, and
+statistical estimators as separate contracts.
 
 ## Verification
 
