@@ -38,7 +38,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(size) or b"{}")
         if self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -126,6 +126,22 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertTrue(
             client.projection_bundle("world.json", "query.json", include_views=True)["mcp"]["result"]["include_views"]
         )
+        self.assertEqual(
+            client.repository_catalog(prefix="docs/", limit=3)["mcp"]["result"]["prefix"],
+            "docs/",
+        )
+        self.assertEqual(
+            client.repository_bundle({"id": "route-1"}, policy="exhaustive")["mcp"]["result"]["policy"],
+            "exhaustive",
+        )
+        self.assertEqual(
+            client.repository_impact("docs/README")["mcp"]["result"]["changed"],
+            "docs/README",
+        )
+        self.assertEqual(
+            client.telemetry_project({"kind": "event"}, {"treatments": {}}, "trace-http")["mcp"]["result"]["trace"],
+            "trace-http",
+        )
         self.assertEqual(client.events()["page"]["events"], [])
         with self.assertRaises(ApiError) as error:
             client.request("POST", "/v1/tools/refuse", {})
@@ -182,6 +198,22 @@ class HttpApiClientTests(unittest.TestCase):
             )
             self.assertFalse(
                 (await client.projection_bundle("world.json", "query.json"))["mcp"]["result"]["include_views"]
+            )
+            self.assertEqual(
+                (await client.repository_catalog(limit=2))["mcp"]["result"]["limit"],
+                2,
+            )
+            self.assertEqual(
+                (await client.repository_bundle({"id": "route-async"}))["mcp"]["result"]["route"]["id"],
+                "route-async",
+            )
+            self.assertEqual(
+                (await client.repository_impact("docs/README"))["mcp"]["result"]["changed"],
+                "docs/README",
+            )
+            self.assertEqual(
+                (await client.telemetry_project({"kind": "event"}, {"treatments": {}}, "trace-async"))["mcp"]["result"]["trace"],
+                "trace-async",
             )
 
         asyncio.run(run())

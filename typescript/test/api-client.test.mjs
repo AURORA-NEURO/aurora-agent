@@ -28,6 +28,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/echo") return jsonResponse({ ok: true, tool: "echo", request_id: "r1", mcp: { result: { structuredContent: { value: 3 } } }, guarantee: "shared" });
       if (path === "/v1/tools/metrics_analytics_audit") return jsonResponse({ ok: true, tool: "metrics_analytics_audit", request_id: "r3", mcp: { result: { structuredContent: { workflow: "metrics_descriptive_analytics" } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
+      if (path === "/v1/tools/repository_catalog") return jsonResponse({ ok: true, tool: "repository_catalog", request_id: "r11", mcp: { result: { structuredContent: { workflow: "repository_catalog", prefix: "docs/" } } } });
+      if (path === "/v1/tools/repository_bundle") return jsonResponse({ ok: true, tool: "repository_bundle", request_id: "r12", mcp: { result: { structuredContent: { workflow: "repository_bundle", policy: "exhaustive" } } } });
+      if (path === "/v1/tools/repository_impact") return jsonResponse({ ok: true, tool: "repository_impact", request_id: "r13", mcp: { result: { structuredContent: { workflow: "repository_impact", changed: "docs/README" } } } });
+      if (path === "/v1/tools/telemetry_project") return jsonResponse({ ok: true, tool: "telemetry_project", request_id: "r14", mcp: { result: { structuredContent: { workflow: "telemetry_project", trace: "trace-ts" } } } });
       if (path === "/v1/tools/capability_discover") return jsonResponse({ ok: true, tool: "capability_discover", request_id: "r6", mcp: { result: { structuredContent: { workflow: "capability_discover", result_count: 1 } } } });
       if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: { workflow: "capability_audit", healthy: true } } } });
       if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started" } } } });
@@ -45,6 +49,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(seen.at(-1).init.headers["x-request-id"], "request-1");
   const analytics = await client.metricsAnalyticsAudit({ observations: [{ id: "one" }] });
   assert.equal(analytics.mcp.result.structuredContent.workflow, "metrics_descriptive_analytics");
+  const catalog = await client.repositoryCatalog({ prefix: "docs/", limit: 5, include_briefs: true });
+  const bundle = await client.repositoryBundle({ route: { id: "route-ts" }, policy: "exhaustive", max_depth: 2 });
+  const impact = await client.repositoryImpact({ changed: "docs/README", route: { id: "route-ts" } });
+  const telemetry = await client.telemetryProject({ event: { kind: "tool.completed" }, policy: { treatments: {} }, trace: "trace-ts" });
+  assert.equal(catalog.mcp.result.structuredContent.workflow, "repository_catalog");
+  assert.equal(bundle.mcp.result.structuredContent.policy, "exhaustive");
+  assert.equal(impact.mcp.result.structuredContent.changed, "docs/README");
+  assert.equal(telemetry.mcp.result.structuredContent.trace, "trace-ts");
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });

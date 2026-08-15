@@ -86,6 +86,10 @@ Convenience methods currently cover:
 - `agentMission`: deterministic cross-domain mission planning or explicitly allow-listed execution
   with refusal propagation, output budgets, and optional JSON-pointer bindings;
 - `runtimeExecutionSimulate`: deterministic replay, budget, fault, and fork evidence.
+- `repositoryCatalog`, `repositoryBundle`, and `repositoryImpact`: bounded repository discovery,
+  route-specific progressive disclosure, and changed-module impact checks;
+- `telemetryProject`: redacted telemetry projection with explicit treatment policy, trace, and
+  optional observed-metric evidence fields.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain

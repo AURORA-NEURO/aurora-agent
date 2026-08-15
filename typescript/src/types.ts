@@ -246,6 +246,39 @@ export interface TraceOtelIngestArgs extends JsonObject {
   max_bytes?: number;
 }
 
+export type RepositoryTraversalPolicy = "normative" | "exhaustive";
+
+export interface RepositoryCatalogArgs extends JsonObject {
+  prefix?: string;
+  limit?: number;
+  include_briefs?: boolean;
+  include_findings?: boolean;
+}
+
+export interface RepositoryBundleArgs extends JsonObject {
+  route: JsonObject;
+  policy?: RepositoryTraversalPolicy;
+  max_depth?: number;
+  denied_labels?: string[];
+  follow?: string[];
+  include_markdown?: boolean;
+  max_markdown_chars?: number;
+}
+
+export interface RepositoryImpactArgs extends JsonObject {
+  changed: string;
+  route?: JsonObject;
+  routes?: JsonObject[];
+}
+
+export interface TelemetryProjectArgs extends JsonObject {
+  event: JsonObject;
+  policy: JsonObject;
+  trace: string;
+  metric?: JsonObject;
+  observations?: JsonObject;
+}
+
 export interface MetricsProfileAuditArgs extends JsonObject {
   vectors: JsonValue[];
   waived_dimensions?: string[];

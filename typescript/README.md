@@ -34,9 +34,14 @@ if (result.mcp.result?.isError) {
   subscription views or client-side logs by the SDK.
 - `callTool(name, arguments)` is the escape hatch for all current and future MCP tools. The typed
   helpers `traceOtelIngest`, `metricsProfileAudit`, `metricsAnalyticsAudit`, `bioCapabilityEvidenceAudit`,
-  `bioAtlasPublicationAudit`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`, `capabilityDiscover`, and
-  `capabilityAudit`, `capabilityRoute`, `adapterPlan`, `runtimeExecutionSimulate` cover the
-  highest-value cross-domain workflows without pretending to type every domain payload twice.
+  `bioAtlasPublicationAudit`, `repositoryCatalog`, `repositoryBundle`, `repositoryImpact`,
+  `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`,
+  `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`, and
+  `runtimeExecutionSimulate` cover the highest-value cross-domain workflows without pretending
+  to type every domain payload twice. Repository helpers keep catalog, route traversal, and
+  changed-module impact requests explicit; `telemetryProject` preserves the event, treatment
+  policy, trace, and optional observed-metric boundary without silently treating projected
+  telemetry as a claim.
 - `eventStream` parses the gateway's bounded SSE snapshot and returns the `x-next-after` cursor;
   it is deliberately not a long-lived socket or an implicit reconnect loop.
 - Webhook delivery is poll/send/acknowledge: `deliveries`, `retry`, and `acknowledge` operate on

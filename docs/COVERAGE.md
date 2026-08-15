@@ -64,6 +64,11 @@ async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-so
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table
 projection bundles. The local layer rejects traversal, malformed handles, and ambiguous source
 selection; Rust remains authoritative for sufficiency, omission accounting, and fidelity.
+The repository knowledge helpers now cover bounded module catalog discovery, route-specific
+normative/exhaustive documentation bundles, conservative changed-module impact checks, and explicit
+markdown disclosure ceilings. The telemetry helper carries the same cross-domain discipline into
+operations: redaction policy and trace correlation are required, while optional metric projections
+must carry observations and remain subject to Rust's refusal semantics.
 `adapter_plan` makes the biological-format boundary callable: it matches explicit source formats
 and source shapes against native CSV/inventory adapters and Python-delegated DICOM, NIfTI/BIDS,
 AnnData/Zarr, VCF, FASTA, FASTQ, SAM, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and

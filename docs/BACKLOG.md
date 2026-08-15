@@ -190,6 +190,11 @@ The context SDK surface now covers the full FIBER lifecycle: typed compile, hand
 plan explanation, certificate verification, and bounded projection bundles over sync MCP, async MCP,
 and HTTP. Relative-path traversal and ambiguous source selection fail before transport, while layer
 sufficiency, omission accounting, certificate semantics, and projection fidelity remain Rust-owned.
+Repository knowledge and observability are now typed as well: catalog discovery, route-specific
+documentation bundles, conservative module impact, and redacted telemetry projection all have
+bounded sync/async/HTTP envelopes. Markdown remains opt-in and capped; telemetry metric inputs
+remain coupled to observations so the SDK cannot turn asserted-only or unclassified data into an
+apparently authoritative operational record.
 The benchmark utility complements that kernel for Python notebooks: it separates measured from
 declared/missing/blocked rows, computes deterministic distribution summaries, performs direction-aware
 paired contrasts, and offers cluster-aware percentile bootstrap intervals with explicit assumptions.

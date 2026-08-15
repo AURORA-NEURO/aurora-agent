@@ -81,6 +81,15 @@ invent defaults:
   certificate verification, and projection fidelity.
 - `compile_context(world, query, ...)` remains the compatibility helper for the lower-level mapping
   form and its policy/profile choices.
+- `RepositoryCatalogRequest`, `RepositoryBundleRequest`, and `RepositoryImpactRequest` provide
+  bounded repository knowledge navigation across sync MCP, async MCP, and HTTP. The helpers expose
+  prefix/limit discovery, normative or exhaustive route traversal, denied-label and edge-vocabulary
+  controls, opt-in markdown ceilings, and conservative changed-module impact checks without
+  dumping repository bodies or treating graph impact as a semantic diff.
+- `TelemetryProjectRequest` exposes the operations observability boundary across the same transports.
+  It couples optional metric definitions to observations, requires an explicit redaction policy and
+  trace id, and leaves unclassified emission, missing treatments, asserted-only evidence, and zero
+  denominators as Rust-owned refusals rather than locally inventing telemetry truth.
 - `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON
   importer and preserves its semantic-loss/readiness report.
 - `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and

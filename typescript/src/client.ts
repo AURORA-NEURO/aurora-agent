@@ -25,12 +25,16 @@ import type {
   JsonValue,
   MetricsAnalyticsAuditArgs,
   MetricsProfileAuditArgs,
+  RepositoryBundleArgs,
+  RepositoryCatalogArgs,
+  RepositoryImpactArgs,
   RestToolResponse,
   RuntimeExecutionSimulateArgs,
   SseSnapshot,
   SubscribeOptions,
   SubscriptionListResponse,
   SubscriptionResponse,
+  TelemetryProjectArgs,
   ToolArguments,
   ToolsResponse,
   TraceOtelIngestArgs,
@@ -168,6 +172,22 @@ export class ApiClient {
 
   async traceOtelIngest(args: TraceOtelIngestArgs, options?: ClientRequestOptions) {
     return this.callTool("trace_otel_ingest", args, options);
+  }
+
+  async repositoryCatalog(args: RepositoryCatalogArgs = {}, options?: ClientRequestOptions) {
+    return this.callTool("repository_catalog", args, options);
+  }
+
+  async repositoryBundle(args: RepositoryBundleArgs, options?: ClientRequestOptions) {
+    return this.callTool("repository_bundle", args, options);
+  }
+
+  async repositoryImpact(args: RepositoryImpactArgs, options?: ClientRequestOptions) {
+    return this.callTool("repository_impact", args, options);
+  }
+
+  async telemetryProject(args: TelemetryProjectArgs, options?: ClientRequestOptions) {
+    return this.callTool("telemetry_project", args, options);
   }
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions) {

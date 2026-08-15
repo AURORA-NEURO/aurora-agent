@@ -29,6 +29,13 @@ from .errors import ApiError, ArgumentError, TransportError
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
+from .repository_requests import (
+    RepositoryBundleRequest,
+    RepositoryCatalogRequest,
+    RepositoryImpactRequest,
+    RepositoryTraversalPolicy,
+    TelemetryProjectRequest,
+)
 
 
 def _capability_query_arguments(
@@ -324,6 +331,90 @@ class ApiClient:
                 raise ArgumentError("evidence and policy are required when fingerprint is a mapping")
             request = RoutingDecisionRequest(fingerprint, evidence, policy, task_id)
         return self.call_tool("routing_decide", request.to_mcp_arguments())
+
+    def repository_catalog(
+        self,
+        request: RepositoryCatalogRequest | None = None,
+        *,
+        prefix: str | None = None,
+        limit: int = 200,
+        include_briefs: bool = False,
+        include_findings: bool = False,
+    ) -> dict[str, Any]:
+        """Discover repository modules through the HTTP gateway."""
+
+        if request is not None:
+            if prefix is not None or limit != 200 or include_briefs or include_findings:
+                raise ArgumentError("catalog options must be omitted when passing a RepositoryCatalogRequest")
+        else:
+            request = RepositoryCatalogRequest(prefix, limit, include_briefs, include_findings)
+        return self.call_tool("repository_catalog", request.to_mcp_arguments())
+
+    def repository_bundle(
+        self,
+        route: Mapping[str, Any] | RepositoryBundleRequest,
+        *,
+        policy: RepositoryTraversalPolicy | str = RepositoryTraversalPolicy.NORMATIVE,
+        max_depth: int | None = None,
+        denied_labels: Sequence[str] = (),
+        follow: Sequence[str] = (),
+        include_markdown: bool = False,
+        max_markdown_chars: int | None = None,
+    ) -> dict[str, Any]:
+        """Compile a route-specific repository context through HTTP."""
+
+        if isinstance(route, RepositoryBundleRequest):
+            if (
+                policy not in (RepositoryTraversalPolicy.NORMATIVE, "normative")
+                or max_depth is not None
+                or denied_labels
+                or follow
+                or include_markdown
+                or max_markdown_chars is not None
+            ):
+                raise ArgumentError("bundle options must be omitted when passing a RepositoryBundleRequest")
+            request = route
+        else:
+            request = RepositoryBundleRequest(route, policy, max_depth, denied_labels, follow, include_markdown, max_markdown_chars)
+        return self.call_tool("repository_bundle", request.to_mcp_arguments())
+
+    def repository_impact(
+        self,
+        changed: str | RepositoryImpactRequest,
+        *,
+        route: Mapping[str, Any] | None = None,
+        routes: Sequence[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Compute conservative repository impact through HTTP."""
+
+        if isinstance(changed, RepositoryImpactRequest):
+            if route is not None or routes is not None:
+                raise ArgumentError("route and routes must be omitted when passing a RepositoryImpactRequest")
+            request = changed
+        else:
+            request = RepositoryImpactRequest(changed, route, routes)
+        return self.call_tool("repository_impact", request.to_mcp_arguments())
+
+    def telemetry_project(
+        self,
+        event: Mapping[str, Any] | TelemetryProjectRequest,
+        policy: Mapping[str, Any] | None = None,
+        trace: str | None = None,
+        *,
+        metric: Mapping[str, Any] | None = None,
+        observations: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Project a redacted telemetry event through HTTP."""
+
+        if isinstance(event, TelemetryProjectRequest):
+            if policy is not None or trace is not None or metric is not None or observations is not None:
+                raise ArgumentError("telemetry fields must be omitted when passing a TelemetryProjectRequest")
+            request = event
+        else:
+            if policy is None or trace is None:
+                raise ArgumentError("policy and trace are required when event is a mapping")
+            request = TelemetryProjectRequest(event, policy, trace, metric, observations)
+        return self.call_tool("telemetry_project", request.to_mcp_arguments())
 
     def fiber_compile(
         self,
@@ -625,6 +716,90 @@ class AsyncApiClient:
                 raise ArgumentError("evidence and policy are required when fingerprint is a mapping")
             request = RoutingDecisionRequest(fingerprint, evidence, policy, task_id)
         return await self.call_tool("routing_decide", request.to_mcp_arguments())
+
+    async def repository_catalog(
+        self,
+        request: RepositoryCatalogRequest | None = None,
+        *,
+        prefix: str | None = None,
+        limit: int = 200,
+        include_briefs: bool = False,
+        include_findings: bool = False,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.repository_catalog`."""
+
+        if request is not None:
+            if prefix is not None or limit != 200 or include_briefs or include_findings:
+                raise ArgumentError("catalog options must be omitted when passing a RepositoryCatalogRequest")
+        else:
+            request = RepositoryCatalogRequest(prefix, limit, include_briefs, include_findings)
+        return await self.call_tool("repository_catalog", request.to_mcp_arguments())
+
+    async def repository_bundle(
+        self,
+        route: Mapping[str, Any] | RepositoryBundleRequest,
+        *,
+        policy: RepositoryTraversalPolicy | str = RepositoryTraversalPolicy.NORMATIVE,
+        max_depth: int | None = None,
+        denied_labels: Sequence[str] = (),
+        follow: Sequence[str] = (),
+        include_markdown: bool = False,
+        max_markdown_chars: int | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.repository_bundle`."""
+
+        if isinstance(route, RepositoryBundleRequest):
+            if (
+                policy not in (RepositoryTraversalPolicy.NORMATIVE, "normative")
+                or max_depth is not None
+                or denied_labels
+                or follow
+                or include_markdown
+                or max_markdown_chars is not None
+            ):
+                raise ArgumentError("bundle options must be omitted when passing a RepositoryBundleRequest")
+            request = route
+        else:
+            request = RepositoryBundleRequest(route, policy, max_depth, denied_labels, follow, include_markdown, max_markdown_chars)
+        return await self.call_tool("repository_bundle", request.to_mcp_arguments())
+
+    async def repository_impact(
+        self,
+        changed: str | RepositoryImpactRequest,
+        *,
+        route: Mapping[str, Any] | None = None,
+        routes: Sequence[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.repository_impact`."""
+
+        if isinstance(changed, RepositoryImpactRequest):
+            if route is not None or routes is not None:
+                raise ArgumentError("route and routes must be omitted when passing a RepositoryImpactRequest")
+            request = changed
+        else:
+            request = RepositoryImpactRequest(changed, route, routes)
+        return await self.call_tool("repository_impact", request.to_mcp_arguments())
+
+    async def telemetry_project(
+        self,
+        event: Mapping[str, Any] | TelemetryProjectRequest,
+        policy: Mapping[str, Any] | None = None,
+        trace: str | None = None,
+        *,
+        metric: Mapping[str, Any] | None = None,
+        observations: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.telemetry_project`."""
+
+        if isinstance(event, TelemetryProjectRequest):
+            if policy is not None or trace is not None or metric is not None or observations is not None:
+                raise ArgumentError("telemetry fields must be omitted when passing a TelemetryProjectRequest")
+            request = event
+        else:
+            if policy is None or trace is None:
+                raise ArgumentError("policy and trace are required when event is a mapping")
+            request = TelemetryProjectRequest(event, policy, trace, metric, observations)
+        return await self.call_tool("telemetry_project", request.to_mcp_arguments())
 
     async def fiber_compile(
         self,
