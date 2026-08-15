@@ -74,6 +74,13 @@ class AnalyticsModelTests(unittest.TestCase):
         )
         self.assertEqual(unknown.candidates[0].status, PlanStatus.DEPENDENCY_UNKNOWN)
 
+        text_vcf = AdapterRegistry().plan(
+            AdapterPlanRequest("variants", SourceKind.BYTES, declared_format="text/vcf"),
+            check_environment=False,
+        )
+        self.assertTrue(text_vcf.executable)
+        self.assertEqual(text_vcf.selected_adapter.id, "bioprism.python.vcf_text")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)

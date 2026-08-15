@@ -66,5 +66,10 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM, and OME-Zarr routes
 are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and
 semantic-loss declarations remain visible before parsing. The planners never sniff or fetch bytes.
+`parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
+and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
+reference-build, provenance, type, and precision limitations with source locations. It validates
+the full record stream even when callers request only a bounded preview; indexed or compressed VCF
+access remains an explicit `pysam` adapter responsibility.
 See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

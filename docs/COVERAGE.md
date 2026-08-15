@@ -64,6 +64,10 @@ and source shapes against native CSV/inventory adapters and Python-delegated DIC
 AnnData/Zarr, VCF, BAM/CRAM, and OME-Zarr routes. It reports declared semantic-loss surfaces and
 distinguishes missing from unchecked optional dependencies before execution; it never sniffs
 content, fetches sources, imports packages, or claims that heavyweight parsing has occurred.
+The Python adapter layer now also contains a bounded text VCF reader: it validates the complete
+record stream, preserves raw INFO/FORMAT spellings beside typed projections, retains source and
+line hashes, and reports reference-build, provenance, type, and precision limitations without
+inventing an indexed/compressed reader or a reference genome.
 These remain in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
 key completeness, dependency-graph invalidation, partial unknown-region handling, fail-closed
 misses, and explicit re-proving; `storage_lifecycle_simulate` adds deterministic tiering, pin

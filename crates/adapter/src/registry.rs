@@ -236,6 +236,7 @@ impl AdapterRegistry {
                     LossKind::PrecisionReduced,
                     LossKind::ProvenanceUnavailable,
                     LossKind::OntologyTermUnmapped,
+                    LossKind::TypeUndetermined,
                     LossKind::ContentUninterpreted,
                 ],
                 &["subject", "specimen", "acquisition", "image"],
@@ -255,6 +256,7 @@ impl AdapterRegistry {
                     LossKind::PrecisionReduced,
                     LossKind::ProvenanceUnavailable,
                     LossKind::OntologyTermUnmapped,
+                    LossKind::TypeUndetermined,
                     LossKind::ContentUninterpreted,
                 ],
                 &["subject", "session", "acquisition", "image"],
@@ -282,7 +284,7 @@ impl AdapterRegistry {
                 "Python-owned AnnData/Zarr adapter route preserving obs/var/uns provenance.",
             ),
             descriptor(
-                "bioprism.python.vcf",
+                "bioprism.python.vcf_text",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
                 &["text/vcf", "text/x-vcf", "application/vcf"],
@@ -294,11 +296,32 @@ impl AdapterRegistry {
                     LossKind::PrecisionReduced,
                     LossKind::ProvenanceUnavailable,
                     LossKind::OntologyTermUnmapped,
+                    LossKind::TypeUndetermined,
+                    LossKind::ContentUninterpreted,
+                ],
+                &["subject", "sample", "variant", "genome"],
+                None,
+                "Dependency-free bounded text VCF adapter route requiring reference-build and sample identity checks.",
+            ),
+            descriptor(
+                "bioprism.python.vcf_indexed",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/bcf", "application/vcf+bgzip", "application/vcf+gzip"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::PrecisionReduced,
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::TypeUndetermined,
                     LossKind::ContentUninterpreted,
                 ],
                 &["subject", "sample", "variant", "genome"],
                 Some("pysam"),
-                "Python-owned VCF adapter route requiring reference-build and sample identity checks.",
+                "Python-owned indexed/compressed VCF and BCF route using pysam with reference-build and sample identity checks.",
             ),
             descriptor(
                 "bioprism.python.bam_cram",
@@ -558,6 +581,26 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.dicom")
+        );
+    }
+
+    #[test]
+    fn bounded_text_vcf_selects_the_dependency_free_python_reader() {
+        let plan = AdapterRegistry::default()
+            .plan(request(Some("text/vcf"), SourceKind::Bytes))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.vcf_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
         );
     }
 

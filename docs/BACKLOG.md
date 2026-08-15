@@ -197,6 +197,10 @@ selects native or Python-delegated routes by explicit format and source shape, c
 semantic-loss vocabulary and scope dimensions, and reports dependency missingness versus dependency
 uncertainty. This is a planning and contract layer; heavyweight Python readers still need to emit
 source-specific conformance reports before their normalized worlds are publishable.
+The first concrete Python implementation is now the bounded text VCF reader: it validates the full
+stream, preserves typed and raw representations, records line/source hashes, and refuses to infer
+reference builds. Indexed/compressed VCF, DICOM, NIfTI/BIDS, AnnData/Zarr, BAM/CRAM, and OME-Zarr
+remain separate format-specific adapters rather than being hidden behind a generic parser claim.
 
 
 ## §11 Developer Platform — 6 uncovered

@@ -83,6 +83,12 @@ invent defaults:
   and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
   fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
   and OME-Zarr readers remain responsible for source-specific conformance in the Python layer.
+- `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
+  adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
+  finite numeric values; preserves raw spellings beside typed projections; hashes the source and
+  each disclosed line; and emits source-located coordinate-frame, provenance, type, and precision
+  losses. It validates all records while bounding disclosed variants and loss rows, and it does not
+  pretend to provide indexed/compressed/random-access functionality that belongs to `pysam`.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP

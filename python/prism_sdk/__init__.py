@@ -84,6 +84,7 @@ from .oracle import (
 )
 from .workspace import AsyncWorkspace, Workspace
 from .workbench import WorkbenchRequest
+from .vcf import VcfAdapter, VcfLoss, VcfParseError, VcfParseResult, parse_vcf
 
 __version__ = "0.1.0"
 
@@ -156,6 +157,10 @@ __all__ = [
     "ToolResult",
     "TransportError",
     "ValidityWindow",
+    "VcfLoss",
+    "VcfAdapter",
+    "VcfParseError",
+    "VcfParseResult",
     "ValidationIssue",
     "ValidationReport",
     "Workspace",
@@ -165,6 +170,7 @@ __all__ = [
     "content_digest",
     "analytics_request",
     "adapter_plan",
+    "parse_vcf",
     "validate_pack",
     "__version__",
 ]
