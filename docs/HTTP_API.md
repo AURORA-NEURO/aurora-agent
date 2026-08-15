@@ -29,8 +29,9 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
 | `POST /v1/rpc` | JSON-RPC/MCP-compatible request envelope for tools, resources, and lifecycle |
-| `GET /v1/events?after=N&limit=M` | Cursor page with retention-gap and dropped-event evidence |
-| `GET /v1/events/stream?after=N&limit=M` | A bounded Server-Sent Events snapshot, not an unbounded connection |
+| `GET /v1/events?after=N&limit=M&review_id=H` | Cursor page with retention-gap and dropped-event evidence; optional exact route-review filter |
+| `GET /v1/events/stream?after=N&limit=M&review_id=H` | A bounded Server-Sent Events snapshot, optionally filtered by an exact route-review id |
+| `GET /v1/route-reviews/{review_id}/evidence?after=N&limit=M` | Typed retained route-review evidence lookup |
 | `GET /v1/events/persistence` | Inspect bounded event cursor checkpoint status |
 | `POST /v1/events/persistence/flush` | Force an event cursor checkpoint and verify its write |
 | `GET /v1/webhooks/subscriptions` | Subscription catalogue with secrets omitted |

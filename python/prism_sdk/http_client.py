@@ -15,7 +15,7 @@ import math
 import ssl
 import time
 from typing import Any, Mapping, Sequence
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 from .biological import AdapterPlanRequest
 from .capability import (
@@ -37,7 +37,16 @@ from .context_requests import (
     ProjectionBundleRequest,
 )
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
-from .events import MAX_EVENT_PAGE, DeliveryPage, EventPage, EventPersistenceStatus, SseSnapshot, parse_sse
+from .events import (
+    MAX_EVENT_PAGE,
+    DeliveryPage,
+    EventPage,
+    EventPersistenceStatus,
+    RouteReviewEvidence,
+    SseSnapshot,
+    parse_sse,
+    validate_review_id,
+)
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
@@ -788,28 +797,39 @@ class ApiClient:
     context_explain = fiber_explain
     context_verify = fiber_verify
 
-    def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
+    def events(self, *, after: int = 0, limit: int = 100, review_id: str | None = None) -> dict[str, Any]:
         if after < 0 or not 1 <= limit <= 1000:
             raise ArgumentError("after must be non-negative and limit must be 1..=1000")
-        return self.request("GET", f"/v1/events?after={after}&limit={limit}")
+        suffix = "" if review_id is None else f"&review_id={quote(validate_review_id(review_id), safe='')}"
+        return self.request("GET", f"/v1/events?after={after}&limit={limit}{suffix}")
 
-    def event_page(self, *, after: int = 0, limit: int = 100) -> EventPage:
+    def event_page(
+        self, *, after: int = 0, limit: int = 100, review_id: str | None = None
+    ) -> EventPage:
         """Read a typed cursor page over all retained tool and mission events."""
 
         if isinstance(after, bool) or not isinstance(after, int) or after < 0:
             raise ArgumentError("after must be a non-negative integer")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_EVENT_PAGE:
             raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
-        return EventPage.from_wire(self.request("GET", f"/v1/events?after={after}&limit={limit}"))
+        suffix = "" if review_id is None else f"&review_id={quote(validate_review_id(review_id), safe='')}"
+        return EventPage.from_wire(
+            self.request("GET", f"/v1/events?after={after}&limit={limit}{suffix}")
+        )
 
-    def event_stream(self, *, after: int = 0, limit: int = 100) -> SseSnapshot:
+    def event_stream(
+        self, *, after: int = 0, limit: int = 100, review_id: str | None = None
+    ) -> SseSnapshot:
         """Fetch and parse the bounded SSE snapshot without requiring an EventSource runtime."""
 
         if isinstance(after, bool) or not isinstance(after, int) or after < 0:
             raise ArgumentError("after must be a non-negative integer")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_EVENT_PAGE:
             raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
-        raw, headers = self.request_text("GET", f"/v1/events/stream?after={after}&limit={limit}")
+        suffix = "" if review_id is None else f"&review_id={quote(validate_review_id(review_id), safe='')}"
+        raw, headers = self.request_text(
+            "GET", f"/v1/events/stream?after={after}&limit={limit}{suffix}"
+        )
         next_after_value = headers.get("x-next-after")
         if next_after_value is None:
             next_after = None
@@ -818,6 +838,23 @@ class ApiClient:
         else:
             raise TransportError("HTTP API x-next-after header is not an unsigned integer")
         return SseSnapshot(headers.get("content-type", ""), next_after, parse_sse(raw), raw)
+
+    def route_review_evidence(
+        self, review_id: str, *, after: int = 0, limit: int = 100
+    ) -> RouteReviewEvidence:
+        """Retrieve retained event evidence for one content-addressed route review."""
+
+        review_id = validate_review_id(review_id)
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_EVENT_PAGE:
+            raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
+        return RouteReviewEvidence.from_wire(
+            self.request(
+                "GET",
+                f"/v1/route-reviews/{quote(review_id, safe='')}/evidence?after={after}&limit={limit}",
+            )
+        )
 
     def event_persistence(self) -> EventPersistenceStatus:
         """Inspect the optional restart-aware event cursor checkpoint."""
@@ -1019,15 +1056,32 @@ class AsyncApiClient:
 
         return await asyncio.to_thread(self.client.missions, status=status, limit=limit)
 
-    async def event_page(self, *, after: int = 0, limit: int = 100) -> EventPage:
+    async def event_page(
+        self, *, after: int = 0, limit: int = 100, review_id: str | None = None
+    ) -> EventPage:
         """Async typed cursor page over retained tool and mission events."""
 
-        return await asyncio.to_thread(self.client.event_page, after=after, limit=limit)
+        return await asyncio.to_thread(
+            self.client.event_page, after=after, limit=limit, review_id=review_id
+        )
 
-    async def event_stream(self, *, after: int = 0, limit: int = 100) -> SseSnapshot:
+    async def event_stream(
+        self, *, after: int = 0, limit: int = 100, review_id: str | None = None
+    ) -> SseSnapshot:
         """Async bounded SSE snapshot with the same cursor contract as the sync client."""
 
-        return await asyncio.to_thread(self.client.event_stream, after=after, limit=limit)
+        return await asyncio.to_thread(
+            self.client.event_stream, after=after, limit=limit, review_id=review_id
+        )
+
+    async def route_review_evidence(
+        self, review_id: str, *, after: int = 0, limit: int = 100
+    ) -> RouteReviewEvidence:
+        """Async retained route-review evidence lookup."""
+
+        return await asyncio.to_thread(
+            self.client.route_review_evidence, review_id, after=after, limit=limit
+        )
 
     async def event_persistence(self) -> EventPersistenceStatus:
         """Async inspection of the optional event cursor checkpoint."""
@@ -1442,5 +1496,9 @@ class AsyncApiClient:
     context_explain = fiber_explain
     context_verify = fiber_verify
 
-    async def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
-        return await asyncio.to_thread(self.client.events, after=after, limit=limit)
+    async def events(
+        self, *, after: int = 0, limit: int = 100, review_id: str | None = None
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self.client.events, after=after, limit=limit, review_id=review_id
+        )

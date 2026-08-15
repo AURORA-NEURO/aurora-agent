@@ -122,7 +122,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
-from .events import ApiEvent, DeliveryPage, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, SseEvent, SseSnapshot, parse_sse
+from .events import ApiEvent, DeliveryPage, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_review_id
 from .evidence import (
     BioCapabilityEvidenceAuditRequest,
     ClaimRequest,
@@ -359,10 +359,12 @@ __all__ = [
     "EvidenceStatus",
     "EventPage",
     "EventPersistenceStatus",
+    "RouteReviewEvidence",
     "MAX_EVENT_PAGE",
     "SseEvent",
     "SseSnapshot",
     "parse_sse",
+    "validate_review_id",
     "ConformanceLevel",
     "CalibrationObservation",
     "CapabilityQuery",

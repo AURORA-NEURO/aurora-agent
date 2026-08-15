@@ -55,6 +55,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         plan: {},
         results: [],
       } } } });
+      if (path.startsWith("/v1/route-reviews/")) return jsonResponse({ ok: true, workflow: "capability_route_review_evidence", review_id: "a".repeat(64), found: true, page: { events: [{ id: 1, event_type: "tool.completed", subject: "capability_route_review", request_id: "req-1", payload: {} }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0 } });
       if (path === "/v1/tools/refuse") return jsonResponse({ ok: true, tool: "refuse", request_id: "r2", mcp: { result: { isError: true, structuredContent: { reason: "blocked" } } }, guarantee: "shared" });
       return jsonResponse({ ok: true });
     },
@@ -239,6 +240,7 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
       if (path.endsWith("/replay") && init.method === "POST") {
         return jsonResponse({ ok: true, replayed: [{ delivery_id: 1, subscription_id: "sub", attempt: 1, state: "pending", last_error: null, last_error_retryable: null, event_id: 2, event_type: "tool.completed", signature: "sha256=x", envelope: {} }] });
       }
+      if (path.startsWith("/v1/route-reviews/")) return jsonResponse({ ok: true, workflow: "capability_route_review_evidence", review_id: "a".repeat(64), found: true, page: { events: [{ id: 1, event_type: "tool.completed", subject: "capability_route_review", request_id: "req-1", payload: {} }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0 } });
       return new Response("id: 4\nevent: tool.completed\ndata: {\"ok\":true}\n\nevent: cursor_gap\ndata: {\"after\":0}\n\n", {
       headers: { "content-type": "text/event-stream", "x-next-after": "4" },
       });
@@ -248,6 +250,11 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   assert.equal(snapshot.nextAfter, 4);
   assert.equal(snapshot.events[0].event, "tool.completed");
   assert.deepEqual(JSON.parse(snapshot.events[1].data), { after: 0 });
+  const evidence = await client.routeReviewEvidence("a".repeat(64));
+  assert.equal(evidence.workflow, "capability_route_review_evidence");
+  assert.equal(evidence.found, true);
+  assert.equal(evidence.page.events[0].subject, "capability_route_review");
+  await assert.rejects(client.routeReviewEvidence("invalid"), ArgumentError);
   assert.deepEqual(parseSse("data: a\ndata: b\n\n"), [{ data: "a\nb" }]);
   assert.throws(() => parseSse("retry: nope\n\n"), /retry/);
   const deliveries = await client.deliveries("sub");

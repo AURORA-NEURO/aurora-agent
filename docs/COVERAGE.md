@@ -117,6 +117,10 @@ paths; a schema-clean result is still shape evidence, not domain validation or a
 Each result carries a deterministic content-addressed `review_id` derived from route provenance,
 caller selections, and validation mode so operators can correlate handoff evidence without relying
 on timestamps or mutable server state.
+The HTTP event page and bounded SSE snapshot accept the same exact `review_id` filter, and
+`/v1/route-reviews/{review_id}/evidence` provides a typed retained-evidence lookup. Missing
+retained evidence is reported as an empty bounded window, never upgraded into a historical
+non-existence claim.
 The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
 async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table

@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, DeliveryPage, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, DeliveryPage, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -41,6 +41,9 @@ class FakeApiHandler(BaseHTTPRequestHandler):
                     ]
                 },
             )
+        elif self.path.startswith("/v1/route-reviews/"):
+            review_id = "a" * 64
+            self._send(200, {"ok": True, "workflow": "capability_route_review_evidence", "review_id": review_id, "found": True, "page": {"events": [{"id": 1, "event_type": "tool.completed", "subject": "capability_route_review", "request_id": "req-1", "payload": {}}], "after": 0, "next_after": 1, "oldest": 1, "newest": 1, "gap": False, "dropped_events": 0}})
         elif self.path.startswith("/v1/events/stream"):
             body = b'id: 1\nevent: mission.trace\ndata: {"mission_id":"async-1"}\n\n'
             self.send_response(200)
@@ -274,6 +277,12 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertIsInstance(stream, SseSnapshot)
         self.assertEqual(stream.next_after, 1)
         self.assertEqual(stream.events[0].event, "mission.trace")
+        evidence = client.route_review_evidence("a" * 64)
+        self.assertIsInstance(evidence, RouteReviewEvidence)
+        self.assertTrue(evidence.found)
+        self.assertEqual(evidence.page.events[0].subject, "capability_route_review")
+        with self.assertRaises(ArgumentError):
+            client.route_review_evidence("invalid")
         self.assertIsInstance(client.event_persistence(), EventPersistenceStatus)
         self.assertIsInstance(client.flush_event_persistence(), EventPersistenceStatus)
         with self.assertRaises(ArgumentError):
@@ -387,8 +396,9 @@ class HttpApiClientTests(unittest.TestCase):
                 (await client.telemetry_project({"kind": "event"}, {"treatments": {}}, "trace-async"))["mcp"]["result"]["trace"],
                 "trace-async",
             )
-            self.assertFalse((await client.event_page()).gap)
+            self.assertFalse((await client.event_page(review_id="a" * 64)).gap)
             self.assertEqual((await client.event_stream()).events[0].data, '{"mission_id":"async-1"}')
+            self.assertTrue((await client.route_review_evidence("a" * 64)).found)
 
         asyncio.run(run())
 

@@ -483,6 +483,9 @@ impl ApiRouter {
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
+            ("GET", path) if path.starts_with("/v1/route-reviews/") => {
+                self.route_review_evidence(&request, &request_id)
+            }
             ("GET", "/v1/events/persistence") => self.event_persistence_status(),
             ("POST", "/v1/events/persistence/flush") => self.flush_event_persistence(&request_id),
             ("GET", "/v1/missions") => self.mission_inventory(&request, &request_id),
@@ -708,6 +711,7 @@ impl ApiRouter {
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
+                    "route_review_evidence": "/v1/route-reviews/{review_id}/evidence",
                     "event_persistence": "/v1/events/persistence",
                     "webhooks": "/v1/webhooks/subscriptions"
                 }
@@ -733,6 +737,7 @@ impl ApiRouter {
                     "mission_preflight": true,
                     "mission_inventory": true,
                     "mission_trace": true,
+                    "route_review_evidence": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
@@ -786,6 +791,7 @@ impl ApiRouter {
             Ok(value) => value,
             Err(error) => return self.error(400, "invalid_query", &error, "query"),
         };
+        let review_id = query.get("review_id").map(String::as_str);
         let events = match self.events.lock() {
             Ok(events) => events,
             Err(_) => {
@@ -797,7 +803,11 @@ impl ApiRouter {
                 )
             }
         };
-        match events.events(after, limit) {
+        let page = match review_id {
+            Some(review_id) => events.events_for_review(after, limit, review_id),
+            None => events.events(after, limit),
+        };
+        match page {
             Ok(page) => HttpResponse::json(200, &json!({ "ok": true, "page": page })),
             Err(error) => self.error(400, "invalid_query", &error, "query"),
         }
@@ -816,6 +826,7 @@ impl ApiRouter {
             Ok(value) => value,
             Err(error) => return self.error(400, "invalid_query", &error, "query"),
         };
+        let review_id = query.get("review_id").map(String::as_str);
         let events = match self.events.lock() {
             Ok(events) => events,
             Err(_) => {
@@ -827,12 +838,69 @@ impl ApiRouter {
                 )
             }
         };
-        match events.events(after, limit) {
+        let page = match review_id {
+            Some(review_id) => events.events_for_review(after, limit, review_id),
+            None => events.events(after, limit),
+        };
+        match page {
             Ok(page) => {
                 HttpResponse::text(200, "text/event-stream; charset=utf-8", events.sse(&page))
                     .with_header("x-next-after", page.next_after.to_string())
             }
             Err(error) => self.error(400, "invalid_query", &error, "query"),
+        }
+    }
+
+    fn route_review_evidence(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(review_id) = route_review_id(&request.path_segments()) else {
+            return self.error(
+                404,
+                "not_found",
+                "route-review evidence route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let after = match query_u64(&query, "after", 0) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let limit = match query_usize(&query, "limit", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match events.events_for_review(after, limit, &review_id) {
+            Ok(page) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "workflow": "capability_route_review_evidence",
+                    "review_id": review_id,
+                    "found": !page.events.is_empty(),
+                    "page": page,
+                    "guarantees": [
+                        "evidence is limited to retained capability_route_review tool events with an exact review_id match",
+                        "after is an exclusive event cursor and next_after is the last returned event id",
+                        "retention gaps are reported instead of silently presented as complete history",
+                        "an empty result means no matching retained event was found in the requested cursor window"
+                    ]
+                }),
+            ),
+            Err(error) => self.error(400, "invalid_query", &error, request_id),
         }
     }
 
@@ -1901,8 +1969,9 @@ impl ApiRouter {
                     "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
-                    "/v1/events": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "cursor page" } } } },
-                    "/v1/events/stream": { "get": { "responses": { "200": { "description": "bounded Server-Sent Events snapshot" } } } },
+                    "/v1/events": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }], "responses": { "200": { "description": "cursor page" } } } },
+                    "/v1/events/stream": { "get": { "parameters": [{ "name": "review_id", "in": "query" }], "responses": { "200": { "description": "bounded Server-Sent Events snapshot" } } } },
+                    "/v1/route-reviews/{review_id}/evidence": { "get": { "parameters": [{ "name": "review_id", "in": "path", "required": true }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "retained route-review evidence page" } } } },
                     "/v1/events/persistence": { "get": { "responses": { "200": { "description": "event cursor checkpoint status" } } } },
                     "/v1/events/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded event cursor checkpoint" } } } },
                     "/v1/webhooks/subscriptions": { "get": { "responses": { "200": { "description": "subscriptions" } } }, "post": { "responses": { "201": { "description": "subscription" } } } },
@@ -2302,6 +2371,18 @@ fn mission_id(
         }
     }
     if segments[2].is_empty() {
+        return None;
+    }
+    Some(segments[2].clone())
+}
+
+fn route_review_id(segments: &Result<Vec<String>, crate::http::HttpError>) -> Option<String> {
+    let segments = segments.as_ref().ok()?;
+    if segments.len() != 4
+        || segments[0] != "v1"
+        || segments[1] != "route-reviews"
+        || segments[3] != "evidence"
+    {
         return None;
     }
     Some(segments[2].clone())
@@ -2714,6 +2795,57 @@ mod tests {
             projected_trace["execution_trace_schema_version"],
             "bioprism-devplat-mission-trace/0.1"
         );
+    }
+
+    #[test]
+    fn route_review_evidence_is_queryable_by_content_addressed_id() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let review_id = "a".repeat(64);
+        router.record_tool_event(
+            "review-request",
+            "capability_route_review",
+            &json!({
+                "result": {
+                    "structuredContent": {
+                        "workflow": "capability_route_review",
+                        "review_id": review_id.clone(),
+                    }
+                }
+            }),
+        );
+
+        let filtered = router.handle(request(
+            "GET",
+            &format!("/v1/events?after=0&limit=10&review_id={review_id}"),
+            json!({}),
+        ));
+        assert_eq!(filtered.status, 200);
+        let filtered: Value = serde_json::from_slice(&filtered.body).unwrap();
+        assert_eq!(filtered["page"]["events"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            filtered["page"]["events"][0]["request_id"],
+            "review-request"
+        );
+
+        let evidence = router.handle(request(
+            "GET",
+            &format!("/v1/route-reviews/{review_id}/evidence?after=0&limit=10"),
+            json!({}),
+        ));
+        assert_eq!(evidence.status, 200);
+        let evidence: Value = serde_json::from_slice(&evidence.body).unwrap();
+        assert_eq!(evidence["workflow"], "capability_route_review_evidence");
+        assert_eq!(evidence["review_id"], review_id);
+        assert_eq!(evidence["found"], true);
+        assert_eq!(evidence["page"]["events"].as_array().unwrap().len(), 1);
+
+        let invalid = router.handle(request(
+            "GET",
+            "/v1/route-reviews/not-a-review/evidence",
+            json!({}),
+        ));
+        assert_eq!(invalid.status, 400);
     }
 
     #[test]

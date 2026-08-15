@@ -145,6 +145,14 @@ export interface EventsResponse extends JsonObject {
   page: EventPage;
 }
 
+export interface RouteReviewEvidenceResponse extends JsonObject {
+  ok: boolean;
+  workflow: "capability_route_review_evidence";
+  review_id: string;
+  found: boolean;
+  page: EventPage;
+}
+
 export interface SubscriptionView extends JsonObject {
   id: string;
   endpoint: string;

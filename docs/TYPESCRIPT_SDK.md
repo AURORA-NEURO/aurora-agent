@@ -149,6 +149,9 @@ blocked results preserve structured findings without executing anything. Set `va
 to receive bounded authoritative schema reports for the selected arguments; this remains review
 evidence and does not authorize execution. The typed result also includes a deterministic,
 content-addressed `review_id` for correlating the same handoff across transports and event records.
+`routeReviewEvidence(reviewId, after, limit)` retrieves bounded retained event evidence for that
+exact id as `RouteReviewEvidenceResponse`; the result preserves cursor gaps and distinguishes an
+empty retained window from a claim that the review was never produced.
 
 ## Events and webhooks
 

@@ -449,11 +449,34 @@ impl EventLog {
     }
 
     pub fn events(&self, after: u64, limit: usize) -> Result<EventPage, String> {
+        self.events_matching(after, limit, |_| true)
+    }
+
+    /// Return only retained tool events whose capability-route-review response carries the
+    /// requested content-addressed review id. The event cursor and retention evidence retain the
+    /// same semantics as an unfiltered page; no separate mutable review index is introduced.
+    pub fn events_for_review(
+        &self,
+        after: u64,
+        limit: usize,
+        review_id: &str,
+    ) -> Result<EventPage, String> {
+        validate_review_id(review_id)?;
+        self.events_matching(after, limit, |event| {
+            event.subject == "capability_route_review"
+                && event_matches_review_id(&event.payload, review_id)
+        })
+    }
+
+    fn events_matching<F>(&self, after: u64, limit: usize, matches: F) -> Result<EventPage, String>
+    where
+        F: Fn(&ApiEvent) -> bool,
+    {
         let limit = checked_limit(limit)?;
         let events = self
             .events
             .iter()
-            .filter(|event| event.id > after)
+            .filter(|event| event.id > after && matches(event))
             .take(limit)
             .cloned()
             .collect::<Vec<_>>();
@@ -871,6 +894,45 @@ fn checked_limit(limit: usize) -> Result<usize, String> {
     }
 }
 
+fn validate_review_id(review_id: &str) -> Result<(), String> {
+    if review_id.len() != 64
+        || !review_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("review_id must be a 64-character hexadecimal content hash".into());
+    }
+    Ok(())
+}
+
+fn event_matches_review_id(payload: &Value, review_id: &str) -> bool {
+    payload
+        .get("response")
+        .is_some_and(|response| value_contains_review_id(response, review_id))
+        || payload
+            .get("review_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == review_id)
+}
+
+fn value_contains_review_id(value: &Value, review_id: &str) -> bool {
+    match value {
+        Value::Object(object) => {
+            object
+                .get("review_id")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == review_id)
+                || object
+                    .values()
+                    .any(|child| value_contains_review_id(child, review_id))
+        }
+        Value::Array(values) => values
+            .iter()
+            .any(|child| value_contains_review_id(child, review_id)),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -928,6 +990,37 @@ mod tests {
             .register_subscription(None, "https://example.test", None, "short")
             .is_err());
         assert!(log.events(0, 0).is_err());
+    }
+
+    #[test]
+    fn route_review_event_filter_is_exact_and_bounded() {
+        let mut log = EventLog::new(4).unwrap();
+        let first = "a".repeat(64);
+        let second = "b".repeat(64);
+        log.emit(
+            "tool.completed",
+            "capability_route_review",
+            "req-1",
+            json!({
+                "tool": "capability_route_review",
+                "response": {"result": {"structuredContent": {"review_id": first}}}
+            }),
+        )
+        .unwrap();
+        log.emit(
+            "tool.completed",
+            "capability_route_review",
+            "req-2",
+            json!({
+                "tool": "capability_route_review",
+                "response": {"result": {"structuredContent": {"review_id": second}}}
+            }),
+        )
+        .unwrap();
+        let page = log.events_for_review(0, 10, &first).unwrap();
+        assert_eq!(page.events.len(), 1);
+        assert_eq!(page.events[0].request_id, "req-1");
+        assert!(log.events_for_review(0, 10, &"z".repeat(63)).is_err());
     }
 
     #[test]

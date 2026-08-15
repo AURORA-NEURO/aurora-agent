@@ -46,6 +46,7 @@ import type {
   RepositoryCatalogArgs,
   RepositoryImpactArgs,
   RestToolResponse,
+  RouteReviewEvidenceResponse,
   RuntimeExecutionSimulateArgs,
   SseSnapshot,
   SubscribeOptions,
@@ -405,6 +406,24 @@ export class ApiClient {
     };
   }
 
+  /** Retrieve retained event evidence for one content-addressed capability route review. */
+  async routeReviewEvidence(
+    reviewId: string,
+    after = 0,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<RouteReviewEvidenceResponse> {
+    validateReviewId(reviewId);
+    cursor(after, "after");
+    pageLimit(limit);
+    return this.request(
+      "GET",
+      "/v1/route-reviews/" + encodeURIComponent(reviewId) + "/evidence?after=" + after + "&limit=" + limit,
+      undefined,
+      options,
+    );
+  }
+
   async listSubscriptions(options?: ClientRequestOptions): Promise<SubscriptionListResponse> {
     return this.request("GET", "/v1/webhooks/subscriptions", undefined, options);
   }
@@ -604,6 +623,12 @@ function cursor(value: number, name: string): void {
 
 function pageLimit(value: number): void {
   if (!Number.isSafeInteger(value) || value < 1 || value > MAX_EVENT_PAGE) throw new ArgumentError("limit must be 1..=1000");
+}
+
+function validateReviewId(value: string): void {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new ArgumentError("reviewId must be a 64-character hexadecimal content hash");
+  }
 }
 
 function visible(value: string, name: string, maxBytes: number): string {

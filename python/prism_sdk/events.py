@@ -29,6 +29,22 @@ def _non_negative(name: str, value: Any) -> int:
     return value
 
 
+def _review_id(name: str, value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ArgumentError(f"{name} must be a 64-character hexadecimal content hash")
+    return value
+
+
+def validate_review_id(value: Any) -> str:
+    """Validate a content-addressed route-review identifier for HTTP query/path use."""
+
+    return _review_id("review_id", value)
+
+
 def _optional_bool(name: str, value: Any) -> bool | None:
     if value is None:
         return None
@@ -110,6 +126,33 @@ class EventPage:
             gap=gap,
             dropped_events=_non_negative("event page dropped_events", raw.get("dropped_events")),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class RouteReviewEvidence:
+    """Typed retained event evidence for one content-addressed route review."""
+
+    raw: dict[str, Any]
+    review_id: str
+    found: bool
+    page: EventPage
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RouteReviewEvidence":
+        raw = _mapping("route-review evidence", value)
+        if raw.get("workflow") != "capability_route_review_evidence":
+            raise ArgumentError("route-review evidence workflow is invalid")
+        found = raw.get("found")
+        if not isinstance(found, bool):
+            raise ArgumentError("route-review evidence found must be a boolean")
+        page = EventPage.from_wire(raw.get("page"))
+        review_id = _review_id("route-review evidence review_id", raw.get("review_id"))
+        if found != bool(page.events):
+            raise ArgumentError("route-review evidence found must match page events")
+        return cls(raw=raw, review_id=review_id, found=found, page=page)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)

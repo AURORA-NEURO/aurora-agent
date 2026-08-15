@@ -544,6 +544,10 @@ diagnostics, and keeps mission preflight and execution explicitly separate. Its 
 turning schema conformance into domain readiness. Every review also carries a deterministic,
 content-addressed `review_id` derived from the route provenance, caller selections, and validation
 mode, making the same handoff correlate cleanly across transports and event records.
+The HTTP boundary exposes that evidence through exact `review_id` filtering on event pages and a
+bounded `/v1/route-reviews/{review_id}/evidence` lookup; the Python and TypeScript SDKs provide
+typed helpers while preserving retention gaps and the explicit “not found in retained window”
+meaning of an empty result.
 
 ## Evaluating a context policy
 
