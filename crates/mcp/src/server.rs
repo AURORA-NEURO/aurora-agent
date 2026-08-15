@@ -53,7 +53,9 @@ use bioprism_dataops::{
     DataClass, Plane, TenantPattern,
 };
 use bioprism_devplat::{
-    run_workbench, standard_walkthroughs, DevPlatReport, WorkbenchRequest, WORKBENCH_SCHEMA_VERSION,
+    apply_binding, plan_mission, run_workbench, standard_walkthroughs, DevPlatReport,
+    MissionReport, MissionRequest, MissionStepResult, WorkbenchRequest, MISSION_SCHEMA_VERSION,
+    WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -628,6 +630,7 @@ impl Server {
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
+            "agent_mission" => self.agent_mission(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -11307,6 +11310,260 @@ impl Server {
         Ok(result)
     }
 
+    /// Plan or execute an explicit, bounded DAG of existing domain tools.
+    ///
+    /// Planning is the default. Execution invokes the same internal tool dispatcher used by the
+    /// MCP boundary, but only after the typed mission contract has required an allow-list and
+    /// applied side-effect and output budgets. Nested results remain raw MCP envelopes so a
+    /// refusal cannot be silently converted into a successful scientific conclusion.
+    fn agent_mission(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode agent mission input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("agent mission input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: MissionRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid agent mission input: {error}"))?;
+        let plan =
+            plan_mission(&request).map_err(|error| format!("agent mission refused: {error}"))?;
+        let mut report = MissionReport {
+            schema_version: MISSION_SCHEMA_VERSION.into(),
+            plan,
+            execution: if request.policy.execute {
+                "executed".into()
+            } else {
+                "planned".into()
+            },
+            mission_status: if request.policy.execute {
+                "running".into()
+            } else {
+                "planned".into()
+            },
+            succeeded: 0,
+            refused: 0,
+            blocked: 0,
+            required_failures: 0,
+            returned_bytes: 0,
+            results: Vec::new(),
+            guarantees: vec![
+            "the mission DAG was validated before any nested tool call".into(),
+            "nested calls preserve raw JSON-RPC result and refusal envelopes".into(),
+            "dependent work is blocked when its prerequisite refuses or exceeds budget".into(),
+            "validated JSON-pointer bindings can pass structured upstream results into dependent arguments".into(),
+            "each nested call records a content digest of its post-binding input arguments".into(),
+        ],
+            limitations: vec![
+                "the MCP adapter executes the deterministic plan serially, even when waves are parallelizable".into(),
+                "tool arguments and scientific interpretation remain caller-owned".into(),
+                "this is not a distributed scheduler, durable queue, or external worker pool".into(),
+            ],
+        };
+
+        if !request.policy.execute {
+            let mut output = serde_json::to_value(report)
+                .map_err(|error| format!("cannot encode agent mission plan: {error}"))?;
+            output["ok"] = json!(true);
+            output["workflow"] = json!("agent_mission");
+            output["mission_schema_version"] = json!(MISSION_SCHEMA_VERSION);
+            return Ok(output);
+        }
+
+        let steps = request
+            .steps
+            .iter()
+            .map(|step| (step.id.as_str(), step))
+            .collect::<BTreeMap<_, _>>();
+        let mut failed = BTreeSet::new();
+        let mut blocked = BTreeSet::new();
+        let mut payloads: BTreeMap<String, Value> = BTreeMap::new();
+        let mut abort = false;
+
+        for step_id in &report.plan.ordered_steps {
+            let step = steps
+                .get(step_id.as_str())
+                .ok_or_else(|| format!("mission plan lost step `{step_id}`"))?;
+            if abort
+                || step
+                    .depends_on
+                    .iter()
+                    .any(|dependency| failed.contains(dependency) || blocked.contains(dependency))
+            {
+                blocked.insert(step.id.clone());
+                report.blocked += 1;
+                if step.required {
+                    report.required_failures += 1;
+                    abort = true;
+                }
+                report.results.push(MissionStepResult {
+                    id: step.id.clone(),
+                    tool: step.tool.clone(),
+                    status: "blocked".into(),
+                    required: step.required,
+                    arguments_digest: None,
+                    bytes: 0,
+                    wire: None,
+                    error: Some("a prerequisite mission step refused or was blocked".into()),
+                });
+                continue;
+            }
+
+            let mut effective_arguments = step.arguments.clone();
+            let binding_result = step.bindings.iter().try_for_each(|binding| {
+                let payload = payloads.get(&binding.from_step).ok_or_else(|| {
+                    format!(
+                        "binding source step `{}` has no successful structured payload",
+                        binding.from_step
+                    )
+                })?;
+                apply_binding(&mut effective_arguments, binding, payload)
+                    .map_err(|error| error.to_string())
+            });
+            if let Err(error) = binding_result {
+                failed.insert(step.id.clone());
+                report.refused += 1;
+                if step.required {
+                    report.required_failures += 1;
+                }
+                report.results.push(MissionStepResult {
+                    id: step.id.clone(),
+                    tool: step.tool.clone(),
+                    status: "refused".into(),
+                    required: step.required,
+                    arguments_digest: None,
+                    bytes: 0,
+                    wire: None,
+                    error: Some(format!("mission binding refused: {error}")),
+                });
+                abort |= step.required || request.policy.stop_on_error;
+                continue;
+            }
+            let arguments_digest = bioprism_ids::ContentHash::of_value(&effective_arguments)
+                .map_err(|error| {
+                    format!("cannot hash mission step `{}` arguments: {error}", step.id)
+                })?
+                .to_string();
+
+            let nested = Request {
+                id: Some(json!(step.id)),
+                method: "tools/call".into(),
+                params: json!({
+                    "name": step.tool,
+                    "arguments": effective_arguments,
+                }),
+            };
+            let wire = self.call_tool(&nested).to_json();
+            let bytes = serde_json::to_vec(&wire)
+                .map_err(|error| format!("cannot measure mission step `{}`: {error}", step.id))?
+                .len();
+            if bytes > request.policy.max_step_output_bytes {
+                failed.insert(step.id.clone());
+                report.refused += 1;
+                if step.required {
+                    report.required_failures += 1;
+                }
+                report.results.push(MissionStepResult {
+                    id: step.id.clone(),
+                    tool: step.tool.clone(),
+                    status: "refused".into(),
+                    required: step.required,
+                    arguments_digest: Some(arguments_digest.clone()),
+                    bytes,
+                    wire: None,
+                    error: Some(format!(
+                        "nested result is {bytes} bytes, above the per-step output budget of {}",
+                        request.policy.max_step_output_bytes
+                    )),
+                });
+                abort |= step.required || request.policy.stop_on_error;
+                continue;
+            }
+            if report.returned_bytes.saturating_add(bytes) > request.policy.max_total_output_bytes {
+                failed.insert(step.id.clone());
+                report.refused += 1;
+                if step.required {
+                    report.required_failures += 1;
+                }
+                report.results.push(MissionStepResult {
+                    id: step.id.clone(),
+                    tool: step.tool.clone(),
+                    status: "refused".into(),
+                    required: step.required,
+                    arguments_digest: Some(arguments_digest.clone()),
+                    bytes,
+                    wire: None,
+                    error: Some(format!(
+                        "mission output budget of {} bytes would be exceeded",
+                        request.policy.max_total_output_bytes
+                    )),
+                });
+                abort |= step.required || request.policy.stop_on_error;
+                continue;
+            }
+
+            let is_error = wire
+                .pointer("/result/isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || wire.get("error").is_some();
+            let error = wire
+                .pointer("/result/content/0/text")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            report.returned_bytes += bytes;
+            if is_error {
+                failed.insert(step.id.clone());
+                report.refused += 1;
+                if step.required {
+                    report.required_failures += 1;
+                }
+                report.results.push(MissionStepResult {
+                    id: step.id.clone(),
+                    tool: step.tool.clone(),
+                    status: "refused".into(),
+                    required: step.required,
+                    arguments_digest: Some(arguments_digest.clone()),
+                    bytes,
+                    wire: Some(wire),
+                    error,
+                });
+                abort |= step.required || request.policy.stop_on_error;
+            } else {
+                let payload = wire
+                    .pointer("/result/content/0/text")
+                    .and_then(Value::as_str)
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                    .unwrap_or_else(|| wire.clone());
+                payloads.insert(step.id.clone(), payload);
+                report.succeeded += 1;
+                report.results.push(MissionStepResult {
+                    id: step.id.clone(),
+                    tool: step.tool.clone(),
+                    status: "succeeded".into(),
+                    required: step.required,
+                    arguments_digest: Some(arguments_digest),
+                    bytes,
+                    wire: Some(wire),
+                    error: None,
+                });
+            }
+        }
+
+        report.mission_status = if report.required_failures > 0 {
+            "failed".into()
+        } else if report.refused > 0 || report.blocked > 0 {
+            "partial".into()
+        } else {
+            "succeeded".into()
+        };
+
+        let mut output = serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode agent mission report: {error}"))?;
+        output["ok"] = json!(true);
+        output["workflow"] = json!("agent_mission");
+        output["mission_schema_version"] = json!(MISSION_SCHEMA_VERSION);
+        Ok(output)
+    }
+
     /// Compose the authoring-studio, notebook, capability-dashboard, and CI-plan contracts.
     ///
     /// The Rust workbench validates the request and returns a digest-bound projection. It is
@@ -13648,7 +13905,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -15169,6 +15426,52 @@ pub fn tool_definitions() -> Vec<Value> {
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release. Omit it to receive no readiness claim." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "agent_mission",
+            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled; it never invokes itself or becomes a distributed scheduler.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission_id": { "type": "string", "description": "Stable mission identity used in the content-addressed plan." },
+                    "goal": { "type": "string", "description": "Human- and agent-readable mission objective; scientific meaning remains caller-owned." },
+                    "steps": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 128,
+                        "description": "Domain-labelled steps with deterministic dependencies and optional field-level dataflow bindings.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string" },
+                                "domain": { "type": "string", "description": "Domain label retained for routing and audit; the server does not infer semantics." },
+                                "capability": { "type": "string" },
+                                "objective": { "type": "string" },
+                                "tool": { "type": "string", "description": "Existing MCP tool name; agent_mission cannot recurse." },
+                                "arguments": { "type": "object", "description": "Exact JSON object sent to the nested tool after bindings are applied." },
+                                "depends_on": { "type": "array", "items": { "type": "string" } },
+                                "bindings": {
+                                    "type": "array",
+                                    "description": "Copy a value from a successful direct prerequisite. Empty source_pointer selects the whole decoded payload; target_pointer must select an existing argument slot.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "from_step": { "type": "string" },
+                                            "source_pointer": { "type": "string", "description": "RFC 6901 JSON pointer; empty selects the whole upstream payload." },
+                                            "target_pointer": { "type": "string", "description": "RFC 6901 JSON pointer into this step's existing arguments." }
+                                        },
+                                        "required": ["from_step", "source_pointer", "target_pointer"]
+                                    }
+                                },
+                                "required": { "type": "boolean", "default": true }
+                            },
+                            "required": ["id", "domain", "capability", "objective", "tool"]
+                        }
+                    },
+                    "policy": { "type": "object", "description": "Optional policy: execute, stop_on_error, allow_side_effects, max_steps, max_step_output_bytes, max_total_output_bytes, and allowed_tools. Execution requires an explicit non-empty allow-list." }
+                },
+                "required": ["mission_id", "goal", "steps"]
             }
         }),
         json!({

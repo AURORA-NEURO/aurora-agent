@@ -65,6 +65,11 @@ invent defaults:
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,
   evidence posture, release readiness, safe paths, and deterministic YAML.
+- `agent_mission(mission_id, goal, steps, policy=...)` previews or executes a cross-domain tool DAG.
+  `MissionStep` and `MissionPolicy` preserve domain labels, dependencies, explicit execution
+  allow-lists, side-effect posture, refusal propagation, and output budgets; the server remains the
+  authority for ordering and execution. `MissionBinding` can route a JSON-pointer field from a
+  successful direct prerequisite into an existing argument slot.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP

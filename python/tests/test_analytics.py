@@ -12,6 +12,10 @@ from prism_sdk import (
     CalibrationObservation,
     Client,
     MetricObservation,
+    MissionBinding,
+    MissionPolicy,
+    MissionRequest,
+    MissionStep,
     PairedObservation,
     WorkbenchRequest,
     Workspace,
@@ -87,6 +91,33 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             WorkbenchRequest({})
 
+    def test_mission_request_builds_dependency_bound_wire_contract(self) -> None:
+        request = MissionRequest(
+            "mission-1",
+            "compose evidence",
+            [
+                MissionStep("catalog", "workspace", "discovery", "discover routes", "workspace_capabilities"),
+                MissionStep(
+                    "metrics",
+                    "metrics",
+                    "analytics",
+                    "prepare measurements",
+                    "metrics_analytics_audit",
+                    {"observations": [], "inputs": [None]},
+                    ("catalog",),
+                    True,
+                    (MissionBinding("catalog", "/value", "/inputs/0"),),
+                ),
+            ],
+            MissionPolicy(execute=True, allowed_tools=("workspace_capabilities", "metrics_analytics_audit")),
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["steps"][1]["depends_on"], ["catalog"])
+        self.assertEqual(arguments["steps"][1]["bindings"][0]["target_pointer"], "/inputs/0")
+        self.assertEqual(arguments["policy"]["allowed_tools"], ["workspace_capabilities", "metrics_analytics_audit"])
+        with self.assertRaises(ArgumentError):
+            MissionRequest("", "goal", [MissionStep("s", "d", "c", "o", "tool")])
+
 
 class AnalyticsWorkspaceTests(unittest.TestCase):
     def test_sync_workspace_sends_typed_analytics_request(self) -> None:
@@ -108,6 +139,16 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-1")
         self.assertEqual(result["echo"]["ci"]["offline"], True)
 
+    def test_sync_workspace_exposes_agent_mission(self) -> None:
+        with Client(command(), timeout=2) as client:
+            result = Workspace(client).agent_mission(
+                "mission-sync",
+                "discover capabilities",
+                [MissionStep("catalog", "workspace", "discovery", "discover routes", "workspace_capabilities")],
+            )
+        self.assertEqual(result["echo"]["mission_id"], "mission-sync")
+        self.assertEqual(result["echo"]["steps"][0]["tool"], "workspace_capabilities")
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -123,6 +164,15 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 {"session_id": "studio-async", "artifacts": [], "cells": [], "changes": []}
             )
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-async")
+
+    async def test_async_workspace_exposes_agent_mission(self) -> None:
+        async with AsyncClient(command(), timeout=2) as client:
+            result = await AsyncWorkspace(client).agent_mission(
+                "mission-async",
+                "discover capabilities",
+                [MissionStep("catalog", "workspace", "discovery", "discover routes", "workspace_capabilities")],
+            )
+        self.assertEqual(result["echo"]["mission_id"], "mission-async")
 
 
 if __name__ == "__main__":

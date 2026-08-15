@@ -47,6 +47,7 @@ from .errors import (
 )
 from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
+from .mission import MissionBinding, MissionPolicy, MissionRequest, MissionStep
 from .oracle import (
     Admissibility,
     EvidenceTier,
@@ -104,6 +105,10 @@ __all__ = [
     "MutationPlan",
     "MutationSpec",
     "MetricObservation",
+    "MissionBinding",
+    "MissionPolicy",
+    "MissionRequest",
+    "MissionStep",
     "MissingnessAuditRequest",
     "OracleCombineRequest",
     "OracleManifest",

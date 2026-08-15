@@ -305,6 +305,41 @@ export interface DeveloperWorkbenchArgs extends JsonObject {
   ci?: JsonObject;
 }
 
+export interface AgentMissionBinding extends JsonObject {
+  from_step: string;
+  source_pointer: string;
+  target_pointer: string;
+}
+
+export interface AgentMissionStep extends JsonObject {
+  id: string;
+  domain: string;
+  capability: string;
+  objective: string;
+  tool: string;
+  arguments?: JsonObject;
+  depends_on?: string[];
+  required?: boolean;
+  bindings?: AgentMissionBinding[];
+}
+
+export interface AgentMissionPolicy extends JsonObject {
+  execute?: boolean;
+  stop_on_error?: boolean;
+  allow_side_effects?: boolean;
+  max_steps?: number;
+  max_step_output_bytes?: number;
+  max_total_output_bytes?: number;
+  allowed_tools?: string[];
+}
+
+export interface AgentMissionArgs extends JsonObject {
+  mission_id: string;
+  goal: string;
+  steps: AgentMissionStep[];
+  policy?: AgentMissionPolicy;
+}
+
 export interface RuntimeExecutionSimulateArgs extends JsonObject {
   tape?: JsonObject;
   actions?: JsonValue[];

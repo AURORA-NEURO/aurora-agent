@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 116);
+    assert_eq!(tools.len(), 117);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3499,6 +3499,96 @@ fn developer_workbench_refuses_notebook_cycles_and_unsafe_ci() {
         .as_str()
         .unwrap()
         .contains("parent directory"));
+}
+
+#[test]
+fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
+    let mut server = server();
+    let planned = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "mission-plan-1",
+            "goal": "prepare a cross-domain evidence review",
+            "steps": [
+                {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
+                {"id": "metrics", "domain": "metrics", "capability": "analytics", "objective": "prepare measurements", "tool": "metrics_analytics_audit", "depends_on": ["catalog"]}
+            ]
+        }),
+    );
+    assert_eq!(planned["__isError"], json!(false));
+    assert_eq!(planned["workflow"], json!("agent_mission"));
+    assert_eq!(planned["execution"], json!("planned"));
+    assert_eq!(planned["plan"]["critical_path_length"], json!(2));
+    assert_eq!(
+        planned["plan"]["ordered_steps"],
+        json!(["catalog", "metrics"])
+    );
+    assert_eq!(planned["results"].as_array().unwrap().len(), 0);
+    assert_eq!(planned["plan"]["digest"].as_str().unwrap().len(), 64);
+
+    let executed = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "mission-execute-1",
+            "goal": "execute safe local discovery",
+            "steps": [
+                {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
+                {"id": "protocol", "domain": "orchestration", "capability": "acts", "objective": "inspect protocol", "tool": "weave_protocol_catalog", "arguments": {"context": null}, "depends_on": ["catalog"], "bindings": [{"from_step": "catalog", "source_pointer": "", "target_pointer": "/context"}]}
+            ],
+            "policy": {"execute": true, "allowed_tools": ["workspace_capabilities", "weave_protocol_catalog"], "max_total_output_bytes": 2000000}
+        }),
+    );
+    assert_eq!(executed["__isError"], json!(false));
+    assert_eq!(executed["execution"], json!("executed"));
+    assert_eq!(executed["mission_status"], json!("succeeded"));
+    assert_eq!(executed["succeeded"], json!(2));
+    assert_eq!(executed["refused"], json!(0));
+    assert_eq!(executed["blocked"], json!(0));
+    assert_eq!(executed["results"][0]["status"], json!("succeeded"));
+    assert!(executed["results"][0]["wire"]["result"].is_object());
+    let source_payload: Value = serde_json::from_str(
+        executed["results"][0]["wire"]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let expected_arguments_digest = ContentHash::of_value(&json!({"context": source_payload}))
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        executed["results"][1]["arguments_digest"],
+        json!(expected_arguments_digest)
+    );
+}
+
+#[test]
+fn agent_mission_preserves_refusal_and_blocks_dependents() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "mission-refusal-1",
+            "goal": "prove refusal propagation",
+            "steps": [
+                {"id": "bad", "domain": "test", "capability": "refusal", "objective": "invoke an unknown tool", "tool": "not_a_real_tool"},
+                {"id": "dependent", "domain": "test", "capability": "blocked", "objective": "must not run", "tool": "workspace_capabilities", "depends_on": ["bad"]}
+            ],
+            "policy": {"execute": true, "allowed_tools": ["not_a_real_tool", "workspace_capabilities"]}
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["refused"], json!(1));
+    assert_eq!(result["blocked"], json!(1));
+    assert_eq!(result["mission_status"], json!("failed"));
+    assert_eq!(result["results"][0]["status"], json!("refused"));
+    assert_eq!(result["results"][1]["status"], json!("blocked"));
+    assert!(result["results"][0]["error"]
+        .as_str()
+        .unwrap()
+        .contains("unknown tool"));
 }
 
 #[test]

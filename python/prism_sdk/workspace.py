@@ -15,6 +15,7 @@ from .analytics import (
 from .authoring import PackArtifact
 from .client import Client
 from .errors import ArgumentError
+from .mission import MissionPolicy, MissionRequest, MissionStep
 from .oracle import (
     EvidenceTier,
     EvaluationReproductionRequest,
@@ -112,6 +113,19 @@ class Workspace:
 
         request = WorkbenchRequest(session, dashboard, ci)
         return self.tool("developer_workbench", request.to_mcp_arguments())
+
+    def agent_mission(
+        self,
+        mission_id: str,
+        goal: str,
+        steps: Sequence[MissionStep | Mapping[str, Any]],
+        *,
+        policy: MissionPolicy | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Preview or execute a bounded dependency graph of existing domain tools."""
+
+        request = MissionRequest(mission_id, goal, steps, policy)
+        return self.tool("agent_mission", request.to_mcp_arguments())
 
     def oracle_combine(
         self,
@@ -358,6 +372,19 @@ class AsyncWorkspace:
 
         request = WorkbenchRequest(session, dashboard, ci)
         return await self.tool("developer_workbench", request.to_mcp_arguments())
+
+    async def agent_mission(
+        self,
+        mission_id: str,
+        goal: str,
+        steps: Sequence[MissionStep | Mapping[str, Any]],
+        *,
+        policy: MissionPolicy | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.agent_mission`."""
+
+        request = MissionRequest(mission_id, goal, steps, policy)
+        return await self.tool("agent_mission", request.to_mcp_arguments())
 
     async def oracle_combine(
         self,

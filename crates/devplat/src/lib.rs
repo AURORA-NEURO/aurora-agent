@@ -22,7 +22,10 @@
 //! packages and composite GitHub Actions evaluated in somebody else's repository. Those are not
 //! vague and they are not process; they are elsewhere. The TypeScript and Python authoring clients
 //! are now in-tree integration artifacts over authoritative Rust contracts, so they are covered
-//! rather than counted as foreign.
+//! rather than counted as foreign. The [`mission`] module now composes those contracts with every
+//! other callable domain surface: it supplies deterministic DAG planning and a least-authority,
+//! refusal-preserving execution boundary without inventing a second domain ontology or claiming
+//! distributed scheduling.
 //! Calling them process would be as wrong as implementing them, and the difference matters to a
 //! contributor deciding what to work on.
 //!
@@ -204,6 +207,7 @@ pub mod claim;
 pub mod classify;
 pub mod error;
 pub mod exploit;
+pub mod mission;
 pub mod report;
 pub mod repro;
 pub mod surface;
@@ -227,6 +231,11 @@ pub use exploit::{
     intent_verdict, release_gate, standard_remediations, task_verdict, CellScore, Containment,
     GateOutcome, IntentVerdict, Remediation, Reward, SecurityCell, ServiceState, TamperAttempt,
     TaskVerdict,
+};
+pub use mission::{
+    apply_binding, plan_mission, MissionBinding, MissionError, MissionPlan, MissionPolicy,
+    MissionReport, MissionRequest, MissionStep, MissionStepPlan, MissionStepResult,
+    MISSION_SCHEMA_VERSION,
 };
 pub use report::{
     drifted_figures, render, render_all, Audience, Depth, EvidenceState, Figure, FigureStatus,

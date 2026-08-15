@@ -83,11 +83,13 @@ Convenience methods currently cover:
 - `developerDeliveryAudit`: developer-platform delivery evidence;
 - `developerWorkbench`: digest-bound authoring/notebook audit, capability dashboard query, and
   review-only CI workflow planning;
+- `agentMission`: deterministic cross-domain mission planning or explicitly allow-listed execution
+  with refusal propagation, output budgets, and optional JSON-pointer bindings;
 - `runtimeExecutionSimulate`: deterministic replay, budget, fault, and fork evidence.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of 116 tool schemas.
+families without maintaining a fragile partial clone of 117 tool schemas.
 
 ## Events and webhooks
 

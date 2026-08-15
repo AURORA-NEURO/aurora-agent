@@ -3,6 +3,7 @@ import { parseSse } from "./sse.js";
 import type {
   ApiClientOptions,
   ApiErrorBody,
+  AgentMissionArgs,
   BioAtlasPublicationAuditArgs,
   BioCapabilityEvidenceAuditArgs,
   CapabilitiesResponse,
@@ -171,6 +172,10 @@ export class ApiClient {
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {
     return this.callTool("developer_workbench", args, options);
+  }
+
+  async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions) {
+    return this.callTool("agent_mission", args, options);
   }
 
   async runtimeExecutionSimulate(args: RuntimeExecutionSimulateArgs, options?: ClientRequestOptions) {

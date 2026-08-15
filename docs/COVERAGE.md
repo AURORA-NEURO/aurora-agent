@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 116 callable tools. That count is intentionally
+The MCP integration layer currently exposes 117 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -44,6 +44,12 @@ ordering, stale-input audit, evidence-aware capability dashboard query, and dete
 Actions YAML planning surface. It preserves notebook holes and release refusal predicates rather
 than treating generated YAML or a local audit as executed CI, a hosted authoring UI, or a public
 dashboard. The TypeScript and Python clients expose this contract without cloning the Rust model.
+`agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
+deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
+blocking dependent work, bounding output, and refusing side-effect confirmations by default. It is
+an in-process serial adapter, not a distributed scheduler, durable queue, or truth synthesizer.
+Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
+argument slots, and each nested call records the content digest of its post-binding inputs.
 These remain in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
 key completeness, dependency-graph invalidation, partial unknown-region handling, fail-closed
 misses, and explicit re-proving; `storage_lifecycle_simulate` adds deterministic tiering, pin

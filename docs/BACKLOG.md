@@ -178,6 +178,10 @@ ordering, logical change history, stale-digest findings, evidence-aware dashboar
 review-only CI workflow plan. Python and TypeScript expose the same composition surface. This does
 not close the external authoring UI, consumer-repository action, hosted GitHub runner, or full
 Python distribution backlog, so those gaps remain explicit rather than being relabelled complete.
+The mission layer now composes the shipped domain tools into a deterministic DAG with an explicit
+preview/execute boundary, tool allow-list, side-effect policy, output budgets, and refusal-to-blocked
+dependency propagation. This materially improves agent usefulness across domains without claiming
+that distributed scheduling, durable queues, sandboxed arbitrary code, or external CI execution exist.
 
 
 ## §11 Developer Platform — 6 uncovered
