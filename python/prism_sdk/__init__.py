@@ -78,8 +78,11 @@ from .capability import (
     CapabilityRouteNeed,
     CapabilityRouteNeedReport,
     CapabilityRouteReport,
+    CapabilityRouteReviewReport,
+    CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
     capability_route_report,
+    capability_route_review_report,
 )
 from .context_requests import (
     CONTEXT_REQUEST_SCHEMA,
@@ -367,8 +370,11 @@ __all__ = [
     "CapabilityRouteNeedReport",
     "CapabilityRouteCoverage",
     "CapabilityRouteReport",
+    "CapabilityRouteReviewRequest",
+    "CapabilityRouteReviewReport",
     "CapabilityRouteRequest",
     "capability_route_report",
+    "capability_route_review_report",
     "CONTEXT_REQUEST_SCHEMA",
     "MAX_CONTEXT_HANDLE_BYTES",
     "MAX_CONTEXT_PATH_BYTES",

@@ -439,6 +439,38 @@ export interface CapabilityRouteResult extends JsonObject {
   execution: "not_started";
 }
 
+export interface CapabilityRouteReviewArgs extends JsonObject {
+  route: JsonObject;
+  selections: MissionRouteSelection[];
+}
+
+export interface CapabilityRouteReviewFinding extends JsonObject {
+  code: string;
+  severity: "error";
+  message: string;
+  need_id?: string;
+}
+
+export interface CapabilityRouteReviewResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_route_review";
+  route_id: string;
+  catalog_digest: string;
+  goal: string;
+  need_count: number;
+  selection_count: number;
+  missing_needs: string[];
+  selected_tools: string[];
+  selected_domains: string[];
+  dependency_waves: string[][];
+  findings: CapabilityRouteReviewFinding[];
+  review_status: "ready" | "blocked";
+  handoff_status: "mission_preflight_required" | "requires_caller_correction";
+  mission_draft: JsonObject | null;
+  route_coverage: JsonObject;
+  execution: "not_started";
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;

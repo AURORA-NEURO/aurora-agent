@@ -132,7 +132,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of 121 tool schemas. `capabilityDiscover`
+families without maintaining a fragile partial clone of 122 tool schemas. `capabilityDiscover`
 searches the explicit cross-domain catalogue and can request authoritative schemas for matches;
 `capabilityAudit` verifies catalogue/schema parity and exposes coverage gaps; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
@@ -142,6 +142,10 @@ tools and arguments are supplied. The route response retains per-need candidate 
 tools. `adapterPlan` selects native
 or Python-delegated biological and clinical source routes—including FHIR—by explicit format and source shape while preserving
 dependency and semantic-loss boundaries.
+`capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
+returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
+dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;
+blocked results preserve structured findings without executing anything.
 
 ## Events and webhooks
 

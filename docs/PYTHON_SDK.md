@@ -125,6 +125,11 @@ invent defaults:
   `ApiClient.capability_route_report(...)`, and its async counterpart provide bounded typed views
   without executing any candidate. `report.route_coverage.fully_resolved` is routing evidence only,
   not authorization, domain validity, or scientific readiness.
+- `CapabilityRouteReviewRequest` and `capability_route_review(...)` validate caller-selected
+  handoff inputs, while `CapabilityRouteReviewReport.from_wire(...)` and the corresponding sync,
+  async, and HTTP `capability_route_review_report(...)` helpers expose blocked/ready findings,
+  candidate mismatches, missing selections, and deterministic dependency waves. A ready report
+  contains a mission draft but explicitly remains `mission_preflight_required`.
 - `mission_from_route(route, mission_id, selections, policy=...)` converts that route into a
   provenance-preserving `MissionAssembly` only after every need has one caller-selected candidate,
   explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or

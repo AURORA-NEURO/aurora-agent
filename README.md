@@ -537,7 +537,9 @@ aggregate `route_coverage` ledger, allowing the agent to see whether its propose
 intended domains before constructing an explicit mission. The Python SDK exposes the same evidence
 through `CapabilityRouteReport.from_wire(...)` and sync/async `capability_route_report(...)` helpers;
 they reconcile the per-need counts, candidate ledgers, and bounded recommendation overflow while
-preserving the raw route for audit.
+preserving the raw route for audit. `capability_route_review` then provides a cross-domain handoff
+checkpoint: it checks caller-selected candidates and dependency waves, emits blocked or ready
+diagnostics, and keeps mission preflight and execution explicitly separate.
 
 ## Evaluating a context policy
 

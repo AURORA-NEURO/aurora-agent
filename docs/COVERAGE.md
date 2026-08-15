@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 121 callable tools. That count is intentionally
+The MCP integration layer currently exposes 122 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -107,6 +107,11 @@ bounded search result, distinguishes explicit tool filters from ranked candidate
 executes the proposed tools. Each need now carries candidate domains, and `route_coverage` reports
 resolved versus unresolved needs plus the groups, domains, and tools that actually contributed
 candidates; this is routing evidence, not authorization, scientific readiness, or equivalence.
+`capability_route_review` is the next bounded handoff checkpoint: it accepts the complete route and
+caller-selected candidates, refuses malformed route envelopes, and returns structured blocked or
+ready diagnostics for candidate membership, exactly-once need selection, explicit JSON arguments,
+dependency references, and deterministic dependency waves. A ready result contains a mission draft
+but remains `mission_preflight_required`; it never grants permission or executes a tool.
 The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
 async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table

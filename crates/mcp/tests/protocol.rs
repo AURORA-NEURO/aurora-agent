@@ -302,7 +302,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 121);
+    assert_eq!(tools.len(), 122);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3912,12 +3912,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(28));
-    assert_eq!(result["unique_catalog_tools"], json!(121));
-    assert_eq!(result["advertised_tool_count"], json!(121));
+    assert_eq!(result["unique_catalog_tools"], json!(122));
+    assert_eq!(result["advertised_tool_count"], json!(122));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(121));
-    assert_eq!(result["schema_quality"]["valid"], json!(121));
+    assert_eq!(result["schema_quality"]["checked"], json!(122));
+    assert_eq!(result["schema_quality"]["valid"], json!(122));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -4002,6 +4002,106 @@ fn capability_route_batches_ranked_and_explicit_needs_without_execution() {
     );
     assert_eq!(refused["__isError"], json!(true));
     assert_eq!(refused["ok"], json!(false));
+}
+
+#[test]
+fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selection() {
+    let mut server = server();
+    let route = call(
+        &mut server,
+        "capability_route",
+        json!({
+            "goal": "compose a reviewed handoff",
+            "needs": [
+                {"id": "oncology", "query": "oncology"},
+                {"id": "release", "tool": "bundle_verify"}
+            ],
+            "max_candidates_per_need": 2,
+            "max_tools": 4
+        }),
+    );
+    let oncology_tool = route["needs"][0]["candidate_tools"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let review = call(
+        &mut server,
+        "capability_route_review",
+        json!({
+            "route": route,
+            "selections": [
+                {
+                    "need_id": "oncology",
+                    "tool": oncology_tool,
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review oncology evidence",
+                    "arguments": {}
+                },
+                {
+                    "need_id": "release",
+                    "tool": "bundle_verify",
+                    "domain": "release",
+                    "capability": "verification",
+                    "objective": "verify the release bundle",
+                    "arguments": {},
+                    "depends_on": ["oncology"]
+                }
+            ]
+        }),
+    );
+    assert_eq!(review["workflow"], json!("capability_route_review"));
+    assert_eq!(review["review_status"], json!("ready"));
+    assert_eq!(
+        review["handoff_status"],
+        json!("mission_preflight_required")
+    );
+    assert_eq!(review["execution"], json!("not_started"));
+    assert_eq!(
+        review["dependency_waves"],
+        json!([["oncology"], ["release"]])
+    );
+    assert_eq!(
+        review["mission_draft"]["steps"].as_array().unwrap().len(),
+        2
+    );
+
+    let blocked = call(
+        &mut server,
+        "capability_route_review",
+        json!({
+            "route": review["route_coverage"].clone(),
+            "selections": []
+        }),
+    );
+    assert_eq!(blocked["__isError"], json!(true));
+
+    let route = call(
+        &mut server,
+        "capability_route",
+        json!({"goal": "review one", "needs": [{"id": "release", "tool": "bundle_verify"}]}),
+    );
+    let blocked = call(
+        &mut server,
+        "capability_route_review",
+        json!({
+            "route": route,
+            "selections": [{
+                "need_id": "release",
+                "tool": "not_a_candidate",
+                "domain": "release",
+                "capability": "verification",
+                "objective": "bad selection",
+                "arguments": {}
+            }]
+        }),
+    );
+    assert_eq!(blocked["review_status"], json!("blocked"));
+    assert!(blocked["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "candidate_mismatch"));
 }
 
 #[test]

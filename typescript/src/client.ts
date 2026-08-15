@@ -11,6 +11,8 @@ import type {
   CapabilityDiscoverArgs,
   CapabilityAuditArgs,
   CapabilityRouteArgs,
+  CapabilityRouteReviewArgs,
+  CapabilityRouteReviewResult,
   CapabilityRouteResult,
   AdapterPlanArgs,
   BioAtlasPublicationAuditArgs,
@@ -262,6 +264,10 @@ export class ApiClient {
 
   async capabilityRoute(args: CapabilityRouteArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRouteResult>> {
     return this.callTool<CapabilityRouteResult>("capability_route", args, options);
+  }
+
+  async capabilityRouteReview(args: CapabilityRouteReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRouteReviewResult>> {
+    return this.callTool<CapabilityRouteReviewResult>("capability_route_review", args, options);
   }
 
   async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions) {

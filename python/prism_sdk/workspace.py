@@ -20,8 +20,11 @@ from .capability import (
     CapabilityQuery,
     CapabilityRouteNeed,
     CapabilityRouteReport,
+    CapabilityRouteReviewReport,
+    CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
     capability_route_report,
+    capability_route_review_report,
 )
 from .context_requests import (
     ContextLayer,
@@ -388,6 +391,25 @@ class Workspace:
                 include_tools=include_tools,
             )
         )
+
+    def capability_route_review(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Review explicit route selections and return a non-executing mission handoff."""
+
+        request = CapabilityRouteReviewRequest(route, selections)
+        return self.tool("capability_route_review", request.to_mcp_arguments())
+
+    def capability_route_review_report(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+    ) -> CapabilityRouteReviewReport:
+        """Return typed diagnostics for a route-to-mission handoff review."""
+
+        return capability_route_review_report(self.capability_route_review(route, selections))
 
     def adapter_plan(
         self,
@@ -1057,6 +1079,25 @@ class AsyncWorkspace:
                 include_tools=include_tools,
             )
         )
+
+    async def capability_route_review(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.capability_route_review`."""
+
+        request = CapabilityRouteReviewRequest(route, selections)
+        return await self.tool("capability_route_review", request.to_mcp_arguments())
+
+    async def capability_route_review_report(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+    ) -> CapabilityRouteReviewReport:
+        """Async typed diagnostics for a route-to-mission handoff review."""
+
+        return capability_route_review_report(await self.capability_route_review(route, selections))
 
     async def adapter_plan(
         self,

@@ -18,7 +18,10 @@ from prism_sdk import (
     CapabilityRouteReport,
     CapabilityRouteNeed,
     CapabilityRouteRequest,
+    CapabilityRouteReviewReport,
+    CapabilityRouteReviewRequest,
     capability_route_report,
+    capability_route_review_report,
     Client,
     MetricObservation,
     MissionBinding,
@@ -100,6 +103,32 @@ def route_report_payload() -> dict:
         "execution": "not_started",
         "guarantees": ["no routed tool was executed"],
         "limitations": ["candidate ranking is not authorization"],
+    }
+
+
+def route_review_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "capability_route_review",
+        "route_id": "r" * 64,
+        "catalog_digest": "c" * 64,
+        "goal": "compose evidence",
+        "need_count": 1,
+        "selection_count": 1,
+        "missing_needs": [],
+        "selected_tools": ["oncology_search"],
+        "selected_domains": ["oncology"],
+        "dependency_waves": [["oncology"]],
+        "findings": [],
+        "review_status": "ready",
+        "handoff_status": "mission_preflight_required",
+        "mission_draft": {
+            "goal": "compose evidence",
+            "steps": [{"id": "oncology", "tool": "oncology_search"}],
+            "dependency_waves": [["oncology"]],
+        },
+        "execution": "not_started",
+        "route_coverage": {"needs_total": 1, "needs_resolved": 1},
     }
 
 
@@ -368,6 +397,34 @@ class AnalyticsModelTests(unittest.TestCase):
         payload["route_coverage"]["needs_resolved"] = 0
         with self.assertRaises(ArgumentError):
             CapabilityRouteReport.from_wire(payload)
+
+    def test_capability_route_review_request_and_report_preserve_handoff_contract(self) -> None:
+        route = route_report_payload()
+        request = CapabilityRouteReviewRequest(
+            route,
+            [
+                {
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }
+            ],
+        )
+        self.assertEqual(request.to_mcp_arguments()["selections"][0]["need_id"], "oncology")
+        report = CapabilityRouteReviewReport.from_wire(route_review_payload())
+        self.assertTrue(report.ready)
+        self.assertEqual(report.dependency_waves, (("oncology",),))
+
+    def test_capability_route_review_report_extracts_http_structured_projection(self) -> None:
+        envelope = {
+            "ok": True,
+            "mcp": {"result": {"structuredContent": route_review_payload()}},
+        }
+        report = capability_route_review_report(envelope)
+        self.assertEqual(report.handoff_status, "mission_preflight_required")
 
 
 class AnalyticsWorkspaceTests(unittest.TestCase):

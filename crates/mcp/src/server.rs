@@ -1310,6 +1310,7 @@ impl Server {
             "capability_audit" => self.capability_audit(&arguments),
             "capability_discover" => self.capability_discover(&arguments),
             "capability_route" => self.capability_route(&arguments),
+            "capability_route_review" => self.capability_route_review(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -12478,6 +12479,451 @@ impl Server {
         Ok(output)
     }
 
+    /// Review caller-selected candidates from one route and produce a non-executing mission handoff.
+    ///
+    /// The route remains discovery evidence. This checkpoint verifies that every need is selected
+    /// exactly once, every selected tool came from that need's bounded candidate list, arguments
+    /// are explicit JSON objects, and dependency references form deterministic waves. It does not
+    /// validate domain semantics, grant authorization, or dispatch a nested tool.
+    fn capability_route_review(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode capability route review input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "capability route review input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        let route = arguments
+            .get("route")
+            .and_then(Value::as_object)
+            .ok_or("capability route review requires a route object")?;
+        if route.get("workflow").and_then(Value::as_str) != Some("capability_route") {
+            return Err("route.workflow must be capability_route".into());
+        }
+        let route_id = route
+            .get("route_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("route.route_id must be a non-empty string")?;
+        let catalog_digest = route
+            .get("catalog_digest")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("route.catalog_digest must be a non-empty string")?;
+        let goal = route
+            .get("goal")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("route.goal must be a non-empty string")?;
+        let raw_needs = route
+            .get("needs")
+            .and_then(Value::as_array)
+            .ok_or("route.needs must be an array")?;
+        if raw_needs.is_empty() || raw_needs.len() > 32 {
+            return Err("route.needs must contain between 1 and 32 needs".into());
+        }
+        let unresolved_route = route
+            .get("unresolved_needs")
+            .and_then(Value::as_array)
+            .ok_or("route.unresolved_needs must be an array")?;
+        let unresolved_route = unresolved_route
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|item| !item.trim().is_empty())
+                    .map(str::to_string)
+                    .ok_or("route.unresolved_needs must contain non-empty strings")
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut need_ids = Vec::with_capacity(raw_needs.len());
+        let mut candidates_by_need = BTreeMap::<String, BTreeSet<String>>::new();
+        for raw_need in raw_needs {
+            let need = raw_need
+                .as_object()
+                .ok_or("route.needs entries must be objects")?;
+            let need_id = need
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or("route need id must be a non-empty string")?
+                .to_string();
+            if candidates_by_need.contains_key(&need_id) {
+                return Err(format!("route contains duplicate need id: {need_id}"));
+            }
+            let candidate_tools = need
+                .get("candidate_tools")
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("route need {need_id:?} has no candidate_tools array"))?;
+            let candidates = candidate_tools
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|item| !item.trim().is_empty())
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            format!("route need {need_id:?} has an invalid candidate tool")
+                        })
+                })
+                .collect::<Result<BTreeSet<_>, _>>()?;
+            candidates_by_need.insert(need_id.clone(), candidates);
+            need_ids.push(need_id);
+        }
+
+        let mut findings = Vec::<Value>::new();
+        let mut add_finding = |code: &str, message: String, need_id: Option<&str>| {
+            let mut finding = json!({
+                "code": code,
+                "severity": "error",
+                "message": message,
+            });
+            if let Some(need_id) = need_id {
+                finding["need_id"] = json!(need_id);
+            }
+            findings.push(finding);
+        };
+        for need_id in &unresolved_route {
+            add_finding(
+                "unresolved_need",
+                format!("route need {need_id:?} has no resolved candidate"),
+                Some(need_id),
+            );
+        }
+
+        let raw_selections = arguments
+            .get("selections")
+            .and_then(Value::as_array)
+            .ok_or("capability route review requires a selections array")?;
+        if raw_selections.len() > 32 {
+            return Err("selections must contain at most 32 choices".into());
+        }
+        if raw_selections.len() != need_ids.len() {
+            add_finding(
+                "selection_count_mismatch",
+                format!(
+                    "route has {} needs but received {} selections",
+                    need_ids.len(),
+                    raw_selections.len()
+                ),
+                None,
+            );
+        }
+
+        let mut selected_steps = BTreeMap::<String, Value>::new();
+        let mut dependencies_by_need = BTreeMap::<String, Vec<String>>::new();
+        for raw_selection in raw_selections {
+            let Some(selection) = raw_selection.as_object() else {
+                add_finding(
+                    "invalid_selection",
+                    "selection must be an object".into(),
+                    None,
+                );
+                continue;
+            };
+            let Some(need_id) = selection
+                .get("need_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            else {
+                add_finding(
+                    "invalid_selection",
+                    "selection.need_id must be a non-empty string".into(),
+                    None,
+                );
+                continue;
+            };
+            let Some(candidates) = candidates_by_need.get(need_id) else {
+                add_finding(
+                    "unknown_need",
+                    format!("selection refers to unknown route need {need_id:?}"),
+                    Some(need_id),
+                );
+                continue;
+            };
+            if selected_steps.contains_key(need_id) {
+                add_finding(
+                    "duplicate_selection",
+                    format!("route need {need_id:?} has more than one selection"),
+                    Some(need_id),
+                );
+                continue;
+            }
+            let Some(tool) = selection
+                .get("tool")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            else {
+                add_finding(
+                    "invalid_selection",
+                    "selection.tool must be a non-empty string".into(),
+                    Some(need_id),
+                );
+                continue;
+            };
+            if !candidates.contains(tool) {
+                add_finding(
+                    "candidate_mismatch",
+                    format!("tool {tool:?} is not a candidate for route need {need_id:?}"),
+                    Some(need_id),
+                );
+                continue;
+            }
+            let mut valid = true;
+            for field in ["domain", "capability", "objective"] {
+                if selection
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .is_none()
+                {
+                    add_finding(
+                        "invalid_selection",
+                        format!("selection.{field} must be a non-empty string"),
+                        Some(need_id),
+                    );
+                    valid = false;
+                }
+            }
+            if !selection
+                .get("arguments")
+                .map(Value::is_object)
+                .unwrap_or(false)
+            {
+                add_finding(
+                    "invalid_arguments",
+                    "selection.arguments must be an explicit JSON object".into(),
+                    Some(need_id),
+                );
+                valid = false;
+            }
+            let depends_on = match selection.get("depends_on") {
+                None => Vec::new(),
+                Some(value) => match value.as_array() {
+                    Some(values) => {
+                        let mut dependencies = Vec::with_capacity(values.len());
+                        for dependency in values {
+                            let Some(dependency) =
+                                dependency.as_str().filter(|value| !value.trim().is_empty())
+                            else {
+                                add_finding(
+                                    "invalid_dependency",
+                                    "selection.depends_on must contain non-empty strings".into(),
+                                    Some(need_id),
+                                );
+                                valid = false;
+                                continue;
+                            };
+                            if dependency == need_id || !candidates_by_need.contains_key(dependency)
+                            {
+                                add_finding(
+                                    "unknown_dependency",
+                                    format!("selection depends on unknown need {dependency:?}"),
+                                    Some(need_id),
+                                );
+                                valid = false;
+                            }
+                            dependencies.push(dependency.to_string());
+                        }
+                        dependencies
+                    }
+                    None => {
+                        add_finding(
+                            "invalid_dependency",
+                            "selection.depends_on must be an array".into(),
+                            Some(need_id),
+                        );
+                        valid = false;
+                        Vec::new()
+                    }
+                },
+            };
+            if let Some(bindings) = selection.get("bindings") {
+                if !bindings
+                    .as_array()
+                    .map(|values| values.iter().all(Value::is_object))
+                    .unwrap_or(false)
+                {
+                    add_finding(
+                        "invalid_bindings",
+                        "selection.bindings must be an array of JSON objects".into(),
+                        Some(need_id),
+                    );
+                    valid = false;
+                }
+            }
+            let required = match selection.get("required") {
+                None => true,
+                Some(Value::Bool(value)) => *value,
+                Some(_) => {
+                    add_finding(
+                        "invalid_selection",
+                        "selection.required must be a boolean".into(),
+                        Some(need_id),
+                    );
+                    valid = false;
+                    true
+                }
+            };
+            if valid {
+                let step = json!({
+                    "id": need_id,
+                    "domain": selection.get("domain").and_then(Value::as_str).unwrap_or_default(),
+                    "capability": selection.get("capability").and_then(Value::as_str).unwrap_or_default(),
+                    "objective": selection.get("objective").and_then(Value::as_str).unwrap_or_default(),
+                    "tool": tool,
+                    "arguments": selection.get("arguments").cloned().unwrap_or_else(|| json!({})),
+                    "depends_on": depends_on,
+                    "required": required,
+                    "bindings": selection.get("bindings").cloned().unwrap_or_else(|| json!([])),
+                });
+                selected_steps.insert(need_id.to_string(), step);
+                dependencies_by_need.insert(
+                    need_id.to_string(),
+                    selection
+                        .get("depends_on")
+                        .and_then(Value::as_array)
+                        .map(|values| {
+                            values
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                );
+            }
+        }
+
+        let missing_needs = need_ids
+            .iter()
+            .filter(|need_id| !selected_steps.contains_key(*need_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for need_id in &missing_needs {
+            add_finding(
+                "missing_selection",
+                format!("route need {need_id:?} has no valid explicit selection"),
+                Some(need_id),
+            );
+        }
+
+        let mut indegree = BTreeMap::<String, usize>::new();
+        let mut dependents = BTreeMap::<String, Vec<String>>::new();
+        for need_id in selected_steps.keys() {
+            let dependencies = dependencies_by_need
+                .get(need_id)
+                .cloned()
+                .unwrap_or_default();
+            let known_dependencies = dependencies
+                .iter()
+                .filter(|dependency| selected_steps.contains_key(*dependency))
+                .count();
+            indegree.insert(need_id.clone(), known_dependencies);
+            for dependency in dependencies {
+                if selected_steps.contains_key(&dependency) {
+                    dependents
+                        .entry(dependency)
+                        .or_default()
+                        .push(need_id.clone());
+                }
+            }
+        }
+        let mut ready = indegree
+            .iter()
+            .filter_map(|(need_id, degree)| (*degree == 0).then_some(need_id.clone()))
+            .collect::<BTreeSet<_>>();
+        let mut dependency_waves = Vec::<Vec<String>>::new();
+        let mut ordered_selected = Vec::<String>::new();
+        while !ready.is_empty() {
+            let wave = ready.iter().cloned().collect::<Vec<_>>();
+            ready.clear();
+            for need_id in &wave {
+                ordered_selected.push(need_id.clone());
+                if let Some(children) = dependents.get(need_id) {
+                    for child in children {
+                        if let Some(degree) = indegree.get_mut(child) {
+                            *degree = degree.saturating_sub(1);
+                            if *degree == 0 {
+                                ready.insert(child.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            dependency_waves.push(wave);
+        }
+        if ordered_selected.len() != selected_steps.len() {
+            add_finding(
+                "dependency_cycle",
+                "valid selections contain a dependency cycle".into(),
+                None,
+            );
+        }
+
+        let selected_tools = selected_steps
+            .values()
+            .filter_map(|step| step.get("tool").and_then(Value::as_str))
+            .collect::<BTreeSet<_>>();
+        let selected_domains = selected_steps
+            .values()
+            .filter_map(|step| step.get("domain").and_then(Value::as_str))
+            .collect::<BTreeSet<_>>();
+        let ordered_steps = need_ids
+            .iter()
+            .filter_map(|need_id| selected_steps.get(need_id).cloned())
+            .collect::<Vec<_>>();
+        let ready_for_handoff = findings.is_empty();
+        let mission_draft = ready_for_handoff.then(|| {
+            json!({
+                "goal": goal,
+                "steps": ordered_steps,
+                "dependency_waves": dependency_waves.clone(),
+            })
+        });
+        let mut output = json!({
+            "ok": true,
+            "workflow": "capability_route_review",
+            "route_id": route_id,
+            "catalog_digest": catalog_digest,
+            "goal": goal,
+            "need_count": need_ids.len(),
+            "selection_count": raw_selections.len(),
+            "missing_needs": missing_needs,
+            "selected_tools": selected_tools,
+            "selected_domains": selected_domains,
+            "dependency_waves": dependency_waves,
+            "findings": findings,
+            "review_status": if ready_for_handoff { "ready" } else { "blocked" },
+            "handoff_status": if ready_for_handoff { "mission_preflight_required" } else { "requires_caller_correction" },
+            "mission_draft": mission_draft,
+            "execution": "not_started",
+            "guarantees": [
+                "route candidates were reviewed without executing any tool",
+                "each ready selection is present in its need's bounded candidate list",
+                "dependency waves are deterministic and use only explicit caller selections",
+            ],
+            "limitations": [
+                "this review checks transport-shaped handoff structure, not domain-specific argument semantics",
+                "the route catalogue digest is provenance and does not prove the live catalogue is unchanged",
+                "mission_preflight remains required before an agent_mission request can be dispatched",
+            ],
+        });
+        output["route_coverage"] = route
+            .get("route_coverage")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure capability route review result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "capability route review result exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        Ok(output)
+    }
+
     /// Plan or execute an explicit, bounded DAG of existing domain tools.
     ///
     /// Planning is the default. Execution invokes the same internal tool dispatcher used by the
@@ -15758,7 +16204,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_discover", "capability_route", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_discover", "capability_route", "capability_route_review", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -17346,6 +17792,38 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_groups": { "type": "boolean", "default": true, "description": "Include per-domain group coverage rows; set false for a compact invariant report." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "capability_route_review",
+            "description": "Review caller-selected tools from one capability_route result and produce a deterministic, non-executing mission handoff. Checks unresolved needs, exactly-one selections, candidate membership, explicit JSON argument objects, dependency references, and dependency cycles. It does not validate domain semantics, grant permission, or dispatch agent_mission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "route": { "type": "object", "description": "The complete JSON result returned by capability_route, including route_id, catalog_digest, needs, and unresolved_needs." },
+                    "selections": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "description": "One caller-selected candidate for every route need. Each selection supplies need_id, tool, domain, capability, objective, and an explicit JSON arguments object; depends_on, required, and bindings are optional.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "need_id": { "type": "string" },
+                                "tool": { "type": "string" },
+                                "domain": { "type": "string" },
+                                "capability": { "type": "string" },
+                                "objective": { "type": "string" },
+                                "arguments": { "type": "object" },
+                                "depends_on": { "type": "array", "items": { "type": "string" } },
+                                "required": { "type": "boolean", "default": true },
+                                "bindings": { "type": "array", "items": { "type": "object" } }
+                            },
+                            "required": ["need_id", "tool", "domain", "capability", "objective", "arguments"]
+                        }
+                    }
+                },
+                "required": ["route", "selections"]
             }
         }),
         json!({

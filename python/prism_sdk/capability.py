@@ -41,6 +41,38 @@ def _route_count(name: str, value: Any) -> int:
     return value
 
 
+def _review_selection(value: Mapping[str, Any]) -> dict[str, Any]:
+    raw = _route_mapping("route selection", value)
+    for name in ("need_id", "tool", "domain", "capability", "objective"):
+        _route_text(f"route selection.{name}", raw.get(name))
+    if not isinstance(raw.get("arguments"), Mapping):
+        raise ArgumentError("route selection.arguments must be an object")
+    depends_on = raw.get("depends_on", [])
+    if not isinstance(depends_on, Sequence) or isinstance(depends_on, (str, bytes)):
+        raise ArgumentError("route selection.depends_on must be an array")
+    for dependency in depends_on:
+        _route_text("route selection dependency", dependency)
+    required = raw.get("required", True)
+    if not isinstance(required, bool):
+        raise ArgumentError("route selection.required must be a boolean")
+    bindings = raw.get("bindings", [])
+    if not isinstance(bindings, Sequence) or isinstance(bindings, (str, bytes)):
+        raise ArgumentError("route selection.bindings must be an array")
+    for binding in bindings:
+        _route_mapping("route selection binding", binding)
+    return {
+        "need_id": raw["need_id"],
+        "tool": raw["tool"],
+        "domain": raw["domain"],
+        "capability": raw["capability"],
+        "objective": raw["objective"],
+        "arguments": dict(raw["arguments"]),
+        "depends_on": list(depends_on),
+        "required": required,
+        "bindings": [dict(binding) for binding in bindings],
+    }
+
+
 @dataclass(frozen=True)
 class CapabilityRouteNeedReport:
     """Validated evidence for one named need returned by ``capability_route``."""
@@ -207,18 +239,123 @@ class CapabilityRouteReport:
         return dict(self.raw)
 
 
-def _route_payload(value: Mapping[str, Any]) -> dict[str, Any]:
-    """Extract a route JSON projection from either stdio payloads or HTTP REST envelopes."""
+@dataclass(frozen=True)
+class CapabilityRouteReviewRequest:
+    """Explicit caller selections for the route-to-mission handoff review."""
 
-    raw = _route_mapping("capability route response", value)
-    if raw.get("workflow") == "capability_route":
+    route: Mapping[str, Any]
+    selections: Sequence[Mapping[str, Any]]
+
+    def __post_init__(self) -> None:
+        route = _route_mapping("review route", self.route)
+        if route.get("workflow") != "capability_route":
+            raise ArgumentError("review route.workflow must be capability_route")
+        if not isinstance(self.selections, Sequence) or isinstance(self.selections, (str, bytes)):
+            raise ArgumentError("review selections must be an array")
+        if not 1 <= len(self.selections) <= 32:
+            raise ArgumentError("review selections must contain between 1 and 32 choices")
+        normalized = tuple(_review_selection(value) for value in self.selections)
+        object.__setattr__(self, "route", route)
+        object.__setattr__(self, "selections", normalized)
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"route": dict(self.route), "selections": [dict(value) for value in self.selections]}
+
+
+@dataclass(frozen=True)
+class CapabilityRouteReviewReport:
+    """Validated non-executing handoff diagnostics for a reviewed route."""
+
+    raw: dict[str, Any]
+    route_id: str
+    catalog_digest: str
+    goal: str
+    review_status: str
+    handoff_status: str
+    need_count: int
+    selection_count: int
+    missing_needs: tuple[str, ...]
+    selected_tools: tuple[str, ...]
+    selected_domains: tuple[str, ...]
+    dependency_waves: tuple[tuple[str, ...], ...]
+    findings: tuple[dict[str, Any], ...]
+    route_coverage: dict[str, Any]
+    mission_draft: dict[str, Any] | None
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityRouteReviewReport":
+        raw = _route_mapping("capability route review report", value)
+        if raw.get("workflow") != "capability_route_review":
+            raise ArgumentError("review.workflow must be capability_route_review")
+        review_status = _route_text("review_status", raw.get("review_status"))
+        if review_status not in {"ready", "blocked"}:
+            raise ArgumentError("review_status must be ready or blocked")
+        handoff_status = _route_text("handoff_status", raw.get("handoff_status"))
+        if handoff_status not in {"mission_preflight_required", "requires_caller_correction"}:
+            raise ArgumentError("unknown handoff_status")
+        need_count = _route_count("need_count", raw.get("need_count"))
+        selection_count = _route_count("selection_count", raw.get("selection_count"))
+        missing_needs = _route_strings("missing_needs", raw.get("missing_needs", []))
+        selected_tools = _route_strings("selected_tools", raw.get("selected_tools", []))
+        selected_domains = _route_strings("selected_domains", raw.get("selected_domains", []))
+        raw_waves = raw.get("dependency_waves")
+        if not isinstance(raw_waves, Sequence) or isinstance(raw_waves, (str, bytes)):
+            raise ArgumentError("dependency_waves must be an array")
+        dependency_waves = tuple(
+            _route_strings(f"dependency_waves[{index}]", wave)
+            for index, wave in enumerate(raw_waves)
+        )
+        raw_findings = raw.get("findings")
+        if not isinstance(raw_findings, Sequence) or isinstance(raw_findings, (str, bytes)):
+            raise ArgumentError("findings must be an array")
+        findings = tuple(_route_mapping("route finding", finding) for finding in raw_findings)
+        mission_draft_value = raw.get("mission_draft")
+        mission_draft = None if mission_draft_value is None else _route_mapping("mission_draft", mission_draft_value)
+        if review_status == "ready":
+            if findings or mission_draft is None or handoff_status != "mission_preflight_required":
+                raise ArgumentError("ready route review must have no findings and a mission draft")
+        elif handoff_status != "requires_caller_correction":
+            raise ArgumentError("blocked route review requires caller correction")
+        return cls(
+            raw=raw,
+            route_id=_route_text("review route_id", raw.get("route_id")),
+            catalog_digest=_route_text("review catalog_digest", raw.get("catalog_digest")),
+            goal=_route_text("review goal", raw.get("goal")),
+            review_status=review_status,
+            handoff_status=handoff_status,
+            need_count=need_count,
+            selection_count=selection_count,
+            missing_needs=missing_needs,
+            selected_tools=selected_tools,
+            selected_domains=selected_domains,
+            dependency_waves=dependency_waves,
+            findings=findings,
+            route_coverage=_route_mapping("review route_coverage", raw.get("route_coverage", {})),
+            mission_draft=mission_draft,
+            execution=_route_text("review execution", raw.get("execution")),
+        )
+
+    @property
+    def ready(self) -> bool:
+        return self.review_status == "ready"
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def _tool_payload(value: Mapping[str, Any], workflow: str) -> dict[str, Any]:
+    """Extract a JSON projection from either a decoded MCP payload or an HTTP REST envelope."""
+
+    raw = _route_mapping("capability tool response", value)
+    if raw.get("workflow") == workflow:
         return raw
     mcp = raw.get("mcp")
     if isinstance(mcp, Mapping):
         result = mcp.get("result")
         if isinstance(result, Mapping):
             structured = result.get("structuredContent")
-            if isinstance(structured, Mapping):
+            if isinstance(structured, Mapping) and structured.get("workflow") == workflow:
                 return dict(structured)
             content = result.get("content")
             if isinstance(content, Sequence) and not isinstance(content, (str, bytes)):
@@ -228,14 +365,22 @@ def _route_payload(value: Mapping[str, Any]) -> dict[str, Any]:
                             decoded = json.loads(block["text"])
                         except json.JSONDecodeError as error:
                             raise ArgumentError(f"route response text is not JSON: {error}") from error
-                        return _route_mapping("decoded capability route response", decoded)
-    raise ArgumentError("response does not contain a capability_route JSON projection")
+                        decoded_mapping = _route_mapping("decoded capability tool response", decoded)
+                        if decoded_mapping.get("workflow") == workflow:
+                            return decoded_mapping
+    raise ArgumentError(f"response does not contain a {workflow} JSON projection")
 
 
 def capability_route_report(value: Mapping[str, Any]) -> CapabilityRouteReport:
     """Parse either a direct route payload or an HTTP tool envelope into a typed report."""
 
-    return CapabilityRouteReport.from_wire(_route_payload(value))
+    return CapabilityRouteReport.from_wire(_tool_payload(value, "capability_route"))
+
+
+def capability_route_review_report(value: Mapping[str, Any]) -> CapabilityRouteReviewReport:
+    """Parse either a direct review payload or an HTTP tool envelope into diagnostics."""
+
+    return CapabilityRouteReviewReport.from_wire(_tool_payload(value, "capability_route_review"))
 
 
 @dataclass(frozen=True)
@@ -368,5 +513,8 @@ __all__ = [
     "CapabilityRouteNeedReport",
     "CapabilityRouteCoverage",
     "CapabilityRouteReport",
+    "CapabilityRouteReviewRequest",
+    "CapabilityRouteReviewReport",
     "capability_route_report",
+    "capability_route_review_report",
 ]
