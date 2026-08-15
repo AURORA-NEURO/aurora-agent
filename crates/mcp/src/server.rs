@@ -516,6 +516,7 @@ impl Server {
             "research_ci_check" => self.research_ci_check(&arguments),
             "capability_rank" => self.capability_rank(&arguments),
             "metrics_profile_audit" => self.metrics_profile_audit(&arguments),
+            "biocapability_evidence_audit" => self.biocapability_evidence_audit(&arguments),
             "safety_release_gate" => self.safety_release_gate(&arguments),
             "medical_boundary_check" => self.medical_boundary_check(&arguments),
             "hub_search" => self.hub_search(&arguments),
@@ -3769,6 +3770,371 @@ impl Server {
             output["rank_instability"] = json!(instability);
         }
         Ok(output)
+    }
+
+    /// Build an evidence-conditioned capability profile across the section-33 dimensions.
+    ///
+    /// The metric profile is necessary but not sufficient for a useful capability claim. This
+    /// workflow keeps the score grid beside the evidence that makes a score interpretable:
+    /// grounding, information value, resource denominator, temporal validity, cross-modal
+    /// consistency, causal identification, re-execution, translation, and coordination. Existing
+    /// typed contracts are invoked for the quantitative sub-audits; the evidence matrix is an
+    /// explicit caller-supplied inventory whose missingness and supporting-field requirements are
+    /// checked here.
+    fn biocapability_evidence_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure biocapability audit envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("biocapability audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let evidence_inputs = input_array(arguments, "evidence", 512)?;
+        let claim_inputs = input_array(arguments, "claim_requests", 128)?;
+
+        let known_dimensions = BIOCAPABILITY_EVIDENCE_DIMENSIONS
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let mut seen_ids = BTreeSet::new();
+        let mut states: BTreeMap<String, Vec<EvidenceState>> = BIOCAPABILITY_EVIDENCE_DIMENSIONS
+            .iter()
+            .map(|dimension| ((*dimension).to_string(), Vec::new()))
+            .collect();
+        let mut domains: BTreeMap<String, usize> = BTreeMap::new();
+        let mut evidence_rows = Vec::with_capacity(evidence_inputs.len());
+
+        for (index, raw) in evidence_inputs.iter().enumerate() {
+            let row = match raw.as_object() {
+                Some(object) => {
+                    let parsed = (|| -> Result<Value, String> {
+                        let id = required_string(object, "id")?;
+                        if !seen_ids.insert(id.clone()) {
+                            return Err(format!("duplicate evidence id {id:?}"));
+                        }
+                        let dimension = required_string(object, "dimension")?;
+                        if !known_dimensions.contains(dimension.as_str()) {
+                            return Err(format!(
+                                "unknown evidence dimension {dimension:?}; choose one of {}",
+                                BIOCAPABILITY_EVIDENCE_DIMENSIONS.join(", ")
+                            ));
+                        }
+                        let declared_status = parse_evidence_state(
+                            object
+                                .get("status")
+                                .ok_or("evidence item requires status")?,
+                        )?;
+                        let domain = object
+                            .get("domain")
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.trim().is_empty())
+                            .unwrap_or("unspecified")
+                            .to_string();
+                        let mut issues = Vec::new();
+                        if declared_status.is_measured() {
+                            validate_evidence_support(object, &dimension, &mut issues);
+                        }
+                        let effective_status = if issues.is_empty() {
+                            declared_status
+                        } else {
+                            EvidenceState::Blocked
+                        };
+                        states
+                            .entry(dimension.clone())
+                            .or_default()
+                            .push(effective_status);
+                        *domains.entry(domain.clone()).or_default() += 1;
+                        Ok(json!({
+                            "index": index,
+                            "ok": issues.is_empty(),
+                            "id": id,
+                            "dimension": dimension,
+                            "domain": domain,
+                            "declared_status": declared_status.as_str(),
+                            "effective_status": effective_status.as_str(),
+                            "issues": issues,
+                            "support": object,
+                            "fail_closed": !issues.is_empty(),
+                        }))
+                    })();
+                    parsed.unwrap_or_else(|error| {
+                        json!({
+                            "index": index,
+                            "ok": false,
+                            "refusal": error,
+                            "fail_closed": true,
+                        })
+                    })
+                }
+                None => json!({
+                    "index": index,
+                    "ok": false,
+                    "refusal": "each evidence item must be an object",
+                    "fail_closed": true,
+                }),
+            };
+            evidence_rows.push(row);
+        }
+
+        let evidence_dimension_rows = BIOCAPABILITY_EVIDENCE_DIMENSIONS
+            .iter()
+            .map(|dimension| {
+                let dimension_states = states.get(*dimension).expect("initialized above");
+                let state = rollup_evidence_state(dimension_states);
+                json!({
+                    "dimension": dimension,
+                    "state": state.as_str(),
+                    "evidence_count": dimension_states.len(),
+                    "measured_count": dimension_states.iter().filter(|state| state.is_measured()).count(),
+                    "declared_count": dimension_states.iter().filter(|state| **state == EvidenceState::Declared).count(),
+                    "blocked_count": dimension_states.iter().filter(|state| **state == EvidenceState::Blocked).count(),
+                    "missing": dimension_states.is_empty() || matches!(state, EvidenceState::Missing),
+                    "measured": state.is_measured(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut claim_rows = Vec::with_capacity(claim_inputs.len());
+        for (index, raw) in claim_inputs.iter().enumerate() {
+            let row = match raw.as_object() {
+                Some(object) => {
+                    let parsed = (|| -> Result<Value, String> {
+                        let id = required_string(object, "id")?;
+                        let claim = required_string(object, "claim")?;
+                        let required = object
+                            .get("requires")
+                            .ok_or("claim request requires a non-empty requires array")?;
+                        let required = required
+                            .as_array()
+                            .ok_or("claim request requires a non-empty requires array")?;
+                        if required.is_empty()
+                            || required.len() > BIOCAPABILITY_EVIDENCE_DIMENSIONS.len()
+                        {
+                            return Err(format!(
+                                "claim request {id:?} requires between 1 and {} dimensions",
+                                BIOCAPABILITY_EVIDENCE_DIMENSIONS.len()
+                            ));
+                        }
+                        let allow_declared = object
+                            .get("allow_declared")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        let mut blockers = Vec::new();
+                        let mut assumptions = Vec::new();
+                        let mut required_dimensions = Vec::new();
+                        for raw_dimension in required {
+                            let dimension = raw_dimension
+                                .as_str()
+                                .ok_or("claim request dimensions must be strings")?;
+                            if !known_dimensions.contains(dimension) {
+                                return Err(format!(
+                                    "claim request {id:?} names unknown dimension {dimension:?}"
+                                ));
+                            }
+                            required_dimensions.push(dimension.to_string());
+                            let dimension_states = states.get(dimension).expect("known dimension");
+                            let state = rollup_evidence_state(dimension_states);
+                            match state {
+                                EvidenceState::Observed | EvidenceState::Reproduced => {}
+                                EvidenceState::Declared if allow_declared => {
+                                    assumptions.push(json!({
+                                        "dimension": dimension,
+                                        "assumption": "declared evidence accepted only as an explicit condition",
+                                    }));
+                                }
+                                EvidenceState::Declared => blockers.push(json!({
+                                    "dimension": dimension,
+                                    "state": state.as_str(),
+                                    "reason": "declared evidence is not a measured support for this claim",
+                                })),
+                                _ => blockers.push(json!({
+                                    "dimension": dimension,
+                                    "state": state.as_str(),
+                                    "reason": "missing, blocked, or non-applicable evidence",
+                                })),
+                            }
+                        }
+                        Ok(json!({
+                            "index": index,
+                            "ok": true,
+                            "id": id,
+                            "claim": claim,
+                            "requires": required_dimensions,
+                            "allow_declared": allow_declared,
+                            "eligible": blockers.is_empty(),
+                            "blockers": blockers,
+                            "explicit_assumptions": assumptions,
+                            "fail_closed": !blockers.is_empty(),
+                        }))
+                    })();
+                    parsed.unwrap_or_else(|error| {
+                        json!({
+                            "index": index,
+                            "ok": false,
+                            "refusal": error,
+                            "fail_closed": true,
+                        })
+                    })
+                }
+                None => json!({
+                    "index": index,
+                    "ok": false,
+                    "refusal": "each claim request must be an object",
+                    "fail_closed": true,
+                }),
+            };
+            claim_rows.push(row);
+        }
+
+        let metrics_arguments = arguments
+            .get("metrics")
+            .cloned()
+            .unwrap_or_else(|| arguments.clone());
+        let metrics = match self.metrics_profile_audit(&metrics_arguments) {
+            Ok(value) => value,
+            Err(error) => json!({
+                "ok": false,
+                "stage": "metrics_profile",
+                "refusal": error,
+                "fail_closed": true,
+            }),
+        };
+        let metrics_ok = metrics.get("ok") == Some(&json!(true));
+
+        let information_value = arguments.get("information").map(|raw| {
+            match raw.as_object() {
+                Some(_) => match self.epistemic_voi(raw) {
+                    Ok(value) => value,
+                    Err(error) => json!({
+                        "ok": false,
+                        "stage": "information_value",
+                        "refusal": error,
+                        "fail_closed": true,
+                    }),
+                },
+                None => json!({
+                    "ok": false,
+                    "stage": "information_value",
+                    "refusal": "information must be an object containing problem, belief, and acquisition(s)",
+                    "fail_closed": true,
+                }),
+            }
+        });
+
+        let reference_quality = arguments.get("reference").map(|raw| {
+            let mut subarguments = serde_json::Map::new();
+            subarguments.insert("reference".into(), raw.clone());
+            if let Some(state) = arguments.get("reference_state") {
+                subarguments.insert("state".into(), state.clone());
+            }
+            match self.bioeval_reference_audit(&Value::Object(subarguments)) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "stage": "reference_quality",
+                    "refusal": error,
+                    "fail_closed": true,
+                }),
+            }
+        });
+
+        let temporal_validity = arguments.get("worldline").map(|raw| {
+            let mut subarguments = serde_json::Map::new();
+            subarguments.insert("worldline".into(), raw.clone());
+            if let Some(at) = arguments.get("at") {
+                subarguments.insert("at".into(), at.clone());
+            }
+            match self.evaluation_worldline_audit(&Value::Object(subarguments)) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "stage": "temporal_validity",
+                    "refusal": error,
+                    "fail_closed": true,
+                }),
+            }
+        });
+
+        let reproducibility = arguments.get("reexecution").map(|raw| {
+            let mut subarguments = serde_json::Map::new();
+            subarguments.insert("reexecution".into(), raw.clone());
+            if let Some(claim) = arguments.get("biological_claim") {
+                subarguments.insert("biological_claim".into(), claim.clone());
+            }
+            match self.evaluation_reproduction_check(&Value::Object(subarguments)) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "stage": "reproducibility",
+                    "refusal": error,
+                    "fail_closed": true,
+                }),
+            }
+        });
+
+        let claims_requested = claim_rows.len();
+        let eligible_claims = claim_rows
+            .iter()
+            .filter(|row| row.get("eligible") == Some(&json!(true)))
+            .count();
+        let evidence_blockers = evidence_rows
+            .iter()
+            .filter(|row| row.get("fail_closed") == Some(&json!(true)))
+            .count();
+        let all_requested_claims_eligible =
+            claims_requested > 0 && eligible_claims == claims_requested && evidence_blockers == 0;
+        Ok(json!({
+            "ok": true,
+            "workflow": "biocapability_evidence_conditioned_profile",
+            "metrics": metrics,
+            "metrics_ok": metrics_ok,
+            "evidence": {
+                "items": evidence_rows.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "omitted_items": evidence_rows.len().saturating_sub(max_items),
+                "item_count": evidence_rows.len(),
+                "invalid_item_count": evidence_blockers,
+                "dimensions": evidence_dimension_rows,
+                "domains": domains,
+            },
+            "claim_requests": {
+                "rows": claim_rows.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "omitted_rows": claim_rows.len().saturating_sub(max_items),
+                "requested": claims_requested,
+                "eligible": eligible_claims,
+                "all_requested_claims_eligible": all_requested_claims_eligible,
+            },
+            "subaudits": {
+                "information_value": information_value,
+                "reference_quality": reference_quality,
+                "temporal_validity": temporal_validity,
+                "reproducibility": reproducibility,
+            },
+            "release_posture": {
+                "ready_for_requested_claims": metrics_ok && all_requested_claims_eligible,
+                "requires_explicit_claim_request": claims_requested == 0,
+                "numeric_scores_are_not_claims_without_evidence": true,
+                "declared_evidence_is_visible_but_not_measured_support": true,
+            },
+            "guarantees": [
+                "capability scores remain conditional on their metric grid and comparability conditions",
+                "evidence dimensions are rolled up with missing, declared, blocked, observed, and reproduced states kept distinct",
+                "temporal, reproducibility, reference-truth, and information-value subaudits reuse their existing typed contracts",
+                "claim readiness requires explicit requested dimensions and never promotes an empty inventory to a universal claim",
+                "supporting-field omissions block measured evidence rather than being inferred from a status label",
+            ],
+            "limitations": [
+                "evidence rows, domains, epochs, costs, and supporting fields are caller-supplied inventories; no external dataset or lab record is inspected",
+                "the matrix is an audit of claim prerequisites, not a statistical estimator, causal identification engine, translation study, or multi-agent execution runtime",
+                "the quantitative subaudits compare or price supplied objects; they do not run evaluations, assays, re-executions, or acquisition actions",
+                "a ready posture means the declared contract is internally complete, not that a scientific or operational claim is true",
+            ],
+        }))
     }
 
     fn safety_release_gate(&self, arguments: &Value) -> Result<Value, String> {
@@ -11814,6 +12180,191 @@ fn parse_attestation_claim(
     }
 }
 
+const BIOCAPABILITY_EVIDENCE_DIMENSIONS: &[&str] = &[
+    "evidence_grounding",
+    "information_acquisition",
+    "resource_efficiency",
+    "temporal_validity",
+    "cross_modal_consistency",
+    "causal_identification",
+    "reproducibility",
+    "translation_maturity",
+    "multi_agent_coordination",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum EvidenceState {
+    Observed,
+    Reproduced,
+    Declared,
+    Missing,
+    Blocked,
+    NotApplicable,
+}
+
+impl EvidenceState {
+    fn as_str(self) -> &'static str {
+        match self {
+            EvidenceState::Observed => "observed",
+            EvidenceState::Reproduced => "reproduced",
+            EvidenceState::Declared => "declared",
+            EvidenceState::Missing => "missing",
+            EvidenceState::Blocked => "blocked",
+            EvidenceState::NotApplicable => "not_applicable",
+        }
+    }
+
+    fn is_measured(self) -> bool {
+        matches!(self, EvidenceState::Observed | EvidenceState::Reproduced)
+    }
+}
+
+fn parse_evidence_state(raw: &Value) -> Result<EvidenceState, String> {
+    let value = raw.as_str().ok_or("evidence status must be a string")?;
+    match value {
+        "observed" => Ok(EvidenceState::Observed),
+        "reproduced" => Ok(EvidenceState::Reproduced),
+        "declared" => Ok(EvidenceState::Declared),
+        "missing" => Ok(EvidenceState::Missing),
+        "blocked" => Ok(EvidenceState::Blocked),
+        "not_applicable" => Ok(EvidenceState::NotApplicable),
+        other => Err(format!("unknown evidence status {other:?}")),
+    }
+}
+
+fn rollup_evidence_state(states: &[EvidenceState]) -> EvidenceState {
+    if states.contains(&EvidenceState::Blocked) {
+        EvidenceState::Blocked
+    } else if states.contains(&EvidenceState::Missing) || states.is_empty() {
+        EvidenceState::Missing
+    } else if states.contains(&EvidenceState::Reproduced) {
+        EvidenceState::Reproduced
+    } else if states.contains(&EvidenceState::Observed) {
+        EvidenceState::Observed
+    } else if states.contains(&EvidenceState::Declared) {
+        EvidenceState::Declared
+    } else {
+        EvidenceState::NotApplicable
+    }
+}
+
+fn validate_evidence_support(
+    object: &serde_json::Map<String, Value>,
+    dimension: &str,
+    issues: &mut Vec<String>,
+) {
+    let required_string_field = |field: &str| {
+        object
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .is_some()
+    };
+    let required_bool_field = |field: &str| object.get(field).and_then(Value::as_bool);
+    let required_number_field = |field: &str| {
+        object
+            .get(field)
+            .and_then(Value::as_f64)
+            .is_some_and(f64::is_finite)
+    };
+    match dimension {
+        "evidence_grounding" => {
+            if !required_string_field("source") {
+                issues.push("measured grounding requires a non-empty source".into());
+            }
+            if !required_string_field("scope") {
+                issues.push("measured grounding requires an explicit scope".into());
+            }
+        }
+        "information_acquisition" => {
+            if required_bool_field("action_changed").is_none() {
+                issues.push("information acquisition requires boolean action_changed".into());
+            }
+            if !required_number_field("cost") {
+                issues.push("information acquisition requires finite numeric cost".into());
+            }
+        }
+        "resource_efficiency" => {
+            if !required_string_field("denominator") {
+                issues.push("resource efficiency requires a named denominator".into());
+            }
+            if !required_number_field("cost") {
+                issues.push("resource efficiency requires finite numeric cost".into());
+            }
+        }
+        "temporal_validity" => {
+            let decision_epoch = object.get("decision_epoch").and_then(Value::as_u64);
+            let evidence_epoch = object.get("evidence_epoch").and_then(Value::as_u64);
+            match (decision_epoch, evidence_epoch) {
+                (Some(decision), Some(evidence)) if evidence <= decision => {}
+                (Some(_), Some(_)) => {
+                    issues.push("evidence was available after the decision epoch".into())
+                }
+                _ => issues
+                    .push("temporal validity requires decision_epoch and evidence_epoch".into()),
+            }
+        }
+        "cross_modal_consistency" => {
+            let modality_count = object
+                .get("modalities")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
+            if modality_count < 2 {
+                issues.push("cross-modal evidence requires at least two modalities".into());
+            }
+            if required_bool_field("agreement").is_none() {
+                issues.push("cross-modal evidence requires boolean agreement".into());
+            }
+        }
+        "causal_identification" => {
+            if object.get("identification").and_then(Value::as_str) != Some("identified") {
+                issues.push(
+                    "causal evidence requires identification=identified; association is not mechanism"
+                        .into(),
+                );
+            }
+            if !required_string_field("estimand") {
+                issues.push("causal evidence requires a named estimand".into());
+            }
+        }
+        "reproducibility" => {
+            if object
+                .get("replications")
+                .and_then(Value::as_u64)
+                .is_none_or(|replications| replications < 2)
+            {
+                issues.push("reproducibility requires at least two replications".into());
+            }
+            if required_bool_field("environment_pinned") != Some(true) {
+                issues.push("reproducibility requires environment_pinned=true".into());
+            }
+        }
+        "translation_maturity" => {
+            if !required_string_field("source_population")
+                || !required_string_field("target_population")
+            {
+                issues.push("translation evidence requires source and target populations".into());
+            }
+            if required_bool_field("bridge") != Some(true) {
+                issues.push("translation evidence requires bridge=true".into());
+            }
+        }
+        "multi_agent_coordination" => {
+            let agent_count = object
+                .get("agents")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
+            if agent_count < 2 {
+                issues.push("coordination evidence requires at least two agents".into());
+            }
+            if !required_number_field("coordination_overhead") {
+                issues.push("coordination evidence requires finite coordination_overhead".into());
+            }
+        }
+        _ => issues.push(format!("unsupported evidence dimension {dimension:?}")),
+    }
+}
+
 fn documentation_policy(arguments: &Value) -> Result<TraversalPolicy, String> {
     let mode = arguments
         .get("policy")
@@ -12104,7 +12655,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "atlas_metrics_and_research_ci",
             "domains": ["capability metrics", "partial rankings", "weight sensitivity", "research CI", "claim publication checks"],
             "crates": ["bioprism-atlas", "bioprism-metrics", "bioprism-atlasx", "bioprism-atlashub"],
-            "mcp_tools": ["atlas_report", "capability_rank", "metrics_profile_audit", "research_ci_check"],
+            "mcp_tools": ["atlas_report", "capability_rank", "metrics_profile_audit", "biocapability_evidence_audit", "research_ci_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -12530,6 +13081,34 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound repeated response rows; defaults to 100." }
                 },
                 "required": ["vectors"]
+            }
+        }),
+        json!({
+            "name": "biocapability_evidence_audit",
+            "description": "Build an evidence-conditioned BioCapability profile over a serialized metric grid. It composes metric comparability and missingness with optional information-value, distributed-reference, temporal-worldline, and reproducibility audits, then checks explicit evidence prerequisites for grounding, acquisition value, resource denominators, temporal validity, cross-modal consistency, causal identification, translation, and multi-agent coordination. Declared evidence stays distinct from observed and reproduced support; missing supporting fields fail closed; no scientific truth, causal effect, clinical authority, or runtime execution is invented.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "metrics": { "type": "object", "description": "Optional serialized metrics_profile_audit arguments; when omitted, top-level vectors/waived_dimensions/weighting are used." },
+                    "vectors": { "type": "array", "minItems": 2, "maxItems": 100, "description": "At least two serialized bioprism-metrics CapabilityVector values when metrics is omitted." },
+                    "waived_dimensions": { "type": "array", "items": { "type": "string" }, "description": "Optional explicit metric comparability waivers; every waiver remains visible." },
+                    "weighting": { "type": "object", "description": "Optional serialized declared weighting used only for sensitivity and totalisation after the partial profile." },
+                    "evidence": { "type": "array", "maxItems": 512, "description": "Evidence inventory rows [{id, dimension, status, domain, ...support fields}]. Status is observed, reproduced, declared, missing, blocked, or not_applicable." },
+                    "claim_requests": { "type": "array", "maxItems": 128, "description": "Explicit requested claims [{id, claim, requires:[dimension], allow_declared}]. No request means no release claim is emitted." },
+                    "information": { "type": "object", "description": "Optional serialized epistemic_voi arguments: problem, belief, and acquisition or acquisitions." },
+                    "reference": { "type": "object", "description": "Optional serialized ReferenceStandard audited for distributed truth and dispersion; reference_state may query a named mass." },
+                    "reference_state": { "type": "string", "description": "Optional state queried in a distribution reference." },
+                    "worldline": { "type": "object", "description": "Optional serialized bioevalx Worldline audited for future evidence leakage and dangling context." },
+                    "at": { "type": "string", "description": "Optional RFC-3339 accessibility cut used with worldline." },
+                    "reexecution": { "type": "object", "description": "Optional serialized bioevalx Reexecution checked for divergence, missing outputs, portability, and validity overreach." },
+                    "biological_claim": { "type": "string", "description": "Optional biological validity claim checked against the reproducibility certificate; failure remains separate from reexecution." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound repeated evidence, claim, and nested detail rows; defaults to 100." }
+                },
+                "required": ["evidence", "claim_requests"],
+                "anyOf": [
+                    { "required": ["vectors"] },
+                    { "required": ["metrics"] }
+                ]
             }
         }),
         json!({

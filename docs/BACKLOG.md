@@ -56,6 +56,14 @@ artifact destinations, and unwitnessable claims. This is still a contract replay
 execute a fuzzer, sandbox, detector, credential revocation, quarantine, notification, incident
 workflow, external checkpoint, or durable audit store, so the remaining `36.07` and `36.19`
 blueprint entries stay in the attention list below.
+The transport now also exposes `biocapability_evidence_audit`, a strict composition surface for
+the §33 metric, value-of-information, reference-standard, temporal-validity, reproducibility,
+cross-modal, causal, translation, and multi-agent contracts already present in the workspace. It
+requires explicit claim requests, validates dimension-specific support fields, blocks future or
+unknown evidence, and keeps declared evidence separate from measured support. This increases
+agent-callable depth but does not supply assays, estimators, replication infrastructure, external
+data acquisition, clinical validation, or distributed agent execution, so the remaining §33
+blueprint entries stay in the attention list below.
 The transport also exposes evidence-backed routing, token-context planning, and deterministic
 WeaveLang compilation/replay inspection. These calls remain bounded library integrations: routing
 cannot synthesize an architecture, token planning does not render or retrieve payloads, and

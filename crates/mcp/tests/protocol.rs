@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 110);
+    assert_eq!(tools.len(), 111);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1807,6 +1807,132 @@ fn metrics_profile_audit_keeps_unmeasured_capabilities_and_uncontested_leads_vis
         .find(|row| row["system"] == json!("system-b"))
         .unwrap();
     assert_eq!(system_b["unmeasured_capability_count"], json!(1));
+}
+
+#[test]
+fn biocapability_evidence_audit_composes_metrics_value_reference_and_claim_readiness() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "biocapability_evidence_audit",
+        json!({
+            "vectors": [
+                metric_vector("system-a", 0.9, 0.8, "pack/4"),
+                metric_vector("system-b", 0.7, 0.6, "pack/4")
+            ],
+            "evidence": [
+                { "id": "grounding", "dimension": "evidence_grounding", "status": "observed", "domain": "oncology", "source": "ledger:run-1", "scope": "pack/4" },
+                { "id": "acquisition", "dimension": "information_acquisition", "status": "observed", "domain": "bioir", "action_changed": true, "cost": 12.0 },
+                { "id": "resource", "dimension": "resource_efficiency", "status": "observed", "domain": "operations", "denominator": "successful reproduced runs", "cost": 12.0 },
+                { "id": "time", "dimension": "temporal_validity", "status": "observed", "domain": "evaluation", "decision_epoch": 10, "evidence_epoch": 9 },
+                { "id": "modal", "dimension": "cross_modal_consistency", "status": "observed", "domain": "oncology", "modalities": ["mri", "pathology"], "agreement": true },
+                { "id": "causal", "dimension": "causal_identification", "status": "observed", "domain": "inference", "identification": "identified", "estimand": "treatment effect" },
+                { "id": "repro", "dimension": "reproducibility", "status": "reproduced", "domain": "research_ci", "replications": 3, "environment_pinned": true },
+                { "id": "translation", "dimension": "translation_maturity", "status": "observed", "domain": "oncoworlds", "source_population": "xenograft", "target_population": "patient", "bridge": true },
+                { "id": "coordination", "dimension": "multi_agent_coordination", "status": "observed", "domain": "orchestration", "agents": ["planner", "verifier"], "coordination_overhead": 1.2 }
+            ],
+            "claim_requests": [{
+                "id": "public-profile",
+                "claim": "publishable capability profile",
+                "requires": [
+                    "evidence_grounding",
+                    "information_acquisition",
+                    "resource_efficiency",
+                    "temporal_validity",
+                    "cross_modal_consistency",
+                    "causal_identification",
+                    "reproducibility",
+                    "translation_maturity",
+                    "multi_agent_coordination"
+                ]
+            }],
+            "information": {
+                "problem": {
+                    "actions": ["treat", "abstain"],
+                    "models": ["responsive", "resistant"],
+                    "loss": [0.0, 10.0, 10.0, 0.0]
+                },
+                "belief": { "mass": [0.5, 0.5] },
+                "acquisition": {
+                    "id": "assay",
+                    "cost": 0.1,
+                    "outcomes": [
+                        { "label": "positive", "likelihood": [0.9, 0.1] },
+                        { "label": "negative", "likelihood": [0.1, 0.9] }
+                    ]
+                }
+            },
+            "reference": {
+                "standard": "distribution",
+                "mass": { "progression": 0.6, "stable": 0.4 },
+                "dispersion": { "kind": "mixed", "aleatoric_fraction": 0.5 }
+            },
+            "reference_state": "progression",
+            "max_items": 20
+        }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["metrics_ok"], json!(true));
+    assert_eq!(
+        payload["claim_requests"]["rows"][0]["eligible"],
+        json!(true)
+    );
+    assert_eq!(
+        payload["release_posture"]["ready_for_requested_claims"],
+        json!(true)
+    );
+    assert_eq!(payload["subaudits"]["information_value"]["ok"], json!(true));
+    assert_eq!(
+        payload["subaudits"]["reference_quality"]["can_certify_clean_pass"],
+        json!(false)
+    );
+    assert_eq!(
+        payload["evidence"]["dimensions"].as_array().unwrap().len(),
+        9
+    );
+    assert_eq!(payload["evidence"]["invalid_item_count"], json!(0));
+}
+
+#[test]
+fn biocapability_evidence_audit_blocks_temporal_leaks_and_declared_only_claims() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "biocapability_evidence_audit",
+        json!({
+            "vectors": [
+                metric_vector("system-a", 0.9, 0.8, "pack/4"),
+                metric_vector("system-b", 0.7, 0.6, "pack/4")
+            ],
+            "evidence": [
+                { "id": "future", "dimension": "temporal_validity", "status": "observed", "decision_epoch": 10, "evidence_epoch": 11 },
+                { "id": "declared-grounding", "dimension": "evidence_grounding", "status": "declared", "source": "operator assertion", "scope": "unknown" },
+                { "id": "unknown", "dimension": "not-a-real-dimension", "status": "observed" }
+            ],
+            "claim_requests": [{
+                "id": "temporal-profile",
+                "claim": "temporally valid profile",
+                "requires": ["temporal_validity", "evidence_grounding"]
+            }]
+        }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["evidence"]["invalid_item_count"], json!(2));
+    let temporal = payload["evidence"]["dimensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["dimension"] == json!("temporal_validity"))
+        .unwrap();
+    assert_eq!(temporal["state"], json!("blocked"));
+    assert_eq!(
+        payload["claim_requests"]["rows"][0]["eligible"],
+        json!(false)
+    );
+    assert_eq!(
+        payload["release_posture"]["ready_for_requested_claims"],
+        json!(false)
+    );
 }
 
 fn risk_assessment(ratings: Value) -> Value {

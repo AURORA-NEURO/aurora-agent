@@ -273,6 +273,13 @@ can apply a declared weighting with sensitivity evidence, while `research_ci_che
 claim, split, figure, regression, environment, egress, non-claim and provenance predicates,
 `metrics_profile_audit` emits per-capability leaders, measured populations, missing systems and
 uncontested-lead warnings for public-card construction without inventing a scalar score,
+`biocapability_evidence_audit` composes metric profiles with explicit evidence states across
+grounding, information acquisition, resource efficiency, temporal validity, cross-modal agreement,
+causal identification, reproducibility, translation maturity, and multi-agent coordination. It
+validates support fields, blocks future evidence and unknown dimensions, keeps declared evidence
+visible without counting it as measured, and releases only explicitly requested claims whose required
+dimensions are eligible; optional information-value, reference-distribution, worldline, and
+reexecution subaudits remain bounded projections rather than biological truth or clinical inference,
 `cache_invalidation_simulate` rebuilds typed cache keys and replays dependency-aware invalidation,
 partial unknown regions, fail-closed lookup misses and explicit re-proving, while
 `storage_lifecycle_simulate` plans pin-aware hot/warm/cold tiering and non-copyable quota
