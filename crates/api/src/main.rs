@@ -5,7 +5,7 @@
 use bioprism_api::{serve, ApiConfig, ApiRouter};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 fn main() {
     let mut arguments = std::env::args().skip(1);
@@ -72,7 +72,7 @@ fn main() {
         ..ApiConfig::default()
     };
     let router = match ApiRouter::new(root, config) {
-        Ok(router) => Arc::new(Mutex::new(router)),
+        Ok(router) => Arc::new(router),
         Err(error) => {
             eprintln!("invalid API configuration: {error}");
             std::process::exit(2);

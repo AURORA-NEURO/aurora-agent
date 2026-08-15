@@ -31,11 +31,11 @@ pub use router::{
 
 use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Serves one bounded request per accepted connection until the listener fails.
-pub fn serve(listener: TcpListener, router: Arc<Mutex<ApiRouter>>) -> std::io::Result<()> {
+pub fn serve(listener: TcpListener, router: Arc<ApiRouter>) -> std::io::Result<()> {
     for incoming in listener.incoming() {
         let stream = incoming?;
         let router = Arc::clone(&router);
@@ -48,15 +48,10 @@ pub fn serve(listener: TcpListener, router: Arc<Mutex<ApiRouter>>) -> std::io::R
     Ok(())
 }
 
-fn serve_connection(stream: TcpStream, router: Arc<Mutex<ApiRouter>>) -> std::io::Result<()> {
+fn serve_connection(stream: TcpStream, router: Arc<ApiRouter>) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
-    let (maximum_header_bytes, maximum_body_bytes) = {
-        let router = router
-            .lock()
-            .map_err(|_| std::io::Error::other("API router lock poisoned"))?;
-        router.limits()
-    };
+    let (maximum_header_bytes, maximum_body_bytes) = router.limits();
     let writer = stream.try_clone()?;
     let mut reader = BufReader::new(stream);
     let request = match read_request(&mut reader, maximum_header_bytes, maximum_body_bytes) {
@@ -76,12 +71,7 @@ fn serve_connection(stream: TcpStream, router: Arc<Mutex<ApiRouter>>) -> std::io
             return Ok(());
         }
     };
-    let response = {
-        let mut router = router
-            .lock()
-            .map_err(|_| std::io::Error::other("API router lock poisoned"))?;
-        router.handle(request)
-    };
+    let response = router.handle(request);
     let mut writer = writer;
     response.write_to(&mut writer)?;
     writer.flush()
@@ -94,7 +84,7 @@ mod tests {
 
     #[test]
     fn wire_round_trip_uses_the_same_bounded_router() {
-        let mut router =
+        let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
         let raw = b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n";
         let request = read_request(

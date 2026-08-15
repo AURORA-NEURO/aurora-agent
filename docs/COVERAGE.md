@@ -70,6 +70,9 @@ The Python HTTP SDK also exposes typed event and signed-delivery pages with the 
 retention-gap, retry-attempt, signature, and pending-count fields already present in TypeScript.
 Its dependency-free `event_stream()` parser now mirrors the TypeScript SSE field rules and preserves
 the gateway's `x-next-after` cursor for resumable monitoring.
+The HTTP listener also serves through a shared immutable router with atomic request IDs and cloned
+ready MCP dispatch sessions, allowing independent domain requests to proceed concurrently while
+keeping all mutable mission and event state bounded and synchronized.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 The authoritative executor validates every known tool's materialized arguments against its

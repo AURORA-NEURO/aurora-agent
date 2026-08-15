@@ -315,6 +315,10 @@ It exposes the exact MCP tool catalogue through REST and JSON-RPC, bounded healt
 routes, cursor-addressable event pages/SSE snapshots, and signed webhook outbox registration,
 retry, and acknowledgement. It deliberately reports gRPC, TLS termination, durable storage, and
 external delivery as absent rather than inferring them from an HTTP listener.
+The serving path uses one immutable shared router across connection threads, atomically allocates
+request IDs, and clones ready MCP dispatch sessions per request. Mission, event, subscription, and
+delivery state remain independently bounded and synchronized, so unrelated domain calls do not
+serialize behind a global router mutex.
 
 The same server exposes the broader workspace: `world_validate` checks a world before compilation,
 `context_compare` runs the equal-engineering baseline panel, `bioworlds_catalog` runs the reference

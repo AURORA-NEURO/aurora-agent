@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -68,7 +68,7 @@ pub struct ApiRouter {
     mission_executor: Arc<bioprism_mcp::Server>,
     config: ApiConfig,
     events: Arc<Mutex<EventLog>>,
-    next_request_id: u64,
+    next_request_id: AtomicU64,
     mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
 }
 
@@ -254,12 +254,12 @@ impl ApiRouter {
             mission_executor,
             config,
             events,
-            next_request_id: 1,
+            next_request_id: AtomicU64::new(1),
             mission_jobs: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }
 
-    pub fn handle(&mut self, request: HttpRequest) -> HttpResponse {
+    pub fn handle(&self, request: HttpRequest) -> HttpResponse {
         let request_id = self.request_id(&request);
         if request.body.len() > self.config.max_body_bytes {
             return self.finish(
@@ -359,14 +359,14 @@ impl ApiRouter {
         (self.config.max_header_bytes, self.config.max_body_bytes)
     }
 
-    fn request_id(&mut self, request: &HttpRequest) -> String {
+    fn request_id(&self, request: &HttpRequest) -> String {
         if let Some(value) = request.header("x-request-id") {
             if !value.is_empty() && value.len() <= 256 && value.bytes().all(|byte| byte >= 0x20) {
                 return value.to_string();
             }
         }
-        let id = format!("http-{}", self.next_request_id);
-        self.next_request_id = self.next_request_id.saturating_add(1);
+        let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let id = format!("http-{id}");
         id
     }
 
@@ -541,7 +541,7 @@ impl ApiRouter {
         }
     }
 
-    fn rpc(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    fn rpc(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let text = match std::str::from_utf8(&request.body) {
             Ok(text) => text,
             Err(_) => return self.error(400, "invalid_json", "body is not UTF-8", request_id),
@@ -577,7 +577,8 @@ impl ApiRouter {
             .get("name")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let Some(response) = self.server.handle(&parsed) else {
+        let mut server = self.server.clone();
+        let Some(response) = server.handle(&parsed) else {
             return HttpResponse::empty(204);
         };
         let wire = response.to_json();
@@ -589,7 +590,7 @@ impl ApiRouter {
         HttpResponse::json(response_status(&wire), &wire)
     }
 
-    fn rest_tool(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    fn rest_tool(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let segments = match request.path_segments() {
             Ok(segments) => segments,
             Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
@@ -607,7 +608,8 @@ impl ApiRouter {
             method: "tools/call".into(),
             params: json!({ "name": tool, "arguments": arguments }),
         };
-        let Some(response) = self.server.handle(&call) else {
+        let mut server = self.server.clone();
+        let Some(response) = server.handle(&call) else {
             return self.error(
                 500,
                 "dispatch_failed",
@@ -650,7 +652,7 @@ impl ApiRouter {
         HttpResponse::json(200, &report)
     }
 
-    fn submit_mission(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    fn submit_mission(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let arguments = match self.json_object(request) {
             Ok(arguments) => arguments,
             Err(error) => return self.error(400, "invalid_json", &error, request_id),
@@ -1168,7 +1170,7 @@ impl ApiRouter {
         )
     }
 
-    fn delete_mission(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    fn delete_mission(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let Some(mission_id) = mission_id(&request.path_segments(), None) else {
             return self.error(404, "not_found", "mission route does not exist", request_id);
         };
@@ -1228,7 +1230,7 @@ impl ApiRouter {
         )
     }
 
-    fn create_subscription(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    fn create_subscription(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let body = match self.json_object(request) {
             Ok(body) => body,
             Err(error) => return self.error(400, "invalid_json", &error, request_id),
@@ -1315,7 +1317,7 @@ impl ApiRouter {
         }
     }
 
-    fn delete_subscription(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    fn delete_subscription(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let Some(id) = subscription_id(&request.path_segments(), None) else {
             return self.error(
                 404,
@@ -1380,16 +1382,16 @@ impl ApiRouter {
         }
     }
 
-    fn ack_deliveries(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    fn ack_deliveries(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         self.delivery_mutation(request, request_id, false)
     }
 
-    fn retry_deliveries(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    fn retry_deliveries(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         self.delivery_mutation(request, request_id, true)
     }
 
     fn delivery_mutation(
-        &mut self,
+        &self,
         request: &HttpRequest,
         request_id: &str,
         retry: bool,
@@ -1757,7 +1759,7 @@ fn hex_digest(digest: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::http::HttpRequest;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn request(method: &str, target: &str, body: Value) -> HttpRequest {
         HttpRequest {
@@ -1771,7 +1773,7 @@ mod tests {
 
     #[test]
     fn rest_and_json_rpc_share_tool_dispatch_and_auth_is_fail_closed() {
-        let mut router = ApiRouter::new(
+        let router = ApiRouter::new(
             std::env::current_dir().unwrap(),
             ApiConfig {
                 bearer_token: Some("0123456789abcdef".into()),
@@ -1802,8 +1804,30 @@ mod tests {
     }
 
     #[test]
+    fn shared_router_handles_concurrent_requests_with_unique_request_ids() {
+        let router = Arc::new(
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap(),
+        );
+        let handles = (0..32)
+            .map(|_| {
+                let router = Arc::clone(&router);
+                std::thread::spawn(move || {
+                    let response = router.handle(request("GET", "/healthz", json!({})));
+                    assert_eq!(response.status, 200);
+                    response.headers.get("x-request-id").cloned()
+                })
+            })
+            .collect::<Vec<_>>();
+        let ids = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap().unwrap())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(ids.len(), 32);
+    }
+
+    #[test]
     fn webhook_lifecycle_is_cursor_based_and_secrets_do_not_return() {
-        let mut router =
+        let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
         let created = router.handle(request(
             "POST",
@@ -1829,7 +1853,7 @@ mod tests {
 
     #[test]
     fn mission_execution_trace_survives_rest_and_event_projection() {
-        let mut router =
+        let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
         let response = router.handle(request(
             "POST",
@@ -1870,7 +1894,7 @@ mod tests {
 
     #[test]
     fn asynchronous_missions_validate_poll_and_reject_duplicate_ids() {
-        let mut router =
+        let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
         let subscription = router.handle(request(
             "POST",
@@ -1997,7 +2021,7 @@ mod tests {
 
     #[test]
     fn mission_preflight_returns_authoritative_plan_without_queueing_or_dispatching() {
-        let mut router =
+        let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
         let response = router.handle(request(
             "POST",
@@ -2050,7 +2074,7 @@ mod tests {
 
     #[test]
     fn asynchronous_mission_submission_rejects_known_tool_schema_mismatch() {
-        let mut router =
+        let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
         let response = router.handle(request(
             "POST",

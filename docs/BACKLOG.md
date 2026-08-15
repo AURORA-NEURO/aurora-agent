@@ -180,6 +180,9 @@ last live job on timeout; this is an orchestration convenience, not a durable qu
 Python now also types the shared event cursor and webhook delivery pages, including retention gaps,
 ordered event IDs, retry attempts, signatures, and pending counts. This keeps mission monitoring and
 ordinary domain-tool observability on one contract in both SDK families.
+The TCP serving path now shares an immutable router across connection threads, allocates request
+IDs atomically, and clones the ready MCP session for independent dispatch. Mutable mission/event
+state remains explicitly bounded behind its own locks, removing the former global request mutex.
 The Python client also parses the bounded SSE snapshot with the same extension-field tolerance and
 cursor-header semantics as TypeScript, keeping streaming-compatible monitoring dependency-free.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with

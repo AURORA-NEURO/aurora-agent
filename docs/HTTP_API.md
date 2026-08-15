@@ -46,6 +46,10 @@ mission id as subject and the exact trace row under `payload.trace`. Those event
 cursor, SSE, and signed webhook outbox as ordinary tool events, so an operator can monitor any
 domain mission without inventing a domain-specific subscription path.
 
+The TCP serving path shares an immutable router across connection threads and allocates request IDs
+atomically. Each stateless REST/JSON-RPC dispatch uses a cloned ready MCP session; mutable mission,
+event, subscription, and delivery state remains independently bounded and synchronized.
+
 ## Asynchronous missions
 
 `POST /v1/missions/preflight` is the synchronous no-dispatch planning endpoint. It accepts the
