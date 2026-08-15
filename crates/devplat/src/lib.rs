@@ -221,7 +221,7 @@ pub use audit::{
 };
 pub use capability::{
     CapabilityCatalogue, CapabilityError, CapabilityGroup, CapabilityMatch, CapabilityQuery,
-    CapabilitySearch, CAPABILITY_SCHEMA_VERSION,
+    CapabilityRouteNeed, CapabilityRouteRequest, CapabilitySearch, CAPABILITY_SCHEMA_VERSION,
 };
 pub use citations::{audit as audit_citations, scan as scan_citations, CitationAudit};
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};

@@ -54,8 +54,9 @@ use bioprism_dataops::{
 };
 use bioprism_devplat::{
     apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
-    CapabilityQuery, DevPlatReport, MissionReport, MissionRequest, MissionStepResult,
-    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
+    MissionStepResult, WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, MISSION_SCHEMA_VERSION,
+    WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -633,6 +634,7 @@ impl Server {
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
             "capability_discover" => self.capability_discover(&arguments),
+            "capability_route" => self.capability_route(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -11500,6 +11502,159 @@ impl Server {
         Ok(output)
     }
 
+    /// Batch multiple cross-domain needs into one digest-bound candidate report.
+    ///
+    /// A route is intentionally a proposal, not a mission: explicit tool filters are marked as
+    /// explicit, free-text/domain/group searches remain ranked candidates, and no nested tool is
+    /// called. This gives an agent one auditable hand-off point before it constructs an allow-listed
+    /// `agent_mission` request with domain-appropriate arguments.
+    fn capability_route(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode capability route input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("capability route input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: CapabilityRouteRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid capability route input: {error}"))?;
+        request
+            .validate()
+            .map_err(|error| format!("capability route refused: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("capability catalogue refused: {error}"))?;
+        let route_document = json!({
+            "catalog_digest": catalogue.digest().to_string(),
+            "goal": request.goal,
+            "needs": request.needs,
+            "max_candidates_per_need": request.max_candidates_per_need,
+            "max_tools": request.max_tools,
+            "include_tools": request.include_tools,
+        });
+        let route_id = bioprism_ids::ContentHash::of_value(&route_document)
+            .map_err(|error| format!("cannot hash capability route: {error}"))?
+            .to_string();
+
+        let mut recommended = BTreeSet::new();
+        let mut unresolved = Vec::new();
+        let mut need_reports = Vec::new();
+        for need in request.needs {
+            let mut query = need.query.clone();
+            if query.query.is_none()
+                && query.group_id.is_none()
+                && query.domain.is_none()
+                && query.tool.is_none()
+            {
+                query.query = Some(request.goal.clone());
+            }
+            query.max_items = query.max_items.min(request.max_candidates_per_need);
+            query.include_tools = false;
+            let search = catalogue
+                .search(&query)
+                .map_err(|error| format!("capability route need {:?} refused: {error}", need.id))?;
+            let mut candidate_groups = BTreeSet::new();
+            let mut candidate_tools = BTreeSet::new();
+            for matched in &search.matches {
+                candidate_groups.insert(matched.group.id.clone());
+                candidate_tools.extend(matched.matched_tools.iter().cloned());
+            }
+            recommended.extend(candidate_tools.iter().cloned());
+            let resolution = if search.matches.is_empty() {
+                unresolved.push(need.id.clone());
+                "unresolved"
+            } else if need.query.tool.is_some() {
+                "explicit"
+            } else {
+                "ranked_candidates"
+            };
+            need_reports.push(json!({
+                "id": need.id,
+                "resolution": resolution,
+                "candidate_groups": candidate_groups.into_iter().collect::<Vec<_>>(),
+                "candidate_tools": candidate_tools.into_iter().collect::<Vec<_>>(),
+                "search": search,
+            }));
+        }
+
+        let recommended_tool_count = recommended.len();
+        let recommended_tools = recommended
+            .iter()
+            .take(request.max_tools)
+            .cloned()
+            .collect::<Vec<_>>();
+        let recommended_tool_overflow =
+            recommended_tool_count.saturating_sub(recommended_tools.len());
+        let mut output = json!({
+            "ok": true,
+            "workflow": "capability_route",
+            "capability_schema_version": CAPABILITY_SCHEMA_VERSION,
+            "route_id": route_id,
+            "catalog_digest": catalogue.digest().to_string(),
+            "goal": request.goal,
+            "needs": need_reports,
+            "unresolved_needs": unresolved,
+            "recommended_tools": recommended_tools,
+            "recommended_tool_count": recommended_tool_count,
+            "recommended_tool_overflow": recommended_tool_overflow,
+            "execution": "not_started",
+            "guarantees": [
+                "each need retains its complete bounded ranked search result",
+                "explicit tool filters are marked separately from ranked candidates",
+                "no routed tool was executed and no permission was granted",
+                "the route is reproducible only against the returned catalogue digest",
+            ],
+            "limitations": [
+                "candidate ranking does not validate domain-specific arguments",
+                "a route is not an agent_mission allow-list until the caller reviews it",
+                "free-text matches are routing evidence, not scientific or readiness claims",
+            ],
+        });
+        if request.include_tools {
+            let definitions = tool_definitions()
+                .into_iter()
+                .filter_map(|definition| {
+                    let name = definition
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    name.map(|name| (name, definition))
+                })
+                .collect::<BTreeMap<_, _>>();
+            let mut schemas = Vec::new();
+            let mut missing = Vec::new();
+            for tool in output["recommended_tools"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                if let Some(definition) = definitions.get(tool) {
+                    schemas.push(definition.clone());
+                } else {
+                    missing.push(tool.to_string());
+                }
+            }
+            output["tool_schemas"] = Value::Array(schemas.clone());
+            output["schema_attachment"] = json!({
+                "requested": true,
+                "returned": schemas.len(),
+                "missing": missing,
+                "authoritative_source": "tools/list definition set",
+            });
+        } else {
+            output["schema_attachment"] = json!({
+                "requested": false,
+                "returned": 0,
+                "missing": [],
+                "authoritative_source": "tools/list definition set",
+            });
+        }
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure capability route result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err("capability route result exceeds the 20000000-byte safety bound".into());
+        }
+        Ok(output)
+    }
+
     /// Plan or execute an explicit, bounded DAG of existing domain tools.
     ///
     /// Planning is the default. Execution invokes the same internal tool dispatcher used by the
@@ -14086,7 +14241,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_discover", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_discover", "capability_route", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -15616,6 +15771,38 @@ pub fn tool_definitions() -> Vec<Value> {
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release. Omit it to receive no readiness claim." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "capability_route",
+            "description": "Batch multiple named cross-domain needs into one digest-bound candidate report. Each need preserves its bounded ranked discovery result; explicit tool filters are distinguished from free-text/domain/group candidates. The route never executes tools, grants permission, validates domain arguments, or replaces review of an agent_mission allow-list.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "goal": { "type": "string", "description": "Human- and agent-readable route objective; if a need has no filter, the goal becomes its free-text query." },
+                    "needs": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "description": "Named requirements with flattened capability filters: id, query, group_id, domain, tool, and optional max_items. Nested include_tools is refused; use the route-level flag.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string" },
+                                "query": { "type": "string" },
+                                "group_id": { "type": "string" },
+                                "domain": { "type": "string" },
+                                "tool": { "type": "string" },
+                                "max_items": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+                            },
+                            "required": ["id"]
+                        }
+                    },
+                    "max_candidates_per_need": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+                    "max_tools": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 },
+                    "include_tools": { "type": "boolean", "default": false, "description": "Attach authoritative schemas for the bounded recommended tool union." }
+                },
+                "required": ["goal", "needs"]
             }
         }),
         json!({

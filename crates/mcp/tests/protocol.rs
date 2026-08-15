@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 119);
+    assert_eq!(tools.len(), 120);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3615,8 +3615,8 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(28));
-    assert_eq!(result["unique_catalog_tools"], json!(119));
-    assert_eq!(result["advertised_tool_count"], json!(119));
+    assert_eq!(result["unique_catalog_tools"], json!(120));
+    assert_eq!(result["advertised_tool_count"], json!(120));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
     assert!(!result["duplicate_group_memberships"]
@@ -3641,6 +3641,46 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
         &mut server,
         "capability_audit",
         json!({"include_groups": "yes"}),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert_eq!(refused["ok"], json!(false));
+}
+
+#[test]
+fn capability_route_batches_ranked_and_explicit_needs_without_execution() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "capability_route",
+        json!({
+            "goal": "compose a cross-domain evidence route",
+            "needs": [
+                {"id": "oncology", "query": "oncology"},
+                {"id": "release", "tool": "bundle_verify"}
+            ],
+            "max_candidates_per_need": 2,
+            "max_tools": 4,
+            "include_tools": true
+        }),
+    );
+    assert_eq!(result["workflow"], json!("capability_route"));
+    assert_eq!(result["execution"], json!("not_started"));
+    assert_eq!(result["unresolved_needs"], json!([]));
+    assert_eq!(result["needs"][0]["resolution"], json!("ranked_candidates"));
+    assert_eq!(result["needs"][1]["resolution"], json!("explicit"));
+    assert!(result["recommended_tools"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("bundle_verify")));
+    assert_eq!(result["recommended_tools"].as_array().unwrap().len(), 4);
+    assert_eq!(result["schema_attachment"]["requested"], json!(true));
+    assert_eq!(result["schema_attachment"]["returned"], json!(4));
+    assert_eq!(result["route_id"].as_str().unwrap().len(), 64);
+
+    let refused = call(
+        &mut server,
+        "capability_route",
+        json!({"goal": "bad", "needs": [{"id": "nested", "include_tools": true}]}),
     );
     assert_eq!(refused["__isError"], json!(true));
     assert_eq!(refused["ok"], json!(false));
@@ -3935,7 +3975,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 13000
+                "budget": 14000
             },
             "policy": "normative",
             "include_markdown": true,

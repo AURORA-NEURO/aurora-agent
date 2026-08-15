@@ -59,6 +59,7 @@ keeps authoring/notebook sessions, stale digests, capability holes, release post
 CI planning in one evidence-bearing response; it does not pretend to execute a hosted UI or GitHub
 runner. `MissionBinding` supports validated field-level dataflow between direct prerequisite steps,
 and `CapabilityQuery` routes across the complete domain catalogue with optional tool schemas;
-`capability_audit()` verifies the catalogue against the authoritative MCP schema set.
+`capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
+`capability_route()` batches named needs without executing the returned candidates.
 See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

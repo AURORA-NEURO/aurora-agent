@@ -89,9 +89,10 @@ Convenience methods currently cover:
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of 119 tool schemas. `capabilityDiscover`
+families without maintaining a fragile partial clone of 120 tool schemas. `capabilityDiscover`
 searches the explicit cross-domain catalogue and can request authoritative schemas for matches;
-`capabilityAudit` verifies catalogue/schema parity and exposes coverage gaps.
+`capabilityAudit` verifies catalogue/schema parity and exposes coverage gaps; `capabilityRoute`
+batches named needs into a non-executing, digest-bound route proposal.
 
 ## Events and webhooks
 

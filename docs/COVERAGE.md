@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 119 callable tools. That count is intentionally
+The MCP integration layer currently exposes 120 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -54,6 +54,9 @@ argument slots, and each nested call records the content digest of its post-bind
 or tool and can attach the authoritative `tools/list` schemas for the ranked matches. The companion
 `capability_audit` proves that catalogue names and authoritative schemas remain in parity, reports
 catalog-only and uncatalogued tools, and keeps intentional multi-group membership explicit.
+`capability_route` batches named needs across those groups into a single route id, preserves each
+bounded search result, distinguishes explicit tool filters from ranked candidates, and never
+executes the proposed tools.
 These remain in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
 key completeness, dependency-graph invalidation, partial unknown-region handling, fail-closed
 misses, and explicit re-proving; `storage_lifecycle_simulate` adds deterministic tiering, pin

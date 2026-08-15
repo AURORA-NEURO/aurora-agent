@@ -318,6 +318,23 @@ export interface CapabilityAuditArgs extends JsonObject {
   include_groups?: boolean;
 }
 
+export interface CapabilityRouteNeed extends JsonObject {
+  id: string;
+  query?: string;
+  group_id?: string;
+  domain?: string;
+  tool?: string;
+  max_items?: number;
+}
+
+export interface CapabilityRouteArgs extends JsonObject {
+  goal: string;
+  needs: CapabilityRouteNeed[];
+  max_candidates_per_need?: number;
+  max_tools?: number;
+  include_tools?: boolean;
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;

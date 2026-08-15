@@ -22,9 +22,22 @@ const MAX_GROUPS: usize = 512;
 const MAX_ITEMS: usize = 500;
 const DEFAULT_MAX_ITEMS: usize = 50;
 const MAX_FILTER_BYTES: usize = 512;
+const MAX_ROUTE_NEEDS: usize = 32;
+const DEFAULT_ROUTE_CANDIDATES: usize = 10;
+const MAX_ROUTE_CANDIDATES: usize = 50;
+const DEFAULT_ROUTE_TOOLS: usize = 128;
+const MAX_ROUTE_TOOLS: usize = 256;
 
 fn default_max_items() -> usize {
     DEFAULT_MAX_ITEMS
+}
+
+fn default_route_candidates() -> usize {
+    DEFAULT_ROUTE_CANDIDATES
+}
+
+fn default_route_tools() -> usize {
+    DEFAULT_ROUTE_TOOLS
 }
 
 fn default_status() -> String {
@@ -155,6 +168,76 @@ pub struct CapabilitySearch {
     pub query: CapabilityQuery,
     pub result_count: usize,
     pub matches: Vec<CapabilityMatch>,
+}
+
+/// One named requirement in a multi-need route request. The query fields are flattened so a
+/// caller can write `{ "id": "oncology", "query": "oncology evidence" }` without nesting a
+/// second envelope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityRouteNeed {
+    pub id: String,
+    #[serde(flatten)]
+    pub query: CapabilityQuery,
+}
+
+/// Bounded batch routing over the same catalogue used by [`CapabilityQuery`]. Routing returns
+/// candidates and explicit resolution status; it never grants permission or executes a tool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityRouteRequest {
+    pub goal: String,
+    pub needs: Vec<CapabilityRouteNeed>,
+    #[serde(default = "default_route_candidates")]
+    pub max_candidates_per_need: usize,
+    #[serde(default = "default_route_tools")]
+    pub max_tools: usize,
+    #[serde(default)]
+    pub include_tools: bool,
+}
+
+impl CapabilityRouteRequest {
+    pub fn validate(&self) -> Result<(), CapabilityError> {
+        if self.goal.trim().is_empty() {
+            return Err(CapabilityError::EmptyRouteGoal);
+        }
+        validate_filter("goal", &Some(self.goal.clone()))?;
+        if self.needs.is_empty() {
+            return Err(CapabilityError::NoRouteNeeds);
+        }
+        if self.needs.len() > MAX_ROUTE_NEEDS {
+            return Err(CapabilityError::TooManyRouteNeeds {
+                count: self.needs.len(),
+                maximum: MAX_ROUTE_NEEDS,
+            });
+        }
+        if !(1..=MAX_ROUTE_CANDIDATES).contains(&self.max_candidates_per_need) {
+            return Err(CapabilityError::InvalidRouteLimit {
+                field: "max_candidates_per_need",
+                value: self.max_candidates_per_need,
+                maximum: MAX_ROUTE_CANDIDATES,
+            });
+        }
+        if !(1..=MAX_ROUTE_TOOLS).contains(&self.max_tools) {
+            return Err(CapabilityError::InvalidRouteLimit {
+                field: "max_tools",
+                value: self.max_tools,
+                maximum: MAX_ROUTE_TOOLS,
+            });
+        }
+        let mut ids = BTreeSet::new();
+        for need in &self.needs {
+            validate_filter("need_id", &Some(need.id.clone()))?;
+            if !ids.insert(need.id.clone()) {
+                return Err(CapabilityError::DuplicateRouteNeed {
+                    id: need.id.clone(),
+                });
+            }
+            need.query.validate()?;
+            if need.query.include_tools {
+                return Err(CapabilityError::NestedToolSchemas);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Validated, digest-bound capability catalogue.
@@ -384,6 +467,24 @@ pub enum CapabilityError {
     },
     #[error("max_items must be between 1 and the safety ceiling, got {value}")]
     InvalidLimit { field: &'static str, value: usize },
+    #[error("route goal must be non-empty")]
+    EmptyRouteGoal,
+    #[error("route needs must contain at least one named requirement")]
+    NoRouteNeeds,
+    #[error("route contains too many needs: {count}; maximum is {maximum}")]
+    TooManyRouteNeeds { count: usize, maximum: usize },
+    #[error("route contains duplicate need id `{id}`")]
+    DuplicateRouteNeed { id: String },
+    #[error("route limit {field} must be between 1 and {maximum}, got {value}")]
+    InvalidRouteLimit {
+        field: &'static str,
+        value: usize,
+        maximum: usize,
+    },
+    #[error(
+        "route need queries cannot request nested tool schemas; set include_tools on the route"
+    )]
+    NestedToolSchemas,
     #[error("invalid capability catalogue: {0}")]
     InvalidCatalogue(String),
     #[error("cannot canonicalise capability catalogue: {0}")]
@@ -496,6 +597,58 @@ mod tests {
         assert!(matches!(
             CapabilityCatalogue::from_value(&value),
             Err(CapabilityError::EmptyTool { .. })
+        ));
+    }
+
+    #[test]
+    fn route_requests_are_named_bounded_and_flattened() {
+        let request: CapabilityRouteRequest = serde_json::from_value(json!({
+            "goal": "compose an oncology evidence route",
+            "needs": [
+                {"id": "oncology", "query": "oncology evidence", "domain": "oncology"},
+                {"id": "release", "tool": "bundle_verify"}
+            ],
+            "max_candidates_per_need": 4,
+            "max_tools": 12
+        }))
+        .unwrap();
+        request.validate().unwrap();
+        assert_eq!(request.max_candidates_per_need, 4);
+        assert_eq!(
+            request.needs[0].query.query.as_deref(),
+            Some("oncology evidence")
+        );
+
+        let duplicate = CapabilityRouteRequest {
+            needs: vec![
+                CapabilityRouteNeed {
+                    id: "same".into(),
+                    query: CapabilityQuery::default(),
+                },
+                CapabilityRouteNeed {
+                    id: "same".into(),
+                    query: CapabilityQuery::default(),
+                },
+            ],
+            ..request.clone()
+        };
+        assert!(matches!(
+            duplicate.validate(),
+            Err(CapabilityError::DuplicateRouteNeed { .. })
+        ));
+        let nested = CapabilityRouteRequest {
+            needs: vec![CapabilityRouteNeed {
+                id: "nested".into(),
+                query: CapabilityQuery {
+                    include_tools: true,
+                    ..CapabilityQuery::default()
+                },
+            }],
+            ..request
+        };
+        assert!(matches!(
+            nested.validate(),
+            Err(CapabilityError::NestedToolSchemas)
         ));
     }
 }

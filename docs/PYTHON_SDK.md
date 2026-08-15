@@ -74,6 +74,8 @@ invent defaults:
   tool and can attach authoritative MCP schemas for the returned routing matches.
 - `capability_audit(include_groups=...)` verifies catalogue/schema parity and reports coverage
   gaps and intentional multi-group membership.
+- `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
+  proposal, preserving explicit tool matches separately from ranked candidates.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP

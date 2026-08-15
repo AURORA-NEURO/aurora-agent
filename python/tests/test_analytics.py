@@ -11,6 +11,8 @@ from prism_sdk import (
     AsyncWorkspace,
     CalibrationObservation,
     CapabilityQuery,
+    CapabilityRouteNeed,
+    CapabilityRouteRequest,
     Client,
     MetricObservation,
     MissionBinding,
@@ -128,6 +130,23 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             CapabilityQuery(max_items=0)
 
+    def test_capability_route_request_batches_named_needs_without_execution(self) -> None:
+        request = CapabilityRouteRequest(
+            "compose evidence",
+            [
+                CapabilityRouteNeed("oncology", CapabilityQuery(query="oncology")),
+                {"id": "release", "tool": "bundle_verify"},
+            ],
+            max_candidates_per_need=2,
+            max_tools=4,
+            include_tools=True,
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["needs"][1]["tool"], "bundle_verify")
+        self.assertEqual(arguments["max_tools"], 4)
+        with self.assertRaises(ArgumentError):
+            CapabilityRouteRequest("goal", [{"id": "same"}, {"id": "same"}])
+
 
 class AnalyticsWorkspaceTests(unittest.TestCase):
     def test_sync_workspace_sends_typed_analytics_request(self) -> None:
@@ -172,6 +191,16 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             result = Workspace(client).capability_audit(include_groups=False)
         self.assertEqual(result["echo"], {"include_groups": False})
 
+    def test_sync_workspace_exposes_capability_route(self) -> None:
+        with Client(command(), timeout=2) as client:
+            result = Workspace(client).capability_route(
+                "compose evidence",
+                [{"id": "oncology", "query": "oncology"}],
+                max_tools=4,
+            )
+        self.assertEqual(result["echo"]["goal"], "compose evidence")
+        self.assertEqual(result["echo"]["needs"][0]["id"], "oncology")
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -207,6 +236,14 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(command(), timeout=2) as client:
             result = await AsyncWorkspace(client).capability_audit()
         self.assertEqual(result["echo"], {"include_groups": True})
+
+    async def test_async_workspace_exposes_capability_route(self) -> None:
+        async with AsyncClient(command(), timeout=2) as client:
+            result = await AsyncWorkspace(client).capability_route(
+                "compose evidence",
+                [CapabilityRouteNeed("release", CapabilityQuery(tool="bundle_verify"))],
+            )
+        self.assertEqual(result["echo"]["needs"][0]["tool"], "bundle_verify")
 
 
 if __name__ == "__main__":

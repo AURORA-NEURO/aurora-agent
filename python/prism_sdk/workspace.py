@@ -14,7 +14,7 @@ from .analytics import (
 )
 from .authoring import PackArtifact
 from .client import Client
-from .capability import CapabilityQuery
+from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest, MissionStep
 from .oracle import (
@@ -165,6 +165,26 @@ class Workspace:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return self.tool("capability_audit", {"include_groups": include_groups})
+
+    def capability_route(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Batch named cross-domain needs into a reviewed, non-executing route proposal."""
+
+        request = CapabilityRouteRequest(
+            goal,
+            needs,
+            max_candidates_per_need,
+            max_tools,
+            include_tools,
+        )
+        return self.tool("capability_route", request.to_mcp_arguments())
 
     def oracle_combine(
         self,
@@ -462,6 +482,26 @@ class AsyncWorkspace:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
         return await self.tool("capability_audit", {"include_groups": include_groups})
+
+    async def capability_route(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.capability_route`."""
+
+        request = CapabilityRouteRequest(
+            goal,
+            needs,
+            max_candidates_per_need,
+            max_tools,
+            include_tools,
+        )
+        return await self.tool("capability_route", request.to_mcp_arguments())
 
     async def oracle_combine(
         self,

@@ -6,6 +6,7 @@ import type {
   AgentMissionArgs,
   CapabilityDiscoverArgs,
   CapabilityAuditArgs,
+  CapabilityRouteArgs,
   BioAtlasPublicationAuditArgs,
   BioCapabilityEvidenceAuditArgs,
   CapabilitiesResponse,
@@ -182,6 +183,10 @@ export class ApiClient {
 
   async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions) {
     return this.callTool("capability_audit", args, options);
+  }
+
+  async capabilityRoute(args: CapabilityRouteArgs, options?: ClientRequestOptions) {
+    return this.callTool("capability_route", args, options);
   }
 
   async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions) {

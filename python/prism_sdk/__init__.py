@@ -33,7 +33,7 @@ from .authoring import (
     validate_pack,
 )
 from .client import Client, ClientConfig
-from .capability import CapabilityQuery
+from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import (
     ApiError,
     ArgumentError,
@@ -102,6 +102,8 @@ __all__ = [
     "ClientConfig",
     "CalibrationObservation",
     "CapabilityQuery",
+    "CapabilityRouteNeed",
+    "CapabilityRouteRequest",
     "LifecycleError",
     "InputRef",
     "MutationPlan",

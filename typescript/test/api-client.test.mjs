@@ -30,6 +30,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
       if (path === "/v1/tools/capability_discover") return jsonResponse({ ok: true, tool: "capability_discover", request_id: "r6", mcp: { result: { structuredContent: { workflow: "capability_discover", result_count: 1 } } } });
       if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: { workflow: "capability_audit", healthy: true } } } });
+      if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started" } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: { workflow: "agent_mission", execution: "planned" } } } });
       if (path === "/v1/tools/refuse") return jsonResponse({ ok: true, tool: "refuse", request_id: "r2", mcp: { result: { isError: true, structuredContent: { reason: "blocked" } } }, guarantee: "shared" });
       return jsonResponse({ ok: true });
@@ -47,9 +48,12 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });
   const capabilityAudit = await client.capabilityAudit({ include_groups: false });
+  const route = await client.capabilityRoute({ goal: "compose evidence", needs: [{ id: "oncology", query: "oncology" }] });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilityAudit.mcp.result.structuredContent.workflow, "capability_audit");
   assert.equal(capabilityAudit.mcp.result.structuredContent.healthy, true);
+  assert.equal(route.mcp.result.structuredContent.workflow, "capability_route");
+  assert.equal(route.mcp.result.structuredContent.execution, "not_started");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   await assert.rejects(client.callTool("unsafe/name"), ArgumentError);

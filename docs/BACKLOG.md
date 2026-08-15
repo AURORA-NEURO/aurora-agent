@@ -188,6 +188,9 @@ routing evidence only and do not grant permission or assert readiness.
 The companion `capability_audit` verifies that every catalogued callable has an authoritative
 transport schema and that every advertised schema is catalogued, while preserving intentional
 multi-group membership and per-domain coverage rows.
+`capability_route` batches named cross-domain needs into a reproducible proposal with explicit
+versus ranked resolution status, bounded candidate unions, optional authoritative schemas, and an
+unambiguous no-execution boundary; the caller still reviews arguments before constructing a mission.
 
 
 ## §11 Developer Platform — 6 uncovered
