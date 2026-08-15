@@ -30,6 +30,12 @@ from prism_sdk import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilitySchemaQualityReport,
+    ConformanceCaseReport,
+    ConformancePyramidReport,
+    ConformanceReleaseDecisionReport,
+    ConformanceRunArgs,
+    ConformanceRunReport,
+    ConformanceSuiteReport,
     DeliveryReadinessReport,
     DeveloperDeliveryAuditReport,
     developer_delivery_audit_report,
@@ -65,6 +71,7 @@ from prism_sdk import (
     TabularSemanticLossReport,
     analytics_request,
     tabular_ingest_report,
+    conformance_run_report,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -528,6 +535,41 @@ def tabular_ingest_payload() -> dict:
     }
 
 
+def conformance_run_payload() -> dict:
+    return {
+        "ok": True,
+        "suite": {
+            "id": "fiber-compiler-conformance",
+            "version": "0.1.0",
+            "digest": "d" * 64,
+            "fixture_manifest_id": "fixture-manifest-1",
+            "fixture_count": 2,
+            "synthetic_fixture_count": 1,
+            "case_count": 4,
+            "passed": 3,
+            "failed": 1,
+            "unsupported": 0,
+            "errored": 0,
+            "fixture_drift": [],
+            "pyramid": {"counts": {"unit": 1, "property": 1, "golden": 1, "conformance": 1, "end_to_end": 0}},
+            "fully_conformant": False,
+        },
+        "release_decision": {
+            "decision": "blocked",
+            "suite_id": "fiber-compiler-conformance",
+            "suite_version": "0.1.0",
+            "met": ["no_fixture_drift"],
+            "unmet": [{"gate": "required_requirements_pass", "because": "one mandatory requirement failed", "evidence": ["case-2 (typed refusal) is failed"]}],
+        },
+        "summary": "fiber-compiler-conformance 0.1.0 against reference 0.1.0: 3 passed, 1 failed, 0 unsupported, 0 errored",
+        "results": [
+            {"case_id": "case-1", "title": "deterministic compile", "layer": "unit", "requirement": "must", "enforces": ["determinism"], "invariant": "same input has same digest", "expectations": ["embedded_digest_verifies"], "outcome": {"outcome": "passed"}},
+            {"case_id": "case-2", "title": "typed refusal", "layer": "conformance", "requirement": "must", "enforces": ["typed_failure"], "invariant": "refusal is structured", "expectations": ["fails_with"], "outcome": {"outcome": "failed", "expectation": "fails_with", "detail": "missing error kind"}},
+        ],
+        "guarantees": ["fixture digests are verified before case results are trusted"],
+    }
+
+
 class AnalyticsModelTests(unittest.TestCase):
     def test_biological_adapter_registry_distinguishes_dependency_states(self) -> None:
         request = AdapterPlanRequest(
@@ -730,6 +772,28 @@ class AnalyticsModelTests(unittest.TestCase):
         payload["conformance"] = dict(payload["conformance"])
         payload["conformance"]["verified"] = False
         self.assertFalse(TabularIngestReport.from_wire(payload).conformance_verified)
+
+    def test_conformance_run_report_preserves_pyramid_cases_and_blocking_gates(self) -> None:
+        request = ConformanceRunArgs(include_details=True, max_items=2)
+        self.assertEqual(request.to_mcp_arguments(), {"include_details": True, "max_items": 2})
+        report = ConformanceRunReport.from_wire(conformance_run_payload())
+        self.assertIsInstance(report.suite, ConformanceSuiteReport)
+        self.assertIsInstance(report.suite.pyramid, ConformancePyramidReport)
+        self.assertIsInstance(report.results[0], ConformanceCaseReport)
+        self.assertIsInstance(report.release_decision, ConformanceReleaseDecisionReport)
+        self.assertFalse(report.release_ready)
+        self.assertEqual(report.release_decision.blocking_gates, ("required_requirements_pass",))
+        self.assertEqual(report.suite.pyramid.total, 4)
+
+    def test_conformance_run_report_extracts_http_projection_and_reconciles_decision(self) -> None:
+        report = conformance_run_report({"ok": True, "mcp": {"result": {"structuredContent": conformance_run_payload()}}})
+        self.assertTrue(report.details_included)
+        self.assertEqual(report.summary.split()[0], "fiber-compiler-conformance")
+        payload = conformance_run_payload()
+        payload["release_decision"] = dict(payload["release_decision"])
+        payload["release_decision"]["suite_id"] = "other-suite"
+        with self.assertRaises(ArgumentError):
+            ConformanceRunReport.from_wire(payload)
 
     def test_models_emit_the_exact_rust_wire_shape(self) -> None:
         request = analytics_request(
@@ -1144,6 +1208,12 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(report.source_id, "cohort.csv")
         ingest.assert_called_once_with(request)
 
+    def test_sync_workspace_typed_conformance_report_delegates_to_raw_run(self) -> None:
+        with patch.object(Workspace, "conformance_run", return_value=conformance_run_payload()) as run:
+            report = Workspace(None).conformance_run_report(include_details=True, max_items=2)  # type: ignore[arg-type]
+        self.assertFalse(report.release_ready)
+        run.assert_called_once_with(include_details=True, max_items=2)
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -1338,6 +1408,17 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             report = await AsyncWorkspace(None).tabular_ingest_report(request)  # type: ignore[arg-type]
         self.assertEqual(report.omitted_facts, 1)
         ingest.assert_awaited_once_with(request)
+
+    async def test_async_workspace_typed_conformance_report_delegates_to_raw_run(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "conformance_run",
+            new_callable=AsyncMock,
+            return_value=conformance_run_payload(),
+        ) as run:
+            report = await AsyncWorkspace(None).conformance_run_report(include_details=True, max_items=2)  # type: ignore[arg-type]
+        self.assertEqual(report.release_decision.blocking_gates, ("required_requirements_pass",))
+        run.assert_awaited_once_with(include_details=True, max_items=2)
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ from .capability import (
     capability_discover_report,
     capability_route_review_report,
 )
+from .conformance import ConformanceRunReport, conformance_run_report
 from .context_requests import (
     ContextLayer,
     FiberCompileRequest,
@@ -701,6 +702,32 @@ class ApiClient:
         """Return typed HTTP manifest, conformance, loss, and fact evidence."""
 
         return tabular_ingest_report(self.tabular_ingest(request))
+
+    def conformance_run(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Run the shipped fixture-verified suite through the HTTP gateway."""
+
+        if not isinstance(include_details, bool):
+            raise ArgumentError("include_details must be a boolean")
+        if isinstance(max_items, bool) or not isinstance(max_items, int) or not 1 <= max_items <= 1_000:
+            raise ArgumentError("max_items must be between 1 and 1000")
+        return self.call_tool("conformance_run", {"include_details": include_details, "max_items": max_items})
+
+    def conformance_run_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> ConformanceRunReport:
+        """Return typed HTTP suite, case, pyramid, and release evidence."""
+
+        return conformance_run_report(
+            self.conformance_run(include_details=include_details, max_items=max_items)
+        )
 
     def biocapability_evidence_audit(
         self,
@@ -1555,6 +1582,32 @@ class AsyncApiClient:
         """Return typed async HTTP tabular conformance and loss evidence."""
 
         return tabular_ingest_report(await self.tabular_ingest(request))
+
+    async def conformance_run(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.conformance_run`."""
+
+        if not isinstance(include_details, bool):
+            raise ArgumentError("include_details must be a boolean")
+        if isinstance(max_items, bool) or not isinstance(max_items, int) or not 1 <= max_items <= 1_000:
+            raise ArgumentError("max_items must be between 1 and 1000")
+        return await self.call_tool("conformance_run", {"include_details": include_details, "max_items": max_items})
+
+    async def conformance_run_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> ConformanceRunReport:
+        """Return typed async HTTP conformance and release evidence."""
+
+        return conformance_run_report(
+            await self.conformance_run(include_details=include_details, max_items=max_items)
+        )
 
     async def biocapability_evidence_audit(
         self,

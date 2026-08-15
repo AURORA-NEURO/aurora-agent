@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, TabularIngestReport, TabularIngestRequest, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, TabularIngestReport, TabularIngestRequest, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -58,6 +58,17 @@ def tabular_ingest_payload() -> dict:
         "facts": [{"id": "fact-1", "provides": "subject", "value": "S1"}],
         "omitted_facts": 0,
         "limitations": ["source truth remains caller-owned"],
+    }
+
+
+def conformance_run_payload() -> dict:
+    return {
+        "ok": True,
+        "suite": {"id": "fiber-compiler-conformance", "version": "0.1.0", "digest": "d" * 64, "fixture_manifest_id": "fixture-manifest-1", "fixture_count": 1, "synthetic_fixture_count": 0, "case_count": 1, "passed": 1, "failed": 0, "unsupported": 0, "errored": 0, "fixture_drift": [], "pyramid": {"counts": {"unit": 1}}, "fully_conformant": True},
+        "release_decision": {"decision": "release", "suite_id": "fiber-compiler-conformance", "suite_version": "0.1.0", "suite_digest": "d" * 64, "implementation": "reference 0.1.0", "gates": ["no_fixture_drift"]},
+        "summary": "fiber-compiler-conformance 0.1.0 against reference 0.1.0: 1 passed, 0 failed, 0 unsupported, 0 errored",
+        "results": None,
+        "guarantees": ["fixture digests are verified"],
     }
 
 
@@ -281,7 +292,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -418,6 +429,10 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(
             client.tabular_ingest(tabular_request)["mcp"]["result"]["source_id"],
             "cohort.csv",
+        )
+        self.assertEqual(
+            client.conformance_run(include_details=True, max_items=2)["mcp"]["result"]["max_items"],
+            2,
         )
         evidence_request = BioCapabilityEvidenceAuditRequest(
             [EvidenceItem("grounding", "evidence_grounding", "observed", support={"source": "ledger", "scope": "pack/1"})],
@@ -588,6 +603,14 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertTrue(report.conformance_verified)
         ingest.assert_called_once_with(request)
 
+    def test_http_typed_conformance_report_delegates_to_raw_helper(self) -> None:
+        with patch.object(ApiClient, "conformance_run", return_value=conformance_run_payload()) as run:
+            report = ApiClient(self.base_url).conformance_run_report(include_details=False, max_items=100)
+        self.assertIsInstance(report, ConformanceRunReport)
+        self.assertTrue(report.release_ready)
+        self.assertFalse(report.details_included)
+        run.assert_called_once_with(include_details=False, max_items=100)
+
     def test_http_arguments_and_async_facade(self) -> None:
         with self.assertRaises(ArgumentError):
             ApiClient(self.base_url, bearer_token="short")
@@ -668,6 +691,15 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertIsInstance(report, TabularIngestReport)
             self.assertEqual(report.facts[0]["value"], "S1")
             ingest.assert_awaited_once_with(request)
+            with patch.object(
+                AsyncApiClient,
+                "conformance_run",
+                new_callable=AsyncMock,
+                return_value=conformance_run_payload(),
+            ) as run:
+                report = await client.conformance_run_report(include_details=False, max_items=100)
+            self.assertTrue(report.release_ready)
+            run.assert_awaited_once_with(include_details=False, max_items=100)
             evidence_request = BioCapabilityEvidenceAuditRequest(
                 [EvidenceItem("grounding", "evidence_grounding", "observed", support={"source": "ledger", "scope": "pack/1"})],
                 [ClaimRequest("claim", "grounded profile", ("evidence_grounding",))],

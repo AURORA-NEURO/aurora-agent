@@ -20,6 +20,8 @@ import type {
   AdapterPlanResult,
   TabularIngestArgs,
   TabularIngestResult,
+  ConformanceRunArgs,
+  ConformanceRunResult,
   BioAtlasPublicationAuditArgs,
   BioAtlasPublicationAuditResult,
   BioCapabilityEvidenceAuditArgs,
@@ -285,6 +287,10 @@ export class ApiClient {
 
   async tabularIngest(args: TabularIngestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<TabularIngestResult>> {
     return this.callTool<TabularIngestResult>("tabular_ingest", args, options);
+  }
+
+  async conformanceRun(args: ConformanceRunArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<ConformanceRunResult>> {
+    return this.callTool<ConformanceRunResult>("conformance_run", args, options);
   }
 
   async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AgentMissionReport>> {

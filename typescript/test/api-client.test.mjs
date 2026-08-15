@@ -191,6 +191,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         omitted_facts: 0,
         limitations: ["source truth remains caller-owned"],
       } } } });
+      if (path === "/v1/tools/conformance_run") return jsonResponse({ ok: true, tool: "conformance_run", request_id: "r12", mcp: { result: { structuredContent: {
+        ok: true,
+        suite: { id: "fiber-compiler-conformance", version: "0.1.0", digest: "d".repeat(64), fixture_manifest_id: "fixture-manifest-1", fixture_count: 1, synthetic_fixture_count: 0, case_count: 1, passed: 1, failed: 0, unsupported: 0, errored: 0, fixture_drift: [], pyramid: { counts: { unit: 1 } }, fully_conformant: true },
+        release_decision: { decision: "release", suite_id: "fiber-compiler-conformance", suite_version: "0.1.0", suite_digest: "d".repeat(64), implementation: "reference 0.1.0", gates: ["no_fixture_drift"] },
+        summary: "fiber-compiler-conformance 0.1.0 against reference 0.1.0: 1 passed, 0 failed, 0 unsupported, 0 errored",
+        results: null,
+        guarantees: ["fixture digests are verified"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -366,6 +374,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   });
   const adapter = await client.adapterPlan({ source_id: "scan-1", source_kind: "bytes", declared_format: "application/dicom", available_dependencies: ["pydicom"] });
   const tabular = await client.tabularIngest({ source_id: "cohort.csv", profile: { profile_id: "RG-DEMO-001" }, csv: "subject\nS1\n", format: "text/csv", include_facts: true });
+  const conformance = await client.conformanceRun({ include_details: false, max_items: 100 });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -391,6 +400,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(adapter.mcp.result.structuredContent.selected_adapter.id, "bioprism.tabular");
   assert.equal(tabular.mcp.result.structuredContent.conformance.verified, true);
   assert.equal(tabular.mcp.result.structuredContent.facts[0].value, "S1");
+  assert.equal(conformance.mcp.result.structuredContent.release_decision.decision, "release");
+  assert.equal(conformance.mcp.result.structuredContent.suite.pyramid.counts.unit, 1);
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

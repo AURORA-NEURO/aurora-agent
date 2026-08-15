@@ -222,6 +222,12 @@ invent defaults:
   independent conformance check. `Workspace`, `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`
   expose the same request/result boundary; a passed report is still mapping/accounting evidence,
   not proof that the source declarations are scientifically true.
+- `ConformanceRunArgs` and `conformance_run(...)` run the shipped fixture-verified FIBER suite;
+  `ConformanceRunReport` preserves fixture drift, suite digest, pyramid counts, bounded case
+  outcomes, and the noncompensatory release decision. `conformance_run_report(...)` is available
+  on `Workspace`, `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`; blocked decisions retain
+  every unmet gate and actionable evidence, while `results=None` explicitly means details were
+  not requested rather than that the suite had no cases.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

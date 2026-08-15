@@ -157,6 +157,10 @@ The transport SDKs also expose `tabular_ingest` as a typed execution boundary. I
 source/profile digests, conformance check statuses, loss variants (`lossless`, `lossy`, and
 `unaudited`), bounded facts, and explicit omitted-fact counts; a successful transport call never
 silently upgrades a mapping-accounting result into scientific validity.
+The same SDK parity now covers `conformance_run`: suite digest and fixture drift, pyramid shape,
+per-case outcome details, and the release decision's met/unmet gate evidence remain typed across
+MCP and HTTP. A blocked gate is retained as a diagnostic rather than reduced to `false`, and
+release evidence remains local conformance evidence rather than deployment or clinical approval.
 The Python adapter layer now also contains a bounded text VCF reader: it validates the complete
 record stream, preserves raw INFO/FORMAT spellings beside typed projections, retains source and
 line hashes, and reports reference-build, provenance, type, and precision limitations without

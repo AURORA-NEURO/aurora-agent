@@ -848,6 +848,76 @@ export interface TabularIngestResult extends JsonObject {
   limitations: string[];
 }
 
+export interface ConformanceRunArgs extends JsonObject {
+  include_details?: boolean;
+  max_items?: number;
+}
+
+export interface ConformanceOutcomeResult extends JsonObject {
+  outcome: "passed" | "failed" | "unsupported" | "errored";
+  expectation?: string;
+  detail?: string;
+  reason?: string;
+}
+
+export interface ConformanceCaseResult extends JsonObject {
+  case_id: string;
+  title: string;
+  layer: "unit" | "property" | "golden" | "conformance" | "end_to_end";
+  requirement: "must" | "should";
+  enforces: string[];
+  invariant: string;
+  expectations: string[];
+  outcome: ConformanceOutcomeResult;
+}
+
+export interface ConformancePyramidResult extends JsonObject {
+  counts: JsonObject;
+}
+
+export interface ConformanceSuiteResult extends JsonObject {
+  id: string;
+  version: string;
+  digest: string;
+  fixture_manifest_id: string;
+  fixture_count: number;
+  synthetic_fixture_count: number;
+  case_count: number;
+  passed: number;
+  failed: number;
+  unsupported: number;
+  errored: number;
+  fixture_drift: JsonObject[];
+  pyramid: ConformancePyramidResult;
+  fully_conformant: boolean;
+}
+
+export interface ConformanceUnmetGateResult extends JsonObject {
+  gate: string;
+  because: string;
+  evidence: string[];
+}
+
+export interface ConformanceReleaseDecisionResult extends JsonObject {
+  decision: "release" | "blocked";
+  suite_id: string;
+  suite_version: string;
+  suite_digest?: string;
+  implementation?: string;
+  gates?: string[];
+  met?: string[];
+  unmet?: ConformanceUnmetGateResult[];
+}
+
+export interface ConformanceRunResult extends JsonObject {
+  ok: boolean;
+  suite: ConformanceSuiteResult;
+  release_decision: ConformanceReleaseDecisionResult;
+  summary: string;
+  results: ConformanceCaseResult[] | null;
+  guarantees: string[];
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;

@@ -156,6 +156,9 @@ source-specific conformance.
 `tabularIngest` returns typed `TabularIngestResult` evidence for the real CSV/TSV adapter: explicit
 manifest identity, conformance check outcomes, semantic-loss variant, bounded facts, and omitted
 fact counts. It does not infer a format or turn adapter conformance into source truth.
+`conformanceRun` returns typed `ConformanceRunResult` suite and release evidence, including fixture
+drift, test-pyramid counts, bounded case outcomes, and all unmet noncompensatory gates. A null
+`results` field means case details were not requested; it is not an empty-suite claim.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

@@ -30,6 +30,7 @@ from .capability import (
     capability_route_report,
     capability_route_review_report,
 )
+from .conformance import ConformanceRunArgs, ConformanceRunReport, conformance_run_report
 from .context_requests import (
     ContextLayer,
     FiberCompileRequest,
@@ -517,6 +518,29 @@ class Workspace:
         """Return typed manifest, conformance, semantic-loss, and bounded fact evidence."""
 
         return tabular_ingest_report(self.tabular_ingest(request))
+
+    def conformance_run(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Run the shipped fixture-verified conformance suite without mutating artifacts."""
+
+        request = ConformanceRunArgs(include_details, max_items)
+        return self.tool("conformance_run", request.to_mcp_arguments())
+
+    def conformance_run_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> ConformanceRunReport:
+        """Return typed suite, pyramid, case, and noncompensatory release evidence."""
+
+        return conformance_run_report(
+            self.conformance_run(include_details=include_details, max_items=max_items)
+        )
 
     def oracle_combine(
         self,
@@ -1327,6 +1351,29 @@ class AsyncWorkspace:
         """Return typed async tabular conformance and loss evidence."""
 
         return tabular_ingest_report(await self.tabular_ingest(request))
+
+    async def conformance_run(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.conformance_run`."""
+
+        request = ConformanceRunArgs(include_details, max_items)
+        return await self.tool("conformance_run", request.to_mcp_arguments())
+
+    async def conformance_run_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> ConformanceRunReport:
+        """Return typed async conformance and release evidence."""
+
+        return conformance_run_report(
+            await self.conformance_run(include_details=include_details, max_items=max_items)
+        )
 
     async def oracle_combine(
         self,
