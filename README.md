@@ -302,6 +302,12 @@ attestations. It keeps the crucial nonclaims beside every result: this is a boun
 simulation, not a fuzzer, runtime sandbox, detector, credential revoker, incident channel,
 containment executor, notification service, or durable audit store. `weave_protocol_catalog`
 exposes typed agent-act antecedents.
+`bioatlas_publication_audit` composes atlas coverage, optional evidence-conditioned claim readiness,
+moderation/card rendering, and leaderboard ranking into explicit publication targets. It keeps atlas
+holes, withheld scores, unranked entries, and absent evidence visible; numeric public scores require
+both the disclosure-gated card result and an evidence audit, and no release claim is emitted without
+an explicit target request. It remains an in-memory contract workflow rather than a web publisher,
+identity service, assay runner, leakage detector, scientific truth oracle, or clinical approval.
 `bioethics_action_review` partitions research plans from physical actions and only produces an
 external referral after both required human approvals are present; `bioethics_human_subject_screen`
 keeps institutional review, consent, and return-of-results checks separate; `bioethics_dual_use_review`

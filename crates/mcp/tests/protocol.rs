@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 111);
+    assert_eq!(tools.len(), 112);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -781,6 +781,218 @@ fn hub_cards_and_leaderboards_compose_moderation_disclosure_and_comparability_ga
         json!({ "reason": "not_published", "state": null })
     );
     assert!(leaderboard["headline"].as_str().unwrap().contains("Rank 1"));
+}
+
+#[test]
+fn bioatlas_publication_audit_binds_atlas_evidence_card_and_leaderboard_targets() {
+    fn cap(id: &str) -> CapabilityId {
+        CapabilityId::parse(id).unwrap()
+    }
+
+    let ontology = CapabilityOntology::from_nodes(
+        "publication-atlas/1",
+        [
+            CapabilityNode::new(
+                cap("agent"),
+                "agent",
+                CapabilityFamily::DomainReasoning,
+                CapabilityDimension::Competence,
+            ),
+            CapabilityNode::new(
+                cap("measured"),
+                "measured",
+                CapabilityFamily::Verification,
+                CapabilityDimension::Reliability,
+            )
+            .with_parent(cap("agent")),
+            CapabilityNode::new(
+                cap("efficient"),
+                "efficient",
+                CapabilityFamily::ToolUse,
+                CapabilityDimension::Efficiency,
+            )
+            .with_parent(cap("agent")),
+        ],
+    )
+    .unwrap();
+    let atlas = Atlas::builder(ontology)
+        .evidence(EvidenceRecord::new(
+            "agent-trial",
+            cap("agent"),
+            "publication-atlas/1",
+            EvidenceTier::PublicObservedWorld,
+            OracleTier::Deterministic,
+            TrialOutcome::Pass,
+        ))
+        .evidence(EvidenceRecord::new(
+            "measured-trial",
+            cap("measured"),
+            "publication-atlas/1",
+            EvidenceTier::PublicObservedWorld,
+            OracleTier::Deterministic,
+            TrialOutcome::Pass,
+        ))
+        .evidence(EvidenceRecord::new(
+            "efficient-trial",
+            cap("efficient"),
+            "publication-atlas/1",
+            EvidenceTier::PublicObservedWorld,
+            OracleTier::Deterministic,
+            TrialOutcome::Pass,
+        ))
+        .build()
+        .unwrap();
+
+    let review = call(
+        &mut server(),
+        "hub_submission_review",
+        hub_review_fixture("sub-bioatlas-publication", b"bioatlas-publication"),
+    );
+    assert_eq!(review["ok"], json!(true));
+    let pack = ContentHash::of_bytes(b"bioatlas-publication-pack");
+    let disclosure = call(
+        &mut server(),
+        "hub_disclosure_review",
+        json!({
+            "actions": [
+                { "kind": "declare_held_out", "pack": serde_json::to_value(&pack).unwrap() },
+                { "kind": "disclose", "pack": serde_json::to_value(&pack).unwrap(), "at": 5 }
+            ]
+        }),
+    );
+    assert_eq!(disclosure["ok"], json!(true));
+
+    let conditions = ComparabilityConditions {
+        pack: pack.clone(),
+        pack_version: "1.0.0".into(),
+        split: "hidden-holdout".into(),
+        metric: "atlas-publication-score".into(),
+        higher_is_better: true,
+        oracle_tier: "deterministic".into(),
+        access_mode: AccessTier::Public,
+        budget: BudgetEnvelope::unbounded(),
+        protocol: ContentHash::of_bytes(b"bioatlas-publication-protocol"),
+    };
+    let board = Board {
+        id: BoardId::parse("bioatlas-publication").unwrap(),
+        conditions: conditions.clone(),
+        min_verification: VerificationStatus::SelfReported,
+    };
+    let entry = Entry {
+        submission: SubmissionId::parse("sub-bioatlas-publication").unwrap(),
+        conditions,
+        score: HubScore::point(0.91),
+        computed_at: HubEpoch(5),
+        acknowledges_disclosure: true,
+        scale: EvidenceScale::new(10, 5),
+    };
+
+    let evidence_audit = json!({
+        "vectors": [
+            metric_vector("system-a", 0.91, 0.88, "pack/4"),
+            metric_vector("system-b", 0.71, 0.69, "pack/4")
+        ],
+        "evidence": [{
+            "id": "grounding-1",
+            "dimension": "evidence_grounding",
+            "status": "observed",
+            "source": "publication-fixture",
+            "scope": "public-atlas-card"
+        }],
+        "claim_requests": [{
+            "id": "grounded-card",
+            "claim": "the public atlas card is grounded in the supplied source",
+            "requires": ["evidence_grounding"]
+        }]
+    });
+    let atlas_json = serde_json::to_value(atlas).unwrap();
+    let result = call(
+        &mut server(),
+        "bioatlas_publication_audit",
+        json!({
+            "atlas": atlas_json.clone(),
+            "evidence_audit": evidence_audit,
+            "card": {
+                "moderation": review["ledger"].clone(),
+                "submission": "sub-bioatlas-publication",
+                "score": serde_json::to_value(HubScore::point(0.91)).unwrap(),
+                "pack": serde_json::to_value(&pack).unwrap(),
+                "computed_at": 5,
+                "acknowledges_disclosure": true,
+                "disclosure": disclosure["ledger"].clone()
+            },
+            "leaderboard": {
+                "board": serde_json::to_value(board).unwrap(),
+                "entries": [serde_json::to_value(entry).unwrap()],
+                "moderation": review["ledger"].clone(),
+                "disclosure": disclosure["ledger"].clone()
+            },
+            "release_request": {
+                "id": "publication-fixture-release",
+                "targets": [
+                    "atlas_profile",
+                    "atlas_aggregation",
+                    "evidence_claims",
+                    "card_render",
+                    "numeric_card_score",
+                    "ranked_leaderboard"
+                ]
+            }
+        }),
+    );
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["workflow"], json!("bioatlas_publication_audit"));
+    assert_eq!(result["release_request"]["ready"], json!(true));
+    assert_eq!(
+        result["cross_layer"]["numeric_score_evidence_ready"],
+        json!(true)
+    );
+    assert_eq!(
+        result["cross_layer"]["leaderboard_unranked_count"],
+        json!(0)
+    );
+    assert_eq!(result["card"]["score"]["attached"], json!(true));
+
+    let no_request = call(
+        &mut server(),
+        "bioatlas_publication_audit",
+        json!({ "atlas": atlas_json.clone() }),
+    );
+    assert_eq!(no_request["ok"], json!(true));
+    assert_eq!(no_request["release_request"]["present"], json!(false));
+    assert_eq!(no_request["release_request"]["ready"], json!(false));
+
+    let numeric_without_evidence = call(
+        &mut server(),
+        "bioatlas_publication_audit",
+        json!({
+            "atlas": atlas_json,
+            "card": {
+                "moderation": review["ledger"].clone(),
+                "submission": "sub-bioatlas-publication",
+                "score": serde_json::to_value(HubScore::point(0.91)).unwrap(),
+                "pack": serde_json::to_value(&pack).unwrap(),
+                "computed_at": 5,
+                "acknowledges_disclosure": true,
+                "disclosure": disclosure["ledger"].clone()
+            },
+            "release_request": {
+                "id": "numeric-without-evidence",
+                "targets": ["numeric_card_score"]
+            }
+        }),
+    );
+    assert_eq!(
+        numeric_without_evidence["release_request"]["ready"],
+        json!(false)
+    );
+    assert!(
+        numeric_without_evidence["release_request"]["targets"][0]["blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|blocker| blocker == "evidence_audit_missing")
+    );
 }
 
 #[test]

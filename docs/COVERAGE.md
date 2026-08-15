@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 111 callable tools. That count is intentionally
+The MCP integration layer currently exposes 112 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -45,6 +45,13 @@ unknown dimensions, distinguishes observed/reproduced evidence from declarations
 explicitly requested claims. Optional value-of-information, reference, worldline, and reexecution
 subaudits are included as bounded projections; this does not create data acquisition, biological
 assays, causal estimators, replication infrastructure, clinical validation, or multi-agent runtime.
+`bioatlas_publication_audit` now binds that evidence posture to the public-hub publication path:
+atlas coverage, optional evidence claims, moderation/card rendering, and leaderboard ranking are
+reported as separate gates with explicit release targets. Numeric card scores require both disclosure
+eligibility and evidence-conditioned readiness; absent requests, atlas holes, withheld scores, and
+unranked entries stay visible rather than becoming implicit publication passes. This remains a
+bounded in-memory composition and does not create a web publisher, identity service, assay runner,
+leakage detector, or clinical approval path.
 
 The table below is a snapshot; the script is the live source.
 

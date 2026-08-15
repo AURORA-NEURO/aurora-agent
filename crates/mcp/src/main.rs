@@ -62,7 +62,7 @@ fn main() {
                      weavelang_compile,\n\
                      choreography_check, conformance_run,\n\
                      provider_capability_gate, sdk_registry_check, hub_submission_review, hub_disclosure_review,\n\
-                     hub_card_render, hub_leaderboard_render, telemetry_project,\n\
+                     hub_card_render, hub_leaderboard_render, bioatlas_publication_audit, telemetry_project,\n\
                      governance_schema_check,\n\
                      developer_platform_status, safety_posture, security_redteam_simulate, weave_protocol_catalog, world_index,\n\
                      workspace_capabilities, repository_catalog, repository_bundle, repository_impact\n\

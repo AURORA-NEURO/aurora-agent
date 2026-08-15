@@ -64,6 +64,12 @@ unknown evidence, and keeps declared evidence separate from measured support. Th
 agent-callable depth but does not supply assays, estimators, replication infrastructure, external
 data acquisition, clinical validation, or distributed agent execution, so the remaining §33
 blueprint entries stay in the attention list below.
+The public-hub transport now also exposes `bioatlas_publication_audit`, which binds the atlas,
+evidence-conditioned claim, moderation/card, and leaderboard contracts into one explicit target
+workflow. It refuses implicit release claims, requires evidence for numeric card scores, and keeps
+holes, withheld scores, and unranked entries visible. This is a continuation-safe in-memory audit;
+it does not publish a web page, authenticate identities, execute assays, detect leakage, or create
+clinical authority, so the remaining §34 interface/integration entries stay in the attention list.
 The transport also exposes evidence-backed routing, token-context planning, and deterministic
 WeaveLang compilation/replay inspection. These calls remain bounded library integrations: routing
 cannot synthesize an architecture, token planning does not render or retrieve payloads, and
