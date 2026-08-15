@@ -20,8 +20,9 @@ pub mod http;
 pub mod router;
 
 pub use events::{
-    ApiEvent, DeliveryPage, DeliveryView, EventLog, EventMetrics, EventPage, SubscriptionView,
-    WebhookEnvelope, EVENT_STATE_SCHEMA_VERSION, MAX_EVENT_STATE_FILE_BYTES,
+    ApiEvent, DeliveryFailure, DeliveryPage, DeliveryRunReport, DeliverySendError, DeliverySender,
+    DeliveryView, EventLog, EventMetrics, EventPage, SubscriptionView, WebhookEnvelope,
+    DEFAULT_DELIVERY_WORKER_BATCH, EVENT_STATE_SCHEMA_VERSION, MAX_EVENT_STATE_FILE_BYTES,
 };
 pub use http::{read_request, HttpError, HttpRequest, HttpResponse};
 pub use router::{

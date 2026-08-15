@@ -72,6 +72,10 @@ An independent optional `--event-state` path now checkpoints retained event rows
 continuity under the same 64 MiB bound. It intentionally excludes webhook secrets, subscriptions,
 and pending deliveries; the API and both SDKs expose status/flush checks so operators can verify
 which recovery boundary is enabled instead of inferring it from a 2xx response.
+The API crate also exposes a bounded `DeliverySender`/`ApiRouter::deliver_once` cycle for embedded
+workers: successful signed sends are acknowledged, retryable failures advance through the existing
+ten-attempt cap, and permanent or exhausted failures remain pending. Network/TLS and egress policy
+remain outside the dependency-free gateway.
 Python now exposes typed inventory pages plus bounded sync/async waits that retain the last live
 job on timeout; TypeScript exposes the same wait contract with abortable polling and a typed timeout
 error. These helpers coordinate every domain mission without claiming durable scheduling.

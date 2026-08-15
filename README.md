@@ -321,6 +321,9 @@ and pending deliveries remain process-local. `--event-state` separately checkpoi
 event cursor while never persisting webhook secrets or delivery state. It deliberately reports
 gRPC, TLS termination, distributed scheduling, and external delivery as absent rather than
 inferring them from an HTTP listener.
+Embedded Rust consumers can plug an egress-controlled `DeliverySender` into
+`ApiRouter::deliver_once(...)` to acknowledge successful signed webhook sends and classify bounded
+retryable/permanent failures without giving the gateway arbitrary network access.
 The serving path uses one immutable shared router across connection threads, atomically allocates
 request IDs, and clones ready MCP dispatch sessions per request. Mission, event, subscription, and
 delivery state remain independently bounded and synchronized, so unrelated domain calls do not

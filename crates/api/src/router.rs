@@ -6,7 +6,8 @@
 //! Rust implementation and produce the same evidence-bearing result.
 
 use crate::events::{
-    EventLog, EventMetrics, EVENT_STATE_SCHEMA_VERSION, MAX_EVENT_STATE_FILE_BYTES, MAX_FILTERS,
+    DeliveryRunReport, DeliverySender, EventLog, EventMetrics, EVENT_STATE_SCHEMA_VERSION,
+    MAX_EVENT_STATE_FILE_BYTES, MAX_FILTERS,
 };
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
@@ -531,6 +532,22 @@ impl ApiRouter {
             .lock()
             .map(|events| events.metrics())
             .unwrap_or_else(|_| unavailable_event_metrics())
+    }
+
+    /// Run one bounded webhook delivery cycle using an operator-owned transport.
+    pub fn deliver_once<S: DeliverySender>(
+        &self,
+        sender: &mut S,
+        max_batch: usize,
+    ) -> Result<DeliveryRunReport, String> {
+        let mut events = self
+            .events
+            .lock()
+            .map_err(|_| "event log is unavailable".to_string())?;
+        let report = events.deliver_once(sender, max_batch)?;
+        drop(events);
+        let _ = self.event_persistence.persist();
+        Ok(report)
     }
 
     pub fn limits(&self) -> (usize, usize) {

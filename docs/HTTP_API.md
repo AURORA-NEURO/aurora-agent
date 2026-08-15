@@ -147,6 +147,11 @@ never returned. A delivery worker should send the envelope, retain the `delivery
 when its own transport policy permits, and acknowledge exactly the IDs it has durably accepted.
 The gateway provides the outbox and signature; it does not open arbitrary outbound sockets,
 execute a scheduler, or claim delivery success merely because an envelope was created.
+Embedded Rust deployments can use `bioprism_api::DeliverySender` and
+`ApiRouter::deliver_once(...)` for the same bounded cycle: the callback receives the endpoint and
+already-signed envelope, while the router acknowledges successes, advances retryable attempts up
+to ten, and leaves permanent/exhausted failures pending with a typed `DeliveryRunReport`. The
+callback still owns HTTP/TLS, egress policy, and transport classification.
 
 ## Explicit nonclaims
 

@@ -19,6 +19,7 @@ pub const MAX_FILTERS: usize = 32;
 pub const MAX_RETRY_ATTEMPTS: u32 = 10;
 pub const EVENT_STATE_SCHEMA_VERSION: u64 = 1;
 pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
+pub const DEFAULT_DELIVERY_WORKER_BATCH: usize = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApiEvent {
@@ -88,6 +89,55 @@ pub struct EventMetrics {
     pub dropped_deliveries: u64,
     pub next_event_id: u64,
     pub next_delivery_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DeliveryFailure {
+    pub delivery_id: u64,
+    pub subscription_id: String,
+    pub attempt: u32,
+    pub retryable: bool,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DeliveryRunReport {
+    pub attempted: usize,
+    pub acknowledged: usize,
+    pub retried: usize,
+    pub failed: usize,
+    pub exhausted: usize,
+    pub failures: Vec<DeliveryFailure>,
+}
+
+/// Network boundary supplied by an operator-owned delivery worker.
+///
+/// The API crate hands the transport an already-signed envelope and endpoint. Implementations
+/// decide how to perform HTTP/TLS, classify retryability, and enforce their own egress policy.
+pub trait DeliverySender {
+    fn send(&mut self, endpoint: &str, envelope: &Value) -> Result<(), DeliverySendError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliverySendError {
+    pub retryable: bool,
+    pub message: String,
+}
+
+impl DeliverySendError {
+    pub fn retryable(message: impl Into<String>) -> Self {
+        Self {
+            retryable: true,
+            message: message.into(),
+        }
+    }
+
+    pub fn permanent(message: impl Into<String>) -> Self {
+        Self {
+            retryable: false,
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -515,6 +565,69 @@ impl EventLog {
         }
     }
 
+    /// Execute one bounded delivery cycle through a caller-owned transport.
+    ///
+    /// Successful sends are acknowledged idempotently. Retryable failures advance the signed
+    /// attempt and remain pending; permanent failures and exhausted attempts remain pending for
+    /// operator inspection rather than being deleted as if delivery succeeded.
+    pub fn deliver_once<S: DeliverySender>(
+        &mut self,
+        sender: &mut S,
+        max_batch: usize,
+    ) -> Result<DeliveryRunReport, String> {
+        if !(1..=1000).contains(&max_batch) {
+            return Err("delivery worker batch must be between 1 and 1000".into());
+        }
+        let subscriptions = self.subscriptions();
+        let mut remaining = max_batch;
+        let mut report = DeliveryRunReport {
+            attempted: 0,
+            acknowledged: 0,
+            retried: 0,
+            failed: 0,
+            exhausted: 0,
+            failures: Vec::new(),
+        };
+        for subscription in subscriptions {
+            if remaining == 0 {
+                break;
+            }
+            let page = self.deliveries(&subscription.id, 0, remaining)?;
+            for delivery in page.deliveries {
+                if remaining == 0 {
+                    break;
+                }
+                remaining -= 1;
+                report.attempted += 1;
+                match sender.send(&subscription.endpoint, &delivery.envelope) {
+                    Ok(()) => {
+                        self.acknowledge(&subscription.id, &[delivery.delivery_id])?;
+                        report.acknowledged += 1;
+                    }
+                    Err(error) => {
+                        let failure = DeliveryFailure {
+                            delivery_id: delivery.delivery_id,
+                            subscription_id: subscription.id.clone(),
+                            attempt: delivery.attempt,
+                            retryable: error.retryable,
+                            error: error.message,
+                        };
+                        if failure.retryable && delivery.attempt < MAX_RETRY_ATTEMPTS {
+                            self.retry(&subscription.id, &[delivery.delivery_id])?;
+                            report.retried += 1;
+                        } else if failure.retryable {
+                            report.exhausted += 1;
+                        } else {
+                            report.failed += 1;
+                        }
+                        report.failures.push(failure);
+                    }
+                }
+            }
+        }
+        Ok(report)
+    }
+
     pub fn sse(&self, page: &EventPage) -> Vec<u8> {
         let mut output = String::new();
         for event in &page.events {
@@ -758,5 +871,81 @@ mod tests {
         assert_eq!(restored.metrics().subscriptions, 0);
         assert_eq!(restored.metrics().pending_deliveries, 0);
         let _ = std::fs::remove_file(path);
+    }
+
+    struct TestSender {
+        calls: usize,
+        fail_once: bool,
+    }
+
+    impl DeliverySender for TestSender {
+        fn send(&mut self, _endpoint: &str, _envelope: &Value) -> Result<(), DeliverySendError> {
+            self.calls += 1;
+            if self.fail_once && self.calls == 1 {
+                Err(DeliverySendError::retryable("temporary transport failure"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn delivery_worker_acknowledges_success_and_retries_only_retryable_failure() {
+        let mut log = EventLog::new(4).unwrap();
+        log.register_subscription(
+            Some("worker"),
+            "https://example.test/hook",
+            Some(&["tool.completed".into()]),
+            "a-secret-key",
+        )
+        .unwrap();
+        log.emit("tool.completed", "tool", "req", json!({"ok": true}))
+            .unwrap();
+        let mut sender = TestSender {
+            calls: 0,
+            fail_once: true,
+        };
+        let first = log.deliver_once(&mut sender, 10).unwrap();
+        assert_eq!(first.attempted, 1);
+        assert_eq!(first.retried, 1);
+        assert_eq!(first.acknowledged, 0);
+        assert_eq!(
+            log.deliveries("worker", 0, 10).unwrap().deliveries[0].attempt,
+            2
+        );
+        let second = log.deliver_once(&mut sender, 10).unwrap();
+        assert_eq!(second.acknowledged, 1);
+        assert_eq!(log.deliveries("worker", 0, 10).unwrap().deliveries.len(), 0);
+    }
+
+    #[test]
+    fn delivery_worker_keeps_permanent_failure_pending_for_operator_review() {
+        struct PermanentSender;
+        impl DeliverySender for PermanentSender {
+            fn send(
+                &mut self,
+                _endpoint: &str,
+                _envelope: &Value,
+            ) -> Result<(), DeliverySendError> {
+                Err(DeliverySendError::permanent("certificate rejected"))
+            }
+        }
+        let mut log = EventLog::new(2).unwrap();
+        log.register_subscription(
+            Some("permanent"),
+            "https://example.test/hook",
+            None,
+            "a-secret-key",
+        )
+        .unwrap();
+        log.emit("tool.completed", "tool", "req", json!({"ok": true}))
+            .unwrap();
+        let report = log.deliver_once(&mut PermanentSender, 1).unwrap();
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.retried, 0);
+        assert_eq!(
+            log.deliveries("permanent", 0, 10).unwrap().deliveries.len(),
+            1
+        );
     }
 }

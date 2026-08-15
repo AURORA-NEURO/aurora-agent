@@ -4279,7 +4279,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 14000
+                "budget": 16000
             },
             "policy": "normative",
             "include_markdown": true,
