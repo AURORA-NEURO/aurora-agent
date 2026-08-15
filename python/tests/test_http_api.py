@@ -43,13 +43,19 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             )
         elif self.path.startswith("/v1/events"):
             self._send(200, {"ok": True, "page": {"events": [], "next_after": 0}})
+        elif self.path == "/v1/missions/async-1":
+            self._send(200, {"ok": True, "mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "result": {"mission_status": "succeeded"}})
         else:
             self._send(404, {"ok": False, "error": {"code": "not_found"}})
 
     def do_POST(self) -> None:  # noqa: N802
         size = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(size) or b"{}")
-        if self.path == "/v1/tools/echo":
+        if self.path == "/v1/missions":
+            self._send(202, {"ok": True, "mission_id": "async-1", "status": "queued", "cancel_requested": False})
+        elif self.path == "/v1/missions/async-1/cancel":
+            self._send(202, {"ok": True, "mission_id": "async-1", "status": "running", "cancel_requested": True, "cancel_reason": body.get("reason")})
+        elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
         elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
@@ -93,6 +99,10 @@ class HttpApiClientTests(unittest.TestCase):
         )
         self.assertTrue(mission.ok)
         self.assertEqual(client.call_tool("echo", {"value": 3})["mcp"]["result"]["value"], 3)
+        submitted = client.submit_mission(MissionRequest("async-1", "run", [MissionStep("one", "data", "read", "run", "echo", {"value": 1})]))
+        self.assertEqual(submitted.status, "queued")
+        self.assertEqual(client.mission_status("async-1").result["mission_status"], "succeeded")
+        self.assertTrue(client.cancel_mission("async-1", "operator stop").cancel_requested)
         self.assertEqual(
             client.capability_discover(query="oncology")["mcp"]["result"]["query"],
             "oncology",
@@ -194,6 +204,9 @@ class HttpApiClientTests(unittest.TestCase):
             )
             self.assertTrue(mission.fully_checked)
             self.assertEqual((await client.call_tool("echo", {"async": True}))["tool"], "echo")
+            self.assertEqual((await client.submit_mission(MissionRequest("async-1", "run", [MissionStep("one", "data", "read", "run", "echo", {"value": 1})]))).status, "queued")
+            self.assertEqual((await client.mission_status("async-1")).status, "succeeded")
+            self.assertTrue((await client.cancel_mission("async-1", "operator stop")).cancel_requested)
             self.assertEqual(
                 (await client.capability_route("async route", [{"id": "release", "tool": "bundle_verify"}]))["mcp"]["result"]["goal"],
                 "async route",

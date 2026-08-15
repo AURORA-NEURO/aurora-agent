@@ -26,7 +26,7 @@ pub use events::{
 pub use http::{read_request, HttpError, HttpRequest, HttpResponse};
 pub use router::{
     ApiConfig, ApiRouter, API_VERSION, DEFAULT_EVENT_CAPACITY, DEFAULT_MAX_BODY_BYTES,
-    DEFAULT_MAX_HEADER_BYTES,
+    DEFAULT_MAX_HEADER_BYTES, MAX_MISSION_JOBS,
 };
 
 use std::io::{BufReader, Write};

@@ -30,6 +30,7 @@ import type {
   MetricsAnalyticsAuditArgs,
   MetricsProfileAuditArgs,
   MissionAssembly,
+  MissionJob,
   MissionPreflightResult,
   MissionRouteSelection,
   RepositoryBundleArgs,
@@ -250,6 +251,31 @@ export class ApiClient {
 
   async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AgentMissionReport>> {
     return this.callTool<AgentMissionReport>("agent_mission", args, options);
+  }
+
+  /** Submit a validated mission to the cooperative asynchronous HTTP executor. */
+  async submitMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<MissionJob> {
+    if (!isObject(args)) throw new ArgumentError("mission arguments must be a JSON object");
+    return this.request<MissionJob>("POST", "/v1/missions", args, options);
+  }
+
+  /** Read the current asynchronous mission status and, once terminal, its authoritative report. */
+  async missionStatus(missionId: string, options?: ClientRequestOptions): Promise<MissionJob> {
+    const id = pathSegment(missionId, "mission id");
+    return this.request<MissionJob>("GET", `/v1/missions/${encodeURIComponent(id)}`, undefined, options);
+  }
+
+  /** Request cooperative cancellation; in-flight nested tools are allowed to return. */
+  async cancelMission(missionId: string, reason?: string, options?: ClientRequestOptions): Promise<MissionJob> {
+    const id = pathSegment(missionId, "mission id");
+    if (reason !== undefined) visible(reason, "reason", 2_048);
+    return this.request<MissionJob>("POST", `/v1/missions/${encodeURIComponent(id)}/cancel`, reason === undefined ? {} : { reason }, options);
+  }
+
+  /** Remove a terminal mission from the bounded in-process registry. */
+  async deleteMission(missionId: string, options?: ClientRequestOptions): Promise<JsonObject> {
+    const id = pathSegment(missionId, "mission id");
+    return this.request("DELETE", `/v1/missions/${encodeURIComponent(id)}`, undefined, options);
   }
 
   /** Review a mission against a live or caller-supplied catalogue without issuing any tool call. */

@@ -23,7 +23,9 @@ export const MISSION_TRACE_EVENTS = [
   "step.completed",
   "step.refused",
   "step.blocked",
+  "step.cancelled",
   "wave.completed",
+  "mission.cancelled",
   "mission.completed",
 ] as const;
 export const MAX_MISSION_STEPS = 128;

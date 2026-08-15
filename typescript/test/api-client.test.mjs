@@ -232,6 +232,33 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
 });
 
+test("client exposes asynchronous mission submission, status, and cancellation", async () => {
+  const client = new ApiClient({
+    baseUrl: "https://example.test",
+    fetch: async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/missions" && init.method === "POST") {
+        return jsonResponse({ ok: true, mission_id: "async-1", status: "queued", cancel_requested: false });
+      }
+      if (path === "/v1/missions/async-1" && init.method === "GET") {
+        return jsonResponse({ ok: true, mission_id: "async-1", status: "succeeded", cancel_requested: false, result: { mission_status: "succeeded" } });
+      }
+      if (path === "/v1/missions/async-1/cancel" && init.method === "POST") {
+        return jsonResponse({ ok: true, mission_id: "async-1", status: "running", cancel_requested: true, cancel_reason: "operator stop" }, 202);
+      }
+      return jsonResponse({ ok: false, error: { code: "not_found", message: path } }, 404);
+    },
+  });
+  const submitted = await client.submitMission({ mission_id: "async-1", goal: "run", steps: [] });
+  assert.equal(submitted.status, "queued");
+  const status = await client.missionStatus("async-1");
+  assert.equal(status.status, "succeeded");
+  assert.equal(status.result.mission_status, "succeeded");
+  const cancelled = await client.cancelMission("async-1", "operator stop");
+  assert.equal(cancelled.cancel_requested, true);
+  assert.equal(cancelled.cancel_reason, "operator stop");
+});
+
 test("tool catalogue keeps unsupported schema features visible", async () => {
   const catalogue = await ToolCatalogue.fromDefinitions([
     {

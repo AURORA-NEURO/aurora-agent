@@ -553,6 +553,7 @@ pub struct MissionReport {
     pub succeeded: usize,
     pub refused: usize,
     pub blocked: usize,
+    pub cancelled: usize,
     pub required_failures: usize,
     pub returned_bytes: usize,
     pub results: Vec<MissionStepResult>,

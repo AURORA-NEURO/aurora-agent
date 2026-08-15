@@ -128,6 +128,7 @@ use bioprism_worldfactory::provenance::{Claim, ClaimKind, Provenance, Selection}
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 
 fn repo_root() -> PathBuf {
     [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect()
@@ -3577,6 +3578,45 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     assert_eq!(
         executed["results"][1]["arguments_digest"],
         json!(expected_arguments_digest)
+    );
+}
+
+#[test]
+fn agent_mission_cancellation_preserves_a_closed_trace_and_unlaunched_steps() {
+    let mut server = server();
+    ready(&mut server);
+    let cancellation = AtomicBool::new(true);
+    let report = server
+        .execute_agent_mission_with_cancellation(
+            &json!({
+                "mission_id": "mission-cancelled-1",
+                "goal": "cancel before dispatch",
+                "steps": [
+                    {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}
+                ],
+                "policy": {"execute": true, "allowed_tools": ["workspace_capabilities"]}
+            }),
+            &cancellation,
+        )
+        .expect("cancelled mission should still return a report");
+    assert_eq!(report["mission_status"], json!("cancelled"));
+    assert_eq!(report["cancelled"], json!(1));
+    assert_eq!(report["results"][0]["status"], json!("cancelled"));
+    assert_eq!(
+        report["execution_trace"][0]["event"],
+        json!("mission.started")
+    );
+    assert_eq!(
+        report["execution_trace"][1]["event"],
+        json!("step.cancelled")
+    );
+    assert_eq!(
+        report["execution_trace"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["event"],
+        json!("mission.completed")
     );
 }
 

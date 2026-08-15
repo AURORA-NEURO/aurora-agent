@@ -56,6 +56,10 @@ if (result.mcp.result?.isError) {
   serial execution remains the default. Executed `agentMission()` responses expose the authoritative
   clock-free `execution_trace` with contiguous lifecycle, wave, refusal, block, and byte-accounting
   events.
+- `submitMission()`, `missionStatus()`, and `cancelMission()` provide typed asynchronous mission
+  jobs. Cancellation is cooperative between nested calls or parallel batches, and terminal reports
+  preserve the authoritative Rust trace rather than claiming force-kill or rollback. `deleteMission()`
+  removes only terminal jobs from the bounded process-local registry.
 - `missionFromRoute()` converts a completed `capabilityRoute()` response into a provenance-preserving
   mission assembly only after every need has one caller-selected candidate and explicit JSON
   arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is

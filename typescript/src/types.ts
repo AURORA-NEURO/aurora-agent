@@ -443,7 +443,9 @@ export type MissionTraceEventName =
   | "step.completed"
   | "step.refused"
   | "step.blocked"
+  | "step.cancelled"
   | "wave.completed"
+  | "mission.cancelled"
   | "mission.completed";
 
 export interface MissionTraceEvent extends JsonObject {
@@ -462,13 +464,32 @@ export interface AgentMissionReport extends JsonObject {
   ok: boolean;
   workflow: "agent_mission";
   execution: "planned" | "executed";
-  mission_status: "planned" | "running" | "succeeded" | "partial" | "failed";
+  mission_status: "planned" | "running" | "succeeded" | "partial" | "failed" | "cancelled";
+  succeeded?: number;
+  refused?: number;
+  blocked?: number;
+  cancelled?: number;
+  required_failures?: number;
   returned_bytes: number;
   execution_trace_schema_version: string;
   execution_trace: MissionTraceEvent[];
   plan: JsonObject;
   results: JsonObject[];
   [key: string]: JsonValue | undefined;
+}
+
+export type MissionJobStatus = "queued" | "running" | "planned" | "succeeded" | "partial" | "failed" | "cancelled";
+
+export interface MissionJob extends JsonObject {
+  ok: boolean;
+  mission_id: string;
+  status: MissionJobStatus;
+  cancel_requested: boolean;
+  cancel_reason?: string | null;
+  result?: AgentMissionReport | null;
+  error?: string | null;
+  poll?: string;
+  cancel?: string;
 }
 
 export interface MissionStepPreflight extends JsonObject {

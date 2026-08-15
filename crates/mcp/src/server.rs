@@ -237,6 +237,7 @@ use bioprism_worldgen::{generate as generate_world, WorldSpec};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SERVER_NAME: &str = "bioprism";
@@ -265,6 +266,7 @@ pub enum Lifecycle {
     Ready,
 }
 
+#[derive(Clone)]
 pub struct Server {
     root: PathBuf,
     lifecycle: Lifecycle,
@@ -327,6 +329,83 @@ fn trace_event(
     });
 }
 
+fn cancellation_requested(cancellation: Option<&AtomicBool>) -> bool {
+    cancellation.is_some_and(|flag| flag.load(Ordering::Acquire))
+}
+
+fn cancel_remaining_steps(report: &mut MissionReport, request: &MissionRequest, from_wave: usize) {
+    let existing = report
+        .results
+        .iter()
+        .map(|result| result.id.clone())
+        .collect::<BTreeSet<_>>();
+    let steps = request
+        .steps
+        .iter()
+        .map(|step| (step.id.as_str(), step))
+        .collect::<BTreeMap<_, _>>();
+    let waves = report.plan.waves.clone();
+    for (wave_index, wave) in waves.iter().enumerate().skip(from_wave) {
+        for step_id in wave {
+            if existing.contains(step_id) {
+                continue;
+            }
+            let Some(step) = steps.get(step_id.as_str()) else {
+                continue;
+            };
+            let detail = "mission cancellation was requested before this step was dispatched";
+            report.cancelled += 1;
+            report.results.push(MissionStepResult {
+                id: step.id.clone(),
+                tool: step.tool.clone(),
+                status: "cancelled".into(),
+                required: step.required,
+                arguments_digest: None,
+                bytes: 0,
+                wire: None,
+                error: Some(detail.into()),
+            });
+            trace_event(
+                report,
+                "step.cancelled",
+                Some(wave_index),
+                Some(step),
+                Some("cancelled"),
+                None,
+                0,
+                Some(detail.into()),
+            );
+        }
+    }
+}
+
+fn finish_cancelled_mission(report: MissionReport, context: &str) -> Result<Value, String> {
+    let mut report = report;
+    report.mission_status = "cancelled".into();
+    let returned_bytes = report.returned_bytes;
+    trace_event(
+        &mut report,
+        "mission.cancelled",
+        None,
+        None,
+        Some("cancelled"),
+        None,
+        returned_bytes,
+        Some("cooperative cancellation stopped future dispatches; in-flight calls were allowed to return".into()),
+    );
+    trace_event(
+        &mut report,
+        "mission.completed",
+        None,
+        None,
+        Some("cancelled"),
+        None,
+        returned_bytes,
+        None,
+    );
+    encode_mission_report(report, context)
+}
+
 impl Server {
     pub fn new(root: PathBuf) -> Self {
         Server {
@@ -341,6 +420,35 @@ impl Server {
 
     pub fn lifecycle(&self) -> Lifecycle {
         self.lifecycle
+    }
+
+    /// Validate an agent mission without dispatching any nested tool.
+    ///
+    /// The HTTP job surface uses this before accepting work so malformed missions fail at
+    /// submission time rather than becoming opaque background failures.
+    pub fn validate_agent_mission(&self, arguments: &Value) -> Result<(), String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode agent mission input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("agent mission input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: MissionRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid agent mission input: {error}"))?;
+        plan_mission(&request).map_err(|error| format!("agent mission refused: {error}"))?;
+        Ok(())
+    }
+
+    /// Execute an agent mission while observing a shared cooperative cancellation flag.
+    ///
+    /// Cancellation is checked between nested tool calls and parallel batches. An in-flight tool
+    /// call is never forcefully interrupted, so the returned report can distinguish completed
+    /// work from steps that were prevented from being dispatched.
+    pub fn execute_agent_mission_with_cancellation(
+        &self,
+        arguments: &Value,
+        cancellation: &AtomicBool,
+    ) -> Result<Value, String> {
+        self.agent_mission_with_cancellation(arguments, Some(cancellation))
     }
 
     /// Resolves a client-supplied path inside the root.
@@ -11853,6 +11961,14 @@ impl Server {
     /// applied side-effect and output budgets. Nested results remain raw MCP envelopes so a
     /// refusal cannot be silently converted into a successful scientific conclusion.
     fn agent_mission(&self, arguments: &Value) -> Result<Value, String> {
+        self.agent_mission_with_cancellation(arguments, None)
+    }
+
+    fn agent_mission_with_cancellation(
+        &self,
+        arguments: &Value,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode agent mission input: {error}"))?;
         if encoded.len() > 20_000_000 {
@@ -11878,6 +11994,7 @@ impl Server {
             succeeded: 0,
             refused: 0,
             blocked: 0,
+            cancelled: 0,
             required_failures: 0,
             returned_bytes: 0,
             results: Vec::new(),
@@ -11933,7 +12050,7 @@ impl Server {
         }
 
         if request.policy.execution_mode == "parallel_waves" {
-            return self.execute_parallel_mission(&request, report);
+            return self.execute_parallel_mission(&request, report, cancellation);
         }
 
         let steps = request
@@ -11948,6 +12065,13 @@ impl Server {
 
         let waves = report.plan.waves.clone();
         for (wave_index, wave) in waves.iter().enumerate() {
+            if cancellation_requested(cancellation) {
+                cancel_remaining_steps(&mut report, &request, wave_index);
+                return finish_cancelled_mission(
+                    report,
+                    "cannot encode cancelled agent mission report",
+                );
+            }
             trace_event(
                 &mut report,
                 "wave.started",
@@ -11959,6 +12083,13 @@ impl Server {
                 None,
             );
             for step_id in wave {
+                if cancellation_requested(cancellation) {
+                    cancel_remaining_steps(&mut report, &request, wave_index);
+                    return finish_cancelled_mission(
+                        report,
+                        "cannot encode cancelled agent mission report",
+                    );
+                }
                 let step = steps
                     .get(step_id.as_str())
                     .ok_or_else(|| format!("mission plan lost step `{step_id}`"))?;
@@ -12243,6 +12374,7 @@ impl Server {
         &self,
         request: &MissionRequest,
         mut report: MissionReport,
+        cancellation: Option<&AtomicBool>,
     ) -> Result<Value, String> {
         let steps = request
             .steps
@@ -12256,6 +12388,13 @@ impl Server {
 
         let waves = report.plan.waves.clone();
         for (wave_index, wave) in waves.iter().enumerate() {
+            if cancellation_requested(cancellation) {
+                cancel_remaining_steps(&mut report, request, wave_index);
+                return finish_cancelled_mission(
+                    report,
+                    "cannot encode cancelled parallel agent mission report",
+                );
+            }
             trace_event(
                 &mut report,
                 "wave.started",
@@ -12363,26 +12502,6 @@ impl Server {
                 }
             }
 
-            for item in &pending {
-                if let ParallelPending::Call {
-                    step,
-                    arguments_digest,
-                    ..
-                } = item
-                {
-                    trace_event(
-                        &mut report,
-                        "step.started",
-                        Some(wave_index),
-                        Some(step),
-                        Some("running"),
-                        Some(arguments_digest.clone()),
-                        0,
-                        None,
-                    );
-                }
-            }
-
             let call_entries = pending
                 .iter()
                 .filter_map(|item| match item {
@@ -12394,6 +12513,38 @@ impl Server {
                 .collect::<Vec<_>>();
             let mut call_results = BTreeMap::new();
             for batch in call_entries.chunks(request.policy.max_parallelism) {
+                if cancellation_requested(cancellation) {
+                    cancel_remaining_steps(&mut report, request, wave_index);
+                    return finish_cancelled_mission(
+                        report,
+                        "cannot encode cancelled parallel agent mission report",
+                    );
+                }
+                for (step, _) in batch {
+                    let arguments_digest = pending
+                        .iter()
+                        .find_map(|item| match item {
+                            ParallelPending::Call {
+                                step: pending_step,
+                                arguments_digest,
+                                ..
+                            } if pending_step.id == step.id => Some(arguments_digest.clone()),
+                            _ => None,
+                        })
+                        .ok_or_else(|| {
+                            format!("parallel mission step `{}` has no argument digest", step.id)
+                        })?;
+                    trace_event(
+                        &mut report,
+                        "step.started",
+                        Some(wave_index),
+                        Some(step),
+                        Some("running"),
+                        Some(arguments_digest),
+                        0,
+                        None,
+                    );
+                }
                 let batch_results = std::thread::scope(|scope| {
                     let handles = batch
                         .iter()

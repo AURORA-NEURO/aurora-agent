@@ -20,6 +20,10 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/capabilities` | Tool/resource counts, transport support, limits, and workspace catalogue |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
+| `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
+| `GET /v1/missions/{mission_id}` | Poll job state and retrieve the authoritative mission report |
+| `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
+| `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
 | `POST /v1/rpc` | JSON-RPC/MCP-compatible request envelope for tools, resources, and lifecycle |
 | `GET /v1/events?after=N&limit=M` | Cursor page with retention-gap and dropped-event evidence |
 | `GET /v1/events/stream?after=N&limit=M` | A bounded Server-Sent Events snapshot, not an unbounded connection |
@@ -36,6 +40,24 @@ event payload by byte count and SHA-256, so observability cannot silently turn i
 memory sink. `agent_mission` reports include a clock-free `execution_trace`; when its raw response
 is omitted for size, the event retains a bounded mission-trace projection with lifecycle, refusal,
 block, digest, and byte-accounting evidence.
+
+## Asynchronous missions
+
+`POST /v1/missions` accepts the same JSON object as the `agent_mission` tool and returns `202`
+after the complete mission graph, policy, allow-list, and safety bounds have passed validation.
+The response contains `mission_id`, `status: "queued"`, and poll/cancel links. `GET` returns
+`queued`, `running`, or a terminal status (`planned`, `succeeded`, `partial`, `failed`, or
+`cancelled`) plus the raw authoritative report once available. Mission IDs are unique within the
+process and the bounded in-memory registry holds at most `MAX_MISSION_JOBS` entries.
+Terminal jobs can be removed with `DELETE`; active jobs are refused with `409` so cleanup cannot
+silently discard work that may still dispatch.
+
+Cancellation is deliberately cooperative: the API sets a shared cancellation flag, the executor
+checks it before dispatching each serial step and parallel batch, and already-running nested tools
+are allowed to return. A cancelled report includes `cancelled` step results and a closed trace with
+`mission.cancelled` before `mission.completed`; it never pretends that an interrupted in-flight
+effect was rolled back. This is an in-process operational surface, not a durable queue, distributed
+worker scheduler, or force-kill guarantee.
 
 ## Cursor and webhook guarantees
 

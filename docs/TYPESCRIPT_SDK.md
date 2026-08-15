@@ -85,6 +85,10 @@ Convenience methods currently cover:
   review-only CI workflow planning;
 - `agentMission`: deterministic cross-domain mission planning or explicitly allow-listed execution
   with refusal propagation, output budgets, and optional JSON-pointer bindings;
+- `submitMission`, `missionStatus`, and `cancelMission`: typed asynchronous mission jobs with
+  bounded polling, authoritative terminal reports, and cooperative cancellation between nested
+calls or parallel batches;
+  `deleteMission` removes only terminal jobs from the bounded registry, preserving active work.
 - `runtimeExecutionSimulate`: deterministic replay, budget, fault, and fork evidence.
 - `repositoryCatalog`, `repositoryBundle`, and `repositoryImpact`: bounded repository discovery,
   route-specific progressive disclosure, and changed-module impact checks;
@@ -107,6 +111,8 @@ remains the default. Executed `agentMission()` responses type the authoritative 
 `execution_trace` with contiguous lifecycle, wave, refusal, block, and byte-accounting events. Pass
 the earlier `ToolCatalogue` snapshot to guarantee that mission review and subsequent checked calls
 refer to the same live schema set; the Rust `agent_mission` tool remains the execution authority.
+`MissionJob` makes queued, running, planned, succeeded, partial, failed, and cancelled states
+explicit; cancellation is a request to stop future dispatch, not a force-kill or rollback claim.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain

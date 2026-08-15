@@ -122,6 +122,14 @@ invent defaults:
   explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or
   out-of-candidate tools, performs no transport call, and is intended to feed `mission_preflight()`
   before `agent_mission()`.
+- `ApiClient.submit_mission(request)` and `AsyncApiClient.submit_mission(request)` submit the same
+  typed `MissionRequest` to the bounded asynchronous HTTP executor. `mission_status(mission_id)`
+  returns a typed `MissionJob` with the raw authoritative report when terminal, and
+  `cancel_mission(mission_id, reason=...)` requests cooperative cancellation. Cancellation stops
+  future dispatch between nested calls or parallel batches; it does not force-kill an in-flight
+  tool or imply rollback.
+  `delete_mission(mission_id)` removes a terminal job when the caller has consumed its report;
+  active jobs are refused so cleanup cannot discard in-flight work.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the
   complete live MCP catalogue, including domains that do not yet have a handwritten convenience
   method. The catalogue is copied from `tools/list` or `/v1/tools`, deduplicated, bounded, and

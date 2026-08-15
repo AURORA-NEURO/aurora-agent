@@ -30,7 +30,9 @@ MISSION_TRACE_EVENTS = frozenset(
         "step.completed",
         "step.refused",
         "step.blocked",
+        "step.cancelled",
         "wave.completed",
+        "mission.cancelled",
         "mission.completed",
     }
 )
@@ -679,6 +681,56 @@ class MissionExecutionReport:
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise ArgumentError("returned_bytes must be a non-negative integer")
         return value
+
+    @property
+    def cancelled(self) -> int:
+        value = self.raw.get("cancelled", 0)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ArgumentError("cancelled must be a non-negative integer")
+        return value
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionJob:
+    """Typed view over an asynchronous HTTP mission job."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    status: str
+    cancel_requested: bool
+    cancel_reason: str | None
+    result: Mapping[str, Any] | None
+    error: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionJob":
+        raw = _mapping("mission job", value)
+        mission_id = raw.get("mission_id")
+        _text("mission job mission_id", mission_id)
+        status = raw.get("status")
+        _text("mission job status", status)
+        if status not in {"queued", "running", "planned", "succeeded", "partial", "failed", "cancelled"}:
+            raise ArgumentError(f"unknown mission job status: {status}")
+        cancel_requested = raw.get("cancel_requested", False)
+        if not isinstance(cancel_requested, bool):
+            raise ArgumentError("mission job cancel_requested must be a boolean")
+        cancel_reason = raw.get("cancel_reason")
+        if cancel_reason is not None:
+            _text("mission job cancel_reason", cancel_reason)
+        result = raw.get("result")
+        if result is not None and not isinstance(result, Mapping):
+            raise ArgumentError("mission job result must be an object or null")
+        error = raw.get("error")
+        if error is not None:
+            _text("mission job error", error)
+        return cls(raw, mission_id, status, cancel_requested, cancel_reason, result, error)
+
+    @property
+    def terminal(self) -> bool:
+        return self.status in {"planned", "succeeded", "partial", "failed", "cancelled"}
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)

@@ -280,6 +280,9 @@ called. The executor is serial by default; an explicit `execution_mode: "paralle
 dispatches independent wave members concurrently with bounded width and reserved output budget.
 Executed missions also return a deterministic clock-free trace of lifecycle, wave, step, refusal,
 block, digest, and byte-accounting transitions.
+The HTTP gateway adds bounded asynchronous mission jobs with typed status polling and cooperative
+cancellation between nested calls or parallel batches; a cancellation report records what completed
+and what was never dispatched rather than implying force-kill or rollback.
 
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,

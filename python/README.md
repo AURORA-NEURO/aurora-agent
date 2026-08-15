@@ -79,6 +79,11 @@ mission lifecycle boundaries without hiding the raw report. `mission_from_route(
 `capability_route()` response into a provenance-preserving `MissionAssembly`, but only after the
 caller selects exactly one candidate tool and supplies its arguments for every need; unresolved
 and out-of-candidate selections are refused rather than guessed.
+The HTTP clients additionally expose `submit_mission()`, `mission_status()`, and
+`cancel_mission()` through a typed `MissionJob`. Cancellation is cooperative: it prevents future
+step or parallel-batch dispatch while allowing an in-flight tool to return, and the terminal report
+records cancelled steps instead of implying rollback. `delete_mission()` releases a terminal job
+from the bounded process-local registry.
 For any current or future domain without a handwritten wrapper, `tool_catalogue()` snapshots the
 live `tools/list` or `/v1/tools` definitions, `plan_tool()` performs conservative shape-only
 preflight, and `tool_checked()` executes the reviewed call. Plans are digest-bound and carry no

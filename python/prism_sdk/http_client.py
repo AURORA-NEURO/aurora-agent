@@ -31,6 +31,7 @@ from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
 from .mission import (
     MissionAssembly,
+    MissionJob,
     MissionPolicy,
     MissionPreflight,
     MissionRequest,
@@ -187,6 +188,31 @@ class ApiClient:
         if not isinstance(name, str) or not name or "/" in name:
             raise ArgumentError("tool name must be a non-empty path-safe string")
         return self.request("POST", f"/v1/tools/{name}", dict(arguments or {}))
+
+    def submit_mission(self, request: MissionRequest | Mapping[str, Any]) -> MissionJob:
+        """Submit a validated mission to the cooperative asynchronous HTTP executor."""
+
+        if not isinstance(request, (MissionRequest, Mapping)):
+            raise ArgumentError("mission request must be a MissionRequest or mapping")
+        arguments = request.to_mcp_arguments() if isinstance(request, MissionRequest) else dict(request)
+        return MissionJob.from_wire(self.request("POST", "/v1/missions", arguments))
+
+    def mission_status(self, mission_id: str) -> MissionJob:
+        self._mission_id(mission_id)
+        return MissionJob.from_wire(self.request("GET", f"/v1/missions/{mission_id}"))
+
+    def cancel_mission(self, mission_id: str, reason: str | None = None) -> MissionJob:
+        self._mission_id(mission_id)
+        if reason is not None and (not isinstance(reason, str) or not reason.strip() or len(reason) > 2_048):
+            raise ArgumentError("reason must be a non-empty string of at most 2048 bytes")
+        payload = {} if reason is None else {"reason": reason}
+        return MissionJob.from_wire(self.request("POST", f"/v1/missions/{mission_id}/cancel", payload))
+
+    def delete_mission(self, mission_id: str) -> dict[str, Any]:
+        """Remove a terminal mission from the bounded in-process registry."""
+
+        self._mission_id(mission_id)
+        return self.request("DELETE", f"/v1/missions/{mission_id}")
 
     def tool_catalogue(self) -> ToolCatalogue:
         """Snapshot the authoritative live HTTP ``/v1/tools`` catalogue."""
@@ -609,6 +635,11 @@ class ApiClient:
         if not isinstance(value, str) or not value or "/" in value or "\r" in value or "\n" in value:
             raise ArgumentError("subscription_id must be a non-empty path-safe string")
 
+    @staticmethod
+    def _mission_id(value: str) -> None:
+        if not isinstance(value, str) or not value or "/" in value or "\r" in value or "\n" in value:
+            raise ArgumentError("mission_id must be a non-empty path-safe string")
+
 
 class AsyncApiClient:
     """Async facade over :class:`ApiClient`, using bounded worker threads for stdlib portability."""
@@ -630,6 +661,18 @@ class AsyncApiClient:
 
     async def call_tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.call_tool, name, arguments)
+
+    async def submit_mission(self, request: MissionRequest | Mapping[str, Any]) -> MissionJob:
+        return await asyncio.to_thread(self.client.submit_mission, request)
+
+    async def mission_status(self, mission_id: str) -> MissionJob:
+        return await asyncio.to_thread(self.client.mission_status, mission_id)
+
+    async def cancel_mission(self, mission_id: str, reason: str | None = None) -> MissionJob:
+        return await asyncio.to_thread(self.client.cancel_mission, mission_id, reason)
+
+    async def delete_mission(self, mission_id: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.delete_mission, mission_id)
 
     async def tool_catalogue(self) -> ToolCatalogue:
         """Async snapshot of the authoritative live HTTP ``/v1/tools`` catalogue."""

@@ -10,12 +10,17 @@ use crate::http::{HttpRequest, HttpResponse};
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 pub const API_VERSION: &str = "v1";
 pub const DEFAULT_MAX_HEADER_BYTES: usize = 32 * 1024;
 pub const DEFAULT_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const DEFAULT_EVENT_CAPACITY: usize = 4096;
+pub const MAX_MISSION_JOBS: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -58,9 +63,25 @@ impl ApiConfig {
 
 pub struct ApiRouter {
     server: bioprism_mcp::Server,
+    mission_executor: Arc<bioprism_mcp::Server>,
     config: ApiConfig,
     events: EventLog,
     next_request_id: u64,
+    mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
+}
+
+struct MissionJob {
+    cancellation: Arc<AtomicBool>,
+    state: Arc<Mutex<MissionJobState>>,
+}
+
+#[derive(Clone)]
+struct MissionJobState {
+    status: String,
+    cancel_requested: bool,
+    cancel_reason: Option<String>,
+    result: Option<Value>,
+    error: Option<String>,
 }
 
 impl ApiRouter {
@@ -86,11 +107,14 @@ impl ApiRouter {
             params: Value::Null,
         };
         server.handle(&initialized);
+        let mission_executor = Arc::new(server.clone());
         Ok(Self {
             server,
+            mission_executor,
             config,
             events,
             next_request_id: 1,
+            mission_jobs: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }
 
@@ -145,6 +169,16 @@ impl ApiRouter {
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
+            ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
+            ("GET", path) if path.starts_with("/v1/missions/") => {
+                self.mission_status(&request, &request_id)
+            }
+            ("POST", path) if path.starts_with("/v1/missions/") => {
+                self.mission_control(&request, &request_id)
+            }
+            ("DELETE", path) if path.starts_with("/v1/missions/") => {
+                self.delete_mission(&request, &request_id)
+            }
             ("POST", "/v1/rpc") => self.rpc(&request, &request_id),
             ("POST", path) if path.starts_with("/v1/tools/") => {
                 self.rest_tool(&request, &request_id)
@@ -236,6 +270,7 @@ impl ApiRouter {
                     "openapi": "/v1/openapi.json",
                     "capabilities": "/v1/capabilities",
                     "tools": "/v1/tools",
+                    "missions": "/v1/missions",
                     "events": "/v1/events",
                     "webhooks": "/v1/webhooks/subscriptions"
                 }
@@ -257,6 +292,8 @@ impl ApiRouter {
                     "json_rpc": true,
                     "event_cursor": true,
                     "server_sent_events_snapshot": true,
+                    "async_missions": true,
+                    "cooperative_mission_cancellation": true,
                     "signed_webhook_outbox": true,
                     "grpc": false,
                     "tls": false,
@@ -423,6 +460,315 @@ impl ApiRouter {
                 "mcp": wire,
                 "guarantee": "REST and MCP calls share the same in-process tool dispatcher"
             }),
+        )
+    }
+
+    fn submit_mission(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let mission_id = match arguments.get("mission_id").and_then(Value::as_str) {
+            Some(value) if !value.trim().is_empty() && value.len() <= 256 => value.to_string(),
+            _ => {
+                return self.error(
+                    422,
+                    "invalid_mission",
+                    "mission_id must be a non-empty string of at most 256 bytes",
+                    request_id,
+                )
+            }
+        };
+        let arguments = Value::Object(arguments);
+        if let Err(error) = self.mission_executor.validate_agent_mission(&arguments) {
+            return self.error(422, "invalid_mission", &error, request_id);
+        }
+
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(Mutex::new(MissionJobState {
+            status: "queued".into(),
+            cancel_requested: false,
+            cancel_reason: None,
+            result: None,
+            error: None,
+        }));
+        let job = Arc::new(MissionJob {
+            cancellation: Arc::clone(&cancellation),
+            state: Arc::clone(&state),
+        });
+        {
+            let mut jobs = match self.mission_jobs.lock() {
+                Ok(jobs) => jobs,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "mission_registry_unavailable",
+                        "mission job registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            if jobs.contains_key(&mission_id) {
+                return self.error(
+                    409,
+                    "mission_exists",
+                    "a mission with this mission_id already exists",
+                    request_id,
+                );
+            }
+            if jobs.len() >= MAX_MISSION_JOBS {
+                return self.error(
+                    429,
+                    "mission_capacity_exhausted",
+                    "the in-memory mission registry has reached its safety bound",
+                    request_id,
+                );
+            }
+            jobs.insert(mission_id.clone(), Arc::clone(&job));
+        }
+
+        let executor = Arc::clone(&self.mission_executor);
+        let worker_id = mission_id.clone();
+        let worker_arguments = arguments;
+        let spawn = thread::Builder::new()
+            .name(format!("mission-{worker_id}"))
+            .spawn(move || {
+                if let Ok(mut current) = state.lock() {
+                    current.status = "running".into();
+                }
+                let outcome = executor
+                    .execute_agent_mission_with_cancellation(&worker_arguments, &cancellation);
+                if let Ok(mut current) = job.state.lock() {
+                    match outcome {
+                        Ok(result) => {
+                            current.status = result
+                                .get("mission_status")
+                                .and_then(Value::as_str)
+                                .unwrap_or("succeeded")
+                                .into();
+                            current.result = Some(result);
+                        }
+                        Err(error) => {
+                            current.status = "failed".into();
+                            current.error = Some(error);
+                        }
+                    }
+                }
+            });
+        if spawn.is_err() {
+            if let Ok(mut jobs) = self.mission_jobs.lock() {
+                jobs.remove(&mission_id);
+            }
+            return self.error(
+                503,
+                "mission_worker_unavailable",
+                "the mission worker could not be started",
+                request_id,
+            );
+        }
+
+        HttpResponse::json(
+            202,
+            &json!({
+                "ok": true,
+                "mission_id": mission_id,
+                "status": "queued",
+                "cancel_requested": false,
+                "poll": format!("/v1/missions/{mission_id}"),
+                "cancel": format!("/v1/missions/{mission_id}/cancel"),
+                "guarantees": [
+                    "mission validation completed before acceptance",
+                    "execution is cooperative and preserves the authoritative mission report",
+                    "in-flight nested tool calls are allowed to return before future dispatch stops",
+                ],
+            }),
+        )
+    }
+
+    fn mission_status(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), None) else {
+            return self.error(404, "not_found", "mission route does not exist", request_id);
+        };
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let current = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "mission_id": mission_id,
+                "status": current.status,
+                "cancel_requested": current.cancel_requested,
+                "cancel_reason": current.cancel_reason,
+                "result": current.result,
+                "error": current.error,
+                "poll": format!("/v1/missions/{mission_id}"),
+                "cancel": format!("/v1/missions/{mission_id}/cancel"),
+            }),
+        )
+    }
+
+    fn mission_control(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), Some("cancel")) else {
+            return self.error(
+                404,
+                "not_found",
+                "mission control route does not exist",
+                request_id,
+            );
+        };
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let reason = if request.body.is_empty() {
+            "cancellation requested by API caller".to_string()
+        } else {
+            let body = match self.json_object(request) {
+                Ok(body) => body,
+                Err(error) => return self.error(400, "invalid_json", &error, request_id),
+            };
+            match body.get("reason") {
+                None => "cancellation requested by API caller".to_string(),
+                Some(Value::String(value)) if !value.trim().is_empty() && value.len() <= 2_048 => {
+                    value.clone()
+                }
+                Some(_) => {
+                    return self.error(
+                        422,
+                        "invalid_cancellation",
+                        "reason must be a non-empty string of at most 2048 bytes",
+                        request_id,
+                    )
+                }
+            }
+        };
+        let mut current = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        if is_terminal_mission_status(&current.status) {
+            if current.status == "cancelled" {
+                return HttpResponse::json(
+                    200,
+                    &json!({ "ok": true, "mission_id": mission_id, "status": current.status, "cancel_requested": true, "idempotent": true }),
+                );
+            }
+            return self.error(
+                409,
+                "mission_terminal",
+                "mission has already reached a terminal state",
+                request_id,
+            );
+        }
+        job.cancellation.store(true, Ordering::Release);
+        current.cancel_requested = true;
+        current.cancel_reason = Some(reason.clone());
+        let Ok(mut state) = job.state.lock() else {
+            return self.error(
+                500,
+                "mission_state_unavailable",
+                "mission state is unavailable",
+                request_id,
+            );
+        };
+        state.cancel_requested = current.cancel_requested;
+        state.cancel_reason = current.cancel_reason.clone();
+        HttpResponse::json(
+            202,
+            &json!({
+                "ok": true,
+                "mission_id": mission_id,
+                "status": current.status,
+                "cancel_requested": true,
+                "cancel_reason": current.cancel_reason,
+                "reason": reason,
+                "poll": format!("/v1/missions/{mission_id}"),
+            }),
+        )
+    }
+
+    fn delete_mission(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), None) else {
+            return self.error(404, "not_found", "mission route does not exist", request_id);
+        };
+        let mut jobs = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = jobs.remove(&mission_id) else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                jobs.insert(mission_id, job);
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                );
+            }
+        };
+        if !is_terminal_mission_status(&state.status) {
+            jobs.insert(mission_id, job);
+            return self.error(
+                409,
+                "mission_running",
+                "only terminal missions may be removed",
+                request_id,
+            );
+        }
+        HttpResponse::json(
+            200,
+            &json!({ "ok": true, "mission_id": mission_id, "deleted": true }),
         )
     }
 
@@ -712,6 +1058,9 @@ impl ApiRouter {
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
+                    "/v1/missions": { "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
+                    "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
+                    "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
                     "/v1/events": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "cursor page" } } } },
                     "/v1/events/stream": { "get": { "responses": { "200": { "description": "bounded Server-Sent Events snapshot" } } } },
@@ -725,6 +1074,17 @@ impl ApiRouter {
             }),
         )
     }
+}
+
+fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
+    job.state.lock().map(|state| state.clone()).map_err(|_| ())
+}
+
+fn is_terminal_mission_status(status: &str) -> bool {
+    matches!(
+        status,
+        "planned" | "succeeded" | "partial" | "failed" | "cancelled"
+    )
 }
 
 fn subscription_id(
@@ -746,6 +1106,26 @@ fn subscription_id(
         }
     }
     Some(segments[3].clone())
+}
+
+fn mission_id(
+    segments: &Result<Vec<String>, crate::http::HttpError>,
+    suffix: Option<&str>,
+) -> Option<String> {
+    let segments = segments.as_ref().ok()?;
+    let expected = if suffix.is_some() { 4 } else { 3 };
+    if segments.len() != expected || segments[0] != "v1" || segments[1] != "missions" {
+        return None;
+    }
+    if let Some(suffix) = suffix {
+        if segments[3] != suffix {
+            return None;
+        }
+    }
+    if segments[2].is_empty() {
+        return None;
+    }
+    Some(segments[2].clone())
 }
 
 fn query_u64(
@@ -918,6 +1298,44 @@ mod tests {
             projected_trace["execution_trace_schema_version"],
             "bioprism-devplat-mission-trace/0.1"
         );
+    }
+
+    #[test]
+    fn asynchronous_missions_validate_poll_and_reject_duplicate_ids() {
+        let mut router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let body = json!({
+            "mission_id": "api-async-1",
+            "goal": "plan an asynchronous cross-domain mission",
+            "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}]
+        });
+        let submitted = router.handle(request("POST", "/v1/missions", body.clone()));
+        assert_eq!(submitted.status, 202);
+        let duplicate = router.handle(request("POST", "/v1/missions", body));
+        assert_eq!(duplicate.status, 409);
+
+        let mut status = Value::Null;
+        for _ in 0..100 {
+            let response = router.handle(request("GET", "/v1/missions/api-async-1", json!({})));
+            assert_eq!(response.status, 200);
+            status = serde_json::from_slice(&response.body).unwrap();
+            if status["status"] == "planned" {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(status["status"], "planned");
+        assert_eq!(status["result"]["mission_status"], "planned");
+        let cancel = router.handle(request(
+            "POST",
+            "/v1/missions/api-async-1/cancel",
+            json!({"reason": "too late"}),
+        ));
+        assert_eq!(cancel.status, 409);
+        let deleted = router.handle(request("DELETE", "/v1/missions/api-async-1", json!({})));
+        assert_eq!(deleted.status, 200);
+        let missing = router.handle(request("GET", "/v1/missions/api-async-1", json!({})));
+        assert_eq!(missing.status, 404);
     }
 
     #[test]
