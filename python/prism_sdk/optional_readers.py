@@ -18,6 +18,7 @@ from .anndata import audit_anndata
 from .authoring import content_digest
 from .dicom import audit_dicom
 from .errors import ArgumentError
+from .fasta import MAX_FASTA_BYTES, parse_fasta
 from .fastq import MAX_FASTQ_BYTES, parse_fastq
 from .fhir import MAX_FHIR_BYTES, parse_fhir_json, parse_fhir_ndjson
 from .mzml import MAX_MZML_BYTES, parse_mzml
@@ -648,6 +649,35 @@ def read_fastq(
         raise ArgumentError(f"FASTQ read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_fasta(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    sequence_type: str = "unknown",
+    max_records: int = 100_000,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded UTF-8 FASTA and return the dependency-free sequence audit."""
+
+    candidate = _path(path, field="FASTA path")
+    if candidate.stat().st_size > MAX_FASTA_BYTES:
+        raise ArgumentError(f"FASTA path exceeds the {MAX_FASTA_BYTES}-byte reader limit")
+    try:
+        return parse_fasta(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            sequence_type=sequence_type,
+            max_records=max_records,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"FASTA read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_mzml(
     path: str,
     *,
@@ -732,6 +762,7 @@ __all__ = [
     "read_alignment_file",
     "read_anndata_projection",
     "read_dicom_projection",
+    "read_fasta",
     "read_fastq",
     "read_fhir_json",
     "read_fhir_ndjson",

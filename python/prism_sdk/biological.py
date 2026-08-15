@@ -384,6 +384,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free bounded FASTQ reader validating complete records, quality lengths, and paired-read evidence without disclosing read content.",
         ),
         _descriptor(
+            "bioprism.python.fasta_text",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/fasta", "text/fasta", "text/x-fasta"),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("provenance_unavailable", "content_uninterpreted", "type_undetermined"),
+            ("subject", "sample", "reference", "sequence"),
+            "Dependency-free bounded FASTA reader validating complete records, optional nucleotide/protein alphabets, and duplicate identifiers without disclosing sequence content.",
+        ),
+        _descriptor(
             "bioprism.python.fhir_ndjson",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/fhir+ndjson",),

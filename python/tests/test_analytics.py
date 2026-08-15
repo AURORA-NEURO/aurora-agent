@@ -151,6 +151,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(mzml.executable)
         self.assertEqual(mzml.selected_adapter.id, "bioprism.python.mzml_text")
 
+        fasta = AdapterRegistry().plan(
+            AdapterPlanRequest("reference", SourceKind.BYTES, declared_format="text/fasta"),
+            check_environment=False,
+        )
+        self.assertTrue(fasta.executable)
+        self.assertEqual(fasta.selected_adapter.id, "bioprism.python.fasta_text")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)

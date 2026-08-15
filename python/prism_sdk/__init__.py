@@ -84,6 +84,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
+from .fasta import FastaAdapter, FastaFinding, FastaParseError, FastaParseResult, parse_fasta
 from .fastq import FastqAdapter, FastqFinding, FastqParseError, FastqParseResult, parse_fastq
 from .fhir import FhirAdapter, FhirAuditResult, FhirFinding, audit_fhir, parse_fhir_json, parse_fhir_ndjson
 from .http_client import ApiClient, AsyncApiClient
@@ -118,6 +119,7 @@ from .optional_readers import (
     read_alignment_file,
     read_anndata_projection,
     read_dicom_projection,
+    read_fasta,
     read_fastq,
     read_fhir_json,
     read_fhir_ndjson,
@@ -173,6 +175,10 @@ __all__ = [
     "EvaluationTrajectoryRequest",
     "EvaluationWorldlineRequest",
     "Finding",
+    "FastaAdapter",
+    "FastaFinding",
+    "FastaParseError",
+    "FastaParseResult",
     "FhirAdapter",
     "FhirAuditResult",
     "FhirFinding",
@@ -269,12 +275,14 @@ __all__ = [
     "bootstrap_mean",
     "parse_vcf",
     "parse_fastq",
+    "parse_fasta",
     "parse_mzml",
     "parse_fhir_json",
     "parse_fhir_ndjson",
     "read_anndata_projection",
     "read_alignment_file",
     "read_dicom_projection",
+    "read_fasta",
     "read_fhir_json",
     "read_fhir_ndjson",
     "read_mzml",

@@ -449,6 +449,23 @@ impl AdapterRegistry {
                 "Dependency-free bounded FASTQ reader validating complete records, quality lengths, and paired-read evidence without disclosing read content.",
             ),
             descriptor(
+                "bioprism.python.fasta_text",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/fasta", "text/fasta", "text/x-fasta"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "sample", "reference", "sequence"],
+                None,
+                "Dependency-free bounded FASTA reader validating complete records, optional nucleotide/protein alphabets, and duplicate identifiers without disclosing sequence content.",
+            ),
+            descriptor(
                 "bioprism.python.fhir_ndjson",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -929,6 +946,26 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.mzml_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_fasta_selects_the_dependency_free_python_reader() {
+        let plan = AdapterRegistry::default()
+            .plan(request(Some("text/fasta"), SourceKind::Bytes))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.fasta_text")
         );
         assert_eq!(
             plan.selected_adapter
