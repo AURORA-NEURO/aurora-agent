@@ -90,6 +90,9 @@ without decoding sequences, qualities, auxiliary tags, indexes, or reference bas
 all six concrete projection audits. They normalize successful, lossy, invalid, blocked, rejected,
 and unsupported outcomes; raw-byte routes refuse explicitly until an optional reader binding exists,
 and the request envelope records payload keys rather than echoing payload values.
+When installed, `read_nifti_header()` and `read_anndata_projection()` provide verified raw-file
+bindings for nibabel and anndata-backed H5AD/Zarr metadata. They feed the same auditors without
+loading image arrays or matrix values; missing optional packages remain typed refusals.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

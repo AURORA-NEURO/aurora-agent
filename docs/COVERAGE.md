@@ -92,6 +92,9 @@ The Python adapter runtime now executes all six concrete parsed-projection route
 bounded request/result envelope, preserves adapter descriptors and document digests, classifies
 lossy/invalid/blocked/rejected outcomes, and explicitly refuses raw-byte routes without silently
 falling back or sniffing content.
+Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
+anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
+The readers avoid full image-array and matrix-value materialization.
 The Python benchmark layer now complements Rust's descriptive metrics kernel with typed evidence
 rows, distribution summaries, direction-aware paired contrasts, and deterministic observation- or
 replicate-group bootstrap intervals. It preserves declared/missing/blocked populations and labels

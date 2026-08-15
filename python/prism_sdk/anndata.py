@@ -220,8 +220,8 @@ def _column(
     if length is not None and length != axis_count:
         audit.add("column_length_mismatch", "error", path, f"column length {length} disagrees with axis length {axis_count}")
     dtype = _dtype(value.get("dtype"), path=path, field="column dtype", audit=audit)
-    missing = value.get("missing_count", 0)
-    if isinstance(missing, bool) or not isinstance(missing, int) or missing < 0 or (length is not None and missing > length):
+    missing = value.get("missing_count")
+    if missing is not None and (isinstance(missing, bool) or not isinstance(missing, int) or missing < 0 or (length is not None and missing > length)):
         audit.add("missing_count_invalid", "error", path, "missing_count must be within the column length")
         missing = None
     categories = value.get("categories")

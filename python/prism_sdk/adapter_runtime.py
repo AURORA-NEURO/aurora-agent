@@ -20,6 +20,7 @@ from .biological import AdapterDescriptor, AdapterRegistry
 from .dicom import audit_dicom
 from .errors import ArgumentError
 from .nifti import audit_nifti
+from .optional_readers import OptionalDependencyUnavailable, read_anndata_projection, read_nifti_header
 from .vcf import parse_vcf
 
 
@@ -127,6 +128,8 @@ class AdapterRuntime:
             "bioprism.python.nifti_metadata",
             "bioprism.python.anndata_metadata",
             "bioprism.python.alignment_metadata",
+            "bioprism.python.nifti_bids",
+            "bioprism.python.anndata",
         }
     )
 
@@ -164,6 +167,14 @@ class AdapterRuntime:
             )
         try:
             document = self._dispatch(request)
+        except OptionalDependencyUnavailable as error:
+            return AdapterExecutionResult(
+                request,
+                RuntimeStatus.UNSUPPORTED,
+                True,
+                descriptor,
+                error={"kind": "optional_dependency_missing", "dependency": error.dependency, "detail": str(error)},
+            )
         except ArgumentError as error:
             return AdapterExecutionResult(
                 request,
@@ -231,11 +242,33 @@ class AdapterRuntime:
                 max_images=payload.get("max_images", 10_000),
                 max_items=request.max_items,
             ).to_wire()
+        if adapter_id == "bioprism.python.nifti_bids":
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("nifti_bids payload requires a string 'path'")
+            return read_nifti_header(
+                path,
+                source_id=request.source_id,
+                provenance=request.provenance,
+                reference_space=payload.get("reference_space"),
+                max_items=request.max_items,
+            )
         if adapter_id == "bioprism.python.anndata_metadata":
             dataset = payload.get("dataset")
             if not isinstance(dataset, Mapping):
                 raise ArgumentError("anndata_metadata payload requires a mapping 'dataset'")
             return audit_anndata(dataset, source_id=request.source_id, provenance=request.provenance, max_items=request.max_items).to_wire()
+        if adapter_id == "bioprism.python.anndata":
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("anndata payload requires a string 'path'")
+            return read_anndata_projection(
+                path,
+                source_id=request.source_id,
+                provenance=request.provenance,
+                storage_format=payload.get("storage_format", "auto"),
+                max_items=request.max_items,
+            )
         if adapter_id == "bioprism.python.alignment_metadata":
             references = payload.get("references")
             records = payload.get("records")
@@ -260,9 +293,10 @@ class AdapterRuntime:
             return RuntimeStatus.INVALID
         semantic_loss = document.get("semantic_loss")
         if isinstance(semantic_loss, Mapping):
-            if semantic_loss.get("max_severity") == "blocking":
+            max_severity = semantic_loss.get("max_severity")
+            if max_severity == "blocking":
                 return RuntimeStatus.BLOCKED
-            if semantic_loss.get("lost_count", 0):
+            if max_severity in {"major", "degrading"}:
                 return RuntimeStatus.LOSSY
         if document.get("publishable") is False:
             return RuntimeStatus.BLOCKED

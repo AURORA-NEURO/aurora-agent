@@ -99,6 +99,7 @@ from .oracle import (
     ReferenceStandardAuditRequest,
     ValidityWindow,
 )
+from .optional_readers import OptionalDependencyUnavailable, read_anndata_projection, read_nifti_header
 from .workspace import AsyncWorkspace, Workspace
 from .workbench import WorkbenchRequest
 from .vcf import VcfAdapter, VcfLoss, VcfParseError, VcfParseResult, parse_vcf
@@ -175,6 +176,7 @@ __all__ = [
     "OracleManifest",
     "OracleRef",
     "OracleVersion",
+    "OptionalDependencyUnavailable",
     "Position",
     "PositionDistribution",
     "PlanStatus",
@@ -220,6 +222,8 @@ __all__ = [
     "RuntimeStatus",
     "bootstrap_mean",
     "parse_vcf",
+    "read_anndata_projection",
+    "read_nifti_header",
     "paired_effect",
     "summarize_distribution",
     "validate_pack",

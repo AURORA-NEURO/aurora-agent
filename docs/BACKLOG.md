@@ -222,6 +222,9 @@ reference bases.
 The typed Python adapter runtime now closes the concrete execution handoff across those six parsed
 routes, normalizes outcome states and document digests, and refuses raw-byte routes explicitly when
 their optional binary-reader binding is absent.
+The verified optional-reader layer now binds installed nibabel and anndata environments for raw
+NIfTI header and H5AD/Zarr metadata inspection, while keeping full array/matrix materialization and
+missing dependencies explicit.
 
 
 ## §11 Developer Platform — 6 uncovered

@@ -115,6 +115,11 @@ invent defaults:
   invalid, blocked, rejected, and unsupported states, carries the authoritative adapter descriptor,
   preserves the audit document digest, and refuses catalogued raw-byte routes until their optional
   binary reader binding exists. Payload values are not echoed in the request envelope.
+- `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
+  installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
+  and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full
+  floating-point image load or disclose matrix values. Missing packages surface as
+  `OptionalDependencyUnavailable` and the runtime preserves that refusal.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and
