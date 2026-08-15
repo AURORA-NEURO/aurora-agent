@@ -71,8 +71,16 @@ invent defaults:
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and
   task identity while leaving provenance support, privacy crossings, reachability, abstention, and
   safe-default decisions to Rust.
-- `compile_context(world, query, ...)` invokes `fiber_compile` while leaving policy/profile choices
-  caller-controlled.
+- `FiberCompileRequest`, `FiberRefineRequest`, `FiberExplainRequest`, `FiberVerifyRequest`, and
+  `ProjectionBundleRequest` make the full FIBER progressive-disclosure lifecycle typed across sync
+  MCP, async MCP, and HTTP. `Workspace.fiber_compile(...)` validates relative world/query paths and
+  l0--l4 layers; `fiber_refine(...)` requires either a bounded content-addressed handle or an
+  explicit world/query pair; `fiber_explain(...)` exposes the plan and omission rationale;
+  `fiber_verify(...)` checks a certificate before trust; and `projection_bundle(...)` keeps complete
+  view bodies opt-in. Rust remains authoritative for compilation, sufficiency, omission accounting,
+  certificate verification, and projection fidelity.
+- `compile_context(world, query, ...)` remains the compatibility helper for the lower-level mapping
+  form and its policy/profile choices.
 - `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON
   importer and preserves its semantic-loss/readiness report.
 - `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and

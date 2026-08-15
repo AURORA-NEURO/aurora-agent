@@ -38,7 +38,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(size) or b"{}")
         if self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -107,6 +107,25 @@ class HttpApiClientTests(unittest.TestCase):
             client.routing_decide(RoutingDecisionRequest({"features": {}}, [{"task_id": "other"}], {"safe_default": "abstain"}))["mcp"]["result"]["policy"]["safe_default"],
             "abstain",
         )
+        self.assertEqual(
+            client.fiber_compile("world.json", "query.json", layer="l1")["mcp"]["result"]["layer"],
+            "l1",
+        )
+        self.assertEqual(
+            client.fiber_refine("l2", handle={"digest": "compiled"})["mcp"]["result"]["handle"]["digest"],
+            "compiled",
+        )
+        self.assertEqual(
+            client.fiber_explain("world.json", "query.json")["mcp"]["result"]["query"],
+            "query.json",
+        )
+        self.assertEqual(
+            client.fiber_verify("certificate.json")["mcp"]["result"]["certificate"],
+            "certificate.json",
+        )
+        self.assertTrue(
+            client.projection_bundle("world.json", "query.json", include_views=True)["mcp"]["result"]["include_views"]
+        )
         self.assertEqual(client.events()["page"]["events"], [])
         with self.assertRaises(ApiError) as error:
             client.request("POST", "/v1/tools/refuse", {})
@@ -144,6 +163,25 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(
                 (await client.routing_decide({"features": {}}, [{"task_id": "other"}], {"safe_default": "abstain"}, task_id="new"))["mcp"]["result"]["task_id"],
                 "new",
+            )
+            self.assertEqual(
+                (await client.fiber_compile("world.json", "query.json"))["mcp"]["result"]["layer"],
+                "l0",
+            )
+            self.assertEqual(
+                (await client.fiber_refine("l1", handle={"digest": "async"}))["mcp"]["result"]["handle"]["digest"],
+                "async",
+            )
+            self.assertEqual(
+                (await client.fiber_explain("world.json", "query.json"))["mcp"]["result"]["world"],
+                "world.json",
+            )
+            self.assertEqual(
+                (await client.fiber_verify("certificate.json"))["mcp"]["result"]["certificate"],
+                "certificate.json",
+            )
+            self.assertFalse(
+                (await client.projection_bundle("world.json", "query.json"))["mcp"]["result"]["include_views"]
             )
 
         asyncio.run(run())

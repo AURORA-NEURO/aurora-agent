@@ -73,6 +73,21 @@ from .authoring import (
 from .bed import BedAdapter, BedFinding, BedParseError, BedParseResult, parse_bed
 from .client import Client, ClientConfig
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
+from .context_requests import (
+    CONTEXT_REQUEST_SCHEMA,
+    MAX_CONTEXT_HANDLE_BYTES,
+    MAX_CONTEXT_PATH_BYTES,
+    ContextCompileRequest,
+    ContextExplainRequest,
+    ContextLayer,
+    ContextRefineRequest,
+    ContextVerifyRequest,
+    FiberCompileRequest,
+    FiberExplainRequest,
+    FiberRefineRequest,
+    FiberVerifyRequest,
+    ProjectionBundleRequest,
+)
 from .dicom import DicomAdapter, DicomAuditResult, DicomFinding, audit_dicom
 from .domain_requests import (
     MAX_DOMAIN_REQUEST_BYTES,
@@ -268,6 +283,18 @@ __all__ = [
     "CapabilityQuery",
     "CapabilityRouteNeed",
     "CapabilityRouteRequest",
+    "CONTEXT_REQUEST_SCHEMA",
+    "MAX_CONTEXT_HANDLE_BYTES",
+    "MAX_CONTEXT_PATH_BYTES",
+    "ContextCompileRequest",
+    "ContextExplainRequest",
+    "ContextLayer",
+    "ContextRefineRequest",
+    "ContextVerifyRequest",
+    "FiberCompileRequest",
+    "FiberExplainRequest",
+    "FiberRefineRequest",
+    "FiberVerifyRequest",
     "LifecycleError",
     "InputRef",
     "MutationPlan",
@@ -291,6 +318,7 @@ __all__ = [
     "OptionalDependencyUnavailable",
     "Position",
     "PositionDistribution",
+    "ProjectionBundleRequest",
     "PlanStatus",
     "ProcessExited",
     "PackArtifact",

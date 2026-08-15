@@ -17,6 +17,14 @@ from urllib.parse import urlsplit
 
 from .biological import AdapterPlanRequest
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
+from .context_requests import (
+    ContextLayer,
+    FiberCompileRequest,
+    FiberExplainRequest,
+    FiberRefineRequest,
+    FiberVerifyRequest,
+    ProjectionBundleRequest,
+)
 from .errors import ApiError, ArgumentError, TransportError
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
@@ -317,6 +325,90 @@ class ApiClient:
             request = RoutingDecisionRequest(fingerprint, evidence, policy, task_id)
         return self.call_tool("routing_decide", request.to_mcp_arguments())
 
+    def fiber_compile(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> dict[str, Any]:
+        """Compile a typed world/query pair through the HTTP gateway."""
+
+        if isinstance(world, FiberCompileRequest):
+            if query is not None or layer not in (ContextLayer.L0, "l0"):
+                raise ArgumentError("query and layer must be omitted when passing a FiberCompileRequest")
+            request = world
+        else:
+            if query is None:
+                raise ArgumentError("query is required when world is a path string")
+            request = FiberCompileRequest(world, query, layer)
+        return self.call_tool("fiber_compile", request.to_mcp_arguments())
+
+    def fiber_refine(
+        self,
+        layer: ContextLayer | str | FiberRefineRequest,
+        *,
+        handle: Mapping[str, Any] | None = None,
+        world: str | None = None,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        """Refine a compiled context through the HTTP gateway."""
+
+        if isinstance(layer, FiberRefineRequest):
+            if handle is not None or world is not None or query is not None:
+                raise ArgumentError("source arguments must be omitted when passing a FiberRefineRequest")
+            request = layer
+        else:
+            request = FiberRefineRequest(layer, handle, world, query)
+        return self.call_tool("fiber_refine", request.to_mcp_arguments())
+
+    def fiber_explain(
+        self,
+        world: str | FiberExplainRequest,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        """Request a compile-plan explanation through the HTTP gateway."""
+
+        if isinstance(world, FiberExplainRequest):
+            if query is not None:
+                raise ArgumentError("query must be omitted when passing a FiberExplainRequest")
+            request = world
+        else:
+            if query is None:
+                raise ArgumentError("query is required when world is a path string")
+            request = FiberExplainRequest(world, query)
+        return self.call_tool("fiber_explain", request.to_mcp_arguments())
+
+    def fiber_verify(self, certificate: str | FiberVerifyRequest) -> dict[str, Any]:
+        """Verify a context certificate through the HTTP gateway."""
+
+        request = certificate if isinstance(certificate, FiberVerifyRequest) else FiberVerifyRequest(certificate)
+        return self.call_tool("fiber_verify", request.to_mcp_arguments())
+
+    def projection_bundle(
+        self,
+        world: str | ProjectionBundleRequest,
+        query: str | None = None,
+        *,
+        include_views: bool = False,
+    ) -> dict[str, Any]:
+        """Request bounded context projections through the HTTP gateway."""
+
+        if isinstance(world, ProjectionBundleRequest):
+            if query is not None or include_views:
+                raise ArgumentError("query and include_views must be omitted when passing a ProjectionBundleRequest")
+            request = world
+        else:
+            if query is None:
+                raise ArgumentError("query is required when world is a path string")
+            request = ProjectionBundleRequest(world=world, query=query, include_views=include_views)
+        return self.call_tool("projection_bundle", request.to_mcp_arguments())
+
+    context_compile = fiber_compile
+    context_refine = fiber_refine
+    context_explain = fiber_explain
+    context_verify = fiber_verify
+
     def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         if after < 0 or not 1 <= limit <= 1000:
             raise ArgumentError("after must be non-negative and limit must be 1..=1000")
@@ -533,6 +625,90 @@ class AsyncApiClient:
                 raise ArgumentError("evidence and policy are required when fingerprint is a mapping")
             request = RoutingDecisionRequest(fingerprint, evidence, policy, task_id)
         return await self.call_tool("routing_decide", request.to_mcp_arguments())
+
+    async def fiber_compile(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.fiber_compile`."""
+
+        if isinstance(world, FiberCompileRequest):
+            if query is not None or layer not in (ContextLayer.L0, "l0"):
+                raise ArgumentError("query and layer must be omitted when passing a FiberCompileRequest")
+            request = world
+        else:
+            if query is None:
+                raise ArgumentError("query is required when world is a path string")
+            request = FiberCompileRequest(world, query, layer)
+        return await self.call_tool("fiber_compile", request.to_mcp_arguments())
+
+    async def fiber_refine(
+        self,
+        layer: ContextLayer | str | FiberRefineRequest,
+        *,
+        handle: Mapping[str, Any] | None = None,
+        world: str | None = None,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.fiber_refine`."""
+
+        if isinstance(layer, FiberRefineRequest):
+            if handle is not None or world is not None or query is not None:
+                raise ArgumentError("source arguments must be omitted when passing a FiberRefineRequest")
+            request = layer
+        else:
+            request = FiberRefineRequest(layer, handle, world, query)
+        return await self.call_tool("fiber_refine", request.to_mcp_arguments())
+
+    async def fiber_explain(
+        self,
+        world: str | FiberExplainRequest,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.fiber_explain`."""
+
+        if isinstance(world, FiberExplainRequest):
+            if query is not None:
+                raise ArgumentError("query must be omitted when passing a FiberExplainRequest")
+            request = world
+        else:
+            if query is None:
+                raise ArgumentError("query is required when world is a path string")
+            request = FiberExplainRequest(world, query)
+        return await self.call_tool("fiber_explain", request.to_mcp_arguments())
+
+    async def fiber_verify(self, certificate: str | FiberVerifyRequest) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.fiber_verify`."""
+
+        request = certificate if isinstance(certificate, FiberVerifyRequest) else FiberVerifyRequest(certificate)
+        return await self.call_tool("fiber_verify", request.to_mcp_arguments())
+
+    async def projection_bundle(
+        self,
+        world: str | ProjectionBundleRequest,
+        query: str | None = None,
+        *,
+        include_views: bool = False,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.projection_bundle`."""
+
+        if isinstance(world, ProjectionBundleRequest):
+            if query is not None or include_views:
+                raise ArgumentError("query and include_views must be omitted when passing a ProjectionBundleRequest")
+            request = world
+        else:
+            if query is None:
+                raise ArgumentError("query is required when world is a path string")
+            request = ProjectionBundleRequest(world=world, query=query, include_views=include_views)
+        return await self.call_tool("projection_bundle", request.to_mcp_arguments())
+
+    context_compile = fiber_compile
+    context_refine = fiber_refine
+    context_explain = fiber_explain
+    context_verify = fiber_verify
 
     async def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.events, after=after, limit=limit)

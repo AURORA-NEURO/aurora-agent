@@ -186,6 +186,10 @@ Typed Python envelopes now also cover `world_claim_check`, `lab_plan`, and `rout
 sync MCP, async MCP, and HTTP. They keep serialized provenance, obligation/action graphs, routing
 fingerprints, evidence ledgers, budgets, and task identity bounded and explicit without duplicating
 Rust's support, privacy, reachability, abstention, or safe-default decisions.
+The context SDK surface now covers the full FIBER lifecycle: typed compile, handle-or-source refine,
+plan explanation, certificate verification, and bounded projection bundles over sync MCP, async MCP,
+and HTTP. Relative-path traversal and ambiguous source selection fail before transport, while layer
+sufficiency, omission accounting, certificate semantics, and projection fidelity remain Rust-owned.
 The benchmark utility complements that kernel for Python notebooks: it separates measured from
 declared/missing/blocked rows, computes deterministic distribution summaries, performs direction-aware
 paired contrasts, and offers cluster-aware percentile bootstrap intervals with explicit assumptions.

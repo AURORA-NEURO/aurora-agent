@@ -53,7 +53,10 @@ evidence judgements, reference panels, evidence-conditioned BioCapability audit 
 paired contrasts, and calibration forecasts. They validate local JSON and cross-field invariants,
 then let `Workspace` delegate final decisions and arithmetic to the Rust kernel through
 `pack_health_assess()`, `mutation_family()`, `oracle_combine()`,
-`metrics_analytics_audit()`, `biocapability_evidence_audit()`, `bioql_compile()`, `world_claim_check()`, `lab_plan()`, `routing_decide()`, `developer_workbench()`, `agent_mission()`, `capability_discover()`, and the evaluation helpers.
+`metrics_analytics_audit()`, `biocapability_evidence_audit()`, `bioql_compile()`, `world_claim_check()`, `lab_plan()`, `routing_decide()`, `fiber_compile()`, `fiber_refine()`, `fiber_explain()`, `fiber_verify()`, `projection_bundle()`, `developer_workbench()`, `agent_mission()`, `capability_discover()`, and the evaluation helpers.
+The FIBER helpers preserve the progressive-disclosure lifecycle: compile the minimal contract,
+refine only when necessary, inspect omissions before trust, verify certificates, and opt into full
+projection bodies explicitly.
 The mission layer lets an agent preview or explicitly execute a bounded, allow-listed graph across
 the existing domain tools while retaining refusals and blocking dependent work. The workbench
 keeps authoring/notebook sessions, stale digests, capability holes, release posture, and review-only

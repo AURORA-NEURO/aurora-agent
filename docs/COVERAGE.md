@@ -59,6 +59,11 @@ so a name-parity pass cannot conceal a malformed contract.
 `capability_route` batches named needs across those groups into a single route id, preserves each
 bounded search result, distinguishes explicit tool filters from ranked candidates, and never
 executes the proposed tools.
+The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
+async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
+compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table
+projection bundles. The local layer rejects traversal, malformed handles, and ambiguous source
+selection; Rust remains authoritative for sufficiency, omission accounting, and fidelity.
 `adapter_plan` makes the biological-format boundary callable: it matches explicit source formats
 and source shapes against native CSV/inventory adapters and Python-delegated DICOM, NIfTI/BIDS,
 AnnData/Zarr, VCF, FASTA, FASTQ, SAM, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
