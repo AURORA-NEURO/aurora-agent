@@ -84,6 +84,14 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
+from .evidence import (
+    BioCapabilityEvidenceAuditRequest,
+    ClaimRequest,
+    EVIDENCE_DIMENSIONS,
+    EVIDENCE_STATUSES,
+    EvidenceItem,
+    EvidenceStatus,
+)
 from .fasta import FastaAdapter, FastaFinding, FastaParseError, FastaParseResult, parse_fasta
 from .fastq import FastqAdapter, FastqFinding, FastqParseError, FastqParseResult, parse_fastq
 from .fhir import FhirAdapter, FhirAuditResult, FhirFinding, audit_fhir, parse_fhir_json, parse_fhir_ndjson
@@ -144,6 +152,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ArgumentError",
+    "BioCapabilityEvidenceAuditRequest",
     "ApiClient",
     "ApiError",
     "AcceptanceResult",
@@ -219,9 +228,14 @@ __all__ = [
     "JudgementBuilder",
     "Client",
     "ClientConfig",
+    "ClaimRequest",
     "DicomAdapter",
     "DicomAuditResult",
     "DicomFinding",
+    "EVIDENCE_DIMENSIONS",
+    "EVIDENCE_STATUSES",
+    "EvidenceItem",
+    "EvidenceStatus",
     "ConformanceLevel",
     "CalibrationObservation",
     "CapabilityQuery",

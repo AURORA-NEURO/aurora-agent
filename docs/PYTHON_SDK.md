@@ -57,6 +57,11 @@ invent defaults:
   when the caller supplies an id and target list.
 - `bioatlas_publication_audit(atlas, ...)` preserves optional evidence, card, leaderboard, and
   weighting contracts and never implies publication without explicit targets.
+- `BioCapabilityEvidenceAuditRequest`, `EvidenceItem`, and `ClaimRequest` provide a bounded typed
+  input for `Workspace.biocapability_evidence_audit(...)` and its async/HTTP counterparts. They
+  enumerate the nine evidence dimensions, keep observed/reproduced support distinct from declared
+  status, validate claim prerequisites and duplicate IDs, and preserve optional information-value,
+  reference, temporal, and reproducibility subaudits without deciding scientific truth locally.
 - `compile_context(world, query, ...)` invokes `fiber_compile` while leaving policy/profile choices
   caller-controlled.
 - `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON

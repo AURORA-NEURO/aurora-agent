@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, ClaimRequest, EvidenceItem
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -38,7 +38,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(size) or b"{}")
         if self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_"):
+        elif self.path.startswith("/v1/tools/capability_") or self.path == "/v1/tools/biocapability_evidence_audit":
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -82,6 +82,15 @@ class HttpApiClientTests(unittest.TestCase):
             client.adapter_plan("scan-1", "bytes", declared_format="application/dicom")["mcp"]["result"]["source_id"],
             "scan-1",
         )
+        evidence_request = BioCapabilityEvidenceAuditRequest(
+            [EvidenceItem("grounding", "evidence_grounding", "observed", support={"source": "ledger", "scope": "pack/1"})],
+            [ClaimRequest("claim", "grounded profile", ("evidence_grounding",))],
+            vectors=({"system": "a"}, {"system": "b"}),
+        )
+        self.assertEqual(
+            client.biocapability_evidence_audit(evidence_request)["mcp"]["result"]["claim_requests"][0]["id"],
+            "claim",
+        )
         self.assertEqual(client.events()["page"]["events"], [])
         with self.assertRaises(ApiError) as error:
             client.request("POST", "/v1/tools/refuse", {})
@@ -102,6 +111,15 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(
                 (await client.adapter_plan("variants", "bytes", declared_format="text/vcf"))["mcp"]["result"]["declared_format"],
                 "text/vcf",
+            )
+            evidence_request = BioCapabilityEvidenceAuditRequest(
+                [EvidenceItem("grounding", "evidence_grounding", "observed", support={"source": "ledger", "scope": "pack/1"})],
+                [ClaimRequest("claim", "grounded profile", ("evidence_grounding",))],
+                vectors=({"system": "a"}, {"system": "b"}),
+            )
+            self.assertEqual(
+                (await client.biocapability_evidence_audit(evidence_request))["mcp"]["result"]["max_items"],
+                100,
             )
 
         asyncio.run(run())

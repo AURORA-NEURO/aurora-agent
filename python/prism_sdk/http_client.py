@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from .biological import AdapterPlanRequest
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ApiError, ArgumentError, TransportError
+from .evidence import BioCapabilityEvidenceAuditRequest
 
 
 def _capability_query_arguments(
@@ -227,6 +228,16 @@ class ApiClient:
         )
         return self.call_tool("adapter_plan", request.to_mcp_arguments())
 
+    def biocapability_evidence_audit(
+        self,
+        request: BioCapabilityEvidenceAuditRequest,
+    ) -> dict[str, Any]:
+        """Run the evidence-conditioned capability audit through the HTTP gateway."""
+
+        if not isinstance(request, BioCapabilityEvidenceAuditRequest):
+            raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
+        return self.call_tool("biocapability_evidence_audit", request.to_mcp_arguments())
+
     def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         if after < 0 or not 1 <= limit <= 1000:
             raise ArgumentError("after must be non-negative and limit must be 1..=1000")
@@ -356,6 +367,16 @@ class AsyncApiClient:
             available_dependencies,
         )
         return await self.call_tool("adapter_plan", request.to_mcp_arguments())
+
+    async def biocapability_evidence_audit(
+        self,
+        request: BioCapabilityEvidenceAuditRequest,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.biocapability_evidence_audit`."""
+
+        if not isinstance(request, BioCapabilityEvidenceAuditRequest):
+            raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
+        return await self.call_tool("biocapability_evidence_audit", request.to_mcp_arguments())
 
     async def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.events, after=after, limit=limit)

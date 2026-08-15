@@ -162,6 +162,10 @@ eligibility and evidence-conditioned readiness; absent requests, atlas holes, wi
 unranked entries stay visible rather than becoming implicit publication passes. This remains a
 bounded in-memory composition and does not create a web publisher, identity service, assay runner,
 leakage detector, or clinical approval path.
+The Python SDK now exposes the same evidence-conditioned profile as a typed workflow: nine named
+evidence dimensions, explicit observed/reproduced/declared/missing states, support-field validation,
+claim prerequisite validation, duplicate-ID rejection, and sync/async/HTTP transport helpers. Rust
+remains authoritative for metric comparability, release posture, and nested scientific audits.
 
 The table below is a snapshot; the script is the live source.
 

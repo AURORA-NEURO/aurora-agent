@@ -49,11 +49,11 @@ See [`docs/HTTP_API.md`](../docs/HTTP_API.md) for the route and delivery contrac
 
 The package also includes dependency-free authoring builders for digest-bound benchmark packs,
 set-valued decision cells, deterministic metamorphic mutations, versioned oracle manifests,
-evidence judgements, reference panels, evaluation requests, and typed metrics observations,
+evidence judgements, reference panels, evidence-conditioned BioCapability audit requests, evaluation requests, and typed metrics observations,
 paired contrasts, and calibration forecasts. They validate local JSON and cross-field invariants,
 then let `Workspace` delegate final decisions and arithmetic to the Rust kernel through
 `pack_health_assess()`, `mutation_family()`, `oracle_combine()`,
-`metrics_analytics_audit()`, `developer_workbench()`, `agent_mission()`, `capability_discover()`, and the evaluation helpers.
+`metrics_analytics_audit()`, `biocapability_evidence_audit()`, `developer_workbench()`, `agent_mission()`, `capability_discover()`, and the evaluation helpers.
 The mission layer lets an agent preview or explicitly execute a bounded, allow-listed graph across
 the existing domain tools while retaining refusals and blocking dependent work. The workbench
 keeps authoring/notebook sessions, stale digests, capability holes, release posture, and review-only

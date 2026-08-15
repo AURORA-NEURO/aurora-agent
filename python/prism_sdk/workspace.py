@@ -17,6 +17,7 @@ from .biological import AdapterPlanRequest
 from .client import Client
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ArgumentError
+from .evidence import BioCapabilityEvidenceAuditRequest
 from .mission import MissionPolicy, MissionRequest, MissionStep
 from .oracle import (
     EvidenceTier,
@@ -103,6 +104,16 @@ class Workspace:
             calibration_bins=calibration_bins,
         )
         return self.tool("metrics_analytics_audit", request.to_mcp_arguments())
+
+    def biocapability_evidence_audit(
+        self,
+        request: BioCapabilityEvidenceAuditRequest,
+    ) -> dict[str, Any]:
+        """Audit evidence prerequisites before making cross-domain capability claims."""
+
+        if not isinstance(request, BioCapabilityEvidenceAuditRequest):
+            raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
+        return self.tool("biocapability_evidence_audit", request.to_mcp_arguments())
 
     def developer_workbench(
         self,
@@ -440,6 +451,16 @@ class AsyncWorkspace:
             calibration_bins=calibration_bins,
         )
         return await self.tool("metrics_analytics_audit", request.to_mcp_arguments())
+
+    async def biocapability_evidence_audit(
+        self,
+        request: BioCapabilityEvidenceAuditRequest,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.biocapability_evidence_audit`."""
+
+        if not isinstance(request, BioCapabilityEvidenceAuditRequest):
+            raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
+        return await self.tool("biocapability_evidence_audit", request.to_mcp_arguments())
 
     async def developer_workbench(
         self,

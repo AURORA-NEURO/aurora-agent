@@ -173,6 +173,11 @@ adapters and full distribution ergonomics. The metrics layer now additionally ex
 bounded descriptive analytics for scalar observations, paired robustness/cross-modal/translation
 contrasts, replicate spread, cost/latency, and calibration; those summaries remain descriptive and
 do not replace inferential statistics or external evidence acquisition.
+The Python layer now also provides typed evidence-conditioned BioCapability requests: nine named
+evidence dimensions, explicit status handling, dimension-specific support maps, claim prerequisite
+validation, duplicate-ID rejection, and sync/async/HTTP transport helpers. The Rust kernel still
+owns comparability, nested evidence audits, and release decisions; the Python models do not mint
+scientific support or publication authority.
 The benchmark utility complements that kernel for Python notebooks: it separates measured from
 declared/missing/blocked rows, computes deterministic distribution summaries, performs direction-aware
 paired contrasts, and offers cluster-aware percentile bootstrap intervals with explicit assumptions.
