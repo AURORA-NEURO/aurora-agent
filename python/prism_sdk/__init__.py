@@ -38,6 +38,7 @@ from .benchmark import (
     paired_effect,
     summarize_distribution,
 )
+from .bids import BidsAdapter, BidsAuditResult, BidsFinding, audit_bids
 from .authoring import (
     AcceptanceResult,
     AuthoringError,
@@ -111,6 +112,9 @@ __all__ = [
     "AdapterPlanRequest",
     "AdapterRegistry",
     "BenchmarkObservation",
+    "BidsAdapter",
+    "BidsAuditResult",
+    "BidsFinding",
     "BootstrapInterval",
     "AsyncClient",
     "AsyncApiClient",
@@ -187,6 +191,7 @@ __all__ = [
     "content_digest",
     "analytics_request",
     "adapter_plan",
+    "audit_bids",
     "bootstrap_mean",
     "parse_vcf",
     "paired_effect",

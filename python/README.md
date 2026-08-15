@@ -66,6 +66,10 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM, and OME-Zarr routes
 are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and
 semantic-loss declarations remain visible before parsing. The planners never sniff or fetch bytes.
+`BidsAdapter` and `audit_bids()` add a dependency-free BIDS manifest path: they validate bounded
+relative paths, entities, directory labels, JSON sidecar inheritance and conflict precedence,
+participant coverage, task metadata, and derivative descriptions. They accept parsed projections
+and never claim to parse NIfTI or other binary image bytes.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

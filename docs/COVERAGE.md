@@ -68,6 +68,10 @@ The Python adapter layer now also contains a bounded text VCF reader: it validat
 record stream, preserves raw INFO/FORMAT spellings beside typed projections, retains source and
 line hashes, and reports reference-build, provenance, type, and precision limitations without
 inventing an indexed/compressed reader or a reference genome.
+It also contains a bounded BIDS manifest audit: it validates relative paths and entity syntax,
+directory/entity agreement, inherited JSON sidecars and equal-specificity conflicts, task metadata,
+participant coverage, and derivative descriptions while explicitly leaving binary image parsing to
+the format-specific adapter. Both reports disclose their limits and bind normalized input digests.
 The Python benchmark layer now complements Rust's descriptive metrics kernel with typed evidence
 rows, distribution summaries, direction-aware paired contrasts, and deterministic observation- or
 replicate-group bootstrap intervals. It preserves declared/missing/blocked populations and labels

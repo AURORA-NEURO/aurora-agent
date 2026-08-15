@@ -244,6 +244,24 @@ impl AdapterRegistry {
                 "Python-owned DICOM adapter route; the Rust layer plans and audits the boundary.",
             ),
             descriptor(
+                "bioprism.python.bids_manifest",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/bids-manifest"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "session", "acquisition", "image", "event"],
+                None,
+                "Dependency-free BIDS manifest, entity, sidecar-inheritance, and participant audit; binary image bytes remain uninterpreted.",
+            ),
+            descriptor(
                 "bioprism.python.nifti_bids",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -595,6 +613,29 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.vcf_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_bids_manifest_selects_the_dependency_free_python_auditor() {
+        let plan = AdapterRegistry::default()
+            .plan(request(
+                Some("application/bids-manifest"),
+                SourceKind::Bytes,
+            ))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.bids_manifest")
         );
         assert_eq!(
             plan.selected_adapter

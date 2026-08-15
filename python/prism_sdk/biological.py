@@ -263,6 +263,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Python-owned DICOM adapter route; the Rust layer plans and audits the boundary.",
         ),
         _descriptor(
+            "bioprism.python.bids_manifest",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/bids-manifest",),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("coordinate_frame_not_carried", "provenance_unavailable", "content_uninterpreted", "type_undetermined"),
+            ("subject", "session", "acquisition", "image", "event"),
+            "Dependency-free BIDS manifest, entity, sidecar-inheritance, and participant audit; binary image bytes remain uninterpreted.",
+        ),
+        _descriptor(
             "bioprism.python.nifti_bids",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/nifti", "application/x-nifti", "application/bids"),

@@ -82,7 +82,12 @@ invent defaults:
   semantic-loss and scope surface. `Workspace.adapter_plan(...)`, `ApiClient.adapter_plan(...)`,
   and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
   fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
-  and OME-Zarr readers remain responsible for source-specific conformance in the Python layer.
+   and OME-Zarr readers remain responsible for source-specific conformance in the Python layer.
+- `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
+  BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
+  inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and
+  derivative pipeline descriptions. The report hashes normalized input and states that it did not
+  read image bytes; NIfTI/DICOM/EEG/MEG interpretation remains a separate adapter concern.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and
@@ -245,10 +250,10 @@ properties. These helpers never locally choose a biological truth or convert an 
 negative result.
 
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData, indexed/compressed VCF,
-inferential statistics, OTLP export, a notebook UI, or CI deployment. It now ships a bounded text
-VCF reader and descriptive/cluster-bootstrap utilities above the Rust kernel. The repository still
-keeps gRPC, durable event storage, external webhook delivery, heavyweight biological readers, and
-statistical estimators as separate contracts.
+binary BIDS image parsing, inferential statistics, OTLP export, a notebook UI, or CI deployment. It
+now ships bounded text VCF and BIDS manifest audits plus descriptive/cluster-bootstrap utilities
+above the Rust kernel. The repository still keeps gRPC, durable event storage, external webhook
+delivery, heavyweight binary biological readers, and statistical estimators as separate contracts.
 
 ## Verification
 
