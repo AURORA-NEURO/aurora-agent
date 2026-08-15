@@ -70,6 +70,8 @@ invent defaults:
   allow-lists, side-effect posture, refusal propagation, and output budgets; the server remains the
   authority for ordering and execution. `MissionBinding` can route a JSON-pointer field from a
   successful direct prerequisite into an existing argument slot.
+- `capability_discover(...)` searches the complete domain catalogue by intent, domain, group, or
+  tool and can attach authoritative MCP schemas for the returned routing matches.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP

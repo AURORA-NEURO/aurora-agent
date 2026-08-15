@@ -14,6 +14,7 @@ from .analytics import (
 )
 from .authoring import PackArtifact
 from .client import Client
+from .capability import CapabilityQuery
 from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest, MissionStep
 from .oracle import (
@@ -126,6 +127,37 @@ class Workspace:
 
         request = MissionRequest(mission_id, goal, steps, policy)
         return self.tool("agent_mission", request.to_mcp_arguments())
+
+    def capability_discover(
+        self,
+        *,
+        query: CapabilityQuery | str | None = None,
+        text: str | None = None,
+        domain: str | None = None,
+        tool: str | None = None,
+        group_id: str | None = None,
+        max_items: int = 50,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Search every catalogued domain and optionally return authoritative tool schemas."""
+
+        if isinstance(query, CapabilityQuery):
+            if (
+                any(value is not None for value in (text, domain, tool, group_id))
+                or max_items != 50
+                or include_tools
+            ):
+                raise ArgumentError("query cannot be combined with individual capability filters")
+            request = query
+        elif isinstance(query, str):
+            if text is not None:
+                raise ArgumentError("query cannot be combined with text")
+            request = CapabilityQuery(query, group_id, domain, tool, max_items, include_tools)
+        elif query is not None:
+            raise ArgumentError("query must be a CapabilityQuery or string")
+        else:
+            request = CapabilityQuery(text, group_id, domain, tool, max_items, include_tools)
+        return self.tool("capability_discover", request.to_mcp_arguments())
 
     def oracle_combine(
         self,
@@ -385,6 +417,37 @@ class AsyncWorkspace:
 
         request = MissionRequest(mission_id, goal, steps, policy)
         return await self.tool("agent_mission", request.to_mcp_arguments())
+
+    async def capability_discover(
+        self,
+        *,
+        query: CapabilityQuery | str | None = None,
+        text: str | None = None,
+        domain: str | None = None,
+        tool: str | None = None,
+        group_id: str | None = None,
+        max_items: int = 50,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.capability_discover`."""
+
+        if isinstance(query, CapabilityQuery):
+            if (
+                any(value is not None for value in (text, domain, tool, group_id))
+                or max_items != 50
+                or include_tools
+            ):
+                raise ArgumentError("query cannot be combined with individual capability filters")
+            request = query
+        elif isinstance(query, str):
+            if text is not None:
+                raise ArgumentError("query cannot be combined with text")
+            request = CapabilityQuery(query, group_id, domain, tool, max_items, include_tools)
+        elif query is not None:
+            raise ArgumentError("query must be a CapabilityQuery or string")
+        else:
+            request = CapabilityQuery(text, group_id, domain, tool, max_items, include_tools)
+        return await self.tool("capability_discover", request.to_mcp_arguments())
 
     async def oracle_combine(
         self,

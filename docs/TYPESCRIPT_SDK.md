@@ -89,7 +89,8 @@ Convenience methods currently cover:
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of 117 tool schemas.
+families without maintaining a fragile partial clone of 118 tool schemas. `capabilityDiscover`
+searches the explicit cross-domain catalogue and can request authoritative schemas for matches.
 
 ## Events and webhooks
 

@@ -53,9 +53,9 @@ use bioprism_dataops::{
     DataClass, Plane, TenantPattern,
 };
 use bioprism_devplat::{
-    apply_binding, plan_mission, run_workbench, standard_walkthroughs, DevPlatReport,
-    MissionReport, MissionRequest, MissionStepResult, WorkbenchRequest, MISSION_SCHEMA_VERSION,
-    WORKBENCH_SCHEMA_VERSION,
+    apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
+    CapabilityQuery, DevPlatReport, MissionReport, MissionRequest, MissionStepResult,
+    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -631,6 +631,7 @@ impl Server {
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
+            "capability_discover" => self.capability_discover(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -11310,6 +11311,80 @@ impl Server {
         Ok(result)
     }
 
+    /// Search the complete workspace capability catalogue and optionally attach authoritative MCP
+    /// schemas for the matched tools.
+    ///
+    /// This is intentionally a discovery operation, not a semantic router or permission grant.
+    /// Scores only reflect explicit label matches; callers still need to inspect the returned
+    /// domain, evidence, policy, and tool contracts before constructing a mission.
+    fn capability_discover(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode capability discovery input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("capability discovery input exceeds the 20000000-byte safety bound".into());
+        }
+        let query: CapabilityQuery = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid capability discovery input: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("capability catalogue refused: {error}"))?;
+        let search = catalogue
+            .search(&query)
+            .map_err(|error| format!("capability discovery refused: {error}"))?;
+        let mut output = serde_json::to_value(search)
+            .map_err(|error| format!("cannot encode capability discovery result: {error}"))?;
+        let mut schema_missing = Vec::new();
+        let mut schema_returned = 0usize;
+        if query.include_tools {
+            let definitions = tool_definitions();
+            let definitions = definitions
+                .into_iter()
+                .filter_map(|definition| {
+                    let name = definition
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    name.map(|name| (name, definition))
+                })
+                .collect::<BTreeMap<_, _>>();
+            if let Some(matches) = output.get_mut("matches").and_then(Value::as_array_mut) {
+                for matched in matches {
+                    let tool_names = matched
+                        .get("matched_tools")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let mut schemas = Vec::new();
+                    for tool_name in tool_names.iter().filter_map(Value::as_str) {
+                        if let Some(definition) = definitions.get(tool_name) {
+                            schemas.push(definition.clone());
+                        } else {
+                            schema_missing.push(tool_name.to_string());
+                        }
+                    }
+                    schema_returned += schemas.len();
+                    matched["tool_schemas"] = Value::Array(schemas);
+                }
+            }
+        }
+        output["ok"] = json!(true);
+        output["workflow"] = json!("capability_discover");
+        output["capability_schema_version"] = json!(CAPABILITY_SCHEMA_VERSION);
+        output["schema_attachment"] = json!({
+            "requested": query.include_tools,
+            "returned": schema_returned,
+            "missing": schema_missing,
+            "authoritative_source": "tools/list definition set"
+        });
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure capability discovery result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "capability discovery result exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        Ok(output)
+    }
+
     /// Plan or execute an explicit, bounded DAG of existing domain tools.
     ///
     /// Planning is the default. Execution invokes the same internal tool dispatcher used by the
@@ -13896,7 +13971,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_discover", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -15424,6 +15499,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "governance": { "type": "object", "description": "Optional exact arguments for governance_schema_check. A document-mode conforming result is required for governance_schema readiness; a catalog result is not enough." },
                     "release": { "type": "object", "description": "Optional exact arguments for release_audit. Required for release readiness." },
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release. Omit it to receive no readiness claim." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "capability_discover",
+            "description": "Search the complete explicit workspace capability catalogue across all domain groups. Query by free-text intent, group id, domain, or MCP tool; results are deterministic, bounded, digest-bound, and retain routing labels. Optional tool schema attachment comes from the authoritative tools/list definitions. Scores are label-match routing evidence, not permission, readiness, or scientific truth.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Optional intent text such as `oncology evidence`, `trace`, or `release provenance`." },
+                    "group_id": { "type": "string", "description": "Optional exact or prefix capability group id." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive domain label filter." },
+                    "tool": { "type": "string", "description": "Optional exact, prefix, or substring MCP tool filter." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 },
+                    "include_tools": { "type": "boolean", "default": false, "description": "Attach full authoritative schemas for matched MCP tools." }
                 },
                 "required": []
             }

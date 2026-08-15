@@ -10,6 +10,7 @@ from prism_sdk import (
     AsyncClient,
     AsyncWorkspace,
     CalibrationObservation,
+    CapabilityQuery,
     Client,
     MetricObservation,
     MissionBinding,
@@ -118,6 +119,15 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             MissionRequest("", "goal", [MissionStep("s", "d", "c", "o", "tool")])
 
+    def test_capability_query_builds_bounded_cross_domain_wire_contract(self) -> None:
+        query = CapabilityQuery(query="oncology evidence", max_items=3, include_tools=True)
+        self.assertEqual(
+            query.to_mcp_arguments(),
+            {"query": "oncology evidence", "max_items": 3, "include_tools": True},
+        )
+        with self.assertRaises(ArgumentError):
+            CapabilityQuery(max_items=0)
+
 
 class AnalyticsWorkspaceTests(unittest.TestCase):
     def test_sync_workspace_sends_typed_analytics_request(self) -> None:
@@ -149,6 +159,14 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(result["echo"]["mission_id"], "mission-sync")
         self.assertEqual(result["echo"]["steps"][0]["tool"], "workspace_capabilities")
 
+    def test_sync_workspace_exposes_capability_discovery(self) -> None:
+        with Client(command(), timeout=2) as client:
+            with self.assertRaises(ArgumentError):
+                Workspace(client).capability_discover(query=object())  # type: ignore[arg-type]
+            result = Workspace(client).capability_discover(query="oncology")
+        self.assertEqual(result["echo"]["query"], "oncology")
+        self.assertEqual(result["echo"]["include_tools"], False)
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -173,6 +191,12 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 [MissionStep("catalog", "workspace", "discovery", "discover routes", "workspace_capabilities")],
             )
         self.assertEqual(result["echo"]["mission_id"], "mission-async")
+
+    async def test_async_workspace_exposes_capability_discovery(self) -> None:
+        async with AsyncClient(command(), timeout=2) as client:
+            result = await AsyncWorkspace(client).capability_discover(domain="release", max_items=2)
+        self.assertEqual(result["echo"]["domain"], "release")
+        self.assertEqual(result["echo"]["max_items"], 2)
 
 
 if __name__ == "__main__":

@@ -305,6 +305,15 @@ export interface DeveloperWorkbenchArgs extends JsonObject {
   ci?: JsonObject;
 }
 
+export interface CapabilityDiscoverArgs extends JsonObject {
+  query?: string;
+  group_id?: string;
+  domain?: string;
+  tool?: string;
+  max_items?: number;
+  include_tools?: boolean;
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;

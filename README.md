@@ -102,7 +102,7 @@ carries a typed verdict in [`crates/residue`](crates/residue) explaining why not
 | [`bioprism-conformance`](crates/conformance) | 14,40,43 | Conformance suites, the test pyramid and release quality gates |
 | [`bioprism-cookbook`](crates/cookbook) | 03,11,13,14,19,21,38,39,40,41,43 | Reference examples: worked recipes with the claim each one demonstrates and the property a reader can check |
 | [`bioprism-dataops`](crates/dataops) | 12 | Section 12 remainder: storage topology, relational catalog, SLOs, compute placement and federated deployment, each answer carrying the basis it was known from |
-| [`bioprism-devplat`](crates/devplat) | 11,19 | Developer platform contracts: evidence-aware authoring workbench, cross-domain mission DAGs, notebook/session audit, capability dashboard queries, CI planning, and reference-example predicates |
+| [`bioprism-devplat`](crates/devplat) | 11,19 | Developer platform contracts: evidence-aware authoring workbench, cross-domain mission DAGs, digest-bound capability discovery, notebook/session audit, capability dashboard queries, CI planning, and reference-example predicates |
 | [`bioprism-devx`](crates/devx) | 11,23,38,39,40,41,43 | Developer platform: machine-actionable diagnostics, compile introspection, the local-loop invalidation contract and the 23.32 debugger surface model |
 | [`bioprism-docgraph`](crates/docgraph) | 39,41,43 | Documentation graph: module registry, edge vocabulary, context cards, task routes, bundle compiler, change impact |
 | [`bioprism-epistemic`](crates/epistemic) | 43 | The remaining FIBER calculus: coverage-aware selection, separator protocol, rate-distortion and value of information |
@@ -261,7 +261,7 @@ resources, so a client can build valid documents and route work without reading 
 The repository also ships a dependency-free Python client in [`python/`](python/README.md). It
 supports synchronous and asyncio MCP sessions, enforces the initialize/initialized lifecycle,
 keeps transport/protocol/remote-refusal errors distinct, bounds JSON-RPC frames, and provides thin
-helpers for `developer_delivery_audit`, `developer_workbench`, `agent_mission`, `bioatlas_publication_audit`, and `fiber_compile`. It is an
+helpers for `developer_delivery_audit`, `developer_workbench`, `agent_mission`, `capability_discover`, `bioatlas_publication_audit`, and `fiber_compile`. It is an
 integration foundation above the Rust kernel, not a claim that the full Python data-adapter,
 benchmark-statistics, or biological-format ecosystem is complete. Its authoring layer now builds
 digest-bound packs, decision cells, deterministic mutation plans, versioned oracle judgements,

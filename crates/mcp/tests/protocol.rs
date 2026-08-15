@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 117);
+    assert_eq!(tools.len(), 118);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3560,6 +3560,51 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     assert_eq!(
         executed["results"][1]["arguments_digest"],
         json!(expected_arguments_digest)
+    );
+}
+
+#[test]
+fn capability_discovery_routes_across_domains_and_attaches_authoritative_schemas() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "capability_discover",
+        json!({
+            "query": "oncology",
+            "max_items": 2,
+            "include_tools": true
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["workflow"], json!("capability_discover"));
+    assert_eq!(result["result_count"], json!(1));
+    assert_eq!(
+        result["matches"][0]["group"]["id"],
+        json!("biological_domains")
+    );
+    assert!(result["matches"][0]["matched_tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool == "onco_response_assess"));
+    assert!(result["matches"][0]["tool_schemas"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|schema| schema["name"] == "onco_response_assess"));
+    assert_eq!(result["schema_attachment"]["requested"], json!(true));
+    assert_eq!(result["catalog_digest"].as_str().unwrap().len(), 64);
+
+    let filtered = call(
+        &mut server,
+        "capability_discover",
+        json!({"domain": "release", "tool": "bundle_verify"}),
+    );
+    assert_eq!(filtered["__isError"], json!(false));
+    assert_eq!(filtered["result_count"], json!(1));
+    assert_eq!(
+        filtered["matches"][0]["matched_tools"],
+        json!(["bundle_verify"])
     );
 }
 

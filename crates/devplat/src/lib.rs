@@ -202,6 +202,7 @@
 //! stating: a section can look two-thirds unimplemented while the platform underneath it is not.
 
 pub mod audit;
+pub mod capability;
 pub mod citations;
 pub mod claim;
 pub mod classify;
@@ -217,6 +218,10 @@ pub mod workbench;
 pub use audit::{
     catalogues_are_disjoint, findings, recipes_are_all_in_tree, unimplemented_titles,
     DevPlatReport, Finding, WalkthroughSummary,
+};
+pub use capability::{
+    CapabilityCatalogue, CapabilityError, CapabilityGroup, CapabilityMatch, CapabilityQuery,
+    CapabilitySearch, CAPABILITY_SCHEMA_VERSION,
 };
 pub use citations::{audit as audit_citations, scan as scan_citations, CitationAudit};
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};

@@ -4,6 +4,7 @@ import type {
   ApiClientOptions,
   ApiErrorBody,
   AgentMissionArgs,
+  CapabilityDiscoverArgs,
   BioAtlasPublicationAuditArgs,
   BioCapabilityEvidenceAuditArgs,
   CapabilitiesResponse,
@@ -172,6 +173,10 @@ export class ApiClient {
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {
     return this.callTool("developer_workbench", args, options);
+  }
+
+  async capabilityDiscover(args: CapabilityDiscoverArgs = {}, options?: ClientRequestOptions) {
+    return this.callTool("capability_discover", args, options);
   }
 
   async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions) {
