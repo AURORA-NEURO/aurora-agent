@@ -154,6 +154,12 @@ class AdapterRuntimeTests(unittest.TestCase):
         self.assertEqual(first.to_wire()["status_counts"], {"lossy": 1, "succeeded": 1})
         self.assertEqual(first.batch_digest, second.batch_digest)
         self.assertEqual(len(first.document_digests), 2)
+        self.assertTrue(first.accepted)
+        self.assertEqual(first.to_wire()["adapter_counts"], {"bioprism.python.fhir_manifest": 1, "bioprism.python.vcf_text": 1})
+        self.assertEqual(first.to_wire()["valid_count"], 2)
+        self.assertEqual(first.to_wire()["publishable_count"], 2)
+        self.assertIn("resource", first.to_wire()["scope_dimensions"])
+        self.assertGreater(first.to_wire()["semantic_loss"]["declared_loss_count"], 0)
         self.assertNotIn(VCF, str(first.to_wire()["request"]))
         self.assertEqual(first.to_wire()["result_count"], 2)
 
@@ -173,6 +179,8 @@ class AdapterRuntimeTests(unittest.TestCase):
         self.assertEqual(result.omitted_requests, 0)
         self.assertEqual(result.results[1].status, RuntimeStatus.UNSUPPORTED)
         self.assertEqual(result.to_wire()["status_counts"], {"succeeded": 1, "unsupported": 1})
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.to_wire()["error_kind_counts"], {"unknown_adapter": 1})
         self.assertNotIn(VCF, str(result.to_wire()["request"]))
         self.assertEqual(result.to_wire()["results"][1]["error"]["kind"], "unknown_adapter")
 
@@ -186,6 +194,7 @@ class AdapterRuntimeTests(unittest.TestCase):
         self.assertEqual(result.status, BatchStatus.PARTIAL)
         self.assertTrue(result.stopped_on_error)
         self.assertEqual(result.omitted_requests, 1)
+        self.assertFalse(result.accepted)
         self.assertEqual(result.to_wire()["result_count"], 2)
 
     def test_batch_bounds_reject_empty_requests_and_unbounded_total_preview(self) -> None:

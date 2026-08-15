@@ -9,6 +9,7 @@ unsupported result.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Sequence
@@ -198,7 +199,7 @@ class ProjectionBatchResult:
 
     @property
     def accepted(self) -> bool:
-        return bool(self.results) and all(result.accepted for result in self.results)
+        return self.omitted_requests == 0 and bool(self.results) and all(result.accepted for result in self.results)
 
     @property
     def document_digests(self) -> tuple[str, ...]:
@@ -229,10 +230,88 @@ class ProjectionBatchResult:
             ],
         }
 
-    def to_wire(self) -> dict[str, Any]:
-        status_counts: dict[str, int] = {}
+    def _aggregate(self) -> dict[str, Any]:
+        status_counts: Counter[str] = Counter(result.status.value for result in self.results)
+        adapter_counts: Counter[str] = Counter()
+        error_kind_counts: Counter[str] = Counter()
+        loss_kind_counts: Counter[str] = Counter()
+        scope_dimensions: set[str] = set()
+        valid_count = 0
+        publishable_count = 0
+        document_count = 0
+        executable_count = 0
+        declared_loss_count = 0
+        visible_loss_entry_count = 0
+        omitted_loss_entries = 0
+        max_loss_severity: str | None = None
+        severity_order = {"advisory": 0, "degrading": 1, "major": 2, "blocking": 3}
         for result in self.results:
-            status_counts[result.status.value] = status_counts.get(result.status.value, 0) + 1
+            if result.adapter is not None:
+                adapter_counts[result.adapter.id] += 1
+                scope_dimensions.update(result.adapter.scope_dimensions)
+            if result.error is not None:
+                kind = result.error.get("kind")
+                if isinstance(kind, str):
+                    error_kind_counts[kind] += 1
+            if result.executable:
+                executable_count += 1
+            document = result.document
+            if not isinstance(document, Mapping):
+                continue
+            document_count += 1
+            conformance = document.get("conformance")
+            conformance_passed = isinstance(conformance, Mapping) and conformance.get("passed") is True
+            if document.get("valid") is True or conformance_passed:
+                valid_count += 1
+            semantic_loss = document.get("semantic_loss")
+            loss_is_blocking = isinstance(semantic_loss, Mapping) and semantic_loss.get("max_severity") == "blocking"
+            conformance_publishable = isinstance(conformance, Mapping) and conformance.get("publishable") is True
+            if document.get("publishable") is True or conformance_publishable or (
+                conformance_passed and not loss_is_blocking and result.status in {RuntimeStatus.SUCCEEDED, RuntimeStatus.LOSSY}
+            ):
+                publishable_count += 1
+            if not isinstance(semantic_loss, Mapping):
+                continue
+            loss_count = semantic_loss.get("lost_count")
+            if isinstance(loss_count, int) and loss_count >= 0:
+                declared_loss_count += loss_count
+            lost = semantic_loss.get("lost")
+            if isinstance(lost, Sequence) and not isinstance(lost, (str, bytes)):
+                for loss in lost:
+                    if not isinstance(loss, Mapping):
+                        continue
+                    visible_loss_entry_count += 1
+                    kind = loss.get("kind")
+                    if isinstance(kind, str):
+                        loss_kind_counts[kind] += 1
+            omitted = semantic_loss.get("omitted_lost")
+            if isinstance(omitted, int) and omitted >= 0:
+                omitted_loss_entries += omitted
+            severity = semantic_loss.get("max_severity")
+            if isinstance(severity, str) and (
+                max_loss_severity is None or severity_order.get(severity, -1) > severity_order.get(max_loss_severity, -1)
+            ):
+                max_loss_severity = severity
+        return {
+            "status_counts": dict(sorted(status_counts.items())),
+            "adapter_counts": dict(sorted(adapter_counts.items())),
+            "error_kind_counts": dict(sorted(error_kind_counts.items())),
+            "scope_dimensions": sorted(scope_dimensions),
+            "valid_count": valid_count,
+            "publishable_count": publishable_count,
+            "document_count": document_count,
+            "executable_count": executable_count,
+            "semantic_loss": {
+                "declared_loss_count": declared_loss_count,
+                "visible_loss_entry_count": visible_loss_entry_count,
+                "omitted_loss_entries": omitted_loss_entries,
+                "max_severity": max_loss_severity,
+                "kind_counts": dict(sorted(loss_kind_counts.items())),
+            },
+        }
+
+    def to_wire(self) -> dict[str, Any]:
+        aggregate = self._aggregate()
         return {
             "schema": RUNTIME_BATCH_SCHEMA,
             "request": self.request.to_wire(),
@@ -241,7 +320,15 @@ class ProjectionBatchResult:
             "result_count": len(self.results),
             "omitted_requests": self.omitted_requests,
             "stopped_on_error": self.stopped_on_error,
-            "status_counts": dict(sorted(status_counts.items())),
+            "status_counts": aggregate["status_counts"],
+            "adapter_counts": aggregate["adapter_counts"],
+            "error_kind_counts": aggregate["error_kind_counts"],
+            "scope_dimensions": aggregate["scope_dimensions"],
+            "valid_count": aggregate["valid_count"],
+            "publishable_count": aggregate["publishable_count"],
+            "document_count": aggregate["document_count"],
+            "executable_count": aggregate["executable_count"],
+            "semantic_loss": aggregate["semantic_loss"],
             "batch_digest": self.batch_digest,
             "results": [result.to_wire() for result in self.results],
         }

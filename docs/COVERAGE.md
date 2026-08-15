@@ -92,6 +92,9 @@ The Python adapter runtime now executes the complete set of concrete parsed-proj
 bounded request/result envelope, preserves adapter descriptors and document digests, classifies
 lossy/invalid/blocked/rejected outcomes, and explicitly refuses unavailable raw-byte routes without
 silently falling back or sniffing content.
+Its heterogeneous batch envelope now aggregates status, adapter, failure, validity, publishability,
+scope, and semantic-loss evidence while retaining member digests and explicit omitted-request state;
+stop-on-error batches are never marked accepted as complete.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.
