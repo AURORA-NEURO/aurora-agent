@@ -274,6 +274,7 @@ class CapabilityRouteReviewReport:
     """Validated non-executing handoff diagnostics for a reviewed route."""
 
     raw: dict[str, Any]
+    review_id: str
     route_id: str
     catalog_digest: str
     goal: str
@@ -327,6 +328,7 @@ class CapabilityRouteReviewReport:
             raise ArgumentError("blocked route review requires caller correction")
         return cls(
             raw=raw,
+            review_id=_route_text("review review_id", raw.get("review_id")),
             route_id=_route_text("review route_id", raw.get("route_id")),
             catalog_digest=_route_text("review catalog_digest", raw.get("catalog_digest")),
             goal=_route_text("review goal", raw.get("goal")),

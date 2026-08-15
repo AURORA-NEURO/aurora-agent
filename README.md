@@ -541,7 +541,9 @@ preserving the raw route for audit. `capability_route_review` then provides a cr
 checkpoint: it checks caller-selected candidates and dependency waves, emits blocked or ready
 diagnostics, and keeps mission preflight and execution explicitly separate. Its optional
 `validate_schemas` mode reports authoritative selected-tool schema digests and issue paths without
-turning schema conformance into domain readiness.
+turning schema conformance into domain readiness. Every review also carries a deterministic,
+content-addressed `review_id` derived from the route provenance, caller selections, and validation
+mode, making the same handoff correlate cleanly across transports and event records.
 
 ## Evaluating a context policy
 

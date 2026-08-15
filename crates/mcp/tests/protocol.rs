@@ -4051,6 +4051,7 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         }),
     );
     assert_eq!(review["workflow"], json!("capability_route_review"));
+    assert_eq!(review["review_id"].as_str().unwrap().len(), 64);
     assert_eq!(review["review_status"], json!("ready"));
     assert_eq!(
         review["handoff_status"],

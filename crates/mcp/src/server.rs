@@ -12601,6 +12601,15 @@ impl Server {
             Some(Value::Bool(value)) => *value,
             Some(_) => return Err("validate_schemas must be a boolean".into()),
         };
+        let review_document = json!({
+            "route_id": route_id,
+            "catalog_digest": catalog_digest,
+            "selections": raw_selections,
+            "validate_schemas": validate_schemas,
+        });
+        let review_id = bioprism_ids::ContentHash::of_value(&review_document)
+            .map_err(|error| format!("cannot hash capability route review: {error}"))?
+            .to_string();
         if raw_selections.len() > 32 {
             return Err("selections must contain at most 32 choices".into());
         }
@@ -12955,6 +12964,7 @@ impl Server {
         let mut output = json!({
             "ok": true,
             "workflow": "capability_route_review",
+            "review_id": review_id,
             "route_id": route_id,
             "catalog_digest": catalog_digest,
             "goal": goal,

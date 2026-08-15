@@ -114,6 +114,9 @@ dependency references, and deterministic dependency waves. A ready result contai
 but remains `mission_preflight_required`; it never grants permission or executes a tool. Callers may
 set `validate_schemas` to receive per-selected-tool authoritative schema digests and bounded issue
 paths; a schema-clean result is still shape evidence, not domain validation or authorization.
+Each result carries a deterministic content-addressed `review_id` derived from route provenance,
+caller selections, and validation mode so operators can correlate handoff evidence without relying
+on timestamps or mutable server state.
 The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
 async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table

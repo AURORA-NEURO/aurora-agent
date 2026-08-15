@@ -110,6 +110,7 @@ def route_review_payload() -> dict:
     return {
         "ok": True,
         "workflow": "capability_route_review",
+        "review_id": "v" * 64,
         "route_id": "r" * 64,
         "catalog_digest": "c" * 64,
         "goal": "compose evidence",
@@ -425,6 +426,7 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(request.to_mcp_arguments()["validate_schemas"])
         report = CapabilityRouteReviewReport.from_wire(route_review_payload())
         self.assertTrue(report.ready)
+        self.assertEqual(len(report.review_id), 64)
         self.assertEqual(report.dependency_waves, (("oncology",),))
         self.assertTrue(report.schema_review["valid"])
 

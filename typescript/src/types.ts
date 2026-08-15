@@ -455,6 +455,7 @@ export interface CapabilityRouteReviewFinding extends JsonObject {
 export interface CapabilityRouteReviewResult extends JsonObject {
   ok: boolean;
   workflow: "capability_route_review";
+  review_id: string;
   route_id: string;
   catalog_digest: string;
   goal: string;

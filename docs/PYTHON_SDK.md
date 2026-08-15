@@ -131,7 +131,8 @@ invent defaults:
   candidate mismatches, missing selections, and deterministic dependency waves. A ready report
   contains a mission draft but explicitly remains `mission_preflight_required`. Pass
   `validate_schemas=True` to request authoritative per-tool schema digests and bounded issue paths
-  in `report.schema_review`.
+  in `report.schema_review`. The resulting `report.review_id` is a deterministic,
+  content-addressed correlation key for the route provenance, selections, and validation mode.
 - `mission_from_route(route, mission_id, selections, policy=...)` converts that route into a
   provenance-preserving `MissionAssembly` only after every need has one caller-selected candidate,
   explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or
