@@ -95,6 +95,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(dicom_metadata.executable)
         self.assertEqual(dicom_metadata.selected_adapter.id, "bioprism.python.dicom_metadata")
 
+        nifti_metadata = AdapterRegistry().plan(
+            AdapterPlanRequest("bold-header", SourceKind.BYTES, declared_format="application/nifti-manifest"),
+            check_environment=False,
+        )
+        self.assertTrue(nifti_metadata.executable)
+        self.assertEqual(nifti_metadata.selected_adapter.id, "bioprism.python.nifti_metadata")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)

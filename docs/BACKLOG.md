@@ -211,7 +211,8 @@ coverage, and derivative descriptions without reading binary image bytes. The DI
 UID hierarchy, dimensions, frame geometry, slice positions, provenance, and privacy-safe summaries
 without decoding pixels. Indexed/compressed VCF, binary DICOM transfer syntaxes, NIfTI/affine
 interpretation, AnnData/Zarr, BAM/CRAM, and OME-Zarr remain separate format-specific adapters rather
-than being hidden behind a generic parser claim.
+than being hidden behind a generic parser claim. The NIfTI projection route now covers header/affine
+semantics without claiming to decode arrays, compression, extensions, or BIDS sidecars.
 
 
 ## §11 Developer Platform — 6 uncovered

@@ -300,6 +300,24 @@ impl AdapterRegistry {
                 "Python-owned NIfTI/BIDS adapter route with affine and sidecar provenance checks.",
             ),
             descriptor(
+                "bioprism.python.nifti_metadata",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/nifti-manifest"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "session", "acquisition", "image", "voxel"],
+                None,
+                "Dependency-free audit of parsed NIfTI shape, datatype, affine, qform/sform, units, and coordinate-frame metadata; arrays remain uninterpreted.",
+            ),
+            descriptor(
                 "bioprism.python.anndata",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -677,6 +695,29 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.dicom_metadata")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn parsed_nifti_manifest_selects_the_dependency_free_header_auditor() {
+        let plan = AdapterRegistry::default()
+            .plan(request(
+                Some("application/nifti-manifest"),
+                SourceKind::Bytes,
+            ))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.nifti_metadata")
         );
         assert_eq!(
             plan.selected_adapter

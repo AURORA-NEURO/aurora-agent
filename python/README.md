@@ -75,6 +75,9 @@ check UID hierarchy, duplicate SOP instances, dimensions, frame-of-reference and
 slice spacing, enhanced multi-frame positions, provenance, and bounded privacy-safe summaries.
 Structural validity is reported separately from publishability when coordinate or provenance loss
 is blocking; pixel decoding remains an explicit optional-reader responsibility.
+`NiftiAdapter` and `audit_nifti()` add the header/affine counterpart: shape, datatype, qform/sform,
+affine invertibility, voxel-size agreement, units, axis codes, series consistency, provenance, and
+privacy-safe affine digests are checked without reading image arrays or compressed files.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

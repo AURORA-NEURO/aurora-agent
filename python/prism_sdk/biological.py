@@ -296,6 +296,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Python-owned NIfTI/BIDS adapter route with affine and sidecar provenance checks.",
         ),
         _descriptor(
+            "bioprism.python.nifti_metadata",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/nifti-manifest",),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("coordinate_frame_not_carried", "provenance_unavailable", "content_uninterpreted", "type_undetermined"),
+            ("subject", "session", "acquisition", "image", "voxel"),
+            "Dependency-free audit of parsed NIfTI shape, datatype, affine, qform/sform, units, and coordinate-frame metadata; arrays remain uninterpreted.",
+        ),
+        _descriptor(
             "bioprism.python.anndata",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/anndata", "application/h5ad", "application/zarr"),

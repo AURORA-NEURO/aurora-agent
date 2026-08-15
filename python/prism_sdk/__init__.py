@@ -74,6 +74,7 @@ from .errors import (
 from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
 from .mission import MissionBinding, MissionPolicy, MissionRequest, MissionStep
+from .nifti import NiftiAdapter, NiftiAuditResult, NiftiFinding, audit_nifti
 from .oracle import (
     Admissibility,
     EvidenceTier,
@@ -155,6 +156,9 @@ __all__ = [
     "MissionPolicy",
     "MissionRequest",
     "MissionStep",
+    "NiftiAdapter",
+    "NiftiAuditResult",
+    "NiftiFinding",
     "MissingnessAuditRequest",
     "OracleCombineRequest",
     "OracleManifest",
@@ -197,6 +201,7 @@ __all__ = [
     "adapter_plan",
     "audit_bids",
     "audit_dicom",
+    "audit_nifti",
     "bootstrap_mean",
     "parse_vcf",
     "paired_effect",
