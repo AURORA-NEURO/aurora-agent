@@ -36,6 +36,7 @@ from .repository_requests import (
     RepositoryTraversalPolicy,
     TelemetryProjectRequest,
 )
+from .tooling import ToolCallPlan, ToolCatalogue
 from .oracle import (
     EvidenceTier,
     EvaluationReproductionRequest,
@@ -67,6 +68,41 @@ class Workspace:
 
     def tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return self.client.call_tool(name, arguments).require_ok()
+
+    def tool_catalogue(self) -> ToolCatalogue:
+        """Snapshot the authoritative live ``tools/list`` catalogue for checked calls."""
+
+        return ToolCatalogue.from_definitions(self.client.list_tools())
+
+    def plan_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> ToolCallPlan:
+        """Validate a cross-domain tool call without executing it or interpreting its result."""
+
+        snapshot = catalogue if catalogue is not None else self.tool_catalogue()
+        if not isinstance(snapshot, ToolCatalogue):
+            raise ArgumentError("catalogue must be a ToolCatalogue")
+        return snapshot.plan(name, arguments)
+
+    def tool_checked(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> dict[str, Any]:
+        """Run any live MCP tool after conservative schema preflight.
+
+        The preflight checks only the transport JSON shape.  Remote refusals still raise
+        ``ToolRefusal`` and remain distinct from a successful domain result.
+        """
+
+        plan = self.plan_tool(name, arguments, catalogue=catalogue)
+        return self.tool(plan.tool, plan.to_mcp_arguments())
 
     def pack_health_assess(
         self,
@@ -659,6 +695,37 @@ class AsyncWorkspace:
 
     async def tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return (await self.client.call_tool(name, arguments)).require_ok()
+
+    async def tool_catalogue(self) -> ToolCatalogue:
+        """Async snapshot of the authoritative live ``tools/list`` catalogue."""
+
+        return ToolCatalogue.from_definitions(await self.client.list_tools())
+
+    async def plan_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> ToolCallPlan:
+        """Validate an arbitrary cross-domain tool call without executing it."""
+
+        snapshot = catalogue if catalogue is not None else await self.tool_catalogue()
+        if not isinstance(snapshot, ToolCatalogue):
+            raise ArgumentError("catalogue must be a ToolCatalogue")
+        return snapshot.plan(name, arguments)
+
+    async def tool_checked(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> dict[str, Any]:
+        """Run any live MCP tool after conservative schema preflight."""
+
+        plan = await self.plan_tool(name, arguments, catalogue=catalogue)
+        return await self.tool(plan.tool, plan.to_mcp_arguments())
 
     async def pack_health_assess(
         self,

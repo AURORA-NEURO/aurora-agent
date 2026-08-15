@@ -66,6 +66,11 @@ runner. `MissionBinding` supports validated field-level dataflow between direct 
 and `CapabilityQuery` routes across the complete domain catalogue with optional tool schemas;
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
+For any current or future domain without a handwritten wrapper, `tool_catalogue()` snapshots the
+live `tools/list` or `/v1/tools` definitions, `plan_tool()` performs conservative shape-only
+preflight, and `tool_checked()` executes the reviewed call. Plans are digest-bound and carry no
+domain-success claim; unsupported schema keywords remain warnings, and remote refusals remain
+distinct from transport validation.
 `AdapterRegistry` and `adapter_plan()` add a dependency-free format boundary for tabular and
 biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, FASTA, FASTQ, SAM, GFF3, PDB, SDF/MOL, mzML, BAM/CRAM, OME-Zarr, and FHIR routes
 are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and

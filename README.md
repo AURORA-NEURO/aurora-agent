@@ -270,6 +270,11 @@ projection audits, plus bounded heterogeneous projection batches, while leaving 
 oracle decisions to Rust. `prism_sdk.ApiClient` and
 `AsyncApiClient` also speak the bounded HTTP gateway described in [`docs/HTTP_API.md`](docs/HTTP_API.md).
 
+For every current or future MCP domain, the Python layer also exposes a schema-aware fallback:
+`tool_catalogue()` snapshots the live definitions, `plan_tool()` performs bounded transport-shape
+preflight, and `tool_checked()` executes only after that review. This does not claim domain
+validity or suppress refusals; unsupported schema features remain visible as warnings.
+
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,
 typed API errors, SSE cursor parsing, webhook outbox lifecycle, and typed facades for the evidence,

@@ -107,6 +107,13 @@ invent defaults:
   coverage gaps, and intentional multi-group membership.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates.
+- `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the
+  complete live MCP catalogue, including domains that do not yet have a handwritten convenience
+  method. The catalogue is copied from `tools/list` or `/v1/tools`, deduplicated, bounded, and
+  digest-addressed; preflight enforces only conservative JSON Schema shape (`required`, types,
+  arrays, enums, bounds, and common combinators). Unsupported schema features are warnings, not
+  hidden passes. A plan has no side effects, and remote refusals remain `ToolRefusal` rather than
+  becoming a successful result.
 - `AdapterRegistry` and `adapter_plan(...)` expose a dependency-free biological source planner.
   It matches explicit formats and source shapes to native or Python-delegated routes, optionally
   checks installed optional packages without importing them, and reports the adapter's declared
@@ -223,7 +230,11 @@ invent defaults:
   missing, blocked, and not-applicable rows; use deterministic quantiles and sample variance;
   optionally compute a specified-seed percentile bootstrap over observations or declared replicate
   groups; and retain limitations about exchangeability, causal interpretation, and clinical use.
-- `tool(name, arguments)` remains available for every current and future MCP domain.
+- `tool(name, arguments)` remains available for every current and future MCP domain. Prefer
+  `tool_checked(name, arguments)` when a live schema snapshot is available: it makes the transport
+  shape inspectable before execution while preserving the server as the authority for domain
+  semantics, policy, evidence, and refusal decisions. `plan_tool(...)` is the no-side-effect review
+  boundary for agents that need to assemble a call graph before running it.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP
 gateway: health/capability discovery, typed `capability_discover`, `capability_audit`,

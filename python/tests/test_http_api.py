@@ -27,7 +27,20 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             self._send(200, {"ok": True, "ready": True})
         elif self.path == "/v1/tools":
-            self._send(200, {"tools": [{"name": "echo"}]})
+            self._send(
+                200,
+                {
+                    "tools": [
+                        {
+                            "name": "echo",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {"value": {"type": "integer"}},
+                            },
+                        }
+                    ]
+                },
+            )
         elif self.path.startswith("/v1/events"):
             self._send(200, {"ok": True, "page": {"events": [], "next_after": 0}})
         else:
@@ -65,6 +78,11 @@ class HttpApiClientTests(unittest.TestCase):
         client = ApiClient(self.base_url, bearer_token="0123456789abcdef")
         self.assertTrue(client.health()["ready"])
         self.assertEqual(client.tools()[0]["name"], "echo")
+        catalogue = client.tool_catalogue()
+        self.assertEqual(client.plan_tool("echo", {"value": 3}, catalogue=catalogue).tool, "echo")
+        self.assertEqual(client.tool_checked("echo", {"value": 3}, catalogue=catalogue)["mcp"]["result"]["value"], 3)
+        with self.assertRaises(ArgumentError):
+            client.plan_tool("echo", {"value": "not-an-integer"}, catalogue=catalogue)
         self.assertEqual(client.call_tool("echo", {"value": 3})["mcp"]["result"]["value"], 3)
         self.assertEqual(
             client.capability_discover(query="oncology")["mcp"]["result"]["query"],
@@ -154,6 +172,9 @@ class HttpApiClientTests(unittest.TestCase):
 
         async def run() -> None:
             self.assertTrue((await client.health())["ok"])
+            catalogue = await client.tool_catalogue()
+            self.assertEqual((await client.plan_tool("echo", {"value": 5}, catalogue=catalogue)).tool, "echo")
+            self.assertEqual((await client.tool_checked("echo", {"value": 5}, catalogue=catalogue))["mcp"]["result"]["value"], 5)
             self.assertEqual((await client.call_tool("echo", {"async": True}))["tool"], "echo")
             self.assertEqual(
                 (await client.capability_route("async route", [{"id": "release", "tool": "bundle_verify"}]))["mcp"]["result"]["goal"],

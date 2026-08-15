@@ -188,6 +188,20 @@ from .optional_readers import (
 )
 from .workspace import AsyncWorkspace, Workspace
 from .workbench import WorkbenchRequest
+from .tooling import (
+    MAX_TOOL_ARGUMENT_DEPTH,
+    MAX_TOOL_CATALOGUE_BYTES,
+    MAX_TOOL_DEFINITIONS,
+    MAX_TOOL_NAME_BYTES,
+    MAX_TOOL_SCHEMA_BYTES,
+    TOOL_CATALOGUE_SCHEMA,
+    ToolCallPlan,
+    ToolCatalogue,
+    ToolDefinition,
+    ToolSchemaError,
+    ToolValidationIssue,
+    ToolValidationReport,
+)
 from .vcf import VcfAdapter, VcfLoss, VcfParseError, VcfParseResult, parse_vcf
 
 __version__ = "0.1.0"
@@ -346,6 +360,18 @@ __all__ = [
     "RepositoryImpactRequest",
     "RepositoryTraversalPolicy",
     "TelemetryProjectRequest",
+    "MAX_TOOL_ARGUMENT_DEPTH",
+    "MAX_TOOL_CATALOGUE_BYTES",
+    "MAX_TOOL_DEFINITIONS",
+    "MAX_TOOL_NAME_BYTES",
+    "MAX_TOOL_SCHEMA_BYTES",
+    "TOOL_CATALOGUE_SCHEMA",
+    "ToolCallPlan",
+    "ToolCatalogue",
+    "ToolDefinition",
+    "ToolSchemaError",
+    "ToolValidationIssue",
+    "ToolValidationReport",
     "ProjectionBundleRequest",
     "PlanStatus",
     "ProcessExited",

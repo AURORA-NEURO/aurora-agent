@@ -34,7 +34,17 @@ for raw in sys.stdin:
             {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": {"tools": [{"name": "echo", "inputSchema": {"type": "object"}}]},
+                "result": {
+                    "tools": [
+                        {
+                            "name": "echo",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {"value": {"type": "integer"}},
+                            },
+                        }
+                    ]
+                },
             }
         )
     elif method == "tools/call":

@@ -36,6 +36,7 @@ from .repository_requests import (
     RepositoryTraversalPolicy,
     TelemetryProjectRequest,
 )
+from .tooling import ToolCallPlan, ToolCatalogue
 
 
 def _capability_query_arguments(
@@ -177,6 +178,37 @@ class ApiClient:
         if not isinstance(name, str) or not name or "/" in name:
             raise ArgumentError("tool name must be a non-empty path-safe string")
         return self.request("POST", f"/v1/tools/{name}", dict(arguments or {}))
+
+    def tool_catalogue(self) -> ToolCatalogue:
+        """Snapshot the authoritative live HTTP ``/v1/tools`` catalogue."""
+
+        return ToolCatalogue.from_definitions(self.tools())
+
+    def plan_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> ToolCallPlan:
+        """Validate any advertised tool's JSON shape without issuing a POST."""
+
+        snapshot = catalogue if catalogue is not None else self.tool_catalogue()
+        if not isinstance(snapshot, ToolCatalogue):
+            raise ArgumentError("catalogue must be a ToolCatalogue")
+        return snapshot.plan(name, arguments)
+
+    def tool_checked(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> dict[str, Any]:
+        """Run any advertised tool after conservative schema preflight."""
+
+        plan = self.plan_tool(name, arguments, catalogue=catalogue)
+        return self.call_tool(plan.tool, plan.to_mcp_arguments())
 
     def capability_discover(
         self,
@@ -564,6 +596,37 @@ class AsyncApiClient:
 
     async def call_tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.call_tool, name, arguments)
+
+    async def tool_catalogue(self) -> ToolCatalogue:
+        """Async snapshot of the authoritative live HTTP ``/v1/tools`` catalogue."""
+
+        return ToolCatalogue.from_definitions(await self.tools())
+
+    async def plan_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> ToolCallPlan:
+        """Validate any advertised tool's JSON shape without issuing a POST."""
+
+        snapshot = catalogue if catalogue is not None else await self.tool_catalogue()
+        if not isinstance(snapshot, ToolCatalogue):
+            raise ArgumentError("catalogue must be a ToolCatalogue")
+        return snapshot.plan(name, arguments)
+
+    async def tool_checked(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> dict[str, Any]:
+        """Run any advertised tool after conservative schema preflight."""
+
+        plan = await self.plan_tool(name, arguments, catalogue=catalogue)
+        return await self.call_tool(plan.tool, plan.to_mcp_arguments())
 
     async def capability_discover(
         self,
