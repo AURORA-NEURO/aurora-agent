@@ -72,6 +72,10 @@ It also contains a bounded BIDS manifest audit: it validates relative paths and 
 directory/entity agreement, inherited JSON sidecars and equal-specificity conflicts, task metadata,
 participant coverage, and derivative descriptions while explicitly leaving binary image parsing to
 the format-specific adapter. Both reports disclose their limits and bind normalized input digests.
+The parsed DICOM projection audit now adds UID hierarchy, duplicate SOP, dimensions, frame-of-
+reference, orthonormal orientation, slice-position, enhanced multi-frame, provenance, and
+privacy-safe digest checks. It distinguishes structural validity from publishability and does not
+decode pixels or transfer syntaxes.
 The Python benchmark layer now complements Rust's descriptive metrics kernel with typed evidence
 rows, distribution summaries, direction-aware paired contrasts, and deterministic observation- or
 replicate-group bootstrap intervals. It preserves declared/missing/blocked populations and labels

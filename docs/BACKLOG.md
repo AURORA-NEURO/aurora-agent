@@ -203,13 +203,15 @@ selects native or Python-delegated routes by explicit format and source shape, c
 semantic-loss vocabulary and scope dimensions, and reports dependency missingness versus dependency
 uncertainty. This is a planning and contract layer; heavyweight Python readers still need to emit
 source-specific conformance reports before their normalized worlds are publishable.
-The first concrete Python implementations are now the bounded text VCF reader and BIDS manifest
-auditor. The VCF route validates the full stream, preserves typed and raw representations, records
-line/source hashes, and refuses to infer reference builds. The BIDS route validates manifest paths,
-entities, sidecar inheritance/conflicts, participant coverage, and derivative descriptions without
-reading binary image bytes. Indexed/compressed VCF, DICOM, NIfTI/affine interpretation, AnnData/Zarr,
-BAM/CRAM, and OME-Zarr remain separate format-specific adapters rather than being hidden behind a
-generic parser claim.
+The first concrete Python implementations are now the bounded text VCF reader, BIDS manifest
+auditor, and parsed DICOM projection auditor. The VCF route validates the full stream, preserves
+typed and raw representations, records line/source hashes, and refuses to infer reference builds.
+The BIDS route validates manifest paths, entities, sidecar inheritance/conflicts, participant
+coverage, and derivative descriptions without reading binary image bytes. The DICOM route validates
+UID hierarchy, dimensions, frame geometry, slice positions, provenance, and privacy-safe summaries
+without decoding pixels. Indexed/compressed VCF, binary DICOM transfer syntaxes, NIfTI/affine
+interpretation, AnnData/Zarr, BAM/CRAM, and OME-Zarr remain separate format-specific adapters rather
+than being hidden behind a generic parser claim.
 
 
 ## §11 Developer Platform — 6 uncovered

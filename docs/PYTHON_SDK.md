@@ -88,6 +88,12 @@ invent defaults:
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and
   derivative pipeline descriptions. The report hashes normalized input and states that it did not
   read image bytes; NIfTI/DICOM/EEG/MEG interpretation remains a separate adapter concern.
+- `DicomAdapter` and `audit_dicom(...)` provide a bounded parsed-projection audit for study/series/
+  SOP identity, duplicate instances, dimensions, frame-of-reference consistency, orthonormal image
+  geometry, slice positions, enhanced multi-frame positions, and provenance. It returns digest-bound
+  UID summaries without echoing arbitrary patient tags, and separates structural validity from
+  publishability when coordinate or provenance losses are blocking. Pixel decoding and transfer
+  syntax decompression remain the responsibility of the optional binary reader.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and
@@ -251,9 +257,10 @@ negative result.
 
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData, indexed/compressed VCF,
 binary BIDS image parsing, inferential statistics, OTLP export, a notebook UI, or CI deployment. It
-now ships bounded text VCF and BIDS manifest audits plus descriptive/cluster-bootstrap utilities
-above the Rust kernel. The repository still keeps gRPC, durable event storage, external webhook
-delivery, heavyweight binary biological readers, and statistical estimators as separate contracts.
+now ships bounded text VCF, BIDS manifest, and parsed DICOM metadata audits plus descriptive/
+cluster-bootstrap utilities above the Rust kernel. The repository still keeps gRPC, durable event
+storage, external webhook delivery, heavyweight binary biological readers, and statistical estimators
+as separate contracts.
 
 ## Verification
 

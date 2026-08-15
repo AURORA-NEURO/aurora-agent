@@ -244,6 +244,24 @@ impl AdapterRegistry {
                 "Python-owned DICOM adapter route; the Rust layer plans and audits the boundary.",
             ),
             descriptor(
+                "bioprism.python.dicom_metadata",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/dicom-manifest"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "specimen", "acquisition", "image"],
+                None,
+                "Dependency-free audit of parsed DICOM identity, study/series hierarchy, frame geometry, and provenance; pixels remain uninterpreted.",
+            ),
+            descriptor(
                 "bioprism.python.bids_manifest",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -636,6 +654,29 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.bids_manifest")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn parsed_dicom_manifest_selects_the_dependency_free_metadata_auditor() {
+        let plan = AdapterRegistry::default()
+            .plan(request(
+                Some("application/dicom-manifest"),
+                SourceKind::Bytes,
+            ))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.dicom_metadata")
         );
         assert_eq!(
             plan.selected_adapter

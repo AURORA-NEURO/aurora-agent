@@ -58,6 +58,7 @@ from .authoring import (
 )
 from .client import Client, ClientConfig
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
+from .dicom import DicomAdapter, DicomAuditResult, DicomFinding, audit_dicom
 from .errors import (
     ApiError,
     ArgumentError,
@@ -137,6 +138,9 @@ __all__ = [
     "JudgementBuilder",
     "Client",
     "ClientConfig",
+    "DicomAdapter",
+    "DicomAuditResult",
+    "DicomFinding",
     "ConformanceLevel",
     "CalibrationObservation",
     "CapabilityQuery",
@@ -192,6 +196,7 @@ __all__ = [
     "analytics_request",
     "adapter_plan",
     "audit_bids",
+    "audit_dicom",
     "bootstrap_mean",
     "parse_vcf",
     "paired_effect",

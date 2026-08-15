@@ -70,6 +70,11 @@ semantic-loss declarations remain visible before parsing. The planners never sni
 relative paths, entities, directory labels, JSON sidecar inheritance and conflict precedence,
 participant coverage, task metadata, and derivative descriptions. They accept parsed projections
 and never claim to parse NIfTI or other binary image bytes.
+`DicomAdapter` and `audit_dicom()` provide the corresponding parsed DICOM projection audit: they
+check UID hierarchy, duplicate SOP instances, dimensions, frame-of-reference and image geometry,
+slice spacing, enhanced multi-frame positions, provenance, and bounded privacy-safe summaries.
+Structural validity is reported separately from publishability when coordinate or provenance loss
+is blocking; pixel decoding remains an explicit optional-reader responsibility.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates
