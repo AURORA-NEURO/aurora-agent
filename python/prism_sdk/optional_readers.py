@@ -20,6 +20,7 @@ from .dicom import audit_dicom
 from .errors import ArgumentError
 from .fastq import MAX_FASTQ_BYTES, parse_fastq
 from .fhir import MAX_FHIR_BYTES, parse_fhir_json, parse_fhir_ndjson
+from .mzml import MAX_MZML_BYTES, parse_mzml
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
 from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
@@ -647,6 +648,33 @@ def read_fastq(
         raise ArgumentError(f"FASTQ read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_mzml(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_spectra: int = 100_000,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded mzML XML metadata without decoding binary spectra arrays."""
+
+    candidate = _path(path, field="mzML path")
+    if candidate.stat().st_size > MAX_MZML_BYTES:
+        raise ArgumentError(f"mzML path exceeds the {MAX_MZML_BYTES}-byte reader limit")
+    try:
+        return parse_mzml(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            max_spectra=max_spectra,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"mzML read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_ome_zarr(
     path: str,
     *,
@@ -707,6 +735,7 @@ __all__ = [
     "read_fastq",
     "read_fhir_json",
     "read_fhir_ndjson",
+    "read_mzml",
     "read_indexed_vcf",
     "read_nifti_header",
     "read_ome_zarr",

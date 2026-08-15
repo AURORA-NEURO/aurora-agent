@@ -88,6 +88,7 @@ from .fastq import FastqAdapter, FastqFinding, FastqParseError, FastqParseResult
 from .fhir import FhirAdapter, FhirAuditResult, FhirFinding, audit_fhir, parse_fhir_json, parse_fhir_ndjson
 from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
+from .mzml import MzmlAdapter, MzmlFinding, MzmlParseError, MzmlParseResult, parse_mzml
 from .mission import MissionBinding, MissionPolicy, MissionRequest, MissionStep
 from .nifti import NiftiAdapter, NiftiAuditResult, NiftiFinding, audit_nifti
 from .ome_zarr import OmeAuditResult, OmeFinding, OmeZarrAdapter, audit_ome_zarr
@@ -121,6 +122,7 @@ from .optional_readers import (
     read_fhir_json,
     read_fhir_ndjson,
     read_indexed_vcf,
+    read_mzml,
     read_nifti_header,
     read_ome_zarr,
 )
@@ -178,6 +180,10 @@ __all__ = [
     "FastqFinding",
     "FastqParseError",
     "FastqParseResult",
+    "MzmlAdapter",
+    "MzmlFinding",
+    "MzmlParseError",
+    "MzmlParseResult",
     "Independence",
     "Judgement",
     "JudgementBuilder",
@@ -263,6 +269,7 @@ __all__ = [
     "bootstrap_mean",
     "parse_vcf",
     "parse_fastq",
+    "parse_mzml",
     "parse_fhir_json",
     "parse_fhir_ndjson",
     "read_anndata_projection",
@@ -270,6 +277,7 @@ __all__ = [
     "read_dicom_projection",
     "read_fhir_json",
     "read_fhir_ndjson",
+    "read_mzml",
     "read_indexed_vcf",
     "read_nifti_header",
     "read_ome_zarr",

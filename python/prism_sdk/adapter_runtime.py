@@ -22,6 +22,7 @@ from .dicom import audit_dicom
 from .errors import ArgumentError
 from .fastq import parse_fastq
 from .fhir import audit_fhir
+from .mzml import parse_mzml
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
 from .optional_readers import (
@@ -33,6 +34,7 @@ from .optional_readers import (
     read_fhir_json,
     read_fhir_ndjson,
     read_indexed_vcf,
+    read_mzml,
     read_nifti_header,
     read_ome_zarr,
 )
@@ -263,6 +265,7 @@ class AdapterRuntime:
             "bioprism.python.fhir_manifest",
             "bioprism.python.fhir_json",
             "bioprism.python.fhir_ndjson",
+            "bioprism.python.mzml_text",
             "bioprism.python.vcf_indexed",
             "bioprism.python.bam_cram",
             "bioprism.python.ome_zarr",
@@ -443,6 +446,28 @@ class AdapterRuntime:
                 source_id=request.source_id,
                 provenance=request.provenance,
                 max_records=payload.get("max_records", 100_000),
+                max_items=request.max_items,
+            )
+        if adapter_id == "bioprism.python.mzml_text":
+            if "text" in payload:
+                text = payload.get("text")
+                if not isinstance(text, (str, bytes)):
+                    raise ArgumentError("mzml_text payload requires text or bytes under 'text'")
+                return parse_mzml(
+                    text,
+                    source_id=request.source_id,
+                    provenance=request.provenance,
+                    max_spectra=payload.get("max_spectra", 100_000),
+                    max_items=request.max_items,
+                ).to_wire()
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("mzml_text payload requires 'text' or a string 'path'")
+            return read_mzml(
+                path,
+                source_id=request.source_id,
+                provenance=request.provenance,
+                max_spectra=payload.get("max_spectra", 100_000),
                 max_items=request.max_items,
             )
         if adapter_id == "bioprism.python.nifti_metadata":

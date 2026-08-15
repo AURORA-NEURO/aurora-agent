@@ -503,6 +503,24 @@ impl AdapterRegistry {
                 "Dependency-free audit of parsed FHIR structure, resource identity, references, profiles, and provenance; clinical values remain uninterpreted.",
             ),
             descriptor(
+                "bioprism.python.mzml_text",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/mzml", "application/xml+mass-spectrometry", "text/mzml"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "sample", "assay", "spectrum", "ion"],
+                None,
+                "Dependency-free bounded mzML XML metadata reader that audits spectra and binary-array declarations without decoding payloads.",
+            ),
+            descriptor(
                 "bioprism.python.ome_zarr",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -891,6 +909,26 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.fastq_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_mzml_selects_the_dependency_free_python_reader() {
+        let plan = AdapterRegistry::default()
+            .plan(request(Some("application/mzml"), SourceKind::Bytes))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.mzml_text")
         );
         assert_eq!(
             plan.selected_adapter

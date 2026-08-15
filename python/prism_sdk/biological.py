@@ -417,6 +417,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free audit of parsed FHIR structure, resource identity, references, profiles, and provenance; clinical values remain uninterpreted.",
         ),
         _descriptor(
+            "bioprism.python.mzml_text",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/mzml", "application/xml+mass-spectrometry", "text/mzml"),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("provenance_unavailable", "ontology_term_unmapped", "content_uninterpreted", "type_undetermined"),
+            ("subject", "sample", "assay", "spectrum", "ion"),
+            "Dependency-free bounded mzML XML metadata reader that audits spectra and binary-array declarations without decoding payloads.",
+        ),
+        _descriptor(
             "bioprism.python.ome_zarr",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/ome-zarr", "application/x-zarr"),
