@@ -44,6 +44,11 @@ ordering, stale-input audit, evidence-aware capability dashboard query, and dete
 Actions YAML planning surface. It preserves notebook holes and release refusal predicates rather
 than treating generated YAML or a local audit as executed CI, a hosted authoring UI, or a public
 dashboard. The TypeScript and Python clients expose this contract without cloning the Rust model.
+`developer_delivery_audit` composes the platform, repository, SDK, conformance, provider,
+governance, and release checks into independently inspectable readiness gates. Its typed Python and
+TypeScript projections preserve explicit release targets, blockers, fail-closed/no-implicit-release
+state, foreign-artifact posture, and omitted optional evidence instead of collapsing an incomplete
+delivery review into a green score.
 `agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
 deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
 blocking dependent work, bounding output, and refusing side-effect confirmations by default. Serial
@@ -97,8 +102,8 @@ Static steps are checked at mission validation time; bound steps are checked aga
 materialization in both serial and parallel modes. Schema refusals carry a schema digest and
 JSON-pointer diagnostics and are distinct from the nested domain tool's own refusal envelope.
 `capability_discover` makes the complete cross-domain catalogue searchable by intent, domain, group,
-or tool and can attach the authoritative `tools/list` schemas for the ranked matches. The companion
-The Python `CapabilitySearchReport` and TypeScript `CapabilityDiscoverResult` projections preserve
+or tool and can attach the authoritative `tools/list` schemas for the ranked matches. The Python
+`CapabilitySearchReport` and TypeScript `CapabilityDiscoverResult` projections preserve
 each matched group's domains, crates, CLI entrypoints, Python artifacts, ranked fields, matched
 tools, catalog digest, and optional schema attachment instead of collapsing discovery to an untyped
 blob.

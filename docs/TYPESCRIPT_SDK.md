@@ -136,7 +136,9 @@ families without maintaining a fragile partial clone of 122 tool schemas. `capab
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
-invariant flags, duplicate memberships, and optional per-group coverage; `capabilityRoute`
+invariant flags, duplicate memberships, and optional per-group coverage; `developerDeliveryAudit`
+returns typed `DeveloperDeliveryAuditResult` readiness gates, explicit target blockers, release
+request state, and foreign-surface posture; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected
 tools and arguments are supplied. The route response retains per-need candidate domains and a

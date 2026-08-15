@@ -38,6 +38,7 @@ from .context_requests import (
     FiberVerifyRequest,
     ProjectionBundleRequest,
 )
+from .delivery import DeveloperDeliveryAuditReport, developer_delivery_audit_report
 from .errors import ArgumentError
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
@@ -570,6 +571,37 @@ class Workspace:
         if release_request is not None:
             arguments["release_request"] = release_request
         return self.tool("developer_delivery_audit", arguments)
+
+    def developer_delivery_audit_report(
+        self,
+        *,
+        request_id: str | None = None,
+        targets: Sequence[str] | None = None,
+        platform: Mapping[str, Any] | None = None,
+        repository: Mapping[str, Any] | None = None,
+        repository_impact: Mapping[str, Any] | None = None,
+        sdk: Mapping[str, Any] | None = None,
+        conformance: Mapping[str, Any] | None = None,
+        provider: Mapping[str, Any] | None = None,
+        governance: Mapping[str, Any] | None = None,
+        release: Mapping[str, Any] | None = None,
+    ) -> DeveloperDeliveryAuditReport:
+        """Return typed cross-domain delivery gates and explicit release-target blockers."""
+
+        return developer_delivery_audit_report(
+            self.developer_delivery_audit(
+                request_id=request_id,
+                targets=targets,
+                platform=platform,
+                repository=repository,
+                repository_impact=repository_impact,
+                sdk=sdk,
+                conformance=conformance,
+                provider=provider,
+                governance=governance,
+                release=release,
+            )
+        )
 
     def bioatlas_publication_audit(
         self,
@@ -1296,6 +1328,37 @@ class AsyncWorkspace:
             }
         )
         return (await self.client.call_tool("developer_delivery_audit", arguments)).require_ok()
+
+    async def developer_delivery_audit_report(
+        self,
+        *,
+        request_id: str | None = None,
+        targets: Sequence[str] | None = None,
+        platform: Mapping[str, Any] | None = None,
+        repository: Mapping[str, Any] | None = None,
+        repository_impact: Mapping[str, Any] | None = None,
+        sdk: Mapping[str, Any] | None = None,
+        conformance: Mapping[str, Any] | None = None,
+        provider: Mapping[str, Any] | None = None,
+        governance: Mapping[str, Any] | None = None,
+        release: Mapping[str, Any] | None = None,
+    ) -> DeveloperDeliveryAuditReport:
+        """Async typed cross-domain delivery gates and release-target blockers."""
+
+        return developer_delivery_audit_report(
+            await self.developer_delivery_audit(
+                request_id=request_id,
+                targets=targets,
+                platform=platform,
+                repository=repository,
+                repository_impact=repository_impact,
+                sdk=sdk,
+                conformance=conformance,
+                provider=provider,
+                governance=governance,
+                release=release,
+            )
+        )
 
     async def bioatlas_publication_audit(self, atlas: Mapping[str, Any], **kwargs: Any) -> dict[str, Any]:
         arguments: dict[str, Any] = {"atlas": dict(atlas)}

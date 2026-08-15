@@ -40,6 +40,7 @@ from .context_requests import (
     FiberVerifyRequest,
     ProjectionBundleRequest,
 )
+from .delivery import DeveloperDeliveryAuditReport, developer_delivery_audit_report
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
 from .events import (
     MAX_EVENT_PAGE,
@@ -106,6 +107,29 @@ def _capability_query_arguments(
     if query is not None:
         raise ArgumentError("query must be a CapabilityQuery or string")
     return CapabilityQuery(text, group_id, domain, tool, max_items, include_tools).to_mcp_arguments()
+
+
+def _developer_delivery_arguments(
+    *,
+    request_id: str | None,
+    targets: Sequence[str] | None,
+    checks: Mapping[str, Mapping[str, Any] | None],
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
+        name: dict(value) for name, value in checks.items() if value is not None
+    }
+    if request_id is None and targets is None:
+        return arguments
+    if not isinstance(request_id, str) or not request_id:
+        raise ArgumentError("request_id is required when targets are supplied")
+    if not isinstance(targets, Sequence) or isinstance(targets, (str, bytes)) or not targets:
+        raise ArgumentError("targets must contain at least one target")
+    if any(not isinstance(target, str) or not target for target in targets):
+        raise ArgumentError("targets must contain non-empty strings")
+    if len(set(targets)) != len(targets):
+        raise ArgumentError("targets must be unique")
+    arguments["release_request"] = {"id": request_id, "targets": list(targets)}
+    return arguments
 
 
 class ApiClient:
@@ -432,6 +456,69 @@ class ApiClient:
         """Assemble a route-bound mission locally; callers still preflight before any POST."""
 
         return assemble_mission_from_route(route, mission_id, selections, policy=policy)
+
+    def developer_delivery_audit(
+        self,
+        *,
+        request_id: str | None = None,
+        targets: Sequence[str] | None = None,
+        platform: Mapping[str, Any] | None = None,
+        repository: Mapping[str, Any] | None = None,
+        repository_impact: Mapping[str, Any] | None = None,
+        sdk: Mapping[str, Any] | None = None,
+        conformance: Mapping[str, Any] | None = None,
+        provider: Mapping[str, Any] | None = None,
+        governance: Mapping[str, Any] | None = None,
+        release: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run the cross-domain delivery audit through the HTTP gateway."""
+
+        arguments = _developer_delivery_arguments(
+            request_id=request_id,
+            targets=targets,
+            checks={
+                "platform": platform,
+                "repository": repository,
+                "repository_impact": repository_impact,
+                "sdk": sdk,
+                "conformance": conformance,
+                "provider": provider,
+                "governance": governance,
+                "release": release,
+            },
+        )
+        return self.call_tool("developer_delivery_audit", arguments)
+
+    def developer_delivery_audit_report(
+        self,
+        *,
+        request_id: str | None = None,
+        targets: Sequence[str] | None = None,
+        platform: Mapping[str, Any] | None = None,
+        repository: Mapping[str, Any] | None = None,
+        repository_impact: Mapping[str, Any] | None = None,
+        sdk: Mapping[str, Any] | None = None,
+        conformance: Mapping[str, Any] | None = None,
+        provider: Mapping[str, Any] | None = None,
+        governance: Mapping[str, Any] | None = None,
+        release: Mapping[str, Any] | None = None,
+    ) -> DeveloperDeliveryAuditReport:
+        """Return typed delivery-readiness evidence from the HTTP gateway."""
+
+        return developer_delivery_audit_report(
+            self.developer_delivery_audit(
+                request_id=request_id,
+                targets=targets,
+                platform=platform,
+                repository=repository,
+                repository_impact=repository_impact,
+                sdk=sdk,
+                conformance=conformance,
+                provider=provider,
+                governance=governance,
+                release=release,
+            )
+        )
 
     def capability_discover(
         self,
@@ -1163,6 +1250,69 @@ class AsyncApiClient:
         """Async local route-to-mission assembly; no HTTP request is issued."""
 
         return assemble_mission_from_route(route, mission_id, selections, policy=policy)
+
+    async def developer_delivery_audit(
+        self,
+        *,
+        request_id: str | None = None,
+        targets: Sequence[str] | None = None,
+        platform: Mapping[str, Any] | None = None,
+        repository: Mapping[str, Any] | None = None,
+        repository_impact: Mapping[str, Any] | None = None,
+        sdk: Mapping[str, Any] | None = None,
+        conformance: Mapping[str, Any] | None = None,
+        provider: Mapping[str, Any] | None = None,
+        governance: Mapping[str, Any] | None = None,
+        release: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async cross-domain delivery audit through the HTTP gateway."""
+
+        arguments = _developer_delivery_arguments(
+            request_id=request_id,
+            targets=targets,
+            checks={
+                "platform": platform,
+                "repository": repository,
+                "repository_impact": repository_impact,
+                "sdk": sdk,
+                "conformance": conformance,
+                "provider": provider,
+                "governance": governance,
+                "release": release,
+            },
+        )
+        return await self.call_tool("developer_delivery_audit", arguments)
+
+    async def developer_delivery_audit_report(
+        self,
+        *,
+        request_id: str | None = None,
+        targets: Sequence[str] | None = None,
+        platform: Mapping[str, Any] | None = None,
+        repository: Mapping[str, Any] | None = None,
+        repository_impact: Mapping[str, Any] | None = None,
+        sdk: Mapping[str, Any] | None = None,
+        conformance: Mapping[str, Any] | None = None,
+        provider: Mapping[str, Any] | None = None,
+        governance: Mapping[str, Any] | None = None,
+        release: Mapping[str, Any] | None = None,
+    ) -> DeveloperDeliveryAuditReport:
+        """Async typed delivery-readiness evidence from the HTTP gateway."""
+
+        return developer_delivery_audit_report(
+            await self.developer_delivery_audit(
+                request_id=request_id,
+                targets=targets,
+                platform=platform,
+                repository=repository,
+                repository_impact=repository_impact,
+                sdk=sdk,
+                conformance=conformance,
+                provider=provider,
+                governance=governance,
+                release=release,
+            )
+        )
 
     async def capability_discover(
         self,

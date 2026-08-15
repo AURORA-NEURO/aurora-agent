@@ -374,6 +374,65 @@ export interface DeveloperDeliveryAuditArgs extends JsonObject {
   release_request?: JsonObject;
 }
 
+export interface DeveloperDeliveryTargetResult extends JsonObject {
+  target: string;
+  available: boolean;
+  eligible: boolean;
+  blockers: string[];
+  notes: string[];
+}
+
+export interface DeveloperDeliveryReadinessResult extends JsonObject {
+  platform_checks_clean: boolean;
+  unguarded_claims: number;
+  developer_claims_ready: boolean;
+  repository_scope_clean: boolean;
+  repository_impact_clean: boolean;
+  sdk_admission_clean: boolean;
+  conformance_release: boolean;
+  provider_capability_gate_cleared: boolean;
+  governance_document_clean: boolean;
+  release_audit_ready: boolean;
+  local_delivery_ready: boolean;
+}
+
+export interface DeveloperDeliveryExternalSurfaceResult extends JsonObject {
+  foreign_subject_count: number;
+  foreign_artifacts_present: boolean;
+  foreign_artifacts_are_not_inferred: boolean;
+  local_integration_foundations: JsonObject[];
+  unverified_surface_families: string[];
+}
+
+export interface DeveloperDeliveryReleaseRequestResult extends JsonObject {
+  present: boolean;
+  id?: string;
+  targets?: DeveloperDeliveryTargetResult[];
+  ready: boolean;
+  fail_closed?: boolean;
+  no_implicit_release: boolean;
+  reason?: string;
+  available_target_count: number;
+}
+
+export interface DeveloperDeliveryAuditResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_delivery_audit";
+  platform: JsonObject | null;
+  repository: JsonObject | null;
+  repository_impact: JsonObject | null;
+  sdk: JsonObject | null;
+  conformance: JsonObject | null;
+  provider: JsonObject | null;
+  governance: JsonObject | null;
+  release: JsonObject | null;
+  readiness: DeveloperDeliveryReadinessResult;
+  external_surface_posture: DeveloperDeliveryExternalSurfaceResult;
+  release_request: DeveloperDeliveryReleaseRequestResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

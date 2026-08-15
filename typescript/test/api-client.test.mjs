@@ -33,6 +33,49 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/echo") return jsonResponse({ ok: true, tool: "echo", request_id: "r1", mcp: { result: { structuredContent: { value: 3 } } }, guarantee: "shared" });
       if (path === "/v1/tools/metrics_analytics_audit") return jsonResponse({ ok: true, tool: "metrics_analytics_audit", request_id: "r3", mcp: { result: { structuredContent: { workflow: "metrics_descriptive_analytics" } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
+      if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "developer_delivery_audit",
+        platform: {},
+        repository: {},
+        repository_impact: null,
+        sdk: {},
+        conformance: {},
+        provider: {},
+        governance: {},
+        release: {},
+        readiness: {
+          platform_checks_clean: true,
+          unguarded_claims: 0,
+          developer_claims_ready: true,
+          repository_scope_clean: true,
+          repository_impact_clean: false,
+          sdk_admission_clean: true,
+          conformance_release: true,
+          provider_capability_gate_cleared: true,
+          governance_document_clean: true,
+          release_audit_ready: true,
+          local_delivery_ready: true,
+        },
+        external_surface_posture: {
+          foreign_subject_count: 2,
+          foreign_artifacts_present: true,
+          foreign_artifacts_are_not_inferred: true,
+          local_integration_foundations: [{ artifact: "prism_sdk", kind: "client" }],
+          unverified_surface_families: ["typescript_sdk"],
+        },
+        release_request: {
+          present: true,
+          id: "delivery-1",
+          targets: [{ target: "local_delivery", available: true, eligible: true, blockers: [], notes: [] }],
+          ready: true,
+          fail_closed: false,
+          no_implicit_release: true,
+          available_target_count: 10,
+        },
+        guarantees: ["no implicit release"],
+        limitations: ["external execution remains outside the workflow"],
+      } } } });
       if (path === "/v1/tools/repository_catalog") return jsonResponse({ ok: true, tool: "repository_catalog", request_id: "r11", mcp: { result: { structuredContent: { workflow: "repository_catalog", prefix: "docs/" } } } });
       if (path === "/v1/tools/repository_bundle") return jsonResponse({ ok: true, tool: "repository_bundle", request_id: "r12", mcp: { result: { structuredContent: { workflow: "repository_bundle", policy: "exhaustive" } } } });
       if (path === "/v1/tools/repository_impact") return jsonResponse({ ok: true, tool: "repository_impact", request_id: "r13", mcp: { result: { structuredContent: { workflow: "repository_impact", changed: "docs/README" } } } });
@@ -224,6 +267,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(telemetry.mcp.result.structuredContent.trace, "trace-ts");
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
+  const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
+  assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
+  assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);
+  assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "local_delivery");
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });
   const capabilityAudit = await client.capabilityAudit({ include_groups: false });
   const route = await client.capabilityRoute({ goal: "compose evidence", needs: [{ id: "oncology", query: "oncology" }] });

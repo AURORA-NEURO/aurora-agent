@@ -24,6 +24,7 @@ import type {
   DeliveryMutationResponse,
   DeliveriesResponse,
   DeveloperDeliveryAuditArgs,
+  DeveloperDeliveryAuditResult,
   DeveloperWorkbenchArgs,
   EventMetrics,
   EventPersistenceStatus,
@@ -249,8 +250,8 @@ export class ApiClient {
     return this.callTool("telemetry_project", args, options);
   }
 
-  async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions) {
-    return this.callTool("developer_delivery_audit", args, options);
+  async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {
+    return this.callTool<DeveloperDeliveryAuditResult>("developer_delivery_audit", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

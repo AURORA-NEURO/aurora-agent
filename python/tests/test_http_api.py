@@ -7,7 +7,53 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+
+
+def developer_delivery_audit_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_delivery_audit",
+        "platform": {},
+        "repository": {},
+        "repository_impact": None,
+        "sdk": {},
+        "conformance": {},
+        "provider": {},
+        "governance": {},
+        "release": {},
+        "readiness": {
+            "platform_checks_clean": True,
+            "unguarded_claims": 0,
+            "developer_claims_ready": True,
+            "repository_scope_clean": True,
+            "repository_impact_clean": False,
+            "sdk_admission_clean": True,
+            "conformance_release": True,
+            "provider_capability_gate_cleared": True,
+            "governance_document_clean": True,
+            "release_audit_ready": True,
+            "local_delivery_ready": True,
+        },
+        "external_surface_posture": {
+            "foreign_subject_count": 0,
+            "foreign_artifacts_present": False,
+            "foreign_artifacts_are_not_inferred": True,
+            "local_integration_foundations": [],
+            "unverified_surface_families": [],
+        },
+        "release_request": {
+            "present": True,
+            "id": "delivery-1",
+            "targets": [{"target": "local_delivery", "available": True, "eligible": True, "blockers": [], "notes": []}],
+            "ready": True,
+            "fail_closed": False,
+            "no_implicit_release": True,
+            "available_target_count": 10,
+        },
+        "guarantees": [],
+        "limitations": [],
+    }
 
 
 def capability_audit_payload() -> dict:
@@ -116,7 +162,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -236,6 +282,12 @@ class HttpApiClientTests(unittest.TestCase):
             False,
         )
         self.assertEqual(
+            client.developer_delivery_audit(
+                request_id="delivery-1", targets=["local_delivery"]
+            )["mcp"]["result"]["release_request"]["id"],
+            "delivery-1",
+        )
+        self.assertEqual(
             client.capability_route("compose evidence", [{"id": "oncology", "query": "oncology"}])["mcp"]["result"]["goal"],
             "compose evidence",
         )
@@ -324,6 +376,30 @@ class HttpApiClientTests(unittest.TestCase):
         with self.assertRaises(ApiError) as error:
             client.request("POST", "/v1/tools/refuse", {})
         self.assertEqual(error.exception.status, 422)
+
+    def test_http_typed_delivery_audit_report_delegates_to_raw_helper(self) -> None:
+        with patch.object(
+            ApiClient,
+            "developer_delivery_audit",
+            return_value=developer_delivery_audit_payload(),
+        ) as audit:
+            report = ApiClient(self.base_url).developer_delivery_audit_report(
+                request_id="delivery-1", targets=["local_delivery"]
+            )
+        self.assertIsInstance(report, DeveloperDeliveryAuditReport)
+        self.assertTrue(report.ready_for_requested_release)
+        audit.assert_called_once_with(
+            request_id="delivery-1",
+            targets=["local_delivery"],
+            platform=None,
+            repository=None,
+            repository_impact=None,
+            sdk=None,
+            conformance=None,
+            provider=None,
+            governance=None,
+            release=None,
+        )
 
     def test_http_typed_capability_audit_report_delegates_to_raw_helper(self) -> None:
         with patch.object(ApiClient, "capability_audit", return_value=capability_audit_payload()) as audit:
@@ -440,6 +516,28 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertFalse((await client.event_page(review_id="a" * 64)).gap)
             self.assertEqual((await client.event_stream()).events[0].data, '{"mission_id":"async-1"}')
             self.assertTrue((await client.route_review_evidence("a" * 64)).found)
+            with patch.object(
+                AsyncApiClient,
+                "developer_delivery_audit",
+                new_callable=AsyncMock,
+                return_value=developer_delivery_audit_payload(),
+            ) as audit:
+                report = await client.developer_delivery_audit_report(
+                    request_id="delivery-1", targets=["local_delivery"]
+                )
+            self.assertTrue(report.readiness.local_delivery_ready)
+            audit.assert_awaited_once_with(
+                request_id="delivery-1",
+                targets=["local_delivery"],
+                platform=None,
+                repository=None,
+                repository_impact=None,
+                sdk=None,
+                conformance=None,
+                provider=None,
+                governance=None,
+                release=None,
+            )
             with patch.object(
                 AsyncApiClient,
                 "capability_audit",

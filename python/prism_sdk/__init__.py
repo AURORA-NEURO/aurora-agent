@@ -117,6 +117,14 @@ from .domain_requests import (
     RoutingDecisionRequest,
     WorldClaimCheckRequest,
 )
+from .delivery import (
+    DeliveryExternalSurfaceReport,
+    DeliveryReadinessReport,
+    DeliveryReleaseRequestReport,
+    DeliveryTargetReport,
+    DeveloperDeliveryAuditReport,
+    developer_delivery_audit_report,
+)
 from .errors import (
     ApiError,
     ArgumentError,
@@ -393,6 +401,12 @@ __all__ = [
     "capability_route_review_report",
     "capability_discover_report",
     "capability_audit_report",
+    "DeliveryTargetReport",
+    "DeliveryReadinessReport",
+    "DeliveryExternalSurfaceReport",
+    "DeliveryReleaseRequestReport",
+    "DeveloperDeliveryAuditReport",
+    "developer_delivery_audit_report",
     "CONTEXT_REQUEST_SCHEMA",
     "MAX_CONTEXT_HANDLE_BYTES",
     "MAX_CONTEXT_PATH_BYTES",

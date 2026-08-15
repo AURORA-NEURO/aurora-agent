@@ -26,6 +26,9 @@ from prism_sdk import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilitySchemaQualityReport,
+    DeliveryReadinessReport,
+    DeveloperDeliveryAuditReport,
+    developer_delivery_audit_report,
     capability_audit_report,
     capability_discover_report,
     capability_route_report,
@@ -226,6 +229,60 @@ def capability_audit_payload() -> dict:
                 "missing_schemas": [],
             }
         ],
+    }
+
+
+def developer_delivery_audit_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_delivery_audit",
+        "platform": {},
+        "repository": {},
+        "repository_impact": None,
+        "sdk": {},
+        "conformance": {},
+        "provider": {},
+        "governance": {},
+        "release": {},
+        "readiness": {
+            "platform_checks_clean": True,
+            "unguarded_claims": 0,
+            "developer_claims_ready": True,
+            "repository_scope_clean": True,
+            "repository_impact_clean": False,
+            "sdk_admission_clean": True,
+            "conformance_release": True,
+            "provider_capability_gate_cleared": True,
+            "governance_document_clean": True,
+            "release_audit_ready": True,
+            "local_delivery_ready": True,
+        },
+        "external_surface_posture": {
+            "foreign_subject_count": 2,
+            "foreign_artifacts_present": True,
+            "foreign_artifacts_are_not_inferred": True,
+            "local_integration_foundations": [{"artifact": "prism_sdk", "kind": "client"}],
+            "unverified_surface_families": ["typescript_sdk"],
+        },
+        "release_request": {
+            "present": True,
+            "id": "delivery-1",
+            "targets": [
+                {
+                    "target": "local_delivery",
+                    "available": True,
+                    "eligible": True,
+                    "blockers": [],
+                    "notes": ["bounded local delivery"],
+                }
+            ],
+            "ready": True,
+            "fail_closed": False,
+            "no_implicit_release": True,
+            "available_target_count": 10,
+        },
+        "guarantees": ["no implicit release"],
+        "limitations": ["external execution remains outside the workflow"],
     }
 
 
@@ -505,6 +562,29 @@ class AnalyticsModelTests(unittest.TestCase):
         )
         self.assertEqual(report.catalog_digest, "c" * 64)
 
+    def test_developer_delivery_audit_report_preserves_fail_closed_readiness(self) -> None:
+        report = DeveloperDeliveryAuditReport.from_wire(developer_delivery_audit_payload())
+        self.assertIsInstance(report.readiness, DeliveryReadinessReport)
+        self.assertTrue(report.readiness.claims_guarded)
+        self.assertTrue(report.ready_for_requested_release)
+        self.assertFalse(report.evidence_complete)
+        self.assertEqual(report.release_request.targets[0].target, "local_delivery")
+        self.assertTrue(report.external_surface_posture.foreign_posture_explicit)
+
+    def test_developer_delivery_audit_report_extracts_http_projection(self) -> None:
+        report = developer_delivery_audit_report(
+            {"ok": True, "mcp": {"result": {"structuredContent": developer_delivery_audit_payload()}}}
+        )
+        self.assertEqual(report.release_request.request_id, "delivery-1")
+
+    def test_developer_delivery_audit_report_rejects_duplicate_targets(self) -> None:
+        payload = developer_delivery_audit_payload()
+        payload["release_request"]["targets"].append(
+            dict(payload["release_request"]["targets"][0])
+        )
+        with self.assertRaises(ArgumentError):
+            DeveloperDeliveryAuditReport.from_wire(payload)
+
     def test_capability_route_report_extracts_http_json_text_projection(self) -> None:
         envelope = {
             "ok": True,
@@ -576,6 +656,30 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             )
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-1")
         self.assertEqual(result["echo"]["ci"]["offline"], True)
+
+    def test_sync_workspace_typed_delivery_audit_report(self) -> None:
+        with patch.object(
+            Workspace,
+            "developer_delivery_audit",
+            return_value=developer_delivery_audit_payload(),
+        ) as audit:
+            report = Workspace(None).developer_delivery_audit_report(  # type: ignore[arg-type]
+                request_id="delivery-1",
+                targets=["local_delivery"],
+            )
+        self.assertTrue(report.ready_for_requested_release)
+        audit.assert_called_once_with(
+            request_id="delivery-1",
+            targets=["local_delivery"],
+            platform=None,
+            repository=None,
+            repository_impact=None,
+            sdk=None,
+            conformance=None,
+            provider=None,
+            governance=None,
+            release=None,
+        )
 
     def test_sync_workspace_exposes_agent_mission(self) -> None:
         with Client(command(), timeout=2) as client:
@@ -670,6 +774,31 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 {"session_id": "studio-async", "artifacts": [], "cells": [], "changes": []}
             )
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-async")
+
+    async def test_async_workspace_typed_delivery_audit_report(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "developer_delivery_audit",
+            new_callable=AsyncMock,
+            return_value=developer_delivery_audit_payload(),
+        ) as audit:
+            report = await AsyncWorkspace(None).developer_delivery_audit_report(  # type: ignore[arg-type]
+                request_id="delivery-1",
+                targets=["local_delivery"],
+            )
+        self.assertTrue(report.readiness.local_delivery_ready)
+        audit.assert_awaited_once_with(
+            request_id="delivery-1",
+            targets=["local_delivery"],
+            platform=None,
+            repository=None,
+            repository_impact=None,
+            sdk=None,
+            conformance=None,
+            provider=None,
+            governance=None,
+            release=None,
+        )
 
     async def test_async_workspace_exposes_agent_mission(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

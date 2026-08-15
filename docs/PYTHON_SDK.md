@@ -96,6 +96,12 @@ invent defaults:
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,
   evidence posture, release readiness, safe paths, and deterministic YAML.
+- `developer_delivery_audit(...)` composes platform, repository, SDK, conformance, provider,
+  governance, and release evidence without executing publication or CI. `DeveloperDeliveryAuditReport`
+  plus `Workspace.developer_delivery_audit_report(...)`, `AsyncWorkspace.developer_delivery_audit_report(...)`,
+  and the HTTP counterparts expose typed readiness gates, explicit target blockers, fail-closed
+  release-request state, foreign-artifact posture, and preserved check evidence. A report is release
+  evidence only when a caller supplied an explicit target request; it never creates implicit approval.
 - `agent_mission(mission_id, goal, steps, policy=...)` previews or executes a cross-domain tool DAG.
   `MissionStep` and `MissionPolicy` preserve domain labels, dependencies, explicit execution
   allow-lists, side-effect posture, refusal propagation, and output budgets; the server remains the
