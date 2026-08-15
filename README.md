@@ -532,6 +532,9 @@ route defects, traversal completeness and omission influence; requesting rendere
 explicit and fails rather than truncating over a caller-supplied limit. `repository_impact` computes
 conservative incoming-dependent closure and typed propagation stops for a changed module, with
 affected task routes retained as explicit invalidation evidence rather than a semantic-diff claim.
+Cross-domain `capability_route` responses additionally report per-need candidate domains and an
+aggregate `route_coverage` ledger, allowing the agent to see whether its proposed route spans the
+intended domains before constructing an explicit mission.
 
 ## Evaluating a context policy
 

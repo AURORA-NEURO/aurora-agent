@@ -137,7 +137,9 @@ searches the explicit cross-domain catalogue and can request authoritative schem
 `capabilityAudit` verifies catalogue/schema parity and exposes coverage gaps; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected
-tools and arguments are supplied; `adapterPlan` selects native
+tools and arguments are supplied. The route response retains per-need candidate domains and a
+`route_coverage` ledger so a caller can see which domains contributed evidence before selecting
+tools. `adapterPlan` selects native
 or Python-delegated biological and clinical source routes—including FHIR—by explicit format and source shape while preserving
 dependency and semantic-loss boundaries.
 

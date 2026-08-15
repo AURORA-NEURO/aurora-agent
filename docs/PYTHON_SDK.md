@@ -116,7 +116,8 @@ invent defaults:
 - `capability_audit(include_groups=...)` verifies catalogue/schema parity, input-schema quality,
   coverage gaps, and intentional multi-group membership.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
-  proposal, preserving explicit tool matches separately from ranked candidates.
+  proposal, preserving explicit tool matches separately from ranked candidates. Its raw result also
+  includes per-need candidate domains and a `route_coverage` ledger for resolved/unresolved needs.
 - `mission_from_route(route, mission_id, selections, policy=...)` converts that route into a
   provenance-preserving `MissionAssembly` only after every need has one caller-selected candidate,
   explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or

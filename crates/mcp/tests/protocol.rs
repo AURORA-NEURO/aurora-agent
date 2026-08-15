@@ -3979,6 +3979,20 @@ fn capability_route_batches_ranked_and_explicit_needs_without_execution() {
     assert_eq!(result["recommended_tools"].as_array().unwrap().len(), 4);
     assert_eq!(result["schema_attachment"]["requested"], json!(true));
     assert_eq!(result["schema_attachment"]["returned"], json!(4));
+    assert_eq!(result["route_coverage"]["needs_total"], json!(2));
+    assert_eq!(result["route_coverage"]["needs_resolved"], json!(2));
+    assert_eq!(result["route_coverage"]["needs_unresolved"], json!(0));
+    assert!(
+        result["route_coverage"]["candidate_domain_count"]
+            .as_u64()
+            .unwrap()
+            >= 2
+    );
+    assert!(result["needs"][0]["candidate_domains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|domain| domain == "oncology"));
     assert_eq!(result["route_id"].as_str().unwrap().len(), 64);
 
     let refused = call(

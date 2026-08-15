@@ -104,7 +104,9 @@ It also validates every input schema's object shape, required/property consisten
 so a name-parity pass cannot conceal a malformed contract.
 `capability_route` batches named needs across those groups into a single route id, preserves each
 bounded search result, distinguishes explicit tool filters from ranked candidates, and never
-executes the proposed tools.
+executes the proposed tools. Each need now carries candidate domains, and `route_coverage` reports
+resolved versus unresolved needs plus the groups, domains, and tools that actually contributed
+candidates; this is routing evidence, not authorization, scientific readiness, or equivalence.
 The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
 async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table

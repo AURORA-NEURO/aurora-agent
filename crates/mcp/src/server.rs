@@ -12341,6 +12341,8 @@ impl Server {
         let mut recommended = BTreeSet::new();
         let mut unresolved = Vec::new();
         let mut need_reports = Vec::new();
+        let mut route_groups = BTreeSet::new();
+        let mut route_domains = BTreeSet::new();
         for need in request.needs {
             let mut query = need.query.clone();
             if query.query.is_none()
@@ -12356,11 +12358,15 @@ impl Server {
                 .search(&query)
                 .map_err(|error| format!("capability route need {:?} refused: {error}", need.id))?;
             let mut candidate_groups = BTreeSet::new();
+            let mut candidate_domains = BTreeSet::new();
             let mut candidate_tools = BTreeSet::new();
             for matched in &search.matches {
                 candidate_groups.insert(matched.group.id.clone());
+                candidate_domains.extend(matched.group.domains.iter().cloned());
                 candidate_tools.extend(matched.matched_tools.iter().cloned());
             }
+            route_groups.extend(candidate_groups.iter().cloned());
+            route_domains.extend(candidate_domains.iter().cloned());
             recommended.extend(candidate_tools.iter().cloned());
             let resolution = if search.matches.is_empty() {
                 unresolved.push(need.id.clone());
@@ -12374,6 +12380,7 @@ impl Server {
                 "id": need.id,
                 "resolution": resolution,
                 "candidate_groups": candidate_groups.into_iter().collect::<Vec<_>>(),
+                "candidate_domains": candidate_domains.into_iter().collect::<Vec<_>>(),
                 "candidate_tools": candidate_tools.into_iter().collect::<Vec<_>>(),
                 "search": search,
             }));
@@ -12399,6 +12406,17 @@ impl Server {
             "recommended_tools": recommended_tools,
             "recommended_tool_count": recommended_tool_count,
             "recommended_tool_overflow": recommended_tool_overflow,
+            "route_coverage": {
+                "needs_total": need_reports.len(),
+                "needs_resolved": need_reports.len().saturating_sub(unresolved.len()),
+                "needs_unresolved": unresolved.len(),
+                "candidate_group_count": route_groups.len(),
+                "candidate_groups": route_groups,
+                "candidate_domain_count": route_domains.len(),
+                "candidate_domains": route_domains,
+                "candidate_tool_count": recommended_tool_count,
+                "posture": "routing evidence only; caller must review domain contracts, arguments, policy, and authorization"
+            },
             "execution": "not_started",
             "guarantees": [
                 "each need retains its complete bounded ranked search result",

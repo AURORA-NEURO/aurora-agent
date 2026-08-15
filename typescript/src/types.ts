@@ -402,6 +402,43 @@ export interface CapabilityRouteArgs extends JsonObject {
   include_tools?: boolean;
 }
 
+export interface CapabilityRouteNeedResult extends JsonObject {
+  id: string;
+  resolution: "explicit" | "ranked_candidates" | "unresolved";
+  candidate_groups: string[];
+  candidate_domains: string[];
+  candidate_tools: string[];
+  search: JsonObject;
+}
+
+export interface CapabilityRouteCoverage extends JsonObject {
+  needs_total: number;
+  needs_resolved: number;
+  needs_unresolved: number;
+  candidate_group_count: number;
+  candidate_groups: string[];
+  candidate_domain_count: number;
+  candidate_domains: string[];
+  candidate_tool_count: number;
+  posture: string;
+}
+
+export interface CapabilityRouteResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_route";
+  route_id: string;
+  catalog_digest: string;
+  goal: string;
+  needs: CapabilityRouteNeedResult[];
+  unresolved_needs: string[];
+  recommended_tools: string[];
+  recommended_tool_count: number;
+  recommended_tool_overflow: number;
+  route_coverage: CapabilityRouteCoverage;
+  schema_attachment: JsonObject;
+  execution: "not_started";
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;
