@@ -52,5 +52,8 @@ evidence judgements, reference panels, evaluation requests, and typed metrics ob
 paired contrasts, and calibration forecasts. They validate local JSON and cross-field invariants,
 then let `Workspace` delegate final decisions and arithmetic to the Rust kernel through
 `pack_health_assess()`, `mutation_family()`, `oracle_combine()`,
-`metrics_analytics_audit()`, and the evaluation helpers. See
+`metrics_analytics_audit()`, `developer_workbench()`, and the evaluation helpers. The workbench
+keeps authoring/notebook sessions, stale digests, capability holes, release posture, and review-only
+CI planning in one evidence-bearing response; it does not pretend to execute a hosted UI or GitHub
+runner. See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

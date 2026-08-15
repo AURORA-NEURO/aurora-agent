@@ -431,7 +431,11 @@ pub fn standard_walkthroughs() -> Result<Vec<Walkthrough>, WalkthroughError> {
     )
     .step(Step::naming(
         "Start the stdio server.",
-        rust_claim("bioprism_mcp::serve", "bioprism-mcp", "crates/mcp/src/lib.rs")?,
+        rust_claim(
+            "bioprism_mcp::serve",
+            "bioprism-mcp",
+            "crates/mcp/src/lib.rs",
+        )?,
     ))
     .step(Step::naming(
         "Read the tool definitions the server advertises.",

@@ -58,3 +58,20 @@ jobs:
       - name: run stdio client contract tests
         working-directory: python
         run: python -W error::ResourceWarning -m unittest discover -s tests -v
+
+  typescript-sdk:
+    name: TypeScript SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - name: install locked dependencies
+        working-directory: typescript
+        run: npm ci --ignore-scripts
+      - name: build and run contract tests
+        working-directory: typescript
+        run: npm test

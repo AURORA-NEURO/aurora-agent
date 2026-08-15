@@ -10,6 +10,7 @@ import type {
   DeliveryMutationResponse,
   DeliveriesResponse,
   DeveloperDeliveryAuditArgs,
+  DeveloperWorkbenchArgs,
   EventMetrics,
   EventsResponse,
   FetchLike,
@@ -166,6 +167,10 @@ export class ApiClient {
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions) {
     return this.callTool("developer_delivery_audit", args, options);
+  }
+
+  async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {
+    return this.callTool("developer_workbench", args, options);
   }
 
   async runtimeExecutionSimulate(args: RuntimeExecutionSimulateArgs, options?: ClientRequestOptions) {

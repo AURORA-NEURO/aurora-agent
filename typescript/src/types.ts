@@ -299,6 +299,12 @@ export interface DeveloperDeliveryAuditArgs extends JsonObject {
   release_request?: JsonObject;
 }
 
+export interface DeveloperWorkbenchArgs extends JsonObject {
+  session: JsonObject;
+  dashboard?: JsonObject;
+  ci?: JsonObject;
+}
+
 export interface RuntimeExecutionSimulateArgs extends JsonObject {
   tape?: JsonObject;
   actions?: JsonValue[];

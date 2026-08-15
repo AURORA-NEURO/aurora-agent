@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 115 callable tools. That count is intentionally
+The MCP integration layer currently exposes 116 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -39,7 +39,12 @@ per-capability coverage and uncontested-lead projection used by honest public ca
 `metrics_analytics_audit` adds a bounded domain-neutral arithmetic kernel for scalar summaries,
 paired robustness/cross-modal/translation/design contrasts, cost and latency, replicate spread,
 and probability calibration while keeping declared and missing evidence out of measured values.
-All three remain in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
+`developer_workbench` now composes a validated authoring/notebook session, digest-bound dependency
+ordering, stale-input audit, evidence-aware capability dashboard query, and deterministic GitHub
+Actions YAML planning surface. It preserves notebook holes and release refusal predicates rather
+than treating generated YAML or a local audit as executed CI, a hosted authoring UI, or a public
+dashboard. The TypeScript and Python clients expose this contract without cloning the Rust model.
+These remain in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
 key completeness, dependency-graph invalidation, partial unknown-region handling, fail-closed
 misses, and explicit re-proving; `storage_lifecycle_simulate` adds deterministic tiering, pin
 protection, quota reserves, raw class attribution, and non-copyable delegation/absorption. These

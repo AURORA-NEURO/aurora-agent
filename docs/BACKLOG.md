@@ -172,6 +172,12 @@ benchmark statistics, and full distribution ergonomics. The metrics layer now ad
 bounded descriptive analytics for scalar observations, paired robustness/cross-modal/translation
 contrasts, replicate spread, cost/latency, and calibration; those summaries remain descriptive and
 do not replace inferential statistics or external evidence acquisition.
+The developer workbench now provides an authoritative Rust contract for the implementable core of
+the remaining authoring-platform idea: sessions carry artifact cards, notebook cells, dependency
+ordering, logical change history, stale-digest findings, evidence-aware dashboard rows, and a
+review-only CI workflow plan. Python and TypeScript expose the same composition surface. This does
+not close the external authoring UI, consumer-repository action, hosted GitHub runner, or full
+Python distribution backlog, so those gaps remain explicit rather than being relabelled complete.
 
 
 ## §11 Developer Platform — 6 uncovered

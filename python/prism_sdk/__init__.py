@@ -69,6 +69,7 @@ from .oracle import (
     ValidityWindow,
 )
 from .workspace import AsyncWorkspace, Workspace
+from .workbench import WorkbenchRequest
 
 __version__ = "0.1.0"
 
@@ -128,6 +129,7 @@ __all__ = [
     "ValidationIssue",
     "ValidationReport",
     "Workspace",
+    "WorkbenchRequest",
     "canonical_bytes",
     "canonical_json",
     "content_digest",

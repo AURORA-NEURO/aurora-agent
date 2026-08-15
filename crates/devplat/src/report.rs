@@ -37,7 +37,7 @@
 //! No signature and no bundle: `bioprism-ids` supplies the digest, and what to do with it is the
 //! bundle crate's question.
 
-use bioprism_ids::{ContentHash, CanonicalError};
+use bioprism_ids::{CanonicalError, ContentHash};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -219,7 +219,10 @@ pub struct Limitation {
 }
 
 impl Limitation {
-    pub fn new(mismatch: impl Into<String>, effect: impl Into<String>) -> Result<Self, ReportError> {
+    pub fn new(
+        mismatch: impl Into<String>,
+        effect: impl Into<String>,
+    ) -> Result<Self, ReportError> {
         let mismatch: String = mismatch.into();
         let effect: String = effect.into();
         if effect.trim().is_empty() {

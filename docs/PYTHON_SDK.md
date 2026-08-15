@@ -61,6 +61,10 @@ invent defaults:
   caller-controlled.
 - `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON
   importer and preserves its semantic-loss/readiness report.
+- `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and
+  notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
+  planning. The facade validates only the outer mappings; Rust validates digests, dependencies,
+  evidence posture, release readiness, safe paths, and deterministic YAML.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP

@@ -411,7 +411,10 @@ impl Effect {
 
 /// The two effects 19.22's molecule card forbids by name.
 pub fn forbidden_by_default() -> Vec<Effect> {
-    vec![Effect::new("patient.advice"), Effect::new("external.publish")]
+    vec![
+        Effect::new("patient.advice"),
+        Effect::new("external.publish"),
+    ]
 }
 
 /// The declared envelope of a reproduction molecule: what it needs, what it must never do.
@@ -460,10 +463,7 @@ impl MoleculeCard {
     pub fn paper_reproducer() -> Result<Self, ReproError> {
         MoleculeCard::seal(
             "paper-reproducer",
-            [
-                Effect::new("artifact.read"),
-                Effect::new("sandbox.execute"),
-            ],
+            [Effect::new("artifact.read"), Effect::new("sandbox.execute")],
             forbidden_by_default(),
             vec![
                 "proprietary-data-unavailable".to_string(),
@@ -524,7 +524,12 @@ impl TryFrom<MoleculeCardWire> for MoleculeCard {
     type Error = ReproError;
 
     fn try_from(wire: MoleculeCardWire) -> Result<Self, Self::Error> {
-        MoleculeCard::seal(wire.name, wire.required, wire.forbidden, wire.known_failures)
+        MoleculeCard::seal(
+            wire.name,
+            wire.required,
+            wire.forbidden,
+            wire.known_failures,
+        )
     }
 }
 

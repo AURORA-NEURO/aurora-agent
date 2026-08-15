@@ -33,8 +33,8 @@ use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::classify::{classification, implemented_module_ids, not_implemented, verdict_counts};
 use crate::claim::Evidence;
+use crate::classify::{classification, implemented_module_ids, not_implemented, verdict_counts};
 use crate::error::ReportError;
 use crate::surface::foreign_subjects;
 use crate::walkthrough::{recheck, Standing, Walkthrough};
@@ -186,9 +186,10 @@ pub fn findings(walkthroughs: &[Walkthrough], workspace: &Workspace) -> Vec<Find
         }
         if walkthrough.documents_absent_artifact() {
             findings.push(Finding {
-                invariant: "a document whose every claim is outside this repository is labelled as \
+                invariant:
+                    "a document whose every claim is outside this repository is labelled as \
                             such rather than counted as verified"
-                    .to_string(),
+                        .to_string(),
                 observed: format!(
                     "walkthrough `{id}` has {} claims and none of them can be checked here",
                     walkthrough.standing().unguarded_claims()

@@ -195,7 +195,10 @@ fn standing_is_derived_from_the_claims_and_cannot_be_declared() {
     ));
     assert!(matches!(
         find("mcp-agent-quickstart"),
-        Standing::PartlyOutside { here: 2, outside: 1 }
+        Standing::PartlyOutside {
+            here: 2,
+            outside: 1
+        }
     ));
 }
 

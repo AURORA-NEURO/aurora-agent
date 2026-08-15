@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 115);
+    assert_eq!(tools.len(), 116);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3372,6 +3372,133 @@ fn developer_delivery_audit_composes_local_health_and_blocks_missing_evidence() 
     );
     assert_eq!(duplicate["__isError"], json!(true));
     assert!(duplicate["error"].as_str().unwrap().contains("duplicate"));
+}
+
+#[test]
+fn developer_workbench_audits_notebook_digests_queries_dashboard_and_plans_ci() {
+    let mut server = server();
+    let digest = "a".repeat(64);
+    let output_digest = "b".repeat(64);
+    let payload = call(
+        &mut server,
+        "developer_workbench",
+        json!({
+            "session": {
+                "session_id": "studio-1",
+                "owner": "agent-a",
+                "goal": "author an oncology capability card",
+                "environment_digest": digest,
+                "artifacts": [{
+                    "id": "artifact-1",
+                    "title": "verification card",
+                    "path": "artifacts/verification.json",
+                    "domain": "oncology",
+                    "capability": "verification",
+                    "state": "validated",
+                    "evidence": "reproduced",
+                    "digest": digest,
+                    "score": 0.8,
+                    "tags": ["public-card"]
+                }],
+                "cells": [{
+                    "id": "cell-1",
+                    "kind": "query",
+                    "source": "workspace.metrics_analytics_audit(...)" ,
+                    "inputs": [{"artifact_id": "artifact-1", "digest": digest}],
+                    "depends_on": [],
+                    "executed": true,
+                    "output_digest": output_digest
+                }],
+                "changes": [{
+                    "id": "change-1",
+                    "artifact_id": "artifact-1",
+                    "kind": "create",
+                    "actor": "agent-a",
+                    "logical_time": 1,
+                    "input_digest": null,
+                    "output_digest": digest,
+                    "reason": "initial artifact"
+                }]
+            },
+            "dashboard": {"domains": ["oncology"], "include_holes": true, "limit": 10},
+            "ci": {
+                "workflow": "consumer contracts",
+                "triggers": ["push", "pull_request"],
+                "rust_toolchain": "1.85.0",
+                "offline": true,
+                "checks": [{"name": "tests", "run": "cargo test --workspace --offline", "required": true}]
+            }
+        }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["workflow"], json!("developer_workbench"));
+    assert_eq!(payload["audit"]["stale_cells"].as_array().unwrap().len(), 0);
+    assert_eq!(payload["dashboard"]["rows"][0]["score"], json!(0.8));
+    assert_eq!(payload["ci"]["execution"], json!("not_executed"));
+    assert_eq!(payload["ci"]["network_access"], json!("denied_by_plan"));
+    assert!(payload["ci"]["workflow_yaml"]
+        .as_str()
+        .unwrap()
+        .contains("cargo test --workspace --offline"));
+
+    let mut stale = json!({
+        "session": {
+            "session_id": "studio-2", "owner": "agent-a", "goal": "stale check",
+            "artifacts": [{
+                "id": "artifact-1", "title": "card", "path": "card.json", "domain": "bioir",
+                "capability": "retrieval", "state": "validated", "evidence": "observed", "digest": digest
+            }],
+            "cells": [{
+                "id": "cell-1", "kind": "review", "source": "review", "inputs": [{"artifact_id": "artifact-1", "digest": digest}],
+                "depends_on": [], "executed": true, "output_digest": output_digest
+            }],
+            "changes": []
+        }
+    });
+    stale["session"]["artifacts"][0]["digest"] = "c".repeat(64).into();
+    let stale_result = call(&mut server, "developer_workbench", stale);
+    assert_eq!(stale_result["__isError"], json!(false));
+    assert_eq!(stale_result["audit"]["stale_cells"], json!(["cell-1"]));
+    assert_eq!(stale_result["audit"]["release_ready"], json!(false));
+}
+
+#[test]
+fn developer_workbench_refuses_notebook_cycles_and_unsafe_ci() {
+    let mut server = server();
+    let cycle = call(
+        &mut server,
+        "developer_workbench",
+        json!({
+            "session": {
+                "session_id": "cycle", "owner": "agent-a", "goal": "cycle",
+                "artifacts": [],
+                "cells": [
+                    {"id": "a", "kind": "review", "source": "a", "depends_on": ["b"], "executed": true, "output_digest": "a".repeat(64)},
+                    {"id": "b", "kind": "review", "source": "b", "depends_on": ["a"], "executed": true, "output_digest": "b".repeat(64)}
+                ],
+                "changes": []
+            }
+        }),
+    );
+    assert_eq!(cycle["__isError"], json!(true));
+    assert!(cycle["error"].as_str().unwrap().contains("cycle"));
+
+    let unsafe_ci = call(
+        &mut server,
+        "developer_workbench",
+        json!({
+            "session": {"session_id": "ci", "owner": "agent-a", "goal": "ci", "artifacts": [], "cells": [], "changes": []},
+            "ci": {
+                "workflow": "ci", "triggers": ["push"], "rust_toolchain": "stable",
+                "checks": [{"name": "bad", "run": "cargo test", "working_directory": "../outside"}]
+            }
+        }),
+    );
+    assert_eq!(unsafe_ci["__isError"], json!(true));
+    assert!(unsafe_ci["error"]
+        .as_str()
+        .unwrap()
+        .contains("parent directory"));
 }
 
 #[test]

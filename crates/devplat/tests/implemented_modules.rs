@@ -96,7 +96,14 @@ fn a_figure_without_a_machine_readable_source_pointer_is_refused() {
 
 #[test]
 fn an_unnamed_or_unexplained_withheld_figure_is_refused() {
-    assert!(Figure::new(" ", 1.0, interval(0.0, 2.0), FigureStatus::Measured, source()).is_err());
+    assert!(Figure::new(
+        " ",
+        1.0,
+        interval(0.0, 2.0),
+        FigureStatus::Measured,
+        source()
+    )
+    .is_err());
     assert!(Figure::new(
         "secret",
         1.0,
@@ -111,8 +118,14 @@ fn an_unnamed_or_unexplained_withheld_figure_is_refused() {
 
 #[test]
 fn an_evidence_state_refuses_a_duplicate_figure_and_an_empty_headline_reference() {
-    let one = Figure::new("a", 1.0, interval(0.0, 2.0), FigureStatus::Measured, source())
-        .expect("has a source");
+    let one = Figure::new(
+        "a",
+        1.0,
+        interval(0.0, 2.0),
+        FigureStatus::Measured,
+        source(),
+    )
+    .expect("has a source");
     let two = one.clone();
     assert!(EvidenceState::new(vec![one.clone(), two], vec![], vec![]).is_err());
     assert!(EvidenceState::new(vec![one], vec![], vec!["b".to_string()]).is_err());
@@ -178,7 +191,10 @@ fn the_executive_view_loses_prose_and_keeps_every_interval() {
     let headline = rendering.figure("auroc_candidate").expect("present");
     assert!(!headline.explanation.is_empty());
     let detail = rendering.figure("token_cost_usd").expect("present");
-    assert!(detail.explanation.is_empty(), "prose survived the depth cut");
+    assert!(
+        detail.explanation.is_empty(),
+        "prose survived the depth cut"
+    );
     assert_eq!(
         detail.figure.uncertainty(),
         state
@@ -212,8 +228,14 @@ fn the_comparability_banner_precedes_the_headline_for_every_audience() {
 
 #[test]
 fn a_state_with_no_limitations_renders_no_banner_and_still_passes_the_ordering_check() {
-    let figure = Figure::new("a", 1.0, interval(0.0, 2.0), FigureStatus::Measured, source())
-        .expect("has a source");
+    let figure = Figure::new(
+        "a",
+        1.0,
+        interval(0.0, 2.0),
+        FigureStatus::Measured,
+        source(),
+    )
+    .expect("has a source");
     let state = EvidenceState::new(vec![figure], vec![], vec!["a".to_string()]).expect("valid");
     let rendering = render(&state, Audience::Reviewer).expect("renders");
     assert!(!rendering.sections.contains(&Section::Banner));
@@ -242,8 +264,8 @@ fn reported_does_not_block_a_conclusion_but_the_three_open_states_do() {
 
 #[test]
 fn a_verification_status_is_refused_while_an_obligation_is_open() {
-    let ledger =
-        ObligationLedger::all_resolved().with(Obligation::ExclusionRule, ObligationStatus::Conflicted);
+    let ledger = ObligationLedger::all_resolved()
+        .with(Obligation::ExclusionRule, ObligationStatus::Conflicted);
     for status in ReproductionStatus::ALL {
         let sealed = ReproductionReport::seal("AUROC improves", status, ledger.clone(), None);
         assert_eq!(
@@ -324,7 +346,10 @@ fn a_manuscript_claim_is_not_a_verification_result() {
 fn summarising_several_sub_claims_yields_conflicted_rather_than_a_majority() {
     assert_eq!(summarise([]), None);
     assert_eq!(
-        summarise([ReproductionStatus::Reproduced, ReproductionStatus::Reproduced]),
+        summarise([
+            ReproductionStatus::Reproduced,
+            ReproductionStatus::Reproduced
+        ]),
         Some(ReproductionStatus::Reproduced)
     );
     assert_eq!(
@@ -354,7 +379,10 @@ fn a_molecule_card_cannot_require_an_effect_it_forbids() {
 fn the_effect_envelope_is_closed_by_default() {
     let card = MoleculeCard::paper_reproducer().expect("seals");
     assert!(card.permits(&Effect::new("artifact.read")));
-    assert!(!card.permits(&Effect::new("network.fetch")), "not named is not allowed");
+    assert!(
+        !card.permits(&Effect::new("network.fetch")),
+        "not named is not allowed"
+    );
     assert!(card.check([Effect::new("sandbox.execute")]).is_ok());
     assert!(card.check([Effect::new("patient.advice")]).is_err());
     assert!(card.check([Effect::new("network.fetch")]).is_err());
@@ -389,7 +417,8 @@ fn the_reproduction_gate_runs_again_when_a_report_arrives_over_the_wire() {
     forged.insert(
         "ledger".to_string(),
         serde_json::to_value(
-            ObligationLedger::all_resolved().with(Obligation::CodeRevision, ObligationStatus::Missing),
+            ObligationLedger::all_resolved()
+                .with(Obligation::CodeRevision, ObligationStatus::Missing),
         )
         .expect("serialises"),
     );

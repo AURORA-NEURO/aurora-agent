@@ -81,11 +81,13 @@ Convenience methods currently cover:
 - `bioCapabilityEvidenceAudit`: evidence posture;
 - `bioAtlasPublicationAudit`: atlas, evidence, card, and leaderboard release gates;
 - `developerDeliveryAudit`: developer-platform delivery evidence;
+- `developerWorkbench`: digest-bound authoring/notebook audit, capability dashboard query, and
+  review-only CI workflow planning;
 - `runtimeExecutionSimulate`: deterministic replay, budget, fault, and fork evidence.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of 115 tool schemas.
+families without maintaining a fragile partial clone of 116 tool schemas.
 
 ## Events and webhooks
 

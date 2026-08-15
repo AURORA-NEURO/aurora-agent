@@ -14,7 +14,9 @@ pub enum SurfaceError {
     #[error("surface of kind `{kind}` has an empty artifact name")]
     UnnamedArtifact { kind: &'static str },
     /// The in-repository surface is a Rust crate, and this workspace's crates are `bioprism-*`.
-    #[error("`{artifact}` is not a crate of this workspace: an in-repository surface must name one")]
+    #[error(
+        "`{artifact}` is not a crate of this workspace: an in-repository surface must name one"
+    )]
     NotAWorkspaceCrate { artifact: String },
 }
 
@@ -90,7 +92,9 @@ pub enum ReportError {
 /// A reproduction report could not be sealed.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ReproError {
-    #[error("the obligation ledger does not mention `{kind}`; it must be total over the ten kinds")]
+    #[error(
+        "the obligation ledger does not mention `{kind}`; it must be total over the ten kinds"
+    )]
     IncompleteLedger { kind: &'static str },
     #[error(
         "status `{status}` is a verification result, and obligations {blocking:?} are still open"

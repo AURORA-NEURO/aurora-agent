@@ -25,6 +25,7 @@ from .oracle import (
     ReferencePanelRequest,
     ReferenceStandardAuditRequest,
 )
+from .workbench import WorkbenchRequest
 
 
 def _targets(request_id: str | None, targets: Sequence[str] | None) -> dict[str, Any] | None:
@@ -99,6 +100,18 @@ class Workspace:
             calibration_bins=calibration_bins,
         )
         return self.tool("metrics_analytics_audit", request.to_mcp_arguments())
+
+    def developer_workbench(
+        self,
+        session: Mapping[str, Any],
+        *,
+        dashboard: Mapping[str, Any] | None = None,
+        ci: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Audit an authoring/notebook session and optional dashboard/CI projections in Rust."""
+
+        request = WorkbenchRequest(session, dashboard, ci)
+        return self.tool("developer_workbench", request.to_mcp_arguments())
 
     def oracle_combine(
         self,
@@ -333,6 +346,18 @@ class AsyncWorkspace:
             calibration_bins=calibration_bins,
         )
         return await self.tool("metrics_analytics_audit", request.to_mcp_arguments())
+
+    async def developer_workbench(
+        self,
+        session: Mapping[str, Any],
+        *,
+        dashboard: Mapping[str, Any] | None = None,
+        ci: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.developer_workbench`."""
+
+        request = WorkbenchRequest(session, dashboard, ci)
+        return await self.tool("developer_workbench", request.to_mcp_arguments())
 
     async def oracle_combine(
         self,

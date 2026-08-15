@@ -13,6 +13,7 @@ from prism_sdk import (
     Client,
     MetricObservation,
     PairedObservation,
+    WorkbenchRequest,
     Workspace,
     analytics_request,
 )
@@ -74,6 +75,18 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             analytics_request([], calibration_bins=1)
 
+    def test_workbench_request_preserves_nested_contracts(self) -> None:
+        request = WorkbenchRequest(
+            {"session_id": "studio-1", "artifacts": [], "cells": [], "changes": []},
+            dashboard={"include_holes": True},
+            ci={"offline": True},
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["dashboard"]["include_holes"], True)
+        self.assertEqual(arguments["ci"]["offline"], True)
+        with self.assertRaises(ArgumentError):
+            WorkbenchRequest({})
+
 
 class AnalyticsWorkspaceTests(unittest.TestCase):
     def test_sync_workspace_sends_typed_analytics_request(self) -> None:
@@ -85,6 +98,16 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(result["echo"]["observations"][0]["dimension"], "verification")
         self.assertEqual(result["echo"]["calibration"][0]["observed"], 1.0)
 
+    def test_sync_workspace_exposes_workbench_composition(self) -> None:
+        with Client(command(), timeout=2) as client:
+            result = Workspace(client).developer_workbench(
+                {"session_id": "studio-1", "artifacts": [], "cells": [], "changes": []},
+                dashboard={"include_holes": True},
+                ci={"offline": True},
+            )
+        self.assertEqual(result["echo"]["session"]["session_id"], "studio-1")
+        self.assertEqual(result["echo"]["ci"]["offline"], True)
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -93,6 +116,13 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 [observation()], calibration_bins=7
             )
         self.assertEqual(result["echo"]["calibration_bins"], 7)
+
+    async def test_async_workspace_exposes_workbench(self) -> None:
+        async with AsyncClient(command(), timeout=2) as client:
+            result = await AsyncWorkspace(client).developer_workbench(
+                {"session_id": "studio-async", "artifacts": [], "cells": [], "changes": []}
+            )
+        self.assertEqual(result["echo"]["session"]["session_id"], "studio-async")
 
 
 if __name__ == "__main__":

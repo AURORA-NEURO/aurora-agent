@@ -26,7 +26,10 @@ fn twenty_modules_are_classified_and_each_title_appears_once() {
 #[test]
 fn the_four_buckets_are_three_three_ten_and_four() {
     assert_eq!(verdict_counts(), [3, 3, 10, 4]);
-    assert_eq!(verdict_counts().iter().sum::<usize>(), classification().len());
+    assert_eq!(
+        verdict_counts().iter().sum::<usize>(),
+        classification().len()
+    );
 }
 
 #[test]
@@ -45,7 +48,8 @@ fn only_an_implemented_verdict_can_carry_a_module_id() {
 #[test]
 fn this_crate_cites_exactly_the_four_modules_it_implemented() {
     let declared = implemented_module_ids();
-    let report = audit(&devplat_dir(), declared.iter().copied()).expect("the crate directory reads");
+    let report =
+        audit(&devplat_dir(), declared.iter().copied()).expect("the crate directory reads");
     assert!(
         report.files_scanned > 8,
         "the audit read {} files, which is too few to have seen the crate",
@@ -62,7 +66,8 @@ fn this_crate_cites_exactly_the_four_modules_it_implemented() {
 fn every_declared_module_id_actually_appears_in_the_source() {
     let declared = implemented_module_ids();
     assert_eq!(declared.len(), 4);
-    let report = audit(&devplat_dir(), declared.iter().copied()).expect("the crate directory reads");
+    let report =
+        audit(&devplat_dir(), declared.iter().copied()).expect("the crate directory reads");
     assert!(
         report.uncited.is_empty(),
         "declared but never written down, so coverage cannot see it: {:?}",
@@ -72,16 +77,44 @@ fn every_declared_module_id_actually_appears_in_the_source() {
 
 #[test]
 fn the_scanner_accepts_a_module_id_and_rejects_its_near_misses() {
-    assert_eq!(scan("implements 11.23 here"), BTreeSet::from(["11.23".into()]));
-    assert!(scan("version 0.1.0").is_empty(), "a semver is not a citation");
-    assert!(scan("111.23").is_empty(), "the section must not abut a digit");
-    assert!(scan("11.234").is_empty(), "the module must not abut a digit");
-    assert!(scan("x11.23").is_empty(), "the token must not abut a letter");
-    assert!(scan("Python 3.12").is_empty(), "a one-digit section is not one");
-    assert!(scan("00.12").is_empty(), "section zero is outside the range");
-    assert!(scan("50.12").is_empty(), "section fifty is outside the range");
+    assert_eq!(
+        scan("implements 11.23 here"),
+        BTreeSet::from(["11.23".into()])
+    );
+    assert!(
+        scan("version 0.1.0").is_empty(),
+        "a semver is not a citation"
+    );
+    assert!(
+        scan("111.23").is_empty(),
+        "the section must not abut a digit"
+    );
+    assert!(
+        scan("11.234").is_empty(),
+        "the module must not abut a digit"
+    );
+    assert!(
+        scan("x11.23").is_empty(),
+        "the token must not abut a letter"
+    );
+    assert!(
+        scan("Python 3.12").is_empty(),
+        "a one-digit section is not one"
+    );
+    assert!(
+        scan("00.12").is_empty(),
+        "section zero is outside the range"
+    );
+    assert!(
+        scan("50.12").is_empty(),
+        "section fifty is outside the range"
+    );
     let ends = format!("{}.{} and {}.{}", 49, 99, "01", "00");
-    assert_eq!(scan(&ends).len(), 2, "sections one and forty-nine are inside");
+    assert_eq!(
+        scan(&ends).len(),
+        2,
+        "sections one and forty-nine are inside"
+    );
 }
 
 #[test]
@@ -139,8 +172,14 @@ fn sixteen_modules_are_named_by_title_with_a_reason_and_never_by_id() {
     let rows = not_implemented();
     assert_eq!(rows.len(), 16);
     for (title, bucket, because) in rows {
-        assert!(scan(title).is_empty(), "`{title}` contains a citation token");
-        assert!(scan(because).is_empty(), "the reason for `{title}` cites an id");
+        assert!(
+            scan(title).is_empty(),
+            "`{title}` contains a citation token"
+        );
+        assert!(
+            scan(because).is_empty(),
+            "the reason for `{title}` cites an id"
+        );
         assert!(
             because.len() > 80,
             "`{title}` is dismissed in {} characters, which is an assertion not a reason",

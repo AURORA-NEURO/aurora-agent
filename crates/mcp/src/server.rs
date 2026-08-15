@@ -52,7 +52,9 @@ use bioprism_dataops::{
     declared_objective_names, parity as topology_parity, reference_local, reference_team,
     DataClass, Plane, TenantPattern,
 };
-use bioprism_devplat::{standard_walkthroughs, DevPlatReport};
+use bioprism_devplat::{
+    run_workbench, standard_walkthroughs, DevPlatReport, WorkbenchRequest, WORKBENCH_SCHEMA_VERSION,
+};
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
     compile_bundle, impact_of, lint, scan_markdown_tree, DocEdgeType, ModuleId, NodeStatus,
@@ -625,6 +627,7 @@ impl Server {
             "governance_schema_check" => self.governance_schema_check(&arguments),
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
+            "developer_workbench" => self.developer_workbench(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -11304,6 +11307,29 @@ impl Server {
         Ok(result)
     }
 
+    /// Compose the authoring-studio, notebook, capability-dashboard, and CI-plan contracts.
+    ///
+    /// The Rust workbench validates the request and returns a digest-bound projection. It is
+    /// intentionally not an executor: no notebook kernel, GitHub API, filesystem write, or CI
+    /// runner is contacted by this tool.
+    fn developer_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode developer workbench input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("developer workbench input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: WorkbenchRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid developer workbench input: {error}"))?;
+        let report = run_workbench(&request)
+            .map_err(|error| format!("developer workbench refused: {error}"))?;
+        let mut output = serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode developer workbench report: {error}"))?;
+        output["ok"] = json!(true);
+        output["workflow"] = json!("developer_workbench");
+        output["workbench_schema_version"] = json!(WORKBENCH_SCHEMA_VERSION);
+        Ok(output)
+    }
+
     fn developer_delivery_audit(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery input: {error}"))?;
@@ -13622,7 +13648,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -15143,6 +15169,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release. Omit it to receive no readiness claim." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "developer_workbench",
+            "description": "Audit a digest-bound authoring-studio/notebook session, optionally query its cross-domain capability dashboard, and optionally generate a deterministic GitHub Actions workflow plan. Notebook dependencies are ordered, stale artifact inputs and evidence holes remain blocking/visible, and generated YAML is content-addressed and marked not executed; the tool never runs cells, calls GitHub, writes files, or turns a rendered workflow into a release claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session": { "type": "object", "description": "Serialized bioprism-devplat StudioSession with session_id, owner, goal, artifacts, cells, changes, and optional policy." },
+                    "dashboard": { "type": "object", "description": "Optional DashboardQuery with search, domains, states, evidence, minimum_score, include_holes, and limit." },
+                    "ci": { "type": "object", "description": "Optional CiRequest with workflow, triggers, rust_toolchain, checks, and offline. Generated YAML is returned but never executed or written." }
+                },
+                "required": ["session"]
             }
         }),
         json!({

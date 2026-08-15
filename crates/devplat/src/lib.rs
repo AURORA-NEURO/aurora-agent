@@ -61,10 +61,12 @@
 //! # Ok::<(), bioprism_devplat::WalkthroughError>(())
 //! ```
 //!
-//! Run over the quickstarts this section assumes, that produces the second finding:
-//! **the only two onboarding documents the section actually writes out — its Python example block
-//! and its CI workflow snippet — are entirely outside this repository.** A green test run here
-//! tells a reader nothing about either. See [`walkthrough::standard_walkthroughs`].
+//! Run over the quickstarts this section assumes, that produces the second finding: **the Python
+//! distribution and consumer-repository CI runner remain external artifacts.** A green test run
+//! here tells a reader nothing about an external package install or hosted runner. The in-tree
+//! [`workbench`] module now supplies the implementable contract layer around that gap: it validates
+//! authoring/notebook sessions and can generate a review-only CI plan, but it does not publish a
+//! package, contact GitHub, or execute a runner. See [`walkthrough::standard_walkthroughs`].
 //!
 //! # The citation rule, made executable
 //!
@@ -107,12 +109,14 @@
 //! [`audit::catalogues_are_disjoint`] and [`audit::recipes_are_all_in_tree`] check the boundary
 //! instead of asserting it.
 //!
-//! **Nothing runs.** No report is written in any format; a [`report::Rendering`] is an ordered list
-//! of sections, which is the level at which both of 11.23's checkable rules live, and HTML,
-//! Markdown, Parquet and PDF are all absent. No reproduction is attempted — [`repro`] is
-//! bookkeeping over results that `bioprism-oracle` and `bioprism-evalengine` produce. No sandbox is
-//! enforced — [`exploit`]'s `Containment` is an observation recorded so it can be *excluded* from a
-//! verdict, not a mechanism.
+//! **The original predicate layer does not execute external systems.** No report is written in any
+//! format; a [`report::Rendering`] is an ordered list of sections, which is the level at which both
+//! of 11.23's checkable rules live, and HTML, Markdown, Parquet and PDF are all absent. No
+//! reproduction is attempted — [`repro`] is bookkeeping over results that `bioprism-oracle` and
+//! `bioprism-evalengine` produce. No sandbox is enforced — [`exploit`]'s `Containment` is an
+//! observation recorded so it can be *excluded* from a verdict, not a mechanism. The separate
+//! [`workbench`] module does execute structural validation and deterministic projections, while
+//! keeping notebook kernels, filesystems, GitHub, and CI runners outside its trust boundary.
 //!
 //! **No clock and no randomness.** Every digest is a function of its input alone.
 //!
@@ -204,10 +208,11 @@ pub mod report;
 pub mod repro;
 pub mod surface;
 pub mod walkthrough;
+pub mod workbench;
 
 pub use audit::{
-    catalogues_are_disjoint, findings, recipes_are_all_in_tree, unimplemented_titles, DevPlatReport,
-    Finding, WalkthroughSummary,
+    catalogues_are_disjoint, findings, recipes_are_all_in_tree, unimplemented_titles,
+    DevPlatReport, Finding, WalkthroughSummary,
 };
 pub use citations::{audit as audit_citations, scan as scan_citations, CitationAudit};
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};
@@ -235,4 +240,11 @@ pub use surface::{foreign_subjects, ForeignSubject, Locale, Surface, SurfaceKind
 pub use walkthrough::{
     recheck, standard_walkthroughs, Standing, Step, StepBody, Walkthrough, WalkthroughDraft,
     WalkthroughId,
+};
+pub use workbench::{
+    audit_session, plan_ci, query_dashboard, run_workbench, ArtifactCard, ArtifactState, CellInput,
+    CellKind, ChangeKind, CiCheck, CiPlan, CiRequest, DashboardQuery, DashboardReport,
+    DashboardRow, EvidencePosture, NotebookPolicy, SessionAudit, StudioCell, StudioChange,
+    StudioSession, WorkbenchError, WorkbenchFinding, WorkbenchReport, WorkbenchRequest,
+    WORKBENCH_SCHEMA_VERSION,
 };
