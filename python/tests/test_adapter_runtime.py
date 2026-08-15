@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
 
 from prism_sdk import (
@@ -112,13 +113,16 @@ class AdapterRuntimeTests(unittest.TestCase):
         result = execute_projection(
             "bioprism.python.dicom",
             "raw-dicom",
-            {"bytes_digest": "abc"},
+            {"path": "missing.dcm"},
         )
 
-        self.assertEqual(result.status, RuntimeStatus.UNSUPPORTED)
-        self.assertFalse(result.executable)
-        self.assertEqual(result.to_wire()["error"]["kind"], "binary_reader_unavailable")
-        self.assertIn("pydicom", result.to_wire()["error"]["detail"])
+        if importlib.util.find_spec("pydicom") is None:
+            self.assertEqual(result.status, RuntimeStatus.UNSUPPORTED)
+            self.assertEqual(result.to_wire()["error"]["kind"], "optional_dependency_missing")
+            self.assertIn("pydicom", result.to_wire()["error"]["detail"])
+        else:
+            self.assertEqual(result.status, RuntimeStatus.REJECTED)
+            self.assertEqual(result.to_wire()["error"]["kind"], "argument_error")
 
     def test_invalid_payload_is_rejected_and_unknown_route_is_typed(self) -> None:
         rejected = execute_projection("bioprism.python.bids_manifest", "bad", {"metadata": {}})

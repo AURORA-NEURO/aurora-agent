@@ -120,6 +120,10 @@ invent defaults:
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full
   floating-point image load or disclose matrix values. Missing packages surface as
   `OptionalDependencyUnavailable` and the runtime preserves that refusal.
+- The runtime also contains dependency-gated bindings for pydicom metadata-only DICOM reads,
+  pysam indexed/compressed VCF/BCF reads, and pysam BAM/CRAM record reads. These feed the DICOM,
+  VCF, and alignment auditors respectively, require explicit paths and bounded record limits, and
+  never turn an absent pydicom/pysam installation into a fallback parser.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and

@@ -225,6 +225,8 @@ their optional binary-reader binding is absent.
 The verified optional-reader layer now binds installed nibabel and anndata environments for raw
 NIfTI header and H5AD/Zarr metadata inspection, while keeping full array/matrix materialization and
 missing dependencies explicit.
+Dependency-gated pydicom and pysam bindings now cover metadata-only DICOM, indexed/compressed VCF/BCF,
+and BAM/CRAM record projection when those packages are installed; absent packages remain explicit.
 
 
 ## §11 Developer Platform — 6 uncovered

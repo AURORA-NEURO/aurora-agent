@@ -93,6 +93,9 @@ and the request envelope records payload keys rather than echoing payload values
 When installed, `read_nifti_header()` and `read_anndata_projection()` provide verified raw-file
 bindings for nibabel and anndata-backed H5AD/Zarr metadata. They feed the same auditors without
 loading image arrays or matrix values; missing optional packages remain typed refusals.
+The same runtime has dependency-gated pydicom and pysam bindings for metadata-only DICOM,
+indexed/compressed VCF/BCF, and BAM/CRAM records. Each feeds the corresponding audited projection;
+absent pydicom/pysam packages produce explicit unsupported results.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

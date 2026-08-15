@@ -12,14 +12,19 @@ import importlib
 from pathlib import Path
 from typing import Any, Mapping
 
+from .alignment import MAX_ALIGNMENT_ITEMS, audit_alignments
 from .anndata import audit_anndata
+from .authoring import content_digest
+from .dicom import audit_dicom
 from .errors import ArgumentError
 from .nifti import audit_nifti
+from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
 
 
 MAX_READER_FILE_BYTES = 4_000_000_000
 MAX_READER_INDEX_VALUES = 1_000_000
 MAX_READER_CATEGORIES = 10_000
+MAX_READER_RECORDS = 100_000
 
 
 class OptionalDependencyUnavailable(ArgumentError):
@@ -355,11 +360,219 @@ def read_anndata_projection(
             close()
 
 
+def _input_files(path: str, *, field: str) -> list[Path]:
+    candidate = _path(path, field=field, directory=Path(path).is_dir())
+    if candidate.is_file():
+        return [candidate]
+    files = [item for item in sorted(candidate.rglob("*")) if item.is_file()]
+    if not files:
+        raise ArgumentError(f"{field} directory contains no files")
+    if len(files) > MAX_READER_RECORDS:
+        raise ArgumentError(f"{field} directory contains more than {MAX_READER_RECORDS} files")
+    for item in files:
+        if item.stat().st_size > MAX_READER_FILE_BYTES:
+            raise ArgumentError(f"{field} member exceeds the {MAX_READER_FILE_BYTES}-byte reader limit: {item}")
+    return files
+
+
+def _dicom_value(dataset: Any, name: str, default: Any = None) -> Any:
+    value = getattr(dataset, name, default)
+    if value is None:
+        return default
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    try:
+        return list(value)
+    except TypeError:
+        return str(value)
+
+
+def read_dicom_projection(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read DICOM metadata with pydicom ``stop_before_pixels`` and audit the projection."""
+
+    pydicom = _import("pydicom")
+    files = _input_files(path, field="dicom path")
+    projections: list[dict[str, Any]] = []
+    try:
+        for item in files:
+            dataset = pydicom.dcmread(str(item), stop_before_pixels=True, force=False)
+            file_meta = getattr(dataset, "file_meta", None)
+            transfer_syntax = getattr(file_meta, "TransferSyntaxUID", None) if file_meta is not None else None
+            frames = int(_dicom_value(dataset, "NumberOfFrames", 1) or 1)
+            projection: dict[str, Any] = {
+                "instance_id": str(item),
+                "study_uid": _dicom_value(dataset, "StudyInstanceUID"),
+                "series_uid": _dicom_value(dataset, "SeriesInstanceUID"),
+                "sop_instance_uid": _dicom_value(dataset, "SOPInstanceUID"),
+                "sop_class_uid": _dicom_value(dataset, "SOPClassUID"),
+                "frame_of_reference_uid": _dicom_value(dataset, "FrameOfReferenceUID"),
+                "transfer_syntax_uid": str(transfer_syntax) if transfer_syntax is not None else None,
+                "modality": _dicom_value(dataset, "Modality"),
+                "rows": _dicom_value(dataset, "Rows"),
+                "columns": _dicom_value(dataset, "Columns"),
+                "number_of_frames": frames,
+                "instance_number": _dicom_value(dataset, "InstanceNumber"),
+                "pixel_spacing": _dicom_value(dataset, "PixelSpacing"),
+                "image_orientation_patient": _dicom_value(dataset, "ImageOrientationPatient"),
+                "image_position_patient": _dicom_value(dataset, "ImagePositionPatient"),
+                "spacing_between_slices": _dicom_value(dataset, "SpacingBetweenSlices"),
+                "tags": {},
+            }
+            per_frame = getattr(dataset, "PerFrameFunctionalGroupsSequence", None)
+            if per_frame is not None and frames > 1:
+                positions: list[Any] = []
+                for frame_group in per_frame:
+                    plane_position = getattr(frame_group, "PlanePositionSequence", None)
+                    if plane_position:
+                        positions.append(_dicom_value(plane_position[0], "ImagePositionPatient"))
+                if len(positions) == frames:
+                    projection["per_frame_positions"] = positions
+            projections.append(projection)
+    except Exception as error:  # noqa: BLE001 - turn reader failures into a bounded SDK error
+        raise ArgumentError(f"DICOM metadata inspection failed for {path!r}: {error}") from error
+    return audit_dicom(projections, source_id=source_id, provenance=provenance, max_items=max_items).to_wire()
+
+
+def read_indexed_vcf(
+    path: str,
+    *,
+    source_id: str,
+    reference_build: str | None = None,
+    provenance: Mapping[str, Any] | None = None,
+    max_records: int = MAX_VCF_RECORDS,
+    max_items: int = MAX_VCF_ITEMS,
+) -> Mapping[str, Any]:
+    """Read indexed/compressed VCF or BCF records with pysam and audit the bounded text projection."""
+
+    if isinstance(max_records, bool) or not isinstance(max_records, int) or not 1 <= max_records <= MAX_VCF_RECORDS:
+        raise ArgumentError(f"max_records must be between 1 and {MAX_VCF_RECORDS}")
+    if isinstance(max_items, bool) or not isinstance(max_items, int) or not 1 <= max_items <= MAX_VCF_ITEMS:
+        raise ArgumentError(f"max_items must be between 1 and {MAX_VCF_ITEMS}")
+    candidate = _path(path, field="indexed VCF path")
+    pysam = _import("pysam")
+    variant_file = None
+    try:
+        variant_file = pysam.VariantFile(str(candidate), "r")
+        header_text = str(variant_file.header).rstrip("\n")
+        lines: list[str] = []
+        for index, record in enumerate(variant_file.fetch()):
+            if index >= max_records:
+                raise ArgumentError(f"indexed VCF contains more than the max_records limit of {max_records}")
+            lines.append(str(record).rstrip("\n"))
+        text = header_text + ("\n" if header_text else "") + "\n".join(lines) + "\n"
+        document = parse_vcf(
+            text,
+            source_id=source_id,
+            reference_build=reference_build,
+            provenance=provenance,
+            max_records=max_records,
+            max_items=max_items,
+        ).to_wire()
+        manifest = dict(document["manifest"])
+        manifest.update({"indexed": True, "reader": "pysam", "representation_digest": content_digest({"header": header_text, "record_count": len(lines)})})
+        document["manifest"] = manifest
+        document["document_digest"] = content_digest(document)
+        return document
+    except ArgumentError:
+        raise
+    except Exception as error:  # noqa: BLE001
+        raise ArgumentError(f"indexed VCF inspection failed for {path!r}: {error}") from error
+    finally:
+        if variant_file is not None:
+            variant_file.close()
+
+
+def read_alignment_file(
+    path: str,
+    *,
+    source_id: str,
+    reference_build: str | None = None,
+    provenance: Mapping[str, Any] | None = None,
+    reference_fasta: str | None = None,
+    require_index: bool = True,
+    max_records: int = MAX_READER_RECORDS,
+    max_items: int = MAX_ALIGNMENT_ITEMS,
+) -> Mapping[str, Any]:
+    """Read bounded BAM/CRAM alignment metadata with pysam, requiring an index by default."""
+
+    if isinstance(max_records, bool) or not isinstance(max_records, int) or not 1 <= max_records <= MAX_READER_RECORDS:
+        raise ArgumentError(f"max_records must be between 1 and {MAX_READER_RECORDS}")
+    candidate = _path(path, field="alignment path")
+    pysam = _import("pysam")
+    alignment_file = None
+    try:
+        kwargs: dict[str, Any] = {}
+        if reference_fasta is not None:
+            kwargs["reference_filename"] = reference_fasta
+        alignment_file = pysam.AlignmentFile(str(candidate), "rb", **kwargs)
+        if require_index and hasattr(alignment_file, "has_index") and not alignment_file.has_index():
+            raise ArgumentError("alignment route requires an index for coordinate-bounded iteration")
+        references = {name: int(length) for name, length in zip(alignment_file.references, alignment_file.lengths)}
+        records: list[dict[str, Any]] = []
+        iterator = alignment_file.fetch(until_eof=not require_index)
+        for index, segment in enumerate(iterator):
+            if index >= max_records:
+                raise ArgumentError(f"alignment contains more than the max_records limit of {max_records}")
+            read_group = None
+            try:
+                read_group = segment.get_tag("RG")
+            except (KeyError, ValueError):
+                pass
+            mate_reference = segment.next_reference_name
+            if mate_reference in {None, "*"}:
+                mate_reference = None
+            records.append(
+                {
+                    "record_id": f"record-{index}",
+                    "read_id": segment.query_name or f"read-{index}",
+                    "reference_name": segment.reference_name,
+                    "start": segment.reference_start if segment.reference_start >= 0 else None,
+                    "reference_end": segment.reference_end,
+                    "cigar": segment.cigarstring,
+                    "flags": int(segment.flag),
+                    "mapping_quality": int(segment.mapping_quality),
+                    "sequence_length": segment.query_length,
+                    "mate_reference_name": mate_reference,
+                    "mate_start": segment.next_reference_start if segment.next_reference_start >= 0 else None,
+                    "template_length": int(segment.template_length),
+                    "read_group": read_group,
+                }
+            )
+        return audit_alignments(
+            references,
+            records,
+            source_id=source_id,
+            reference_build=reference_build,
+            provenance=provenance,
+            max_records=max_records,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except Exception as error:  # noqa: BLE001
+        raise ArgumentError(f"alignment inspection failed for {path!r}: {error}") from error
+    finally:
+        if alignment_file is not None:
+            alignment_file.close()
+
+
 __all__ = [
     "MAX_READER_CATEGORIES",
     "MAX_READER_FILE_BYTES",
     "MAX_READER_INDEX_VALUES",
+    "MAX_READER_RECORDS",
     "OptionalDependencyUnavailable",
+    "read_alignment_file",
     "read_anndata_projection",
+    "read_dicom_projection",
+    "read_indexed_vcf",
     "read_nifti_header",
 ]

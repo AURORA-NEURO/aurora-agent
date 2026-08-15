@@ -99,7 +99,14 @@ from .oracle import (
     ReferenceStandardAuditRequest,
     ValidityWindow,
 )
-from .optional_readers import OptionalDependencyUnavailable, read_anndata_projection, read_nifti_header
+from .optional_readers import (
+    OptionalDependencyUnavailable,
+    read_alignment_file,
+    read_anndata_projection,
+    read_dicom_projection,
+    read_indexed_vcf,
+    read_nifti_header,
+)
 from .workspace import AsyncWorkspace, Workspace
 from .workbench import WorkbenchRequest
 from .vcf import VcfAdapter, VcfLoss, VcfParseError, VcfParseResult, parse_vcf
@@ -223,6 +230,9 @@ __all__ = [
     "bootstrap_mean",
     "parse_vcf",
     "read_anndata_projection",
+    "read_alignment_file",
+    "read_dicom_projection",
+    "read_indexed_vcf",
     "read_nifti_header",
     "paired_effect",
     "summarize_distribution",

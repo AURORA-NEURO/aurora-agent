@@ -20,7 +20,14 @@ from .biological import AdapterDescriptor, AdapterRegistry
 from .dicom import audit_dicom
 from .errors import ArgumentError
 from .nifti import audit_nifti
-from .optional_readers import OptionalDependencyUnavailable, read_anndata_projection, read_nifti_header
+from .optional_readers import (
+    OptionalDependencyUnavailable,
+    read_alignment_file,
+    read_anndata_projection,
+    read_dicom_projection,
+    read_indexed_vcf,
+    read_nifti_header,
+)
 from .vcf import parse_vcf
 
 
@@ -130,6 +137,9 @@ class AdapterRuntime:
             "bioprism.python.alignment_metadata",
             "bioprism.python.nifti_bids",
             "bioprism.python.anndata",
+            "bioprism.python.dicom",
+            "bioprism.python.vcf_indexed",
+            "bioprism.python.bam_cram",
         }
     )
 
@@ -231,6 +241,11 @@ class AdapterRuntime:
                 max_instances=payload.get("max_instances", 100_000),
                 max_items=request.max_items,
             ).to_wire()
+        if adapter_id == "bioprism.python.dicom":
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("dicom payload requires a string 'path'")
+            return read_dicom_projection(path, source_id=request.source_id, provenance=request.provenance, max_items=request.max_items)
         if adapter_id == "bioprism.python.nifti_metadata":
             images = payload.get("images")
             if not isinstance(images, Sequence) or isinstance(images, (str, bytes)):
@@ -285,6 +300,32 @@ class AdapterRuntime:
                 max_records=payload.get("max_records", 100_000),
                 max_items=request.max_items,
             ).to_wire()
+        if adapter_id == "bioprism.python.vcf_indexed":
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("vcf_indexed payload requires a string 'path'")
+            return read_indexed_vcf(
+                path,
+                source_id=request.source_id,
+                reference_build=payload.get("reference_build"),
+                provenance=request.provenance,
+                max_records=payload.get("max_records", 100_000),
+                max_items=request.max_items,
+            )
+        if adapter_id == "bioprism.python.bam_cram":
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("bam_cram payload requires a string 'path'")
+            return read_alignment_file(
+                path,
+                source_id=request.source_id,
+                reference_build=payload.get("reference_build"),
+                provenance=request.provenance,
+                reference_fasta=payload.get("reference_fasta"),
+                require_index=payload.get("require_index", True),
+                max_records=payload.get("max_records", 100_000),
+                max_items=request.max_items,
+            )
         raise ArgumentError(f"no dispatch binding exists for {adapter_id!r}")
 
     @staticmethod
