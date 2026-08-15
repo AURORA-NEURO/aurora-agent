@@ -122,6 +122,11 @@ invent defaults:
   invalid, blocked, rejected, and unsupported states, carries the authoritative adapter descriptor,
   preserves the audit document digest, and returns typed unsupported outcomes when a selected raw
   reader is unavailable. Payload values are not echoed in the request envelope.
+- `ProjectionBatchRequest`, `ProjectionBatchResult`, and `execute_projection_batch(...)` compose
+  heterogeneous source requests under a bounded ordered envelope. They preserve member-level
+  documents, refusal/error states, status counts, document digests, and a batch digest; optional
+  stop-on-error execution reports omitted requests instead of making an incomplete batch look
+  complete.
 - `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
   installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full

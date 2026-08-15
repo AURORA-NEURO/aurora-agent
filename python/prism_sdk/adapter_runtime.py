@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from .alignment import audit_alignments
 from .anndata import audit_anndata
+from .authoring import content_digest
 from .bids import audit_bids
 from .biological import AdapterDescriptor, AdapterRegistry
 from .dicom import audit_dicom
@@ -39,6 +40,9 @@ RUNTIME_SCHEMA = "bioprism-python-adapter-runtime/0.1"
 MAX_RUNTIME_ADAPTER_ID_BYTES = 256
 MAX_RUNTIME_SOURCE_ID_BYTES = 512
 MAX_RUNTIME_ITEMS = 1_000
+MAX_RUNTIME_BATCH_REQUESTS = 64
+MAX_RUNTIME_BATCH_ITEMS = 10_000
+RUNTIME_BATCH_SCHEMA = "bioprism-python-adapter-batch/0.1"
 
 
 class RuntimeStatus(str, Enum):
@@ -48,6 +52,15 @@ class RuntimeStatus(str, Enum):
     BLOCKED = "blocked"
     REJECTED = "rejected"
     UNSUPPORTED = "unsupported"
+
+
+class BatchStatus(str, Enum):
+    """Aggregate state for a bounded heterogeneous projection batch."""
+
+    SUCCEEDED = "succeeded"
+    PARTIAL = "partial"
+    BLOCKED = "blocked"
+    REJECTED = "rejected"
 
 
 def _text(name: str, value: str, maximum: int) -> None:
@@ -126,6 +139,107 @@ class AdapterExecutionResult:
         if self.error is not None:
             result["error"] = dict(self.error)
         return result
+
+
+@dataclass(frozen=True)
+class ProjectionBatchRequest:
+    """A bounded ordered set of explicit projection requests.
+
+    The batch envelope preserves request order for reproducibility, but each member retains its
+    own adapter contract, provenance, refusal state, and document digest. Request payload values
+    are never echoed by ``to_wire``.
+    """
+
+    requests: tuple[ProjectionRequest, ...]
+    stop_on_error: bool = False
+    max_total_items: int = MAX_RUNTIME_BATCH_ITEMS
+
+    def __post_init__(self) -> None:
+        if isinstance(self.requests, (str, bytes)) or not isinstance(self.requests, Sequence):
+            raise ArgumentError("requests must be a sequence of ProjectionRequest values")
+        normalized = tuple(self.requests)
+        if not 1 <= len(normalized) <= MAX_RUNTIME_BATCH_REQUESTS:
+            raise ArgumentError(f"requests must contain between 1 and {MAX_RUNTIME_BATCH_REQUESTS} items")
+        if any(not isinstance(request, ProjectionRequest) for request in normalized):
+            raise ArgumentError("requests must contain only ProjectionRequest values")
+        if not isinstance(self.stop_on_error, bool):
+            raise ArgumentError("stop_on_error must be a boolean")
+        if isinstance(self.max_total_items, bool) or not isinstance(self.max_total_items, int) or not 1 <= self.max_total_items <= MAX_RUNTIME_BATCH_ITEMS:
+            raise ArgumentError(f"max_total_items must be between 1 and {MAX_RUNTIME_BATCH_ITEMS}")
+        requested_items = sum(request.max_items for request in normalized)
+        if requested_items > self.max_total_items:
+            raise ArgumentError(
+                f"sum of request max_items ({requested_items}) exceeds max_total_items ({self.max_total_items})"
+            )
+        object.__setattr__(self, "requests", normalized)
+
+    def to_wire(self) -> dict[str, Any]:
+        return {
+            "requests": [request.to_wire() for request in self.requests],
+            "stop_on_error": self.stop_on_error,
+            "max_total_items": self.max_total_items,
+        }
+
+
+@dataclass(frozen=True)
+class ProjectionBatchResult:
+    """Evidence-bearing aggregate for one bounded heterogeneous projection batch."""
+
+    request: ProjectionBatchRequest
+    status: BatchStatus
+    results: tuple[AdapterExecutionResult, ...]
+    omitted_requests: int = 0
+    stopped_on_error: bool = False
+
+    @property
+    def accepted(self) -> bool:
+        return bool(self.results) and all(result.accepted for result in self.results)
+
+    @property
+    def document_digests(self) -> tuple[str, ...]:
+        return tuple(digest for result in self.results if (digest := result.document_digest) is not None)
+
+    @property
+    def batch_digest(self) -> str:
+        return content_digest(self._digest_input())
+
+    def _digest_input(self) -> dict[str, Any]:
+        return {
+            "schema": RUNTIME_BATCH_SCHEMA,
+            "request": self.request.to_wire(),
+            "status": self.status.value,
+            "omitted_requests": self.omitted_requests,
+            "stopped_on_error": self.stopped_on_error,
+            "results": [
+                {
+                    "request": result.request.to_wire(),
+                    "status": result.status.value,
+                    "accepted": result.accepted,
+                    "executable": result.executable,
+                    "adapter_id": result.adapter.id if result.adapter else None,
+                    "document_digest": result.document_digest,
+                    "error": result.error,
+                }
+                for result in self.results
+            ],
+        }
+
+    def to_wire(self) -> dict[str, Any]:
+        status_counts: dict[str, int] = {}
+        for result in self.results:
+            status_counts[result.status.value] = status_counts.get(result.status.value, 0) + 1
+        return {
+            "schema": RUNTIME_BATCH_SCHEMA,
+            "request": self.request.to_wire(),
+            "status": self.status.value,
+            "accepted": self.accepted,
+            "result_count": len(self.results),
+            "omitted_requests": self.omitted_requests,
+            "stopped_on_error": self.stopped_on_error,
+            "status_counts": dict(sorted(status_counts.items())),
+            "batch_digest": self.batch_digest,
+            "results": [result.to_wire() for result in self.results],
+        }
 
 
 class AdapterRuntime:
@@ -209,6 +323,36 @@ class AdapterRuntime:
                 error={"kind": "adapter_execution_error", "detail": str(error)},
             )
         return AdapterExecutionResult(request, self._status(document), True, descriptor, document=document)
+
+    def execute_batch(self, batch: ProjectionBatchRequest) -> ProjectionBatchResult:
+        """Execute an ordered heterogeneous batch without hiding member-level outcomes."""
+
+        if not isinstance(batch, ProjectionBatchRequest):
+            raise ArgumentError("batch must be a ProjectionBatchRequest")
+        results: list[AdapterExecutionResult] = []
+        for request in batch.requests:
+            result = self.execute(request)
+            results.append(result)
+            if batch.stop_on_error and result.status in {
+                RuntimeStatus.INVALID,
+                RuntimeStatus.BLOCKED,
+                RuntimeStatus.REJECTED,
+                RuntimeStatus.UNSUPPORTED,
+            }:
+                break
+        omitted = len(batch.requests) - len(results)
+        statuses = {result.status for result in results}
+        successful = statuses.intersection({RuntimeStatus.SUCCEEDED, RuntimeStatus.LOSSY})
+        failures = statuses.difference({RuntimeStatus.SUCCEEDED, RuntimeStatus.LOSSY})
+        if not failures and omitted == 0:
+            status = BatchStatus.SUCCEEDED
+        elif successful or omitted:
+            status = BatchStatus.PARTIAL
+        elif RuntimeStatus.BLOCKED in failures or RuntimeStatus.INVALID in failures:
+            status = BatchStatus.BLOCKED
+        else:
+            status = BatchStatus.REJECTED
+        return ProjectionBatchResult(batch, status, tuple(results), omitted, omitted > 0)
 
     def _dispatch(self, request: ProjectionRequest) -> Mapping[str, Any]:
         payload = request.payload
@@ -381,12 +525,32 @@ def execute_projection(
     return (runtime or AdapterRuntime()).execute(request)
 
 
+def execute_projection_batch(
+    requests: Sequence[ProjectionRequest],
+    *,
+    stop_on_error: bool = False,
+    max_total_items: int = MAX_RUNTIME_BATCH_ITEMS,
+    runtime: AdapterRuntime | None = None,
+) -> ProjectionBatchResult:
+    """Execute a bounded ordered batch across heterogeneous explicit adapter requests."""
+
+    batch = ProjectionBatchRequest(tuple(requests), stop_on_error=stop_on_error, max_total_items=max_total_items)
+    return (runtime or AdapterRuntime()).execute_batch(batch)
+
+
 __all__ = [
     "AdapterExecutionResult",
     "AdapterRuntime",
+    "BatchStatus",
+    "MAX_RUNTIME_BATCH_ITEMS",
+    "MAX_RUNTIME_BATCH_REQUESTS",
     "MAX_RUNTIME_ITEMS",
     "ProjectionRequest",
+    "ProjectionBatchRequest",
+    "ProjectionBatchResult",
     "RUNTIME_SCHEMA",
+    "RUNTIME_BATCH_SCHEMA",
     "RuntimeStatus",
     "execute_projection",
+    "execute_projection_batch",
 ]

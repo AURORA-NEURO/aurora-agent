@@ -95,6 +95,11 @@ reference resolution remain explicit limitations.
 the complete set of concrete projection audits. They normalize successful, lossy, invalid, blocked, rejected,
 and unsupported outcomes; unavailable raw-byte routes refuse explicitly without fallback, and the
 request envelope records payload keys rather than echoing payload values.
+`ProjectionBatchRequest`, `ProjectionBatchResult`, and `execute_projection_batch()` compose
+heterogeneous FHIR, imaging, single-cell, variant, alignment, and manifest requests while keeping
+each member's document, refusal state, digest, and semantic-loss classification. Batch limits and
+stop-on-error omissions are explicit, so a partial cross-source audit cannot be mistaken for a
+complete one.
 When installed, `read_nifti_header()` and `read_anndata_projection()` provide verified raw-file
 bindings for nibabel and anndata-backed H5AD/Zarr metadata. They feed the same auditors without
 loading image arrays or matrix values; missing optional packages remain typed refusals.

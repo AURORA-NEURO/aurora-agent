@@ -7,9 +7,12 @@ import unittest
 
 from prism_sdk import (
     AdapterRuntime,
+    BatchStatus,
+    ProjectionBatchRequest,
     ProjectionRequest,
     RuntimeStatus,
     execute_projection,
+    execute_projection_batch,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -123,6 +126,73 @@ class AdapterRuntimeTests(unittest.TestCase):
                 self.assertIn(result.status, {RuntimeStatus.SUCCEEDED, RuntimeStatus.LOSSY})
                 self.assertEqual(len(result.document_digest or ""), 64)
                 self.assertNotIn(VCF, str(result.to_wire()["request"]))
+
+    def test_heterogeneous_batch_is_deterministic_and_preserves_member_documents(self) -> None:
+        requests = (
+            ProjectionRequest(
+                "bioprism.python.vcf_text",
+                "batch-vcf",
+                {"text": VCF, "reference_build": "GRCh38"},
+                provenance={"accession": "batch-vcf"},
+                max_items=10,
+            ),
+            ProjectionRequest(
+                "bioprism.python.fhir_manifest",
+                "batch-fhir",
+                {"document": {"resourceType": "Patient", "id": "patient-1"}},
+                provenance={"accession": "batch-fhir"},
+                max_items=10,
+            ),
+        )
+        first = execute_projection_batch(requests, max_total_items=20)
+        second = execute_projection_batch(requests, max_total_items=20)
+
+        self.assertEqual(first.status, BatchStatus.SUCCEEDED)
+        self.assertEqual(first.to_wire()["status_counts"], {"lossy": 1, "succeeded": 1})
+        self.assertEqual(first.batch_digest, second.batch_digest)
+        self.assertEqual(len(first.document_digests), 2)
+        self.assertNotIn(VCF, str(first.to_wire()["request"]))
+        self.assertEqual(first.to_wire()["result_count"], 2)
+
+    def test_batch_reports_partial_completion_and_preserves_refusal_evidence(self) -> None:
+        good = ProjectionRequest(
+            "bioprism.python.vcf_text",
+            "batch-good",
+            {"text": VCF, "reference_build": "GRCh38"},
+            provenance={"accession": "good"},
+            max_items=5,
+        )
+        bad = ProjectionRequest("bioprism.python.not_real", "batch-bad", {"secret": VCF}, max_items=5)
+
+        result = execute_projection_batch((good, bad), max_total_items=10)
+
+        self.assertEqual(result.status, BatchStatus.PARTIAL)
+        self.assertEqual(result.omitted_requests, 0)
+        self.assertEqual(result.results[1].status, RuntimeStatus.UNSUPPORTED)
+        self.assertEqual(result.to_wire()["status_counts"], {"succeeded": 1, "unsupported": 1})
+        self.assertNotIn(VCF, str(result.to_wire()["request"]))
+        self.assertEqual(result.to_wire()["results"][1]["error"]["kind"], "unknown_adapter")
+
+    def test_stop_on_error_reports_omitted_requests_instead_of_silently_dropping_them(self) -> None:
+        good = ProjectionRequest("bioprism.python.vcf_text", "first", {"text": VCF}, max_items=10)
+        bad = ProjectionRequest("bioprism.python.not_real", "second", {}, max_items=10)
+        later = ProjectionRequest("bioprism.python.vcf_text", "third", {"text": VCF}, max_items=10)
+
+        result = execute_projection_batch((good, bad, later), stop_on_error=True, max_total_items=30)
+
+        self.assertEqual(result.status, BatchStatus.PARTIAL)
+        self.assertTrue(result.stopped_on_error)
+        self.assertEqual(result.omitted_requests, 1)
+        self.assertEqual(result.to_wire()["result_count"], 2)
+
+    def test_batch_bounds_reject_empty_requests_and_unbounded_total_preview(self) -> None:
+        with self.assertRaises(ArgumentError):
+            ProjectionBatchRequest(())
+        request = ProjectionRequest("bioprism.python.vcf_text", "bounded", {"text": VCF}, max_items=2)
+        with self.assertRaises(ArgumentError):
+            ProjectionBatchRequest((request,), max_total_items=1)
+        with self.assertRaises(ArgumentError):
+            execute_projection_batch("not-a-sequence")  # type: ignore[arg-type]
 
     def test_raw_binary_routes_refuse_explicitly_instead_of_falling_back(self) -> None:
         result = execute_projection(
