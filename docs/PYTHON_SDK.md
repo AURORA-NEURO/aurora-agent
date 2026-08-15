@@ -263,6 +263,11 @@ invent defaults:
   full threat details; each mitigation keeps its state-specific declaration, absence reason, or
   enforcement basis. The report explicitly retains that this is a model projection, not runtime
   sandboxing or perimeter enforcement.
+- `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
+  across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
+  `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit
+  conversion and its exact/conventional status, retains caveats, validates the report digest, and
+  exposes the first typed blocking reason rather than silently coercing values.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

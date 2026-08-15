@@ -99,6 +99,7 @@ from .safety import (
     safety_posture_report,
     safety_release_gate_report,
 )
+from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
     RepositoryBundleRequest,
@@ -840,6 +841,23 @@ class ApiClient:
         """Return typed HTTP section-13 posture evidence."""
 
         return safety_posture_report(self.safety_posture(include_threats=include_threats))
+
+    def measurement_compare(
+        self,
+        request: MeasurementCompareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compare standards declarations through the HTTP gateway."""
+
+        normalized = request if isinstance(request, MeasurementCompareArgs) else MeasurementCompareArgs.from_wire(request)
+        return self.call_tool("measurement_compare", normalized.to_mcp_arguments())
+
+    def measurement_compare_report(
+        self,
+        request: MeasurementCompareArgs | Mapping[str, Any],
+    ) -> MeasurementCompareReport:
+        """Return typed HTTP measurement-comparability evidence."""
+
+        return measurement_compare_report(self.measurement_compare(request))
 
     def biocapability_evidence_audit(
         self,
@@ -1811,6 +1829,23 @@ class AsyncApiClient:
         """Return typed async HTTP section-13 posture evidence."""
 
         return safety_posture_report(await self.safety_posture(include_threats=include_threats))
+
+    async def measurement_compare(
+        self,
+        request: MeasurementCompareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.measurement_compare`."""
+
+        normalized = request if isinstance(request, MeasurementCompareArgs) else MeasurementCompareArgs.from_wire(request)
+        return await self.call_tool("measurement_compare", normalized.to_mcp_arguments())
+
+    async def measurement_compare_report(
+        self,
+        request: MeasurementCompareArgs | Mapping[str, Any],
+    ) -> MeasurementCompareReport:
+        """Return typed async HTTP measurement-comparability evidence."""
+
+        return measurement_compare_report(await self.measurement_compare(request))
 
     async def biocapability_evidence_audit(
         self,

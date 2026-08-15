@@ -98,6 +98,7 @@ from .safety import (
     safety_posture_report,
     safety_release_gate_report,
 )
+from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 
 
@@ -656,6 +657,23 @@ class Workspace:
         """Return typed mitigated/declared-only/unmitigated and residual threat evidence."""
 
         return safety_posture_report(self.safety_posture(include_threats=include_threats))
+
+    def measurement_compare(
+        self,
+        request: MeasurementCompareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compare standards-declared measurements without silent unit or ontology coercion."""
+
+        normalized = request if isinstance(request, MeasurementCompareArgs) else MeasurementCompareArgs.from_wire(request)
+        return self.tool("measurement_compare", normalized.to_mcp_arguments())
+
+    def measurement_compare_report(
+        self,
+        request: MeasurementCompareArgs | Mapping[str, Any],
+    ) -> MeasurementCompareReport:
+        """Return typed comparability, conversion receipt, caveats, and blocking reason."""
+
+        return measurement_compare_report(self.measurement_compare(request))
 
     def oracle_combine(
         self,
@@ -1583,6 +1601,23 @@ class AsyncWorkspace:
         """Return typed async section-13 threat posture evidence."""
 
         return safety_posture_report(await self.safety_posture(include_threats=include_threats))
+
+    async def measurement_compare(
+        self,
+        request: MeasurementCompareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.measurement_compare`."""
+
+        normalized = request if isinstance(request, MeasurementCompareArgs) else MeasurementCompareArgs.from_wire(request)
+        return await self.tool("measurement_compare", normalized.to_mcp_arguments())
+
+    async def measurement_compare_report(
+        self,
+        request: MeasurementCompareArgs | Mapping[str, Any],
+    ) -> MeasurementCompareReport:
+        """Return typed async measurement-comparability evidence."""
+
+        return measurement_compare_report(await self.measurement_compare(request))
 
     async def oracle_combine(
         self,

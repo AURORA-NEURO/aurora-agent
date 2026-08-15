@@ -67,6 +67,10 @@ research-only marker. The posture projection reconciles mitigated/declared-only/
 residual subsets, and optional state-specific threat evidence without collapsing declarations into
 enforcement. These additions are policy contracts and structured evidence, not runtime sandboxing,
 content moderation, clinical decision support, or medical-device authorization.
+`measurement_compare` is also typed across both SDKs: conversion receipts, exact versus
+conventional unit semantics, caveats, report digest, tagged first blocking reasons, and policy
+parity remain visible. The clients do not invent UCUM parsing, ontology hierarchy, coordinate
+registration, or source provenance; those remain caller/kernel boundaries.
 `agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
 deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
 blocking dependent work, bounding output, and refusing side-effect confirmations by default. Serial

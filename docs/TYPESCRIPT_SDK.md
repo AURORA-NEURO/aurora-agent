@@ -184,6 +184,10 @@ runtime security, medical advice, or deployment approval.
 `SafetyThreatResult` details. Its `enforced`, `declared_only`, and `absent` mitigation states stay
 distinct, as do residual and unanalysed threat IDs; the explicit perimeter nonclaim remains part
 of the result rather than being inferred from a green transport response.
+`measurementCompare` returns `MeasurementCompareResult` with a tagged comparable/blocked verdict,
+explicit conversion records, caveats, a report SHA-256, and the closed first-blocking reason
+vocabulary. The input preserves caller-supplied standards declarations as JSON so the Rust
+standards kernel remains authoritative for units, frames, builds, and ontology bindings.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

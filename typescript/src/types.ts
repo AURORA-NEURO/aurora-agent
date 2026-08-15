@@ -1241,6 +1241,68 @@ export interface SafetyPostureResult extends JsonObject {
   threat_details?: SafetyThreatResult[];
 }
 
+export interface MeasurementCompareArgs extends JsonObject {
+  left: JsonObject;
+  right: JsonObject;
+  require_bound_terms?: boolean;
+}
+
+export type MeasurementBlockingReason =
+  | "kind_mismatch"
+  | "dimension_mismatch"
+  | "not_commensurable"
+  | "conversion_required"
+  | "unstated_frame"
+  | "frame_mismatch"
+  | "orientation_mismatch"
+  | "space_mismatch"
+  | "unstated_build"
+  | "build_mismatch"
+  | "convention_mismatch"
+  | "contig_mismatch"
+  | "unbound_term"
+  | "unmapped_term"
+  | "ambiguous_term"
+  | "namespace_mismatch"
+  | "ontology_version_drift"
+  | "granularity_mismatch"
+  | "term_mismatch";
+
+export interface MeasurementConversionResult extends JsonObject {
+  from: string;
+  to: string;
+  factor: number;
+  exactness: { exactness: "exact" } | { exactness: "conventional"; convention: string };
+}
+
+export interface MeasurementBlockedReasonResult extends JsonObject {
+  blocked_by: MeasurementBlockingReason;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface MeasurementVerdictResult extends JsonObject {
+  verdict: "comparable" | "blocked";
+  reason?: MeasurementBlockedReasonResult;
+}
+
+export interface MeasurementComparabilityReport extends JsonObject {
+  left: string;
+  right: string;
+  verdict: MeasurementVerdictResult;
+  conversions: MeasurementConversionResult[];
+  caveats: string[];
+}
+
+export interface MeasurementCompareResult extends JsonObject {
+  ok: boolean;
+  comparable: boolean;
+  policy: { require_bound_terms: boolean };
+  report: MeasurementComparabilityReport;
+  report_sha256: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface OpsAcceptanceArgs extends JsonObject {
   max_items?: number;
 }

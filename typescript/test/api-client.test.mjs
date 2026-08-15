@@ -266,6 +266,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         audit_acceptances: true,
         perimeter_controls_are_not_claimed_as_enforced: true,
       } } } });
+      if (path === "/v1/tools/measurement_compare") return jsonResponse({ ok: true, tool: "measurement_compare", request_id: "r21", mcp: { result: { structuredContent: {
+        ok: true,
+        comparable: true,
+        policy: { require_bound_terms: false },
+        report: { left: "left", right: "right", verdict: { verdict: "comparable" }, conversions: [], caveats: [] },
+        report_sha256: "a".repeat(64),
+        guarantees: ["unit conversion is explicit"],
+        limitations: ["caller-supplied declarations"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -448,6 +457,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const safety = await client.safetyReleaseGate({ assessment: { subject: "pack/biological-design@1", category: "biological_design", ratings: { capability_uplift: "low" } } });
   const medical = await client.medicalBoundaryCheck({ output: { side: "clinical", category: "treatment_selection", label: "choose a treatment" } });
   const posture = await client.safetyPosture({ include_threats: false });
+  const measurement = await client.measurementCompare({ left: { label: "left" }, right: { label: "right" }, require_bound_terms: false });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -483,6 +493,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(safety.mcp.result.structuredContent.decision.decision, "cleared");
   assert.equal(medical.mcp.result.structuredContent.admitted, false);
   assert.equal(posture.mcp.result.structuredContent.coverage.unmitigated, 4);
+  assert.equal(measurement.mcp.result.structuredContent.report.verdict.verdict, "comparable");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");
