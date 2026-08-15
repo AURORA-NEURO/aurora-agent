@@ -101,6 +101,16 @@ class AdapterRuntimeTests(unittest.TestCase):
                     "records": [{"record_id": "read-1", "read_id": "read-1", "reference_name": "chr1", "start": 1, "cigar": "5M", "reference_end": 6}],
                 },
             ),
+            (
+                "bioprism.python.fhir_manifest",
+                {
+                    "document": {
+                        "resourceType": "Patient",
+                        "id": "patient-1",
+                        "meta": {"profile": ["https://example.invalid/fhir/Patient"]},
+                    }
+                },
+            ),
         ]
 
         for adapter_id, payload in requests:

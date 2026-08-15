@@ -432,6 +432,42 @@ impl AdapterRegistry {
                 "Dependency-free audit of parsed BAM/CRAM records, CIGAR accounting, coordinates, flags, pairing, sort order, and coverage; read payloads remain uninterpreted.",
             ),
             descriptor(
+                "bioprism.python.fhir_json",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/fhir+json"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "encounter", "resource", "terminology", "time"],
+                None,
+                "Dependency-free bounded FHIR JSON resource and Bundle reader with privacy-safe reference projection.",
+            ),
+            descriptor(
+                "bioprism.python.fhir_manifest",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/fhir-manifest"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ProvenanceUnavailable,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::ContentUninterpreted,
+                    LossKind::TypeUndetermined,
+                ],
+                &["subject", "encounter", "resource", "terminology", "time"],
+                None,
+                "Dependency-free audit of parsed FHIR structure, resource identity, references, profiles, and provenance; clinical values remain uninterpreted.",
+            ),
+            descriptor(
                 "bioprism.python.ome_zarr",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -807,6 +843,32 @@ mod tests {
                 .and_then(|adapter| adapter.optional_dependency.as_deref()),
             None
         );
+    }
+
+    #[test]
+    fn fhir_routes_select_dependency_free_structural_auditors() {
+        let registry = AdapterRegistry::default();
+        for (format, expected) in [
+            ("application/fhir+json", "bioprism.python.fhir_json"),
+            ("application/fhir-manifest", "bioprism.python.fhir_manifest"),
+        ] {
+            let plan = registry
+                .plan(request(Some(format), SourceKind::Bytes))
+                .unwrap();
+            assert!(plan.executable, "{format} should be executable");
+            assert_eq!(
+                plan.selected_adapter
+                    .as_ref()
+                    .map(|adapter| adapter.id.as_str()),
+                Some(expected)
+            );
+            assert_eq!(
+                plan.selected_adapter
+                    .as_ref()
+                    .and_then(|adapter| adapter.optional_dependency.as_deref()),
+                None
+            );
+        }
     }
 
     #[test]

@@ -63,7 +63,7 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
 `AdapterRegistry` and `adapter_plan()` add a dependency-free format boundary for tabular and
-biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM, and OME-Zarr routes
+biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM, OME-Zarr, and FHIR routes
 are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and
 semantic-loss declarations remain visible before parsing. The planners never sniff or fetch bytes.
 `BidsAdapter` and `audit_bids()` add a dependency-free BIDS manifest path: they validate bounded
@@ -86,10 +86,15 @@ HDF5/Zarr chunks or matrix values.
 reference dictionaries, CIGAR spans, 0-based coordinate bounds, flags, mate pairing, sort order,
 mapping qualities, coverage, reference-build provenance, and read-identity digests are checked
 without decoding sequences, qualities, auxiliary tags, indexes, or reference bases.
+The parsed FHIR projection audit now checks Bundle structure, resource identity, profile
+declarations, duplicate resource keys, privacy-safe patient/resource references, bounded nesting,
+and provenance. It rejects duplicate JSON keys and non-standard numbers before auditing raw files;
+profile invariants, terminology expansion, clinical values, narratives, extensions, and external
+reference resolution remain explicit limitations.
 `AdapterRuntime`, `ProjectionRequest`, and `execute_projection()` provide one typed gateway over
-all six concrete projection audits. They normalize successful, lossy, invalid, blocked, rejected,
-and unsupported outcomes; raw-byte routes refuse explicitly until an optional reader binding exists,
-and the request envelope records payload keys rather than echoing payload values.
+the complete set of concrete projection audits. They normalize successful, lossy, invalid, blocked, rejected,
+and unsupported outcomes; unavailable raw-byte routes refuse explicitly without fallback, and the
+request envelope records payload keys rather than echoing payload values.
 When installed, `read_nifti_header()` and `read_anndata_projection()` provide verified raw-file
 bindings for nibabel and anndata-backed H5AD/Zarr metadata. They feed the same auditors without
 loading image arrays or matrix values; missing optional packages remain typed refusals.
@@ -99,6 +104,8 @@ absent pydicom/pysam packages produce explicit unsupported results.
 `OmeZarrAdapter`, `audit_ome_zarr()`, and `read_ome_zarr()` cover multiscale axes, level shapes,
 chunks, scale/translation transforms, channels, labels, and provenance using only Zarr metadata;
 image chunks and pixel values are not loaded.
+The FHIR JSON reader is dependency-free and uses the same auditor for raw files and parsed
+documents; no patient identifiers are echoed in its projection.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

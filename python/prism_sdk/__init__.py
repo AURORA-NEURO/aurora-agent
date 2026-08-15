@@ -74,6 +74,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
+from .fhir import FhirAdapter, FhirAuditResult, FhirFinding, audit_fhir, parse_fhir_json
 from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
 from .mission import MissionBinding, MissionPolicy, MissionRequest, MissionStep
@@ -105,6 +106,7 @@ from .optional_readers import (
     read_alignment_file,
     read_anndata_projection,
     read_dicom_projection,
+    read_fhir_json,
     read_indexed_vcf,
     read_nifti_header,
     read_ome_zarr,
@@ -155,6 +157,9 @@ __all__ = [
     "EvaluationTrajectoryRequest",
     "EvaluationWorldlineRequest",
     "Finding",
+    "FhirAdapter",
+    "FhirAuditResult",
+    "FhirFinding",
     "Independence",
     "Judgement",
     "JudgementBuilder",
@@ -230,14 +235,17 @@ __all__ = [
     "audit_ome_zarr",
     "audit_anndata",
     "audit_alignments",
+    "audit_fhir",
     "execute_projection",
     "ProjectionRequest",
     "RuntimeStatus",
     "bootstrap_mean",
     "parse_vcf",
+    "parse_fhir_json",
     "read_anndata_projection",
     "read_alignment_file",
     "read_dicom_projection",
+    "read_fhir_json",
     "read_indexed_vcf",
     "read_nifti_header",
     "read_ome_zarr",

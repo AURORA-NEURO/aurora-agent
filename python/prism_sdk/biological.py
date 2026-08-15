@@ -3,7 +3,7 @@
 The Rust adapter crate owns the stable contract and semantic-loss vocabulary. This module gives
 Python callers the same planning model plus an optional local dependency check, without importing
 heavy scientific packages merely to discover whether they exist. It intentionally does not parse
-DICOM, NIfTI, AnnData, VCF, BAM/CRAM, or OME-Zarr: those readers belong behind the selected
+DICOM, NIfTI, AnnData, VCF, BAM/CRAM, OME-Zarr, or FHIR: those readers belong behind the selected
 adapter and must produce a source-specific loss audit before their output is publishable.
 """
 
@@ -371,6 +371,28 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             ("coordinate_frame_not_carried", "provenance_unavailable", "content_uninterpreted", "type_undetermined"),
             ("subject", "sample", "read", "reference", "locus"),
             "Dependency-free audit of parsed BAM/CRAM records, CIGAR accounting, coordinates, flags, pairing, sort order, and coverage; read payloads remain uninterpreted.",
+        ),
+        _descriptor(
+            "bioprism.python.fhir_json",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/fhir+json",),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("provenance_unavailable", "ontology_term_unmapped", "content_uninterpreted", "type_undetermined"),
+            ("subject", "encounter", "resource", "terminology", "time"),
+            "Dependency-free bounded FHIR JSON resource and Bundle reader with privacy-safe reference projection.",
+        ),
+        _descriptor(
+            "bioprism.python.fhir_manifest",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/fhir-manifest",),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("provenance_unavailable", "ontology_term_unmapped", "content_uninterpreted", "type_undetermined"),
+            ("subject", "encounter", "resource", "terminology", "time"),
+            "Dependency-free audit of parsed FHIR structure, resource identity, references, profiles, and provenance; clinical values remain uninterpreted.",
         ),
         _descriptor(
             "bioprism.python.ome_zarr",

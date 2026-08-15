@@ -82,7 +82,7 @@ invent defaults:
   semantic-loss and scope surface. `Workspace.adapter_plan(...)`, `ApiClient.adapter_plan(...)`,
   and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
   fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
-   and OME-Zarr readers remain responsible for source-specific conformance in the Python layer.
+  OME-Zarr, and FHIR readers remain responsible for source-specific conformance in the Python layer.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and
@@ -109,12 +109,19 @@ invent defaults:
   reference spans, coordinate bounds, flags, primary mate pairing, coordinate sort order, mapping
   qualities, and per-reference coverage. Read identities are source-bound digests; sequences,
   qualities, auxiliary tags, indexes, and reference bases are not decoded.
+- `FhirAdapter`, `audit_fhir(...)`, and `parse_fhir_json(...)` provide a dependency-free clinical
+  interoperability boundary for FHIR resources and Bundles. They validate resource identity,
+  Bundle structure, bounded nesting, duplicate resource keys, profile declarations, reference
+  scope, unresolved local-looking references, and coded objects without terminology systems.
+  Patient and resource identifiers are source-bound digests; clinical values, narratives,
+  extensions, profile invariants, terminology expansion, and external-reference resolution remain
+  explicit semantic-loss surfaces rather than being guessed.
 - `AdapterRuntime`, `ProjectionRequest`, and `execute_projection(...)` close the planning-to-
-  execution handoff for all six concrete projection routes: VCF, BIDS, DICOM metadata, NIfTI
-  metadata, AnnData metadata, and alignment metadata. The envelope normalizes succeeded, lossy,
+  execution handoff for the concrete parsed projection routes across VCF, BIDS, DICOM, NIfTI,
+  AnnData, alignment, OME-Zarr, and FHIR. The envelope normalizes succeeded, lossy,
   invalid, blocked, rejected, and unsupported states, carries the authoritative adapter descriptor,
-  preserves the audit document digest, and refuses catalogued raw-byte routes until their optional
-  binary reader binding exists. Payload values are not echoed in the request envelope.
+  preserves the audit document digest, and returns typed unsupported outcomes when a selected raw
+  reader is unavailable. Payload values are not echoed in the request envelope.
 - `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
   installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full
@@ -128,6 +135,9 @@ invent defaults:
   route: they validate axes, level shapes, chunks, scale/translation transforms, OME channels,
   labels, and provenance, then inspect only Zarr group/array metadata. Image chunks and pixel values
   are never loaded by the reader.
+- `read_fhir_json(...)` is a bounded raw-file binding for UTF-8 FHIR JSON. It rejects duplicate
+  object keys and non-standard JSON numbers before delegating to the same FHIR auditor, so a raw
+  clinical document cannot silently take a different validation path than a parsed manifest.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and

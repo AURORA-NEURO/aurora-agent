@@ -116,6 +116,20 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(alignment_metadata.executable)
         self.assertEqual(alignment_metadata.selected_adapter.id, "bioprism.python.alignment_metadata")
 
+        fhir_manifest = AdapterRegistry().plan(
+            AdapterPlanRequest("clinical", SourceKind.BYTES, declared_format="application/fhir-manifest"),
+            check_environment=False,
+        )
+        self.assertTrue(fhir_manifest.executable)
+        self.assertEqual(fhir_manifest.selected_adapter.id, "bioprism.python.fhir_manifest")
+
+        fhir_json = AdapterRegistry().plan(
+            AdapterPlanRequest("clinical-json", SourceKind.BYTES, declared_format="application/fhir+json"),
+            check_environment=False,
+        )
+        self.assertTrue(fhir_json.executable)
+        self.assertEqual(fhir_json.selected_adapter.id, "bioprism.python.fhir_json")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)

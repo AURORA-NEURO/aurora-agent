@@ -93,7 +93,7 @@ families without maintaining a fragile partial clone of 121 tool schemas. `capab
 searches the explicit cross-domain catalogue and can request authoritative schemas for matches;
 `capabilityAudit` verifies catalogue/schema parity and exposes coverage gaps; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `adapterPlan` selects native
-or Python-delegated biological source routes by explicit format and source shape while preserving
+or Python-delegated biological and clinical source routes—including FHIR—by explicit format and source shape while preserving
 dependency and semantic-loss boundaries.
 
 ## Events and webhooks

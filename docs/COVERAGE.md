@@ -61,7 +61,7 @@ bounded search result, distinguishes explicit tool filters from ranked candidate
 executes the proposed tools.
 `adapter_plan` makes the biological-format boundary callable: it matches explicit source formats
 and source shapes against native CSV/inventory adapters and Python-delegated DICOM, NIfTI/BIDS,
-AnnData/Zarr, VCF, BAM/CRAM, and OME-Zarr routes. It reports declared semantic-loss surfaces and
+AnnData/Zarr, VCF, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
 distinguishes missing from unchecked optional dependencies before execution; it never sniffs
 content, fetches sources, imports packages, or claims that heavyweight parsing has occurred.
 The Python adapter layer now also contains a bounded text VCF reader: it validates the complete
@@ -88,16 +88,19 @@ The parsed BAM/CRAM alignment projection audit now checks explicit reference dic
 query/reference accounting, 0-based coordinate bounds, flags, primary mate pairing, coordinate
 sort order, mapping qualities, coverage, and reference-build/provenance loss without decoding read
 payloads, indexes, or reference bases.
-The Python adapter runtime now executes all six concrete parsed-projection routes through one
+The Python adapter runtime now executes the complete set of concrete parsed-projection routes through one
 bounded request/result envelope, preserves adapter descriptors and document digests, classifies
-lossy/invalid/blocked/rejected outcomes, and explicitly refuses raw-byte routes without silently
-falling back or sniffing content.
+lossy/invalid/blocked/rejected outcomes, and explicitly refuses unavailable raw-byte routes without
+silently falling back or sniffing content.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.
 The same dependency boundary now covers pydicom metadata-only DICOM and pysam indexed VCF/BCF plus
 BAM/CRAM records; each delegates to the corresponding projection audit and reports absent packages
-as typed unsupported execution rather than silently changing formats.
+as typed unsupported execution rather than silently changing formats. The dependency-free FHIR
+route adds clinical interoperability coverage: it audits Bundle structure, resource identity,
+profile declarations, privacy-safe references, duplicate keys, and provenance without claiming
+profile or terminology conformance.
 The OME-Zarr route now inspects Zarr metadata directly and audits multiscale axes, level shapes,
 chunk bounds, spatial transforms, channel/label metadata, and provenance without reading image
 chunks or pixel values.

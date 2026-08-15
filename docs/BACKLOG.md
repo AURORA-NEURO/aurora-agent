@@ -219,9 +219,10 @@ HDF5/Zarr chunks or matrix values.
 The alignment projection route now covers reference dictionaries, CIGAR accounting, coordinate
 bounds, flags, pairing, sorting, and coverage without decoding BAM/CRAM payloads, indexes, or
 reference bases.
-The typed Python adapter runtime now closes the concrete execution handoff across those six parsed
-routes, normalizes outcome states and document digests, and refuses raw-byte routes explicitly when
-their optional binary-reader binding is absent.
+The typed Python adapter runtime now closes the concrete execution handoff across the parsed VCF,
+BIDS, DICOM, NIfTI, AnnData, alignment, OME-Zarr, and FHIR routes, normalizes outcome states and
+document digests, and refuses raw-byte routes explicitly when their optional binary-reader binding
+is absent.
 The verified optional-reader layer now binds installed nibabel and anndata environments for raw
 NIfTI header and H5AD/Zarr metadata inspection, while keeping full array/matrix materialization and
 missing dependencies explicit.
@@ -229,6 +230,10 @@ Dependency-gated pydicom and pysam bindings now cover metadata-only DICOM, index
 and BAM/CRAM record projection when those packages are installed; absent packages remain explicit.
 The OME-Zarr route now reads and audits multiscale metadata directly from Zarr groups without
 loading image chunks or pixel values.
+The FHIR route now reads dependency-free JSON resources and Bundles, checks bounded resource and
+reference structure, protects identifiers with source-bound digests, and keeps profile validation,
+terminology expansion, clinical interpretation, and external reference resolution explicitly
+outside its conformance claim.
 
 
 ## §11 Developer Platform — 6 uncovered

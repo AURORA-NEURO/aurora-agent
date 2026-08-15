@@ -1,9 +1,10 @@
-"""Verified optional-reader bindings for raw NIfTI and AnnData/Zarr sources.
+"""Verified and dependency-gated readers for bounded raw scientific and clinical sources.
 
 These bindings are intentionally thin: they inspect bounded headers/metadata and immediately feed
 the result into the dependency-free projection auditors. They never call ``get_fdata`` or materialize
 matrix values, and a missing optional dependency becomes a typed runtime refusal rather than an
-implicit fallback.
+implicit fallback. FHIR JSON is dependency-free but follows the same raw-file boundary and duplicate-
+key protections.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from .anndata import audit_anndata
 from .authoring import content_digest
 from .dicom import audit_dicom
 from .errors import ArgumentError
+from .fhir import MAX_FHIR_BYTES, parse_fhir_json
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
 from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
@@ -565,6 +567,31 @@ def read_alignment_file(
             alignment_file.close()
 
 
+def read_fhir_json(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded UTF-8 FHIR JSON and delegate to the dependency-free FHIR auditor."""
+
+    candidate = _path(path, field="FHIR JSON path")
+    if candidate.stat().st_size > MAX_FHIR_BYTES:
+        raise ArgumentError(f"FHIR JSON path exceeds the {MAX_FHIR_BYTES}-byte reader limit")
+    try:
+        return parse_fhir_json(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"FHIR JSON read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_ome_zarr(
     path: str,
     *,
@@ -622,6 +649,7 @@ __all__ = [
     "read_alignment_file",
     "read_anndata_projection",
     "read_dicom_projection",
+    "read_fhir_json",
     "read_indexed_vcf",
     "read_nifti_header",
     "read_ome_zarr",
