@@ -695,6 +695,71 @@ class MissionExecutionReport:
 
 
 @dataclass(frozen=True)
+class MissionProgress:
+    """Typed bounded live-progress projection for an asynchronous mission."""
+
+    raw: dict[str, Any]
+    phase: str
+    current_wave: int | None
+    total_steps: int
+    completed_steps: int
+    active_steps: int
+    succeeded: int
+    refused: int
+    blocked: int
+    cancelled: int
+    required_failures: int
+    returned_bytes: int
+    trace_sequence: int | None
+    last_event: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionProgress":
+        raw = _mapping("mission progress", value)
+        phase = raw.get("phase")
+        _text("mission progress phase", phase)
+        if phase not in {"queued", "running", "cancellation_requested", "planned", "succeeded", "partial", "failed", "cancelled"}:
+            raise ArgumentError(f"unknown mission progress phase: {phase}")
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name, 0)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission progress {name} must be a non-negative integer")
+            return candidate
+
+        def optional_non_negative(name: str) -> int | None:
+            candidate = raw.get(name)
+            if candidate is not None and (not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0):
+                raise ArgumentError(f"mission progress {name} must be null or a non-negative integer")
+            return candidate
+
+        current_wave = optional_non_negative("current_wave")
+        trace_sequence = optional_non_negative("trace_sequence")
+        last_event = raw.get("last_event")
+        if last_event is not None:
+            _text("mission progress last_event", last_event)
+        return cls(
+            raw=raw,
+            phase=phase,
+            current_wave=current_wave,
+            total_steps=non_negative("total_steps"),
+            completed_steps=non_negative("completed_steps"),
+            active_steps=non_negative("active_steps"),
+            succeeded=non_negative("succeeded"),
+            refused=non_negative("refused"),
+            blocked=non_negative("blocked"),
+            cancelled=non_negative("cancelled"),
+            required_failures=non_negative("required_failures"),
+            returned_bytes=non_negative("returned_bytes"),
+            trace_sequence=trace_sequence,
+            last_event=last_event,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class MissionJob:
     """Typed view over an asynchronous HTTP mission job."""
 
@@ -705,6 +770,7 @@ class MissionJob:
     cancel_reason: str | None
     result: Mapping[str, Any] | None
     error: str | None
+    progress: MissionProgress | None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "MissionJob":
@@ -727,7 +793,9 @@ class MissionJob:
         error = raw.get("error")
         if error is not None:
             _text("mission job error", error)
-        return cls(raw, mission_id, status, cancel_requested, cancel_reason, result, error)
+        progress_value = raw.get("progress")
+        progress = None if progress_value is None else MissionProgress.from_wire(progress_value)
+        return cls(raw, mission_id, status, cancel_requested, cancel_reason, result, error, progress)
 
     @property
     def terminal(self) -> bool:

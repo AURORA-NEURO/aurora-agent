@@ -128,6 +128,9 @@ invent defaults:
   `cancel_mission(mission_id, reason=...)` requests cooperative cancellation. Cancellation stops
   future dispatch between nested calls or parallel batches; it does not force-kill an in-flight
   tool or imply rollback.
+  `MissionJob.progress` is a typed `MissionProgress` snapshot with phase, wave, active/completed
+  counts, outcome counters, byte totals, and the latest trace cursor/event; it is safe for bounded
+  dashboards but does not replace the terminal report or claim domain success.
   `delete_mission(mission_id)` removes a terminal job when the caller has consumed its report;
   active jobs are refused so cleanup cannot discard in-flight work.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

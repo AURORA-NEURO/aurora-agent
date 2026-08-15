@@ -46,7 +46,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/v1/missions?"):
             self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
         elif self.path == "/v1/missions/async-1":
-            self._send(200, {"ok": True, "mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "result": {"mission_status": "succeeded"}})
+            self._send(200, {"ok": True, "mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "progress": {"phase": "succeeded", "current_wave": 0, "total_steps": 1, "completed_steps": 1, "active_steps": 0, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "trace_sequence": 4, "last_event": "mission.completed"}, "result": {"mission_status": "succeeded"}})
         else:
             self._send(404, {"ok": False, "error": {"code": "not_found"}})
 
@@ -114,7 +114,12 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(client.call_tool("echo", {"value": 3})["mcp"]["result"]["value"], 3)
         submitted = client.submit_mission(MissionRequest("async-1", "run", [MissionStep("one", "data", "read", "run", "echo", {"value": 1})]))
         self.assertEqual(submitted.status, "queued")
-        self.assertEqual(client.mission_status("async-1").result["mission_status"], "succeeded")
+        status = client.mission_status("async-1")
+        self.assertEqual(status.result["mission_status"], "succeeded")
+        self.assertIsNotNone(status.progress)
+        self.assertEqual(status.progress.phase, "succeeded")
+        self.assertEqual(status.progress.completed_steps, 1)
+        self.assertEqual(status.progress.last_event, "mission.completed")
         inventory = client.missions(status="succeeded", limit=5)
         self.assertEqual(inventory["missions"][0]["mission_id"], "async-1")
         self.assertTrue(client.cancel_mission("async-1", "operator stop").cancel_requested)
@@ -229,7 +234,10 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(remote_preflight["dispatch"], "not_started")
             self.assertEqual((await client.call_tool("echo", {"async": True}))["tool"], "echo")
             self.assertEqual((await client.submit_mission(MissionRequest("async-1", "run", [MissionStep("one", "data", "read", "run", "echo", {"value": 1})]))).status, "queued")
-            self.assertEqual((await client.mission_status("async-1")).status, "succeeded")
+            status = await client.mission_status("async-1")
+            self.assertEqual(status.status, "succeeded")
+            self.assertIsNotNone(status.progress)
+            self.assertEqual(status.progress.phase, "succeeded")
             inventory = await client.missions(status="succeeded", limit=5)
             self.assertEqual(inventory["missions"][0]["mission_id"], "async-1")
             self.assertTrue((await client.cancel_mission("async-1", "operator stop")).cancel_requested)

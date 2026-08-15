@@ -57,6 +57,14 @@ refused counts, cancellation counts, required failures, and returned bytes), nev
 terminal report. Unknown query keys and statuses are refused so an operator cannot mistake a
 partial inventory request for a complete one.
 
+Every asynchronous mission response also carries a bounded `progress` projection. It exposes the
+current phase, wave, total/completed/active step counts, outcome counts, returned bytes, the latest
+clock-free trace sequence, and the latest trace event. The projection is updated from authoritative
+mission trace events while work is running and reconciled from the terminal report before that
+report is returned, so dashboards can use one shape for queued, live, and terminal jobs. It is an
+operational view only: the terminal mission report and its trace remain authoritative for replay,
+content identity, and domain interpretation.
+
 `POST /v1/missions` accepts the same JSON object as the `agent_mission` tool and returns `202`
 after the complete mission graph, policy, allow-list, and safety bounds have passed validation.
 Validation includes bounded authoritative JSON Schema preflight against the live `tools/list`

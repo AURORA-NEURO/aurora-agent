@@ -15,6 +15,8 @@ use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Schema version for mission requests, plans, and execution reports.
@@ -543,6 +545,30 @@ pub struct MissionTraceEvent {
     pub detail: Option<String>,
 }
 
+/// Optional in-process observer used by the HTTP boundary to project live mission progress.
+///
+/// The observer receives serialized trace events as they are appended. It is deliberately skipped
+/// from mission reports so progress observation cannot change the content-addressed report or its
+/// wire contract.
+#[derive(Clone)]
+pub struct MissionTraceObserver(pub Arc<dyn Fn(Value) + Send + Sync>);
+
+impl fmt::Debug for MissionTraceObserver {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MissionTraceObserver")
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for MissionTraceObserver {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for MissionTraceObserver {}
+
 /// Full plan or execution report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissionReport {
@@ -559,6 +585,8 @@ pub struct MissionReport {
     pub results: Vec<MissionStepResult>,
     pub execution_trace_schema_version: String,
     pub execution_trace: Vec<MissionTraceEvent>,
+    #[serde(skip)]
+    pub trace_observer: Option<MissionTraceObserver>,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
 }

@@ -482,6 +482,24 @@ export interface AgentMissionReport extends JsonObject {
 
 export type MissionJobStatus = "queued" | "running" | "planned" | "succeeded" | "partial" | "failed" | "cancelled";
 
+export type MissionProgressPhase = MissionJobStatus | "cancellation_requested";
+
+export interface MissionProgress extends JsonObject {
+  phase: MissionProgressPhase;
+  current_wave: number | null;
+  total_steps: number;
+  completed_steps: number;
+  active_steps: number;
+  succeeded: number;
+  refused: number;
+  blocked: number;
+  cancelled: number;
+  required_failures: number;
+  returned_bytes: number;
+  trace_sequence: number | null;
+  last_event: string | null;
+}
+
 export interface MissionJob extends JsonObject {
   ok: boolean;
   mission_id: string;
@@ -490,6 +508,7 @@ export interface MissionJob extends JsonObject {
   cancel_reason?: string | null;
   result?: AgentMissionReport | null;
   error?: string | null;
+  progress?: MissionProgress;
   poll?: string;
   cancel?: string;
 }
@@ -511,6 +530,7 @@ export interface MissionInventoryItem extends JsonObject {
   status: MissionJobStatus;
   cancel_requested: boolean;
   cancel_reason?: string | null;
+  progress: MissionProgress;
   summary: MissionInventorySummary;
   poll: string;
   cancel: string;

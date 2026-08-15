@@ -79,11 +79,138 @@ struct MissionJob {
 #[derive(Clone)]
 struct MissionJobState {
     total_steps: usize,
+    progress: MissionProgressState,
     status: String,
     cancel_requested: bool,
     cancel_reason: Option<String>,
     result: Option<Value>,
     error: Option<String>,
+}
+
+#[derive(Clone)]
+struct MissionProgressState {
+    phase: String,
+    current_wave: Option<usize>,
+    total_steps: usize,
+    completed_steps: usize,
+    active_steps: usize,
+    succeeded: usize,
+    refused: usize,
+    blocked: usize,
+    cancelled: usize,
+    required_failures: usize,
+    returned_bytes: usize,
+    trace_sequence: Option<usize>,
+    last_event: Option<String>,
+}
+
+impl MissionProgressState {
+    fn new(total_steps: usize) -> Self {
+        Self {
+            phase: "queued".into(),
+            current_wave: None,
+            total_steps,
+            completed_steps: 0,
+            active_steps: 0,
+            succeeded: 0,
+            refused: 0,
+            blocked: 0,
+            cancelled: 0,
+            required_failures: 0,
+            returned_bytes: 0,
+            trace_sequence: None,
+            last_event: None,
+        }
+    }
+
+    fn observe_trace(&mut self, event: &Value) {
+        self.trace_sequence = event
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok());
+        self.last_event = event
+            .get("event")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Some(wave) = event
+            .get("wave")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+        {
+            self.current_wave = Some(wave);
+        }
+        match event.get("event").and_then(Value::as_str) {
+            Some("mission.started") => self.phase = "running".into(),
+            Some("wave.started") => self.phase = "running".into(),
+            Some("step.started") => self.active_steps = self.active_steps.saturating_add(1),
+            Some("step.completed") => {
+                self.active_steps = self.active_steps.saturating_sub(1);
+                self.completed_steps = self.completed_steps.saturating_add(1);
+                self.succeeded = self.succeeded.saturating_add(1);
+            }
+            Some("step.refused") => {
+                self.active_steps = self.active_steps.saturating_sub(1);
+                self.completed_steps = self.completed_steps.saturating_add(1);
+                self.refused = self.refused.saturating_add(1);
+            }
+            Some("step.blocked") => {
+                self.completed_steps = self.completed_steps.saturating_add(1);
+                self.blocked = self.blocked.saturating_add(1);
+            }
+            Some("step.cancelled") => {
+                self.completed_steps = self.completed_steps.saturating_add(1);
+                self.cancelled = self.cancelled.saturating_add(1);
+            }
+            Some("mission.cancelled") => self.phase = "cancelled".into(),
+            Some("mission.completed") => {
+                if let Some(status) = event.get("status").and_then(Value::as_str) {
+                    self.phase = status.to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn request_cancel(&mut self) {
+        if !is_terminal_mission_status(&self.phase) {
+            self.phase = "cancellation_requested".into();
+        }
+    }
+
+    fn reconcile(&mut self, report: &Value) {
+        self.phase = report
+            .get("mission_status")
+            .and_then(Value::as_str)
+            .unwrap_or("failed")
+            .into();
+        self.total_steps = report
+            .pointer("/plan/ordered_steps")
+            .and_then(Value::as_array)
+            .map_or(self.total_steps, Vec::len);
+        self.completed_steps = report
+            .get("results")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        self.active_steps = 0;
+        self.succeeded = progress_count(report, "succeeded");
+        self.refused = progress_count(report, "refused");
+        self.blocked = progress_count(report, "blocked");
+        self.cancelled = progress_count(report, "cancelled");
+        self.required_failures = progress_count(report, "required_failures");
+        self.returned_bytes = progress_count(report, "returned_bytes");
+        if let Some(event) = report
+            .get("execution_trace")
+            .and_then(Value::as_array)
+            .and_then(|events| events.last())
+        {
+            self.observe_trace(event);
+            self.phase = report
+                .get("mission_status")
+                .and_then(Value::as_str)
+                .unwrap_or("failed")
+                .into();
+        }
+    }
 }
 
 impl ApiRouter {
@@ -514,6 +641,7 @@ impl ApiRouter {
         let cancellation = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(MissionJobState {
             total_steps,
+            progress: MissionProgressState::new(total_steps),
             status: "queued".into(),
             cancel_requested: false,
             cancel_reason: None,
@@ -555,7 +683,13 @@ impl ApiRouter {
             jobs.insert(mission_id.clone(), Arc::clone(&job));
         }
 
-        let executor = Arc::clone(&self.mission_executor);
+        let progress_state = Arc::clone(&state);
+        let observer = Arc::new(move |event: Value| {
+            if let Ok(mut current) = progress_state.lock() {
+                current.progress.observe_trace(&event);
+            }
+        });
+        let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
         let worker_id = mission_id.clone();
         let worker_arguments = arguments;
         let spawn = thread::Builder::new()
@@ -563,12 +697,14 @@ impl ApiRouter {
             .spawn(move || {
                 if let Ok(mut current) = state.lock() {
                     current.status = "running".into();
+                    current.progress.phase = "running".into();
                 }
                 let outcome = executor
                     .execute_agent_mission_with_cancellation(&worker_arguments, &cancellation);
                 if let Ok(mut current) = job.state.lock() {
                     match outcome {
                         Ok(result) => {
+                            current.progress.reconcile(&result);
                             current.status = result
                                 .get("mission_status")
                                 .and_then(Value::as_str)
@@ -578,6 +714,8 @@ impl ApiRouter {
                         }
                         Err(error) => {
                             current.status = "failed".into();
+                            current.progress.phase = "failed".into();
+                            current.progress.active_steps = 0;
                             current.error = Some(error);
                         }
                     }
@@ -602,6 +740,7 @@ impl ApiRouter {
                 "mission_id": mission_id,
                 "status": "queued",
                 "cancel_requested": false,
+                "progress": mission_progress_json(&MissionProgressState::new(total_steps)),
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
                 "guarantees": [
@@ -686,6 +825,7 @@ impl ApiRouter {
                 "status": state.status,
                 "cancel_requested": state.cancel_requested,
                 "cancel_reason": state.cancel_reason,
+                "progress": mission_progress_json(&state.progress),
                 "summary": mission_summary(&state),
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
@@ -749,6 +889,7 @@ impl ApiRouter {
                 "status": current.status,
                 "cancel_requested": current.cancel_requested,
                 "cancel_reason": current.cancel_reason,
+                "progress": mission_progress_json(&current.progress),
                 "result": current.result,
                 "error": current.error,
                 "poll": format!("/v1/missions/{mission_id}"),
@@ -830,6 +971,7 @@ impl ApiRouter {
         job.cancellation.store(true, Ordering::Release);
         current.cancel_requested = true;
         current.cancel_reason = Some(reason.clone());
+        current.progress.request_cancel();
         let Ok(mut state) = job.state.lock() else {
             return self.error(
                 500,
@@ -840,6 +982,7 @@ impl ApiRouter {
         };
         state.cancel_requested = current.cancel_requested;
         state.cancel_reason = current.cancel_reason.clone();
+        state.progress.request_cancel();
         HttpResponse::json(
             202,
             &json!({
@@ -848,6 +991,7 @@ impl ApiRouter {
                 "status": current.status,
                 "cancel_requested": true,
                 "cancel_reason": current.cancel_reason,
+                "progress": mission_progress_json(&current.progress),
                 "reason": reason,
                 "poll": format!("/v1/missions/{mission_id}"),
             }),
@@ -1208,6 +1352,32 @@ fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
     job.state.lock().map(|state| state.clone()).map_err(|_| ())
 }
 
+fn progress_count(report: &Value, key: &str) -> usize {
+    report
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(0)
+}
+
+fn mission_progress_json(progress: &MissionProgressState) -> Value {
+    json!({
+        "phase": progress.phase,
+        "current_wave": progress.current_wave,
+        "total_steps": progress.total_steps,
+        "completed_steps": progress.completed_steps,
+        "active_steps": progress.active_steps,
+        "succeeded": progress.succeeded,
+        "refused": progress.refused,
+        "blocked": progress.blocked,
+        "cancelled": progress.cancelled,
+        "required_failures": progress.required_failures,
+        "returned_bytes": progress.returned_bytes,
+        "trace_sequence": progress.trace_sequence,
+        "last_event": progress.last_event,
+    })
+}
+
 fn mission_summary(state: &MissionJobState) -> Value {
     let report = state.result.as_ref();
     let completed_steps = report
@@ -1490,6 +1660,10 @@ mod tests {
         }
         assert_eq!(status["status"], "planned");
         assert_eq!(status["result"]["mission_status"], "planned");
+        assert_eq!(status["progress"]["phase"], "planned");
+        assert_eq!(status["progress"]["total_steps"], 1);
+        assert_eq!(status["progress"]["completed_steps"], 0);
+        assert_eq!(status["progress"]["last_event"], "mission.completed");
         let inventory = router.handle(request(
             "GET",
             "/v1/missions?status=planned&limit=1",
@@ -1501,6 +1675,8 @@ mod tests {
         assert_eq!(inventory["total_matching"], 1);
         assert_eq!(inventory["missions"][0]["mission_id"], "api-async-1");
         assert_eq!(inventory["missions"][0]["summary"]["total_steps"], 1);
+        assert_eq!(inventory["missions"][0]["progress"]["phase"], "planned");
+        assert_eq!(inventory["missions"][0]["progress"]["total_steps"], 1);
         assert_eq!(
             inventory["missions"][0]["summary"]["result_available"],
             true

@@ -53,6 +53,10 @@ distributed scheduler, durable queue, or truth synthesizer.
 Every executed mission also returns a clock-free, sequence-addressed execution trace covering
 mission and wave lifecycle, step starts, completions, refusals, blocks, argument digests, and byte
 accounting; parallel thread completion order never changes that trace order.
+The asynchronous HTTP boundary projects those authoritative trace events into a bounded `progress`
+snapshot while a job is live and reconciles the snapshot against the terminal report. Python and
+TypeScript clients type the same projection for operational dashboards, while replay, content
+identity, and domain interpretation remain owned by the final report and trace.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 The authoritative executor validates every known tool's materialized arguments against its

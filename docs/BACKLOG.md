@@ -163,6 +163,11 @@ does not create a job or imply that binding-dependent arguments have been execut
 Its `/v1/missions` inventory route now gives operators deterministic, status-filtered bounded
 summaries and lifecycle links without exposing unbounded reports; the registry remains process-local
 and non-durable.
+Asynchronous jobs now also project authoritative trace events into a bounded live `progress` view.
+Queued, running, cancellation-requested, and terminal responses share phase, wave, step, outcome,
+byte, and latest-event counters; terminal reconciliation prevents the operational projection from
+drifting away from the report. This still deliberately does not provide durable queue storage,
+distributed scheduling, force-kill semantics, or domain-level success claims.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full

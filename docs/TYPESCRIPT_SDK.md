@@ -113,6 +113,10 @@ the earlier `ToolCatalogue` snapshot to guarantee that mission review and subseq
 refer to the same live schema set; the Rust `agent_mission` tool remains the execution authority.
 `MissionJob` makes queued, running, planned, succeeded, partial, failed, and cancelled states
 explicit; cancellation is a request to stop future dispatch, not a force-kill or rollback claim.
+Its optional `progress: MissionProgress` field provides one bounded shape for queued, live, and
+terminal dashboards: phase, current wave, active/completed steps, outcome counters, returned bytes,
+and the latest clock-free trace sequence/event. The terminal `result` and its execution trace remain
+authoritative for replay and domain interpretation.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain

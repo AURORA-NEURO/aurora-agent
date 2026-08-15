@@ -58,8 +58,9 @@ use bioprism_dataops::{
 use bioprism_devplat::{
     apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
     CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
-    MissionStep, MissionStepResult, MissionTraceEvent, WorkbenchRequest, CAPABILITY_SCHEMA_VERSION,
-    MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
+    CAPABILITY_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
+    WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -238,6 +239,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SERVER_NAME: &str = "bioprism";
@@ -270,6 +272,7 @@ pub enum Lifecycle {
 pub struct Server {
     root: PathBuf,
     lifecycle: Lifecycle,
+    mission_trace_observer: Option<MissionTraceObserver>,
 }
 
 enum ParallelPending<'a> {
@@ -327,6 +330,14 @@ fn trace_event(
         bytes,
         detail,
     });
+    if let (Some(observer), Some(event)) = (
+        report.trace_observer.as_ref(),
+        report.execution_trace.last(),
+    ) {
+        if let Ok(value) = serde_json::to_value(event) {
+            (observer.0)(value);
+        }
+    }
 }
 
 fn cancellation_requested(cancellation: Option<&AtomicBool>) -> bool {
@@ -869,7 +880,18 @@ impl Server {
         Server {
             root: std::fs::canonicalize(&root).unwrap_or(root),
             lifecycle: Lifecycle::New,
+            mission_trace_observer: None,
         }
+    }
+
+    /// Clone the server with an in-process observer for live mission trace projection.
+    ///
+    /// The observer is used only by the bounded HTTP job surface. It cannot alter dispatch,
+    /// reports, or hashes; it receives a copy of each trace event after it is appended.
+    pub fn with_mission_trace_observer(&self, observer: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
+        let mut server = self.clone();
+        server.mission_trace_observer = Some(MissionTraceObserver(observer));
+        server
     }
 
     pub fn root(&self) -> &Path {
@@ -12485,6 +12507,7 @@ impl Server {
             results: Vec::new(),
             execution_trace_schema_version: MISSION_TRACE_SCHEMA_VERSION.into(),
             execution_trace: Vec::new(),
+            trace_observer: self.mission_trace_observer.clone(),
             guarantees: vec![
             "the mission DAG was validated before any nested tool call".into(),
             "nested calls preserve raw JSON-RPC result and refusal envelopes".into(),

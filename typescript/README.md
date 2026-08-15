@@ -65,6 +65,9 @@ if (result.mcp.result?.isError) {
   creating a job or invoking a domain tool. `missionPreflight()` remains the local catalogue review.
 - `missions(status, limit)` returns a deterministic bounded inventory of lifecycle summaries and
   links without materializing unbounded terminal reports.
+- `MissionJob.progress` is a typed bounded live projection with phase, current wave,
+  active/completed counts, outcome counters, returned bytes, and the latest trace cursor/event;
+  terminal results and traces remain authoritative.
 - `missionFromRoute()` converts a completed `capabilityRoute()` response into a provenance-preserving
   mission assembly only after every need has one caller-selected candidate and explicit JSON
   arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is

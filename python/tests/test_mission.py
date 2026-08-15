@@ -6,6 +6,7 @@ from prism_sdk import (
     ArgumentError,
     MissionBinding,
     MissionExecutionReport,
+    MissionProgress,
     MissionRouteSelection,
     MissionRequest,
     MissionStep,
@@ -42,6 +43,33 @@ def catalogue() -> ToolCatalogue:
 
 
 class MissionPreflightTests(unittest.TestCase):
+    def test_progress_validates_bounded_dashboard_projection(self) -> None:
+        progress = MissionProgress.from_wire(
+            {
+                "phase": "running",
+                "current_wave": 2,
+                "total_steps": 4,
+                "completed_steps": 1,
+                "active_steps": 2,
+                "succeeded": 1,
+                "refused": 0,
+                "blocked": 0,
+                "cancelled": 0,
+                "required_failures": 0,
+                "returned_bytes": 128,
+                "trace_sequence": 7,
+                "last_event": "step.started",
+            }
+        )
+        self.assertEqual(progress.phase, "running")
+        self.assertEqual(progress.current_wave, 2)
+        self.assertEqual(progress.active_steps, 2)
+        self.assertEqual(progress.to_dict()["last_event"], "step.started")
+        with self.assertRaises(ArgumentError):
+            MissionProgress.from_wire({"phase": "unknown"})
+        with self.assertRaises(ArgumentError):
+            MissionProgress.from_wire({"phase": "running", "total_steps": -1})
+
     def test_preflight_returns_digest_bound_waves_and_binding_checks(self) -> None:
         request = MissionRequest(
             "mission-1",
