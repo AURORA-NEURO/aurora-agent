@@ -60,6 +60,9 @@ if (result.mcp.result?.isError) {
   jobs. Cancellation is cooperative between nested calls or parallel batches, and terminal reports
   preserve the authoritative Rust trace rather than claiming force-kill or rollback. `deleteMission()`
   removes only terminal jobs from the bounded process-local registry.
+- `preflightMission()` calls the synchronous Rust-owned `/v1/missions/preflight` route; it validates
+  the original execution policy and returns a planned report with `dispatch: "not_started"` without
+  creating a job or invoking a domain tool. `missionPreflight()` remains the local catalogue review.
 - `missionFromRoute()` converts a completed `capabilityRoute()` response into a provenance-preserving
   mission assembly only after every need has one caller-selected candidate and explicit JSON
   arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is

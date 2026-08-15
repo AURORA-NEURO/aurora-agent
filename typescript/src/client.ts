@@ -259,6 +259,12 @@ export class ApiClient {
     return this.request<MissionJob>("POST", "/v1/missions", args, options);
   }
 
+  /** Ask the Rust gateway for an authoritative mission plan without dispatching nested tools. */
+  async preflightMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<AgentMissionReport> {
+    if (!isObject(args)) throw new ArgumentError("mission arguments must be a JSON object");
+    return this.request<AgentMissionReport>("POST", "/v1/missions/preflight", args, options);
+  }
+
   /** Read the current asynchronous mission status and, once terminal, its authoritative report. */
   async missionStatus(missionId: string, options?: ClientRequestOptions): Promise<MissionJob> {
     const id = pathSegment(missionId, "mission id");

@@ -43,6 +43,14 @@ block, digest, and byte-accounting evidence.
 
 ## Asynchronous missions
 
+`POST /v1/missions/preflight` is the synchronous no-dispatch planning endpoint. It accepts the
+same mission document, validates the original execution policy (including the allow-list) and
+static tool schemas, then returns the authoritative `agent_mission` plan with
+`preflight: true`, `execution: "planned"`, and `dispatch: "not_started"`. It never creates a
+job, records an execution event, or invokes a nested domain tool. Binding-dependent arguments
+are represented in the plan and are validated again only when an execution request materializes
+them.
+
 `POST /v1/missions` accepts the same JSON object as the `agent_mission` tool and returns `202`
 after the complete mission graph, policy, allow-list, and safety bounds have passed validation.
 Validation includes bounded authoritative JSON Schema preflight against the live `tools/list`

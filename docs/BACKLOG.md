@@ -157,6 +157,9 @@ REST and JSON-RPC calls to the MCP server, exposes cursor-based event/SSE snapsh
 a signed, retryable webhook outbox with idempotent acknowledgement. This covers the executable
 REST/event portion of the platform, while gRPC, TLS termination, durable storage, and an external
 delivery worker remain explicitly absent.
+The gateway now also exposes a synchronous `/v1/missions/preflight` handoff that validates the
+original mission policy and static schemas while returning an authoritative no-dispatch plan; it
+does not create a job or imply that binding-dependent arguments have been executed.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full

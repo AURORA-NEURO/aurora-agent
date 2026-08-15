@@ -240,6 +240,9 @@ test("client exposes asynchronous mission submission, status, and cancellation",
       if (path === "/v1/missions" && init.method === "POST") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "queued", cancel_requested: false });
       }
+      if (path === "/v1/missions/preflight" && init.method === "POST") {
+        return jsonResponse({ ok: true, workflow: "agent_mission", execution: "planned", mission_status: "planned", preflight: true, dispatch: "not_started", results: [] });
+      }
       if (path === "/v1/missions/async-1" && init.method === "GET") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "succeeded", cancel_requested: false, result: { mission_status: "succeeded" } });
       }
@@ -249,6 +252,9 @@ test("client exposes asynchronous mission submission, status, and cancellation",
       return jsonResponse({ ok: false, error: { code: "not_found", message: path } }, 404);
     },
   });
+  const preflight = await client.preflightMission({ mission_id: "preflight-1", goal: "plan", steps: [] });
+  assert.equal(preflight.preflight, true);
+  assert.equal(preflight.dispatch, "not_started");
   const submitted = await client.submitMission({ mission_id: "async-1", goal: "run", steps: [] });
   assert.equal(submitted.status, "queued");
   const status = await client.missionStatus("async-1");

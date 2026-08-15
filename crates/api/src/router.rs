@@ -169,6 +169,7 @@ impl ApiRouter {
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
+            ("POST", "/v1/missions/preflight") => self.preflight_mission(&request, &request_id),
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
             ("GET", path) if path.starts_with("/v1/missions/") => {
                 self.mission_status(&request, &request_id)
@@ -271,6 +272,7 @@ impl ApiRouter {
                     "capabilities": "/v1/capabilities",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
+                    "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
                     "webhooks": "/v1/webhooks/subscriptions"
                 }
@@ -293,6 +295,7 @@ impl ApiRouter {
                     "event_cursor": true,
                     "server_sent_events_snapshot": true,
                     "async_missions": true,
+                    "mission_preflight": true,
                     "cooperative_mission_cancellation": true,
                     "signed_webhook_outbox": true,
                     "grpc": false,
@@ -461,6 +464,22 @@ impl ApiRouter {
                 "guarantee": "REST and MCP calls share the same in-process tool dispatcher"
             }),
         )
+    }
+
+    fn preflight_mission(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let mut report = match self
+            .mission_executor
+            .preflight_agent_mission(&Value::Object(arguments))
+        {
+            Ok(report) => report,
+            Err(error) => return self.error(422, "invalid_mission", &error, request_id),
+        };
+        report["request_id"] = json!(request_id);
+        HttpResponse::json(200, &report)
     }
 
     fn submit_mission(&mut self, request: &HttpRequest, request_id: &str) -> HttpResponse {
@@ -1058,6 +1077,7 @@ impl ApiRouter {
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
+                    "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
@@ -1336,6 +1356,59 @@ mod tests {
         assert_eq!(deleted.status, 200);
         let missing = router.handle(request("GET", "/v1/missions/api-async-1", json!({})));
         assert_eq!(missing.status, 404);
+    }
+
+    #[test]
+    fn mission_preflight_returns_authoritative_plan_without_queueing_or_dispatching() {
+        let mut router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let response = router.handle(request(
+            "POST",
+            "/v1/missions/preflight",
+            json!({
+                "mission_id": "api-preflight-1",
+                "goal": "preview a cross-domain plan",
+                "steps": [{
+                    "id": "catalog",
+                    "domain": "workspace",
+                    "capability": "discovery",
+                    "objective": "discover routes",
+                    "tool": "workspace_capabilities"
+                }],
+                "policy": {"execute": true, "allowed_tools": ["workspace_capabilities"]}
+            }),
+        ));
+        assert_eq!(response.status, 200);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["preflight"], true);
+        assert_eq!(body["dispatch"], "not_started");
+        assert_eq!(body["execution"], "planned");
+        assert_eq!(body["results"].as_array().unwrap().len(), 0);
+        let missing = router.handle(request("GET", "/v1/missions/api-preflight-1", json!({})));
+        assert_eq!(missing.status, 404);
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/missions/preflight",
+            json!({
+                "mission_id": "api-preflight-invalid-policy",
+                "goal": "must retain execution authorization checks",
+                "steps": [{
+                    "id": "catalog",
+                    "domain": "workspace",
+                    "capability": "discovery",
+                    "objective": "discover routes",
+                    "tool": "workspace_capabilities"
+                }],
+                "policy": {"execute": true}
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let refused_body: Value = serde_json::from_slice(&refused.body).unwrap();
+        assert!(refused_body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("allow-list"));
     }
 
     #[test]

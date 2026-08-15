@@ -258,6 +258,14 @@ class ApiClient:
         snapshot = catalogue if catalogue is not None else self.tool_catalogue()
         return preflight_mission(request, snapshot)
 
+    def preflight_mission(self, request: MissionRequest | Mapping[str, Any]) -> dict[str, Any]:
+        """Ask the Rust gateway for a no-dispatch, authoritative mission plan."""
+
+        if not isinstance(request, (MissionRequest, Mapping)):
+            raise ArgumentError("mission request must be a MissionRequest or mapping")
+        arguments = request.to_mcp_arguments() if isinstance(request, MissionRequest) else dict(request)
+        return self.request("POST", "/v1/missions/preflight", arguments)
+
     def mission_from_route(
         self,
         route: Mapping[str, Any],
@@ -717,6 +725,11 @@ class AsyncApiClient:
             raise ArgumentError("request must be a MissionRequest")
         snapshot = catalogue if catalogue is not None else await self.tool_catalogue()
         return preflight_mission(request, snapshot)
+
+    async def preflight_mission(self, request: MissionRequest | Mapping[str, Any]) -> dict[str, Any]:
+        """Async request for the Rust-owned no-dispatch mission plan."""
+
+        return await asyncio.to_thread(self.client.preflight_mission, request)
 
     async def mission_from_route(
         self,

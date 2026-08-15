@@ -87,6 +87,9 @@ The HTTP clients additionally expose `submit_mission()`, `mission_status()`, and
 step or parallel-batch dispatch while allowing an in-flight tool to return, and the terminal report
 records cancelled steps instead of implying rollback. `delete_mission()` releases a terminal job
 from the bounded process-local registry.
+`preflight_mission()` calls the synchronous Rust-owned `/v1/missions/preflight` route; it validates
+the original execution policy and returns a planned report without creating a job or dispatching
+any domain tool. The existing `mission_preflight()` method remains the local catalogue review.
 For any current or future domain without a handwritten wrapper, `tool_catalogue()` snapshots the
 live `tools/list` or `/v1/tools` definitions, `plan_tool()` performs conservative shape-only
 preflight, and `tool_checked()` executes the reviewed call. Plans are digest-bound and carry no

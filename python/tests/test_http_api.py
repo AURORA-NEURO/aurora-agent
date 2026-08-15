@@ -51,7 +51,9 @@ class FakeApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         size = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(size) or b"{}")
-        if self.path == "/v1/missions":
+        if self.path == "/v1/missions/preflight":
+            self._send(200, {"ok": True, "workflow": "agent_mission", "execution": "planned", "mission_status": "planned", "preflight": True, "dispatch": "not_started", "results": []})
+        elif self.path == "/v1/missions":
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "queued", "cancel_requested": False})
         elif self.path == "/v1/missions/async-1/cancel":
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "running", "cancel_requested": True, "cancel_reason": body.get("reason")})
@@ -98,6 +100,15 @@ class HttpApiClientTests(unittest.TestCase):
             catalogue=catalogue,
         )
         self.assertTrue(mission.ok)
+        remote_preflight = client.preflight_mission(
+            MissionRequest(
+                "mission-http-remote-preflight",
+                "check",
+                [MissionStep("one", "data", "read", "check", "echo", {"value": 3})],
+            )
+        )
+        self.assertTrue(remote_preflight["preflight"])
+        self.assertEqual(remote_preflight["dispatch"], "not_started")
         self.assertEqual(client.call_tool("echo", {"value": 3})["mcp"]["result"]["value"], 3)
         submitted = client.submit_mission(MissionRequest("async-1", "run", [MissionStep("one", "data", "read", "run", "echo", {"value": 1})]))
         self.assertEqual(submitted.status, "queued")
@@ -203,6 +214,15 @@ class HttpApiClientTests(unittest.TestCase):
                 catalogue=catalogue,
             )
             self.assertTrue(mission.fully_checked)
+            remote_preflight = await client.preflight_mission(
+                MissionRequest(
+                    "mission-http-async-remote-preflight",
+                    "check",
+                    [MissionStep("one", "data", "read", "check", "echo", {"value": 5})],
+                )
+            )
+            self.assertTrue(remote_preflight["preflight"])
+            self.assertEqual(remote_preflight["dispatch"], "not_started")
             self.assertEqual((await client.call_tool("echo", {"async": True}))["tool"], "echo")
             self.assertEqual((await client.submit_mission(MissionRequest("async-1", "run", [MissionStep("one", "data", "read", "run", "echo", {"value": 1})]))).status, "queued")
             self.assertEqual((await client.mission_status("async-1")).status, "succeeded")

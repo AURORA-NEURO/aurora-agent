@@ -288,6 +288,9 @@ diagnostics, so malformed calls cannot be mistaken for domain-level refusals or 
 The HTTP gateway adds bounded asynchronous mission jobs with typed status polling and cooperative
 cancellation between nested calls or parallel batches; a cancellation report records what completed
 and what was never dispatched rather than implying force-kill or rollback.
+`POST /v1/missions/preflight` provides the matching synchronous handoff: it validates the original
+execution policy and static schemas, returns the authoritative digest-bound plan, and forcibly
+marks dispatch as `not_started`. It never creates a job or invokes a domain tool.
 
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,

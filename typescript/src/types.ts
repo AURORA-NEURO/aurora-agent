@@ -473,6 +473,8 @@ export interface AgentMissionReport extends JsonObject {
   returned_bytes: number;
   execution_trace_schema_version: string;
   execution_trace: MissionTraceEvent[];
+  preflight?: boolean;
+  dispatch?: "not_started";
   plan: JsonObject;
   results: JsonObject[];
   [key: string]: JsonValue | undefined;

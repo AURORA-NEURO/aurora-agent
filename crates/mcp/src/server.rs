@@ -898,6 +898,29 @@ impl Server {
         Ok(())
     }
 
+    /// Produce the authoritative mission plan without dispatching any nested tool.
+    ///
+    /// This is the transport-facing preflight boundary. It preserves the caller's graph,
+    /// allow-list, budgets, and schema-visible arguments, but forcibly changes the execution
+    /// choice to preview so a request that was authored for execution cannot accidentally run
+    /// through a preflight endpoint.
+    pub fn preflight_agent_mission(&self, arguments: &Value) -> Result<Value, String> {
+        self.validate_agent_mission(arguments)?;
+        let mut value = arguments.clone();
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| "agent mission input must be a JSON object".to_string())?;
+        let policy = object.entry("policy").or_insert_with(|| json!({}));
+        let policy = policy
+            .as_object_mut()
+            .ok_or_else(|| "agent mission policy must be a JSON object".to_string())?;
+        policy.insert("execute".into(), json!(false));
+        let mut report = self.agent_mission_with_cancellation(&value, None)?;
+        report["preflight"] = json!(true);
+        report["dispatch"] = json!("not_started");
+        Ok(report)
+    }
+
     /// Execute an agent mission while observing a shared cooperative cancellation flag.
     ///
     /// Cancellation is checked between nested tool calls and parallel batches. An in-flight tool
