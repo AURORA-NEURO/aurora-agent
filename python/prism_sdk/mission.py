@@ -19,6 +19,7 @@ MAX_MISSION_STEPS = 128
 MAX_ALLOWED_TOOLS = 512
 MAX_STEP_OUTPUT_BYTES = 20_000_000
 MAX_TOTAL_OUTPUT_BYTES = 20_000_000
+MAX_PARALLEL_WAVE_WIDTH = 16
 MISSION_ASSEMBLY_SCHEMA = "bioprism-python-mission-assembly/0.1"
 
 
@@ -61,6 +62,7 @@ class MissionPolicy:
     max_steps: int = 64
     max_step_output_bytes: int = 2_000_000
     max_total_output_bytes: int = 10_000_000
+    execution_mode: str = "serial"
     allowed_tools: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -85,6 +87,8 @@ class MissionPolicy:
                 raise ArgumentError(f"{name} must be between 1 and {maximum}")
         if self.max_step_output_bytes > self.max_total_output_bytes:
             raise ArgumentError("max_step_output_bytes cannot exceed max_total_output_bytes")
+        if self.execution_mode not in ("serial", "parallel_waves"):
+            raise ArgumentError("execution_mode must be serial or parallel_waves")
         if not isinstance(self.allowed_tools, Sequence) or isinstance(self.allowed_tools, (str, bytes)):
             raise ArgumentError("allowed_tools must be a sequence of tool names")
         if len(self.allowed_tools) > MAX_ALLOWED_TOOLS:
@@ -110,6 +114,7 @@ class MissionPolicy:
             "max_steps": self.max_steps,
             "max_step_output_bytes": self.max_step_output_bytes,
             "max_total_output_bytes": self.max_total_output_bytes,
+            "execution_mode": self.execution_mode,
             "allowed_tools": list(self.allowed_tools),
         }
 
@@ -507,6 +512,7 @@ class MissionPreflight:
     request_digest: str
     catalogue_digest: str
     execution: str
+    execution_mode: str
     waves: tuple[tuple[str, ...], ...]
     steps: tuple[MissionStepPreflight, ...]
     issues: tuple[str, ...] = ()
@@ -543,6 +549,7 @@ class MissionPreflight:
             "request_digest": self.request_digest,
             "catalogue_digest": self.catalogue_digest,
             "execution": self.execution,
+            "execution_mode": self.execution_mode,
             "ok": self.ok,
             "fully_checked": self.fully_checked,
             "ordered_steps": list(self.ordered_steps),
@@ -670,6 +677,18 @@ def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> Miss
             remaining.pop(step_id, None)
         for values in remaining.values():
             values.difference_update(ready)
+    if policy.execution_mode == "parallel_waves":
+        max_width = max((len(wave) for wave in waves), default=0)
+        if max_width > MAX_PARALLEL_WAVE_WIDTH:
+            issues.append(
+                f"parallel_waves supports at most {MAX_PARALLEL_WAVE_WIDTH} steps in one wave; got {max_width}"
+            )
+        required_budget = policy.max_step_output_bytes * max_width
+        if required_budget > policy.max_total_output_bytes:
+            issues.append(
+                f"parallel_waves requires {required_budget} bytes for a worst-case wave; "
+                f"policy.max_total_output_bytes is {policy.max_total_output_bytes}"
+            )
     wave_by_id = {step_id: wave for wave, values in enumerate(waves) for step_id in values}
 
     step_results: list[MissionStepPreflight] = []
@@ -713,6 +732,7 @@ def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> Miss
         request_digest=request_digest,
         catalogue_digest=catalogue.digest,
         execution="authorized" if policy.execute else "planned",
+        execution_mode=policy.execution_mode,
         waves=tuple(waves),
         steps=tuple(step_results),
         issues=tuple(dict.fromkeys(issues)),
@@ -736,6 +756,7 @@ def _mission_policy(value: MissionPolicy | Mapping[str, Any] | None) -> MissionP
         max_steps=raw.get("max_steps", 64),
         max_step_output_bytes=raw.get("max_step_output_bytes", 2_000_000),
         max_total_output_bytes=raw.get("max_total_output_bytes", 10_000_000),
+        execution_mode=raw.get("execution_mode", "serial"),
         allowed_tools=tuple(allowed),
     )
 
@@ -775,6 +796,7 @@ __all__ = [
     "MAX_MISSION_STEPS",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
+    "MAX_PARALLEL_WAVE_WIDTH",
     "MISSION_ASSEMBLY_SCHEMA",
     "MissionBinding",
     "MissionAssembly",

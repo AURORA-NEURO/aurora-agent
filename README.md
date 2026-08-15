@@ -276,7 +276,8 @@ preflight, and `tool_checked()` executes only after that review. This does not c
 validity or suppress refusals; unsupported schema features remain visible as warnings.
 Mission requests can additionally pass through `mission_preflight()` for digest-bound graph,
 wave, binding, authorization, and per-step schema review before the Rust mission executor is
-called.
+called. The executor is serial by default; an explicit `execution_mode: "parallel_waves"` policy
+dispatches independent wave members concurrently with bounded width and reserved output budget.
 
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,

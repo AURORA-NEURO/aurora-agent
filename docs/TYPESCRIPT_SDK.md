@@ -100,7 +100,9 @@ refusals in the same raw response envelope as `callTool()`.
 `missionPreflight()` applies the same contract to an `AgentMissionArgs` dependency graph, and
 `assertMissionPreflight()` converts a failed report into a typed local error. The report returns
 request and catalogue digests, deterministic waves, per-step schema reports, JSON-pointer binding
-findings, recursion checks, and execution allow-list findings without issuing a tool call. Pass
+findings, recursion checks, execution allow-list findings, and parallel-wave budget checks without
+issuing a tool call. `execution_mode: "parallel_waves"` explicitly opts into bounded concurrent
+dispatch for independent steps; serial execution remains the default. Pass
 the earlier `ToolCatalogue` snapshot to guarantee that mission review and subsequent checked calls
 refer to the same live schema set; the Rust `agent_mission` tool remains the execution authority.
 

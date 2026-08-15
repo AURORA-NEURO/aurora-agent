@@ -3564,6 +3564,73 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
 }
 
 #[test]
+fn agent_mission_executes_independent_parallel_waves_with_deterministic_reporting() {
+    let mut server = server();
+    let executed = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "mission-parallel-1",
+            "goal": "run independent discovery and protocol inspections",
+            "steps": [
+                {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
+                {"id": "protocol", "domain": "orchestration", "capability": "catalogue", "objective": "inspect protocol", "tool": "weave_protocol_catalog", "arguments": {"context": null}}
+            ],
+            "policy": {
+                "execute": true,
+                "execution_mode": "parallel_waves",
+                "allowed_tools": ["workspace_capabilities", "weave_protocol_catalog"],
+                "max_step_output_bytes": 5000000,
+                "max_total_output_bytes": 10000000
+            }
+        }),
+    );
+    assert_eq!(executed["__isError"], json!(false));
+    assert_eq!(executed["execution"], json!("executed"));
+    assert_eq!(executed["plan"]["execution_mode"], json!("parallel_waves"));
+    assert_eq!(executed["plan"]["waves"].as_array().unwrap().len(), 1);
+    assert_eq!(executed["plan"]["waves"][0], json!(["catalog", "protocol"]));
+    assert_eq!(executed["mission_status"], json!("succeeded"));
+    assert_eq!(executed["succeeded"], json!(2));
+    assert_eq!(executed["refused"], json!(0));
+    assert_eq!(executed["blocked"], json!(0));
+    assert_eq!(executed["results"].as_array().unwrap().len(), 2);
+    assert_eq!(executed["results"][0]["id"], json!("catalog"));
+    assert_eq!(executed["results"][0]["status"], json!("succeeded"));
+    assert_eq!(executed["results"][1]["id"], json!("protocol"));
+    assert_eq!(executed["results"][1]["status"], json!("succeeded"));
+}
+
+#[test]
+fn agent_mission_parallel_waves_preserve_refusals_and_block_dependents() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "mission-parallel-refusal",
+            "goal": "prove parallel refusal propagation",
+            "steps": [
+                {"id": "bad", "domain": "test", "capability": "refusal", "objective": "invoke an unknown tool", "tool": "not_a_real_tool"},
+                {"id": "dependent", "domain": "test", "capability": "blocked", "objective": "must not run", "tool": "workspace_capabilities", "depends_on": ["bad"]}
+            ],
+            "policy": {
+                "execute": true,
+                "execution_mode": "parallel_waves",
+                "allowed_tools": ["not_a_real_tool", "workspace_capabilities"]
+            }
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["plan"]["execution_mode"], json!("parallel_waves"));
+    assert_eq!(result["refused"], json!(1));
+    assert_eq!(result["blocked"], json!(1));
+    assert_eq!(result["mission_status"], json!("failed"));
+    assert_eq!(result["results"][0]["status"], json!("refused"));
+    assert_eq!(result["results"][1]["status"], json!("blocked"));
+}
+
+#[test]
 fn capability_discovery_routes_across_domains_and_attaches_authoritative_schemas() {
     let mut server = server();
     let result = call(

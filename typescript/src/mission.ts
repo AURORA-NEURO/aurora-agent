@@ -19,6 +19,7 @@ export const MAX_MISSION_STEPS = 128;
 export const MAX_ALLOWED_TOOLS = 512;
 export const MAX_STEP_OUTPUT_BYTES = 20_000_000;
 export const MAX_TOTAL_OUTPUT_BYTES = 20_000_000;
+export const MAX_PARALLEL_WAVE_WIDTH = 16;
 
 export class MissionPreflightError extends ArgumentError {
   override readonly name: string = "MissionPreflightError";
@@ -42,6 +43,7 @@ interface NormalStep {
 
 interface NormalPolicy {
   execute: boolean;
+  executionMode: "serial" | "parallel_waves";
   stopOnError: boolean;
   allowSideEffects: boolean;
   allowedTools: string[];
@@ -216,6 +218,16 @@ export async function preflightMission(
   }
   const waveById = new Map<string, number>();
   waves.forEach((wave, index) => wave.forEach((id) => waveById.set(id, index)));
+  if (policy.executionMode === "parallel_waves") {
+    const maxWaveWidth = Math.max(0, ...waves.map((wave) => wave.length));
+    if (maxWaveWidth > MAX_PARALLEL_WAVE_WIDTH) {
+      issues.push(`parallel_waves supports at most ${MAX_PARALLEL_WAVE_WIDTH} steps in one wave; got ${maxWaveWidth}`);
+    }
+    const requiredBudget = policy.maxStepOutputBytes * maxWaveWidth;
+    if (requiredBudget > policy.maxTotalOutputBytes) {
+      issues.push(`parallel_waves requires ${requiredBudget} bytes for a worst-case wave; policy.max_total_output_bytes is ${policy.maxTotalOutputBytes}`);
+    }
+  }
 
   const stepResults: MissionStepPreflight[] = [];
   for (const step of steps) {
@@ -268,6 +280,7 @@ export async function preflightMission(
     request_digest: requestDigest,
     catalogue_digest: catalogue.digest,
     execution: policy.execute && policyValid ? "authorized" : "planned",
+    execution_mode: policy.executionMode,
     ok,
     fully_checked: fullyChecked,
     ordered_steps: waves.flat(),
@@ -431,6 +444,11 @@ function normalisePolicy(raw: AgentMissionPolicy | undefined, issues: string[]):
   if (raw !== undefined && !isObject(raw)) issues.push("policy must be a JSON object");
   const policy = isObject(raw) ? raw : {};
   const execute = booleanValue(policy.execute, false, "policy.execute", issues);
+  const executionMode = policy.execution_mode === undefined
+    ? "serial"
+    : policy.execution_mode === "serial" || policy.execution_mode === "parallel_waves"
+      ? policy.execution_mode
+      : (issues.push("policy.execution_mode must be serial or parallel_waves"), "serial");
   const stopOnError = booleanValue(policy.stop_on_error, true, "policy.stop_on_error", issues);
   const allowSideEffects = booleanValue(policy.allow_side_effects, false, "policy.allow_side_effects", issues);
   const maxSteps = boundedNumber(policy.max_steps, 64, MAX_MISSION_STEPS, "policy.max_steps", issues);
@@ -449,7 +467,7 @@ function normalisePolicy(raw: AgentMissionPolicy | undefined, issues: string[]):
       else allowedTools.push(tool);
     }
   }
-  return { execute, stopOnError, allowSideEffects, allowedTools, maxSteps, maxStepOutputBytes, maxTotalOutputBytes };
+  return { execute, executionMode, stopOnError, allowSideEffects, allowedTools, maxSteps, maxStepOutputBytes, maxTotalOutputBytes };
 }
 
 function booleanValue(value: unknown, fallback: boolean, name: string, issues: string[]): boolean {

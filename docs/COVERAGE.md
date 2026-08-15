@@ -46,8 +46,10 @@ than treating generated YAML or a local audit as executed CI, a hosted authoring
 dashboard. The TypeScript and Python clients expose this contract without cloning the Rust model.
 `agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
 deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
-blocking dependent work, bounding output, and refusing side-effect confirmations by default. It is
-an in-process serial adapter, not a distributed scheduler, durable queue, or truth synthesizer.
+blocking dependent work, bounding output, and refusing side-effect confirmations by default. Serial
+execution remains the default; `parallel_waves` explicitly dispatches independent steps concurrently
+inside a bounded in-process executor after reserving the worst-case wave budget. It is not a
+distributed scheduler, durable queue, or truth synthesizer.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 `capability_discover` makes the complete cross-domain catalogue searchable by intent, domain, group,

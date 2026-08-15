@@ -109,6 +109,57 @@ class MissionPreflightTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             MissionBinding("one", "/valid", "/invalid~2")
 
+    def test_parallel_waves_are_budgeted_and_reported_before_execution(self) -> None:
+        request = MissionRequest(
+            "mission-parallel",
+            "run independent checks",
+            [
+                MissionStep("echo", "data", "read", "echo a value", "echo", {"value": 1}),
+                MissionStep("audit", "evaluation", "verify", "audit a value", "audit", {"value": 2}),
+            ],
+            policy={
+                "execute": True,
+                "execution_mode": "parallel_waves",
+                "allowed_tools": ["echo", "audit"],
+                "max_step_output_bytes": 2_000_000,
+                "max_total_output_bytes": 4_000_000,
+            },
+        )
+        report = preflight_mission(request, catalogue())
+        self.assertTrue(report.ok)
+        self.assertEqual(report.execution_mode, "parallel_waves")
+        self.assertEqual(report.waves, (("audit", "echo"),))
+        self.assertEqual(report.to_dict()["execution_mode"], "parallel_waves")
+
+        invalid_mode = preflight_mission(
+            MissionRequest(
+                "mission-bad-mode",
+                "reject an unknown execution mode",
+                [MissionStep("one", "data", "read", "one", "echo", {"value": 1})],
+                policy={"execution_mode": "distributed"},
+            ),
+            catalogue(),
+        )
+        self.assertFalse(invalid_mode.ok)
+        self.assertTrue(any("execution_mode" in issue for issue in invalid_mode.issues))
+
+        under_budget = MissionRequest(
+            "mission-under-budget",
+            "reject an unsafe wave reservation",
+            [
+                MissionStep("echo", "data", "read", "echo a value", "echo", {"value": 1}),
+                MissionStep("audit", "evaluation", "verify", "audit a value", "audit", {"value": 2}),
+            ],
+            policy={
+                "execution_mode": "parallel_waves",
+                "max_step_output_bytes": 2_000_000,
+                "max_total_output_bytes": 3_000_000,
+            },
+        )
+        under_budget_report = preflight_mission(under_budget, catalogue())
+        self.assertFalse(under_budget_report.ok)
+        self.assertTrue(any("worst-case wave" in issue for issue in under_budget_report.issues))
+
     def test_route_assembly_requires_explicit_candidates_and_preserves_provenance(self) -> None:
         route = {
             "workflow": "capability_route",

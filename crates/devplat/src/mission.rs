@@ -23,6 +23,7 @@ const MAX_STEPS: usize = 128;
 const MAX_ALLOWED_TOOLS: usize = 512;
 const MAX_STEP_OUTPUT_BYTES: usize = 20_000_000;
 const MAX_TOTAL_OUTPUT_BYTES: usize = 20_000_000;
+pub const MAX_PARALLEL_WAVE_WIDTH: usize = 16;
 
 fn default_true() -> bool {
     true
@@ -38,6 +39,10 @@ fn default_max_step_output_bytes() -> usize {
 
 fn default_max_total_output_bytes() -> usize {
     10_000_000
+}
+
+fn default_execution_mode() -> String {
+    "serial".into()
 }
 
 fn empty_object() -> Value {
@@ -128,6 +133,10 @@ pub struct MissionPolicy {
     /// Maximum serialized MCP responses retained for the whole mission.
     #[serde(default = "default_max_total_output_bytes")]
     pub max_total_output_bytes: usize,
+    /// `serial` preserves strict stop-before-next-call budgeting; `parallel_waves` runs each
+    /// independent DAG wave concurrently after reserving its worst-case output budget.
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String,
     /// Tools that may execute. Required and non-empty when `execute` is true.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
@@ -142,6 +151,7 @@ impl Default for MissionPolicy {
             max_steps: default_max_steps(),
             max_step_output_bytes: default_max_step_output_bytes(),
             max_total_output_bytes: default_max_total_output_bytes(),
+            execution_mode: default_execution_mode(),
             allowed_tools: Vec::new(),
         }
     }
@@ -169,6 +179,11 @@ impl MissionPolicy {
         }
         if self.max_step_output_bytes > self.max_total_output_bytes {
             return Err(MissionError::OutputBudgetOrder);
+        }
+        if !matches!(self.execution_mode.as_str(), "serial" | "parallel_waves") {
+            return Err(MissionError::InvalidExecutionMode {
+                mode: self.execution_mode.clone(),
+            });
         }
         if self.allowed_tools.len() > MAX_ALLOWED_TOOLS {
             return Err(MissionError::TooMany {
@@ -475,6 +490,7 @@ pub struct MissionPlan {
     pub critical_path_length: usize,
     pub steps: Vec<MissionStepPlan>,
     pub execution: String,
+    pub execution_mode: String,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
 }
@@ -529,6 +545,12 @@ pub enum MissionError {
     InvalidLimit { field: &'static str, value: usize },
     #[error("one-step output budget cannot exceed total output budget")]
     OutputBudgetOrder,
+    #[error("unknown mission execution mode `{mode}`; choose `serial` or `parallel_waves`")]
+    InvalidExecutionMode { mode: String },
+    #[error("parallel_waves supports at most {maximum} steps in one wave, got {width}")]
+    ParallelWaveTooWide { width: usize, maximum: usize },
+    #[error("parallel_waves requires total output budget {required} for a worst-case wave, got {available}")]
+    ParallelWaveBudget { required: usize, available: usize },
     #[error("duplicate {kind} `{id}`")]
     Duplicate { kind: &'static str, id: String },
     #[error("tool name `{tool}` is not a safe MCP tool identifier")]
@@ -565,6 +587,25 @@ pub enum MissionError {
 pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionError> {
     request.validate()?;
     let waves = request.waves()?;
+    let max_wave_width = waves.iter().map(Vec::len).max().unwrap_or(0);
+    if request.policy.execution_mode == "parallel_waves" {
+        if max_wave_width > MAX_PARALLEL_WAVE_WIDTH {
+            return Err(MissionError::ParallelWaveTooWide {
+                width: max_wave_width,
+                maximum: MAX_PARALLEL_WAVE_WIDTH,
+            });
+        }
+        let required = request
+            .policy
+            .max_step_output_bytes
+            .saturating_mul(max_wave_width);
+        if required > request.policy.max_total_output_bytes {
+            return Err(MissionError::ParallelWaveBudget {
+                required,
+                available: request.policy.max_total_output_bytes,
+            });
+        }
+    }
     let ordered_steps = waves.iter().flatten().cloned().collect::<Vec<_>>();
     let wave_by_id = waves
         .iter()
@@ -614,6 +655,7 @@ pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionErro
             "planned"
         }
         .into(),
+        execution_mode: request.policy.execution_mode.clone(),
         guarantees: vec![
             "step dependencies are validated and ordered deterministically".into(),
             "execution requires an explicit tool allow-list and is opt-in".into(),
@@ -622,7 +664,13 @@ pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionErro
         ],
         limitations: vec![
             "the planner does not infer missing arguments or scientific meaning".into(),
-            "parallel waves are reported for scheduling; the MCP adapter executes serially".into(),
+            if request.policy.execution_mode == "parallel_waves" {
+                "independent steps in each wave execute concurrently in the bounded server process"
+                    .into()
+            } else {
+                "parallel waves are reported for scheduling; the MCP adapter executes serially"
+                    .into()
+            },
             "tool results remain domain-owned and are not merged into a synthetic truth claim"
                 .into(),
         ],
@@ -710,6 +758,32 @@ mod tests {
         ));
         value.policy.allow_side_effects = true;
         assert_eq!(plan_mission(&value).unwrap().execution, "authorized");
+    }
+
+    #[test]
+    fn parallel_waves_are_explicit_and_budget_reserved_before_execution() {
+        let mut value = request(vec![
+            step("one", "metrics_analytics_audit", &[]),
+            step("two", "metrics_analytics_audit", &[]),
+        ]);
+        value.policy.execution_mode = "parallel_waves".into();
+        value.policy.max_step_output_bytes = 2_000_000;
+        value.policy.max_total_output_bytes = 4_000_000;
+        let plan = plan_mission(&value).unwrap();
+        assert_eq!(plan.execution_mode, "parallel_waves");
+        assert_eq!(plan.waves[0].len(), 2);
+
+        value.policy.max_total_output_bytes = 3_000_000;
+        assert!(matches!(
+            plan_mission(&value),
+            Err(MissionError::ParallelWaveBudget { .. })
+        ));
+        value.policy.max_total_output_bytes = 4_000_000;
+        value.policy.execution_mode = "unknown".into();
+        assert!(matches!(
+            plan_mission(&value),
+            Err(MissionError::InvalidExecutionMode { .. })
+        ));
     }
 
     #[test]

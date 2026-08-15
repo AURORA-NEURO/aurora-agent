@@ -133,6 +133,7 @@ from .mission import (
     MAX_MISSION_STEPS,
     MAX_STEP_OUTPUT_BYTES,
     MAX_TOTAL_OUTPUT_BYTES,
+    MAX_PARALLEL_WAVE_WIDTH,
     MISSION_ASSEMBLY_SCHEMA,
     MissionBinding,
     MissionAssembly,

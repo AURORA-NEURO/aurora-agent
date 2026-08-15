@@ -111,6 +111,32 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.deepEqual(preflight.waves, [["prepare"], ["consume"]]);
   assert.equal(preflight.steps[1].status, "ready");
   assert.equal(seen.length, callsBeforeMissionPreflight);
+  const parallel = await client.missionPreflight({
+    mission_id: "mission-parallel",
+    goal: "prepare independent checks",
+    steps: [
+      { id: "first", domain: "workspace", capability: "discovery", objective: "first", tool: "echo", arguments: { value: 1 } },
+      { id: "second", domain: "workspace", capability: "discovery", objective: "second", tool: "echo", arguments: { value: 2 } },
+    ],
+    policy: {
+      execute: true,
+      execution_mode: "parallel_waves",
+      allowed_tools: ["echo"],
+      max_step_output_bytes: 2_000_000,
+      max_total_output_bytes: 4_000_000,
+    },
+  }, catalogue);
+  assert.equal(parallel.ok, true);
+  assert.equal(parallel.execution_mode, "parallel_waves");
+  assert.deepEqual(parallel.waves, [["first", "second"]]);
+  const invalidMode = await client.missionPreflight({
+    mission_id: "mission-invalid-mode",
+    goal: "reject an unknown execution mode",
+    steps: [{ id: "only", domain: "workspace", capability: "discovery", objective: "only", tool: "echo", arguments: { value: 3 } }],
+    policy: { execution_mode: "distributed" },
+  }, catalogue);
+  assert.equal(invalidMode.ok, false);
+  assert.equal(invalidMode.issues.some((issue) => issue.includes("execution_mode")), true);
   const cycle = await client.missionPreflight({
     mission_id: "mission-cycle",
     goal: "reject a cycle",

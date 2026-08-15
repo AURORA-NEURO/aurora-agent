@@ -424,6 +424,7 @@ export interface AgentMissionPolicy extends JsonObject {
   max_steps?: number;
   max_step_output_bytes?: number;
   max_total_output_bytes?: number;
+  execution_mode?: "serial" | "parallel_waves";
   allowed_tools?: string[];
 }
 
@@ -452,6 +453,7 @@ export interface MissionPreflightResult extends JsonObject {
   request_digest: string;
   catalogue_digest: string;
   execution: "planned" | "authorized";
+  execution_mode: "serial" | "parallel_waves";
   ok: boolean;
   fully_checked: boolean;
   ordered_steps: string[];
