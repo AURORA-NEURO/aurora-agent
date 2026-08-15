@@ -10,7 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from .authoring import content_digest
 from .errors import ArgumentError
+from .tooling import ToolCatalogue, ToolSchemaError, ToolValidationReport
+
+
+MAX_MISSION_STEPS = 128
+MAX_ALLOWED_TOOLS = 512
+MAX_STEP_OUTPUT_BYTES = 20_000_000
+MAX_TOTAL_OUTPUT_BYTES = 20_000_000
 
 
 def _text(name: str, value: str) -> None:
@@ -22,6 +30,24 @@ def _mapping(name: str, value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ArgumentError(f"{name} must be a mapping")
     return dict(value)
+
+
+def _valid_pointer(pointer: str, *, allow_empty: bool) -> bool:
+    if pointer == "":
+        return allow_empty
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        return False
+    if any(ord(character) < 32 for character in pointer):
+        return False
+    index = 0
+    while index < len(pointer):
+        if pointer[index] == "~":
+            if index + 1 >= len(pointer) or pointer[index + 1] not in "01":
+                return False
+            index += 2
+        else:
+            index += 1
+    return True
 
 
 @dataclass(frozen=True)
@@ -38,18 +64,42 @@ class MissionPolicy:
 
     def __post_init__(self) -> None:
         for name, value in (
+            ("execute", self.execute),
+            ("stop_on_error", self.stop_on_error),
+            ("allow_side_effects", self.allow_side_effects),
+        ):
+            if not isinstance(value, bool):
+                raise ArgumentError(f"{name} must be a boolean")
+        for name, value in (
             ("max_steps", self.max_steps),
             ("max_step_output_bytes", self.max_step_output_bytes),
             ("max_total_output_bytes", self.max_total_output_bytes),
         ):
-            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-                raise ArgumentError(f"{name} must be a positive integer")
+            maximum = {
+                "max_steps": MAX_MISSION_STEPS,
+                "max_step_output_bytes": MAX_STEP_OUTPUT_BYTES,
+                "max_total_output_bytes": MAX_TOTAL_OUTPUT_BYTES,
+            }[name]
+            if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= maximum:
+                raise ArgumentError(f"{name} must be between 1 and {maximum}")
         if self.max_step_output_bytes > self.max_total_output_bytes:
             raise ArgumentError("max_step_output_bytes cannot exceed max_total_output_bytes")
         if not isinstance(self.allowed_tools, Sequence) or isinstance(self.allowed_tools, (str, bytes)):
             raise ArgumentError("allowed_tools must be a sequence of tool names")
+        if len(self.allowed_tools) > MAX_ALLOWED_TOOLS:
+            raise ArgumentError(f"allowed_tools may contain at most {MAX_ALLOWED_TOOLS} items")
+        seen: set[str] = set()
         for tool in self.allowed_tools:
             _text("allowed_tools entry", tool)
+            if not all(character.isalnum() or character == "_" for character in tool):
+                raise ArgumentError(f"allowed_tools entry is not a safe tool name: {tool}")
+            if tool == "agent_mission":
+                raise ArgumentError("agent_mission cannot invoke itself")
+            if tool in seen:
+                raise ArgumentError(f"duplicate allowed tool: {tool}")
+            seen.add(tool)
+        if self.execute and not self.allowed_tools:
+            raise ArgumentError("execute requires a non-empty allowed_tools list")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -73,11 +123,9 @@ class MissionBinding:
 
     def __post_init__(self) -> None:
         _text("binding.from_step", self.from_step)
-        if not isinstance(self.source_pointer, str) or (
-            self.source_pointer and not self.source_pointer.startswith("/")
-        ):
+        if not isinstance(self.source_pointer, str) or not _valid_pointer(self.source_pointer, allow_empty=True):
             raise ArgumentError("binding.source_pointer must be empty or an RFC 6901 pointer")
-        if not isinstance(self.target_pointer, str) or not self.target_pointer.startswith("/"):
+        if not isinstance(self.target_pointer, str) or not _valid_pointer(self.target_pointer, allow_empty=False):
             raise ArgumentError("binding.target_pointer must be an RFC 6901 pointer")
 
     def to_dict(self) -> dict[str, str]:
@@ -128,6 +176,8 @@ class MissionStep:
             raise ArgumentError("bindings must be a sequence")
         for binding in self.bindings:
             _binding(binding)
+        if not isinstance(self.required, bool):
+            raise ArgumentError("required must be a boolean")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -147,8 +197,14 @@ def _step(value: MissionStep | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(value, MissionStep):
         return value.to_dict()
     raw = _mapping("mission step", value)
+    for name in ("id", "domain", "capability", "objective", "tool"):
+        if name not in raw:
+            raise ArgumentError(f"mission step requires {name}")
+        _text(f"step.{name}", raw[name])
     if "arguments" in raw:
         raw["arguments"] = _mapping("step arguments", raw["arguments"])
+    else:
+        raw["arguments"] = {}
     if "depends_on" in raw and (
         not isinstance(raw["depends_on"], Sequence)
         or isinstance(raw["depends_on"], (str, bytes))
@@ -158,6 +214,11 @@ def _step(value: MissionStep | Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(raw["bindings"], Sequence) or isinstance(raw["bindings"], (str, bytes)):
             raise ArgumentError("step bindings must be a sequence")
         raw["bindings"] = [_binding(value) for value in raw["bindings"]]
+    else:
+        raw["bindings"] = []
+    if "required" in raw and not isinstance(raw["required"], bool):
+        raise ArgumentError("step required must be a boolean")
+    raw.setdefault("required", True)
     return raw
 
 
@@ -195,4 +256,339 @@ class MissionRequest:
         return arguments
 
 
-__all__ = ["MissionBinding", "MissionPolicy", "MissionRequest", "MissionStep"]
+class MissionPreflightError(ArgumentError):
+    """A mission cannot be safely submitted after local graph/schema preflight."""
+
+
+@dataclass(frozen=True)
+class MissionStepPreflight:
+    """Transport and graph findings for one mission step; no tool has executed."""
+
+    id: str
+    tool: str
+    depends_on: tuple[str, ...]
+    wave: int | None
+    status: str
+    schema: ToolValidationReport | None
+    issues: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ready" and not self.issues and (self.schema is None or self.schema.ok)
+
+    def to_dict(self) -> dict[str, Any]:
+        schema: dict[str, Any] | None = None
+        if self.schema is not None:
+            schema = {
+                "tool": self.schema.tool,
+                "schema_digest": self.schema.schema_digest,
+                "ok": self.schema.ok,
+                "fully_checked": self.schema.fully_checked,
+                "issues": [
+                    {"path": issue.path, "code": issue.code, "message": issue.message}
+                    for issue in self.schema.issues
+                ],
+                "warnings": [
+                    {"path": issue.path, "code": issue.code, "message": issue.message}
+                    for issue in self.schema.warnings
+                ],
+            }
+        return {
+            "id": self.id,
+            "tool": self.tool,
+            "depends_on": list(self.depends_on),
+            "wave": self.wave,
+            "status": self.status,
+            "schema": schema,
+            "issues": list(self.issues),
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
+class MissionPreflight:
+    """A deterministic, no-side-effect review of a cross-domain mission request."""
+
+    mission_id: str
+    goal: str
+    request_digest: str
+    catalogue_digest: str
+    execution: str
+    waves: tuple[tuple[str, ...], ...]
+    steps: tuple[MissionStepPreflight, ...]
+    issues: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.issues and all(step.ok for step in self.steps)
+
+    @property
+    def fully_checked(self) -> bool:
+        return self.ok and not self.warnings and all(
+            step.schema is None or step.schema.fully_checked for step in self.steps
+        )
+
+    @property
+    def ordered_steps(self) -> tuple[str, ...]:
+        return tuple(step_id for wave in self.waves for step_id in wave)
+
+    def raise_if_invalid(self) -> None:
+        if not self.ok:
+            details = "; ".join(self.issues)
+            if not details:
+                details = "; ".join(
+                    f"{step.id}: {issue}" for step in self.steps for issue in step.issues
+                )
+            raise MissionPreflightError(f"mission {self.mission_id!r} failed preflight: {details}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "bioprism-python-mission-preflight/0.1",
+            "mission_id": self.mission_id,
+            "goal": self.goal,
+            "request_digest": self.request_digest,
+            "catalogue_digest": self.catalogue_digest,
+            "execution": self.execution,
+            "ok": self.ok,
+            "fully_checked": self.fully_checked,
+            "ordered_steps": list(self.ordered_steps),
+            "waves": [list(wave) for wave in self.waves],
+            "issues": list(self.issues),
+            "warnings": list(self.warnings),
+            "steps": [step.to_dict() for step in self.steps],
+            "limitations": [
+                "preflight checks transport shape and mission graph invariants only",
+                "the remote MCP server remains authoritative for domain semantics and refusal results",
+                "no step is executed by this report",
+            ],
+        }
+
+
+def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> MissionPreflight:
+    """Review a mission against a live schema snapshot without dispatching any tool."""
+
+    if not isinstance(request, MissionRequest):
+        raise ArgumentError("request must be a MissionRequest")
+    if not isinstance(catalogue, ToolCatalogue):
+        raise ArgumentError("catalogue must be a ToolCatalogue")
+    arguments = request.to_mcp_arguments()
+    request_digest = content_digest(arguments)
+    issues: list[str] = []
+    warnings: list[str] = []
+    try:
+        policy = _mission_policy(request.policy)
+    except (ArgumentError, TypeError, ValueError) as error:
+        policy = MissionPolicy()
+        issues.append(f"policy: {error}")
+
+    raw_steps = [_step(value) for value in request.steps]
+    if len(raw_steps) > MAX_MISSION_STEPS:
+        issues.append(f"mission has {len(raw_steps)} steps; maximum is {MAX_MISSION_STEPS}")
+    if len(raw_steps) > policy.max_steps:
+        issues.append(f"mission has {len(raw_steps)} steps; policy.max_steps is {policy.max_steps}")
+    if policy.execute and not policy.allowed_tools:
+        issues.append("execution requires a non-empty explicit allowed_tools list")
+    allowed = set(policy.allowed_tools)
+    step_issues: dict[str, list[str]] = {}
+    step_warnings: dict[str, list[str]] = {}
+    by_id: dict[str, dict[str, Any]] = {}
+    for raw in raw_steps:
+        step_id = raw["id"]
+        if step_id in by_id:
+            message = f"duplicate mission step id: {step_id}"
+            issues.append(message)
+            step_issues.setdefault(step_id, []).append(message)
+        else:
+            by_id[step_id] = raw
+
+    dependencies: dict[str, set[str]] = {}
+    for raw in raw_steps:
+        step_id = raw["id"]
+        local = step_issues.setdefault(step_id, [])
+        seen_dependencies: set[str] = set()
+        dependencies[step_id] = set()
+        for dependency in raw.get("depends_on", []):
+            if dependency == step_id:
+                message = "step depends on itself"
+                issues.append(f"{step_id}: {message}")
+                local.append(message)
+            elif dependency in seen_dependencies:
+                message = f"duplicate dependency: {dependency}"
+                issues.append(f"{step_id}: {message}")
+                local.append(message)
+            elif dependency not in by_id:
+                message = f"unknown dependency: {dependency}"
+                issues.append(f"{step_id}: {message}")
+                local.append(message)
+            else:
+                seen_dependencies.add(dependency)
+                dependencies[step_id].add(dependency)
+
+        binding_targets: set[str] = set()
+        for binding in raw.get("bindings", []):
+            source = binding["from_step"]
+            target = binding["target_pointer"]
+            if source not in by_id:
+                message = f"binding source is unknown: {source}"
+                issues.append(f"{step_id}: {message}")
+                local.append(message)
+            elif source not in dependencies[step_id]:
+                message = f"binding source is not a direct dependency: {source}"
+                issues.append(f"{step_id}: {message}")
+                local.append(message)
+            if target in binding_targets:
+                message = f"duplicate binding target: {target}"
+                issues.append(f"{step_id}: {message}")
+                local.append(message)
+            binding_targets.add(target)
+            if not _pointer_exists(raw.get("arguments", {}), target):
+                message = f"binding target does not exist: {target}"
+                issues.append(f"{step_id}: {message}")
+                local.append(message)
+
+        tool = raw["tool"]
+        if tool == "agent_mission":
+            message = "agent_mission cannot invoke itself"
+            issues.append(f"{step_id}: {message}")
+            local.append(message)
+        if policy.execute and tool not in allowed:
+            message = f"tool is not allow-listed: {tool}"
+            issues.append(f"{step_id}: {message}")
+            local.append(message)
+        if policy.execute and not policy.allow_side_effects and _contains_confirmation(raw.get("arguments", {})):
+            message = "confirmation flag is present while side effects are disabled"
+            issues.append(f"{step_id}: {message}")
+            local.append(message)
+
+    waves: list[tuple[str, ...]] = []
+    remaining = {step_id: set(values) for step_id, values in dependencies.items()}
+    while remaining:
+        ready = tuple(sorted(step_id for step_id, values in remaining.items() if not values))
+        if not ready:
+            cycle = tuple(sorted(remaining))
+            message = f"dependency cycle contains: {', '.join(cycle)}"
+            issues.append(message)
+            for step_id in cycle:
+                step_issues.setdefault(step_id, []).append(message)
+            break
+        waves.append(ready)
+        for step_id in ready:
+            remaining.pop(step_id, None)
+        for values in remaining.values():
+            values.difference_update(ready)
+    wave_by_id = {step_id: wave for wave, values in enumerate(waves) for step_id in values}
+
+    step_results: list[MissionStepPreflight] = []
+    for raw in raw_steps:
+        step_id = raw["id"]
+        schema: ToolValidationReport | None = None
+        local_issues = step_issues.setdefault(step_id, [])
+        local_warnings = step_warnings.setdefault(step_id, [])
+        try:
+            schema = catalogue.validate(raw["tool"], raw.get("arguments", {}))
+            if not schema.ok:
+                local_issues.extend(
+                    f"{issue.path}: {issue.code}: {issue.message}" for issue in schema.issues
+                )
+            for warning in schema.warnings:
+                message = f"{warning.path}: {warning.code}: {warning.message}"
+                local_warnings.append(message)
+                warnings.append(f"{step_id}: {message}")
+        except ToolSchemaError as error:
+            message = str(error)
+            local_issues.append(message)
+            issues.append(f"{step_id}: {message}")
+        status = "ready"
+        if local_issues:
+            status = "blocked" if any("dependency" in issue or "binding" in issue for issue in local_issues) else "invalid"
+        step_results.append(
+            MissionStepPreflight(
+                id=step_id,
+                tool=raw["tool"],
+                depends_on=tuple(raw.get("depends_on", [])),
+                wave=wave_by_id.get(step_id),
+                status=status,
+                schema=schema,
+                issues=tuple(dict.fromkeys(local_issues)),
+                warnings=tuple(dict.fromkeys(local_warnings)),
+            )
+        )
+    return MissionPreflight(
+        mission_id=request.mission_id,
+        goal=request.goal,
+        request_digest=request_digest,
+        catalogue_digest=catalogue.digest,
+        execution="authorized" if policy.execute else "planned",
+        waves=tuple(waves),
+        steps=tuple(step_results),
+        issues=tuple(dict.fromkeys(issues)),
+        warnings=tuple(dict.fromkeys(warnings)),
+    )
+
+
+def _mission_policy(value: MissionPolicy | Mapping[str, Any] | None) -> MissionPolicy:
+    if value is None:
+        return MissionPolicy()
+    if isinstance(value, MissionPolicy):
+        return value
+    raw = _mapping("policy", value)
+    allowed = raw.get("allowed_tools", ())
+    if isinstance(allowed, (str, bytes)) or not isinstance(allowed, Sequence):
+        raise ArgumentError("policy.allowed_tools must be a sequence")
+    return MissionPolicy(
+        execute=raw.get("execute", False),
+        stop_on_error=raw.get("stop_on_error", True),
+        allow_side_effects=raw.get("allow_side_effects", False),
+        max_steps=raw.get("max_steps", 64),
+        max_step_output_bytes=raw.get("max_step_output_bytes", 2_000_000),
+        max_total_output_bytes=raw.get("max_total_output_bytes", 10_000_000),
+        allowed_tools=tuple(allowed),
+    )
+
+
+def _pointer_exists(value: Any, pointer: str) -> bool:
+    if not _valid_pointer(pointer, allow_empty=False):
+        return False
+    current = value
+    for token in pointer[1:].split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, Mapping):
+            if token not in current:
+                return False
+            current = current[token]
+        elif isinstance(current, list) and token.isdigit():
+            index = int(token)
+            if index >= len(current):
+                return False
+            current = current[index]
+        else:
+            return False
+    return True
+
+
+def _contains_confirmation(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        if value.get("confirm") is True:
+            return True
+        return any(_contains_confirmation(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_confirmation(child) for child in value)
+    return False
+
+
+__all__ = [
+    "MAX_ALLOWED_TOOLS",
+    "MAX_MISSION_STEPS",
+    "MAX_STEP_OUTPUT_BYTES",
+    "MAX_TOTAL_OUTPUT_BYTES",
+    "MissionBinding",
+    "MissionPolicy",
+    "MissionPreflight",
+    "MissionPreflightError",
+    "MissionRequest",
+    "MissionStep",
+    "MissionStepPreflight",
+    "preflight_mission",
+]

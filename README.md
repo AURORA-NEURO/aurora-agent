@@ -274,6 +274,9 @@ For every current or future MCP domain, the Python layer also exposes a schema-a
 `tool_catalogue()` snapshots the live definitions, `plan_tool()` performs bounded transport-shape
 preflight, and `tool_checked()` executes only after that review. This does not claim domain
 validity or suppress refusals; unsupported schema features remain visible as warnings.
+Mission requests can additionally pass through `mission_preflight()` for digest-bound graph,
+wave, binding, authorization, and per-step schema review before the Rust mission executor is
+called.
 
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,

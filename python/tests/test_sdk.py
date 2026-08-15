@@ -13,6 +13,8 @@ from prism_sdk import (
     RemoteError,
     ToolRefusal,
     ToolSchemaError,
+    MissionRequest,
+    MissionStep,
     Workspace,
 )
 
@@ -41,6 +43,16 @@ class SyncClientTests(unittest.TestCase):
             self.assertEqual(workspace.tool_checked("echo", {"value": 3}, catalogue=catalogue)["echo"]["value"], 3)
             with self.assertRaises(ToolSchemaError):
                 workspace.plan_tool("echo", {"value": "not-an-integer"}, catalogue=catalogue)
+            mission = workspace.mission_preflight(
+                MissionRequest(
+                    "mission-sdk",
+                    "check",
+                    [MissionStep("one", "data", "read", "check", "echo", {"value": 3})],
+                ),
+                catalogue=catalogue,
+            )
+            self.assertTrue(mission.ok)
+            self.assertEqual(mission.waves, (("one",),))
             result = client.call_tool("echo", {"value": 3})
             self.assertFalse(result.is_error)
             self.assertEqual(result.require_ok()["echo"]["value"], 3)
@@ -88,6 +100,15 @@ class AsyncClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await workspace.tool_checked("echo", {"value": 4}, catalogue=catalogue))["echo"]["value"], 4)
             with self.assertRaises(ToolSchemaError):
                 await workspace.plan_tool("echo", {"value": "not-an-integer"}, catalogue=catalogue)
+            mission = await workspace.mission_preflight(
+                MissionRequest(
+                    "mission-async-sdk",
+                    "check",
+                    [MissionStep("one", "data", "read", "check", "echo", {"value": 4})],
+                ),
+                catalogue=catalogue,
+            )
+            self.assertTrue(mission.fully_checked)
             result = await client.call_tool("echo", {"async": True})
             self.assertEqual(result.require_ok()["echo"]["async"], True)
             report = await AsyncWorkspace(client).developer_delivery_audit(

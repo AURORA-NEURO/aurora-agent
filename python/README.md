@@ -66,6 +66,11 @@ runner. `MissionBinding` supports validated field-level dataflow between direct 
 and `CapabilityQuery` routes across the complete domain catalogue with optional tool schemas;
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
+`mission_preflight()` now reviews that graph locally against a live `ToolCatalogue`: it reports
+content digests, deterministic waves, missing/cyclic dependencies, binding targets, execution
+allow-list and side-effect policy findings, and per-step schema warnings before any mission POST.
+It is a transport and orchestration review only; the Rust `agent_mission` tool remains authoritative
+for actual execution and refusal propagation.
 For any current or future domain without a handwritten wrapper, `tool_catalogue()` snapshots the
 live `tools/list` or `/v1/tools` definitions, `plan_tool()` performs conservative shape-only
 preflight, and `tool_checked()` executes the reviewed call. Plans are digest-bound and carry no

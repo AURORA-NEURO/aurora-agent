@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EvidenceItem, LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EvidenceItem, LabPlanRequest, MissionRequest, MissionStep, RoutingDecisionRequest, WorldClaimCheckRequest
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -83,6 +83,15 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(client.tool_checked("echo", {"value": 3}, catalogue=catalogue)["mcp"]["result"]["value"], 3)
         with self.assertRaises(ArgumentError):
             client.plan_tool("echo", {"value": "not-an-integer"}, catalogue=catalogue)
+        mission = client.mission_preflight(
+            MissionRequest(
+                "mission-http",
+                "check",
+                [MissionStep("one", "data", "read", "check", "echo", {"value": 3})],
+            ),
+            catalogue=catalogue,
+        )
+        self.assertTrue(mission.ok)
         self.assertEqual(client.call_tool("echo", {"value": 3})["mcp"]["result"]["value"], 3)
         self.assertEqual(
             client.capability_discover(query="oncology")["mcp"]["result"]["query"],
@@ -175,6 +184,15 @@ class HttpApiClientTests(unittest.TestCase):
             catalogue = await client.tool_catalogue()
             self.assertEqual((await client.plan_tool("echo", {"value": 5}, catalogue=catalogue)).tool, "echo")
             self.assertEqual((await client.tool_checked("echo", {"value": 5}, catalogue=catalogue))["mcp"]["result"]["value"], 5)
+            mission = await client.mission_preflight(
+                MissionRequest(
+                    "mission-http-async",
+                    "check",
+                    [MissionStep("one", "data", "read", "check", "echo", {"value": 5})],
+                ),
+                catalogue=catalogue,
+            )
+            self.assertTrue(mission.fully_checked)
             self.assertEqual((await client.call_tool("echo", {"async": True}))["tool"], "echo")
             self.assertEqual(
                 (await client.capability_route("async route", [{"id": "release", "tool": "bundle_verify"}]))["mcp"]["result"]["goal"],

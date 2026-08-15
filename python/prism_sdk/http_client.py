@@ -29,6 +29,7 @@ from .errors import ApiError, ArgumentError, TransportError
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
+from .mission import MissionPreflight, MissionRequest, preflight_mission
 from .repository_requests import (
     RepositoryBundleRequest,
     RepositoryCatalogRequest,
@@ -209,6 +210,19 @@ class ApiClient:
 
         plan = self.plan_tool(name, arguments, catalogue=catalogue)
         return self.call_tool(plan.tool, plan.to_mcp_arguments())
+
+    def mission_preflight(
+        self,
+        request: MissionRequest,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> MissionPreflight:
+        """Review a mission against the live HTTP tool catalogue without issuing a POST."""
+
+        if not isinstance(request, MissionRequest):
+            raise ArgumentError("request must be a MissionRequest")
+        snapshot = catalogue if catalogue is not None else self.tool_catalogue()
+        return preflight_mission(request, snapshot)
 
     def capability_discover(
         self,
@@ -627,6 +641,19 @@ class AsyncApiClient:
 
         plan = await self.plan_tool(name, arguments, catalogue=catalogue)
         return await self.call_tool(plan.tool, plan.to_mcp_arguments())
+
+    async def mission_preflight(
+        self,
+        request: MissionRequest,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> MissionPreflight:
+        """Async review of a mission against the live HTTP tool catalogue."""
+
+        if not isinstance(request, MissionRequest):
+            raise ArgumentError("request must be a MissionRequest")
+        snapshot = catalogue if catalogue is not None else await self.tool_catalogue()
+        return preflight_mission(request, snapshot)
 
     async def capability_discover(
         self,

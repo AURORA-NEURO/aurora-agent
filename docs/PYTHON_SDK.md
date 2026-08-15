@@ -101,6 +101,11 @@ invent defaults:
   allow-lists, side-effect posture, refusal propagation, and output budgets; the server remains the
   authority for ordering and execution. `MissionBinding` can route a JSON-pointer field from a
   successful direct prerequisite into an existing argument slot.
+- `mission_preflight(request, catalogue=...)` adds a no-side-effect client review before mission
+  dispatch. It returns a request digest, live-catalogue digest, deterministic waves, per-step
+  schema reports, binding/dependency findings, execution authorization issues, and explicit
+  limitations. It never turns a plan into a domain result; `agent_mission(...)` remains the Rust
+  authority for execution, refusal propagation, and output accounting.
 - `capability_discover(...)` searches the complete domain catalogue by intent, domain, group, or
   tool and can attach authoritative MCP schemas for the returned routing matches.
 - `capability_audit(include_groups=...)` verifies catalogue/schema parity, input-schema quality,

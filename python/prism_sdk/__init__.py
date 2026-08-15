@@ -128,7 +128,20 @@ from .mzml import MzmlAdapter, MzmlFinding, MzmlParseError, MzmlParseResult, par
 from .pdb import PdbAdapter, PdbFinding, PdbParseError, PdbParseResult, parse_pdb
 from .sam import SamAdapter, SamFinding, SamParseError, SamParseResult, parse_sam
 from .sdf import SdfAdapter, SdfFinding, SdfParseError, SdfParseResult, parse_sdf
-from .mission import MissionBinding, MissionPolicy, MissionRequest, MissionStep
+from .mission import (
+    MAX_ALLOWED_TOOLS,
+    MAX_MISSION_STEPS,
+    MAX_STEP_OUTPUT_BYTES,
+    MAX_TOTAL_OUTPUT_BYTES,
+    MissionBinding,
+    MissionPolicy,
+    MissionPreflight,
+    MissionPreflightError,
+    MissionRequest,
+    MissionStep,
+    MissionStepPreflight,
+    preflight_mission,
+)
 from .nifti import NiftiAdapter, NiftiAuditResult, NiftiFinding, audit_nifti
 from .ome_zarr import OmeAuditResult, OmeFinding, OmeZarrAdapter, audit_ome_zarr
 from .oracle import (
@@ -330,9 +343,17 @@ __all__ = [
     "MutationSpec",
     "MetricObservation",
     "MissionBinding",
+    "MAX_ALLOWED_TOOLS",
+    "MAX_MISSION_STEPS",
+    "MAX_STEP_OUTPUT_BYTES",
+    "MAX_TOTAL_OUTPUT_BYTES",
     "MissionPolicy",
+    "MissionPreflight",
+    "MissionPreflightError",
     "MissionRequest",
     "MissionStep",
+    "MissionStepPreflight",
+    "preflight_mission",
     "NiftiAdapter",
     "NiftiAuditResult",
     "NiftiFinding",

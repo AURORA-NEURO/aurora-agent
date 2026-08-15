@@ -28,7 +28,7 @@ from .context_requests import (
 from .errors import ArgumentError
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
-from .mission import MissionPolicy, MissionRequest, MissionStep
+from .mission import MissionPolicy, MissionPreflight, MissionRequest, MissionStep, preflight_mission
 from .repository_requests import (
     RepositoryBundleRequest,
     RepositoryCatalogRequest,
@@ -269,6 +269,19 @@ class Workspace:
 
         request = MissionRequest(mission_id, goal, steps, policy)
         return self.tool("agent_mission", request.to_mcp_arguments())
+
+    def mission_preflight(
+        self,
+        request: MissionRequest,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> MissionPreflight:
+        """Review mission graph, execution policy, and every step schema without dispatching."""
+
+        if not isinstance(request, MissionRequest):
+            raise ArgumentError("request must be a MissionRequest")
+        snapshot = catalogue if catalogue is not None else self.tool_catalogue()
+        return preflight_mission(request, snapshot)
 
     def capability_discover(
         self,
@@ -892,6 +905,19 @@ class AsyncWorkspace:
 
         request = MissionRequest(mission_id, goal, steps, policy)
         return await self.tool("agent_mission", request.to_mcp_arguments())
+
+    async def mission_preflight(
+        self,
+        request: MissionRequest,
+        *,
+        catalogue: ToolCatalogue | None = None,
+    ) -> MissionPreflight:
+        """Async review of mission graph, policy, and step schemas without dispatching."""
+
+        if not isinstance(request, MissionRequest):
+            raise ArgumentError("request must be a MissionRequest")
+        snapshot = catalogue if catalogue is not None else await self.tool_catalogue()
+        return preflight_mission(request, snapshot)
 
     async def capability_discover(
         self,
