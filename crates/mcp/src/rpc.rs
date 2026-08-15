@@ -34,6 +34,35 @@ impl Request {
             ))
         })?;
 
+        let Some(object) = value.as_object() else {
+            return Err(Box::new(Response::error(
+                None,
+                code::INVALID_REQUEST,
+                "JSON-RPC request must be an object".to_string(),
+                None,
+            )));
+        };
+
+        if object.get("jsonrpc") != Some(&Value::String(JSONRPC.to_string())) {
+            return Err(Box::new(Response::error(
+                response_id(&value),
+                code::INVALID_REQUEST,
+                "jsonrpc must be exactly \"2.0\"".to_string(),
+                None,
+            )));
+        }
+
+        if let Some(id) = object.get("id") {
+            if !(id.is_null() || id.is_string() || id.is_number()) {
+                return Err(Box::new(Response::error(
+                    None,
+                    code::INVALID_REQUEST,
+                    "id must be a string, number, or null".to_string(),
+                    None,
+                )));
+            }
+        }
+
         let method = value
             .get("method")
             .and_then(Value::as_str)
@@ -46,6 +75,26 @@ impl Request {
                 ))
             })?
             .to_string();
+
+        if method.is_empty() {
+            return Err(Box::new(Response::error(
+                response_id(&value),
+                code::INVALID_REQUEST,
+                "method must not be empty".to_string(),
+                None,
+            )));
+        }
+
+        if let Some(params) = object.get("params") {
+            if !(params.is_object() || params.is_array()) {
+                return Err(Box::new(Response::error(
+                    response_id(&value),
+                    code::INVALID_REQUEST,
+                    "params must be an object or array".to_string(),
+                    None,
+                )));
+            }
+        }
 
         Ok(Request {
             id: value.get("id").cloned(),
@@ -62,6 +111,12 @@ impl Request {
     pub fn param_str(&self, name: &str) -> Option<&str> {
         self.params.get(name).and_then(Value::as_str)
     }
+}
+
+fn response_id(value: &Value) -> Option<Value> {
+    value
+        .get("id")
+        .and_then(|id| (id.is_null() || id.is_string() || id.is_number()).then(|| id.clone()))
 }
 
 #[derive(Debug, Clone)]
@@ -115,5 +170,43 @@ impl Response {
             }
         }
         Value::Object(map)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_valid_notification_has_no_id_and_is_not_answered() {
+        let request = Request::parse(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+            .expect("notification parses");
+        assert!(request.is_notification());
+    }
+
+    #[test]
+    fn an_invalid_envelope_is_rejected_before_method_dispatch() {
+        for document in [
+            r#"{"id":1,"method":"ping"}"#,
+            r#"{"jsonrpc":"1.0","id":1,"method":"ping"}"#,
+            r#"{"jsonrpc":"2.0","id":true,"method":"ping"}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"ping","params":false}"#,
+        ] {
+            let error = Request::parse(document).unwrap_err().to_json();
+            assert_eq!(error["error"]["code"], json!(code::INVALID_REQUEST));
+        }
+    }
+
+    #[test]
+    fn response_serialisation_never_leaks_a_result_into_an_error() {
+        let response = Response::error(
+            Some(json!(7)),
+            code::INVALID_PARAMS,
+            "bad parameters".into(),
+            Some(json!({ "field": "layer" })),
+        )
+        .to_json();
+        assert!(response.get("result").is_none());
+        assert_eq!(response["error"]["data"]["field"], json!("layer"));
     }
 }

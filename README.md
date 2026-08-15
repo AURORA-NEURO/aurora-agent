@@ -242,15 +242,180 @@ neither; the registry it found them in is retained there as the audit's known-po
 ./target/release/bioprism-mcp --root .
 ```
 
-Speaks JSON-RPC 2.0 over stdio. `fiber_compile` returns the **L0 decision contract** — goal,
-verdict, what was omitted, whether the sufficiency claim holds — plus a refinement handle, and
-*not* the evidence. An agent descends with `fiber_refine` only when the contract is insufficient to
-act on. On the reference world L0 is ~204 estimated tokens against ~1,900 for the full section.
+Speaks JSON-RPC 2.0 over newline-delimited stdio. The session follows the MCP lifecycle: the client
+calls `initialize`, waits for the `notifications/initialized` acknowledgement, and only then calls
+tools or resources. `fiber_compile` returns the **L0 decision contract** — goal, verdict, what was
+omitted, whether the sufficiency claim holds — plus a versioned, content-addressed refinement
+handle, and *not* the evidence. An agent passes that handle to `fiber_refine` only when the contract
+is insufficient to act; the server recompiles and verifies the certificate digest before disclosing
+the requested layer. On the reference world L0 is ~204 estimated tokens against ~1,900 for the full
+section.
 
 The invariant that makes that safe: **omissions are reported at every layer**, so an agent that
 stops at L0 still knows what it does not have. Layering hides volume, never the fact of an
-omission. Paths are confined to `--root`; absolute paths and `..` are refused; `world_index`
-previews its write unless called with `confirm: true`.
+omission. Paths are confined to `--root`; absolute paths, `..`, and symlink escapes are refused.
+The three shipped JSON schemas and the capability catalog are available through read-only MCP
+resources, so a client can build valid documents and route work without reading arbitrary files.
+`world_index` previews its write unless called with `confirm: true`.
+
+The same server exposes the broader workspace: `world_validate` checks a world before compilation,
+`context_compare` runs the equal-engineering baseline panel, `bioworlds_catalog` runs the reference
+vertical slices, `modality_catalog` exposes assay resolution and failure-mode contracts,
+`mutation_family` validates metamorphic families with effective diversity, `prism_minimize` reduces
+and re-checks a diagnostic world, `registry_gate` fail-closes attested benchmark packs,
+`operations_catalog` executes the local/team topology parity and service-contract audit while
+keeping undefined metrics explicit,
+`capability_rank` compares serialized metric vectors without collapsing holes or trade-offs and
+can apply a declared weighting with sensitivity evidence, while `research_ci_check` runs the
+claim, split, figure, regression, environment, egress, non-claim and provenance predicates,
+`policy_screen` enforces caller-supplied policy rules before selection and preserves typed
+refusals, `safety_release_gate` applies the complete dual-use risk gate with unrated dimensions
+still blocking, `hub_search` performs bounded federated exact-facet discovery with authority and
+freshness provenance, `measurement_compare` checks standards declarations without silent unit or
+ontology coercion, `governance_schema_check` checks the shipped schema contracts,
+`medical_boundary_check` admits research use cases and structurally refuses clinical outputs,
+`tabular_ingest` runs the real CSV/TSV adapter with independent conformance and loss accounting,
+`observed_world_declare` seals pinned observed-world declarations, `world_claim_check` enforces
+the provenance claim ladder, `hub_resolve` resolves a federated pack request with digest and
+freshness provenance, `hub_lock` builds a transitive provenance-preserving dependency lock,
+`safety_posture` reports residual threat populations, and `weave_protocol_catalog` exposes typed
+agent-act antecedents.
+`bioethics_action_review` partitions research plans from physical actions and only produces an
+external referral after both required human approvals are present; `bioethics_human_subject_screen`
+keeps institutional review, consent, and return-of-results checks separate; `bioethics_dual_use_review`
+adds an explicit misuse-surface assessment in front of the section-13 release gate;
+`bioethics_validation_check` audits evidence completeness and independent reproduction; and
+`bioethics_representation_audit` preserves unmeasured and small-cell-suppressed strata while
+refusing attribution across unmatched resource context.
+`influence_analyze` computes caller-scoped numeric influence bounds over declared factor regions,
+defaults to structural-only analysis, and keeps unknown preconditions distinct from vacuous bounds.
+`routing_decide` selects only among an explicitly approved architecture panel, abstains on weak
+coverage or margins, and refuses held-out evidence leakage when a task identity is supplied;
+`token_context_plan` checks mandatory token closure, dry-run restricted-data privacy, and policy-only
+comparisons while preserving estimator provenance; `bioql_compile` type-checks explicit biological
+schemas for units, frames, builds, clocks, labels, provenance, and cost bounds without executing a
+query; `weavelang_compile` compiles source to
+deterministic WeaveIR and can inspect or replay its local semantics, with replay as the default and
+world-mutating transitions refused.
+`projection_bundle` derives graph, hypergraph, timeline, and table views from the same compiled
+section and certificate, preserving provenance, fidelity, and unresolved-obstruction coverage;
+view bodies are opt-in and are never treated as proof.
+`lens_catalogue` exposes the implemented section-42 questions, evidence requirements, scope
+preconditions, and declared refusals before a run; `lens_leakage_check` executes the typed cohort
+leakage lens with sealed nonvisual witness rows, explicit underdetermination, and no split repair.
+`choreography_check` checks serialized multiparty protocols, projects every role, and preserves
+bounded or inconclusive model-checking results; `conformance_run` verifies shipped fixture
+digests before running the FIBER suite and returns its noncompensatory release decision.
+`provider_capability_gate` gates runtime/provider claims on passed correctness and security
+evidence, keeps performance values as measurements without invented thresholds, and marks
+cross-provider comparisons indeterminate when either side is untested.
+`scale_family_split_verify` verifies imported benchmark tiers against lineage roots and refuses
+family straddles; `stewardship_review_check` concludes evaluator reviews only when mandatory
+dimensions, corpus support, and independence hold, keeping unreviewed dimensions explicit.
+`quality_gate_run` preserves pass, fail-with-witness, and not-runnable data-quality outcomes;
+`ledger_ingest` appends bitemporal events while exposing quarantine, idempotency, causal release,
+hash-chain, clock-anomaly, temporal-cut, and digest-only projection state.
+`fabric_synthesize` evaluates typed agent-composition candidates against hard effects, privacy,
+budget, assurance, and terminal-state constraints, then returns the rejection map and Pareto
+frontier without inventing a weighted winner.
+`interweave_workflow_catalogue` exposes the six reference workflows and derives their 54 owed
+deliverables from the typed catalogue, keeping specification inventory separate from artefact
+availability.
+`epistemic_voi` prices explicit evidence actions and non-adaptive bundles while keeping gross risk
+reduction, declared cost, net value, action changes, complementarity, and exhaustive limits visible;
+`benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
+repetition analysis; and `pack_catalogue` exposes the agent and biological pack portfolio without
+turning declarations into measured scores.
+`pack_health_assess` runs the typed pack-health gate over observed calibration, trivial baselines,
+contamination, oracle posture, and materialization, binding every finding to the pack digest and
+refusing a numeric score for an unreportable revision.
+`foundation_contract_check` validates falsifiable-contract admissibility, safe refinement, claim
+applicability, world-class counterfactual strength, reveal policy, and transition-plane consistency
+as separate gates.
+`world_generate` creates deterministic synthetic world/query pairs from a bounded `WorldSpec`,
+parses both through the typed runtime, and returns exact digests and structural validation;
+`hub_submission_review` checks the public submission contract and can replay append-only moderation
+with independent verification attestations; `telemetry_project` applies typed redaction with a
+semantic-loss report and optionally evaluates observed-versus-asserted operational metrics. These
+three surfaces are local contract workflows only: they do not publish to a network, authenticate
+identities, persist a hub ledger, export OTLP, execute models, or make clinical claims.
+`factory_lifecycle_simulate` adds deterministic lease, expiry, idempotency, compensation, quarantine,
+and atomic-commit replay; `hub_disclosure_review`, `hub_card_render`, and `hub_leaderboard_render`
+carry disclosure ratchets, fail-closed score publication, comparability conditions, and typed
+unranked entries into agent-callable public-hub projections. `release_audit` composes required
+registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while
+retaining repository impact and developer-platform diagnostics as advisory evidence. These
+surfaces remain bounded and local: they do not create durable queues, identity providers, web UI,
+public-key signing, CI execution, deployment, or network publication.
+`trace_analyze` ingests native JSONL trajectories with explicit import loss, validates causal
+ordering, ranks decision-bearing review candidates, and compares lossless passing traces for first
+divergence. It returns review-gated `CellProposal` previews; it does not replay tools, minimize
+state, use an unimplemented OpenTelemetry adapter, or publish a Decision Cell.
+`lineage_audit` checks specimen ancestry, mass, time, material, artifacts, and identity evidence;
+`preanalytic_apply` runs the real pre-measurement mutation postconditions, family null control,
+response availability, and optional caller-threshold detectability.
+`contradiction_review` poses multimodal readings, filters admissible explanations, detects answer
+cues, ranks discriminating evidence, and keeps resolved, not-yet-examined, and unresolvable states
+distinct without choosing a correct modality.
+`lab_plan` orders caller-declared evidence acquisitions against dependency-aware obligations,
+privacy boundaries, and budget stop rules, while `atlas_report` preserves capability coverage debt,
+failure inconsistencies, measured-versus-unmeasured holes, and optional gated composites.
+`ops_acceptance` reports typed operational acceptance findings without turning unverifiable criteria
+into passes. `ops_capacity` projects qualified work and demand, refusing unbounded work or silent
+degradation. `bundle_verify` recomputes carried result-bundle content and keeps referenced,
+unrecomputed, and provenance-limited entries explicit; it does not claim public-key authentication.
+`oracle_reference_panel` preserves independent reader calls, minority evidence, adjudication
+blinding, and unresolved splits. `oracle_missingness` checks missingness informativeness,
+complete-case admissibility, and small-cell egress under an explicit caller policy.
+`adaptive_panel` audits clustered evaluation evidence, selects the next bounded candidate batch,
+and refuses reportable estimates below coverage or stopping floors. `posterior_gate` keeps
+capability-level posterior vectors separate from rationale-bearing release scalars, coverage
+floors, vetoes, and sensitivity. `oracle_combine` combines tiered judgements without majority
+voting, retaining underdetermination, suppressed overrides, inadmissible evidence, and
+disagreement witnesses.
+`bioeval_reference_audit` validates reference mass normalization and reports distributed truth,
+modal confidence, entropy, dispersion attribution, unresolved scope, and not-evaluable scope
+without treating an omitted state as zero or collapsing the reference to a label.
+`evaluation_worldline_audit` separates future leakage from dangling context references,
+`evaluation_reproduction_check` certifies rerun outputs without promoting reproducibility to
+biological validity, and `evaluation_trajectory_check` evaluates declared path properties with
+bounded immediate/downstream suffixes. `runtime_effect_check` authorizes effects under an explicit
+deny-by-default policy without executing them, while `runtime_tape_verify` verifies hash-chained
+world tapes, checkpoints, artifacts, simulated provenance, and first divergence. `onco_boundary_check`
+keeps research output separate from individualized clinical use, and `onco_response_assess` keeps
+post-treatment progression, threshold sensitivity, and non-identifiable change states explicit.
+`onco_worldline_view` keeps acquisition, recording, release, and agent-visibility clocks distinct,
+reports biological order separately from record order, and exposes the visibility firewall at a
+caller-supplied cutoff. `onco_classification_check` runs the integrated molecular criteria table
+without treating uncollected assays as negative. `oncoworlds_identity_join` checks participant,
+lesion, specimen, disease-epoch, relation, and permissible-use boundaries and returns typed join
+refusals rather than silently discarding cross-modal mismatches.
+`oncoworlds_model_transport` checks whether a model-system result can carry a declared, lossy
+research claim toward patients. `oncoworlds_methylation_classify` preserves QC abstention,
+threshold, calibration, and tumour-content caveats, while `oncoworlds_methylation_compare` keeps
+classifier-version disagreement version-conditioned. `oncoworlds_radiogenomic_check` checks
+participant-safe splits, training-only feature fitting, specimen-versus-tumour target scope,
+mechanism strata, and declared transport assumptions before admitting a cross-modal claim.
+`onco_outcome_analyze` requires an explicit estimand before interpreting one subject’s follow-up,
+keeps loss to follow-up and competing death as censoring distinctions, and reports delayed-entry
+bias. `oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and
+keeps multiple compatible histories as ambiguity rather than selecting one.
+`stress_profile` and `stress_report` sweep biological stress families and report breaking points,
+generator defects, confounding, effective sample size, and unresolved measurements without reducing
+robustness to a single score.
+`developer_platform_status` verifies the cookbook, walkthrough standing, diagnostics, exit-code
+audit and declared change-impact surfaces while keeping foreign SDK/CI artifacts explicit.
+`sdk_registry_check` validates serialized plugin manifests, computes whole/core digests, reports
+attributed trust evidence, and attempts deterministic registry admission under an explicit host
+policy; invalid declarations and capability conflicts return no partial resolution.
+`workspace_capabilities` reports every
+major biological, evaluation, mutation, safety, orchestration, operations and documentation
+surface with its actual transport, while `repository_catalog`/`repository_bundle` provide bounded,
+route-aware access to the documentation graph. Documentation bundles preserve protected closure,
+route defects, traversal completeness and omission influence; requesting rendered markdown is
+explicit and fails rather than truncating over a caller-supplied limit. `repository_impact` computes
+conservative incoming-dependent closure and typed propagation stops for a changed module, with
+affected task routes retained as explicit invalidation evidence rather than a semantic-diff claim.
 
 ## Evaluating a context policy
 

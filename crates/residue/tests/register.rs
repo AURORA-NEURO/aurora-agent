@@ -14,7 +14,7 @@ use bioprism_residue::{
 #[test]
 fn the_register_explains_the_whole_backlog_and_nothing_else() {
     let register = residue().expect("well formed");
-    assert_eq!(register.len(), 57);
+    assert_eq!(register.len(), 56);
     assert_eq!(register.sections().len(), 10);
 }
 
@@ -32,7 +32,7 @@ fn every_module_carries_at_least_one_verdict_and_every_verdict_carries_a_source(
 }
 
 #[test]
-fn exactly_one_of_the_fifty_seven_still_carries_work_on_any_reading() {
+fn exactly_one_of_the_fifty_six_still_carries_work_on_any_reading() {
     // This fell from twenty-six to one when four crates landed, and the fall is the register doing
     // its job rather than an embarrassment to it: twenty-five of the twenty-six left the backlog
     // outright. The survivor is the sandbox, which no crate can build and every crate says so. If a
@@ -41,7 +41,7 @@ fn exactly_one_of_the_fifty_seven_still_carries_work_on_any_reading() {
     let register = residue().expect("well formed");
     let distribution = Distribution::of(&register);
     assert_eq!(distribution.work_remaining, 1);
-    assert_eq!(distribution.modules.total(), 57);
+    assert_eq!(distribution.modules.total(), 56);
     // Zero by *primary* verdict: no module's first-listed reading is that work remains. The one
     // survivor is a second reading beside a discharge, which is exactly the case a register holding
     // one verdict per module would have lost.
@@ -55,13 +55,13 @@ fn the_verdict_distribution_over_modules_is_the_one_reported() {
     let counts = Distribution::of(&register).modules;
     assert_eq!(counts.process, 37);
     assert_eq!(counts.foreign_artifact, 10);
-    assert_eq!(counts.discharged_elsewhere, 10);
+    assert_eq!(counts.discharged_elsewhere, 9);
     assert_eq!(counts.genuinely_uncovered, 0);
     assert_eq!(
         counts.block_level_split, 0,
         "no module's primary verdict is a split"
     );
-    assert_eq!(counts.total(), 57);
+    assert_eq!(counts.total(), 56);
 }
 
 #[test]
@@ -389,22 +389,22 @@ fn no_single_section_holds_a_majority_of_the_residue() {
         .max()
         .copied()
         .unwrap_or_default();
-    assert_eq!(largest, 13);
+    assert_eq!(largest, 12);
     assert!(largest * 4 < register.len());
 }
 
 #[test]
 fn a_module_leaving_the_backlog_is_a_deletion_and_touches_nothing_else() {
     let mut register = residue().expect("well formed");
-    let key = ModuleKey::new(11, 10).expect("in range");
+    let key = ModuleKey::new(11, 4).expect("in range");
     assert!(register.get(key).is_some());
     assert!(register.without(key));
-    assert_eq!(register.len(), 56);
+    assert_eq!(register.len(), 55);
     assert!(register.get(key).is_none());
     assert!(!register.without(key), "removing it twice is a no-op");
     // Nothing else moved: the remaining entries hold no cross-references to each other.
-    assert!(register.find("Mcp Server").is_none());
-    assert!(register.find("Python Sdk").is_some());
+    assert!(register.find("Python Sdk").is_none());
+    assert!(register.find("Typescript Sdk").is_some());
 }
 
 #[test]
@@ -438,7 +438,7 @@ fn a_stored_verdict_that_lost_its_discharger_fails_to_parse_rather_than_arriving
     let register = residue().expect("well formed");
     let json = serde_json::to_string(&register).expect("serializes");
     let hollowed = json.replace(
-        "\"verdict\":\"discharged_elsewhere\",\"by\":[\"bioprism-mcp\"]",
+        "\"verdict\":\"discharged_elsewhere\",\"by\":[\"bioprism-packs\",\"bioprism-factory\"]",
         "\"verdict\":\"discharged_elsewhere\",\"by\":[]",
     );
     assert_ne!(hollowed, json, "the fixture matched something");

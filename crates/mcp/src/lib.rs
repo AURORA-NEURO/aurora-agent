@@ -1,6 +1,6 @@
 //! Model Context Protocol server for the FIBER context compiler.
 //!
-//! Implements blueprint 11.11 and the MCP half of 43.35 (schemas, APIs and the Cognitive ABI).
+//! Implements blueprint 11.10–11.11 and the MCP half of 43.35 (schemas, APIs and the Cognitive ABI).
 //! This is the adoption wedge: an agent in any framework can compile a decision context, descend
 //! only as far into the evidence as it needs, and verify a certificate — without linking the
 //! engine or learning a new SDK.
@@ -9,7 +9,11 @@ pub mod rpc;
 pub mod server;
 
 pub use rpc::{Request, Response};
-pub use server::{tool_definitions, Server, PROTOCOL_VERSION, SERVER_NAME};
+pub use server::{
+    resource_definitions, tool_definitions, workspace_capabilities, Lifecycle, Server,
+    CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI, PROTOCOL_VERSION, QUERY_SCHEMA_URI, SERVER_NAME,
+    WORLD_SCHEMA_URI,
+};
 
 use std::io::{BufRead, Write};
 

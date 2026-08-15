@@ -10,6 +10,17 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
+The MCP integration layer currently exposes 102 callable tools. That count is intentionally
+separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
+`repository_impact` make existing typed contracts agent-callable, while `world_generate`,
+`hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
+contract, and observability projection workflows. `factory_lifecycle_simulate`,
+`hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, and `release_audit` now
+compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
+durable queues, identity, signing, CI execution, UI, OTLP, and network publication explicit as
+unimplemented. None of these turns foreign Python, TypeScript, REST/gRPC, CI, UI, OTLP, or
+network-publication artifacts into implemented workspace code.
+
 The table below is a snapshot; the script is the live source.
 
 ```bash
@@ -18,7 +29,7 @@ BLUEPRINT=/path/to/distribution/root tools/coverage.sh
 
 ## The end state, and what is left
 
-**The figure was 92.6% until an audit found an off-by-one in `tools/coverage.sh`.** The numerator
+**An earlier snapshot reported 92.6% until an audit found an off-by-one in `tools/coverage.sh`.** The numerator
 counted every cited module while the denominator excluded the ten programme sections, so a single
 cited prose module — `21.07`, in `crates/bundle`, for the sentence deferring the signing scheme to
 an ADR nobody wrote — inflated the count by one. The evidence was already in this file: it said 703
@@ -27,12 +38,12 @@ prose from the uncovered list before counting, which is why its figure was the c
 along. 702 + 57 = 759 now reconciles.
 
 
-Coverage is **92.5%** — 702 of 759 code-bearing modules. The remaining **57 are enumerated in
+Coverage is **92.6%** — 703 of 759 code-bearing modules. The remaining **56 are enumerated in
 `docs/BACKLOG.md` and explained in `crates/residue`**, which holds one typed verdict per module
 saying why no crate implements it, anchored to a sentence a classifying crate actually wrote. Its
 reconciliation against the backlog is a test, so the two cannot drift apart silently.
 
-The distribution over the 57: **37 process, 10 foreign artifact, 10 discharged elsewhere, and 1
+The distribution over the 56: **37 process, 10 foreign artifact, 9 discharged elsewhere, and 1
 genuinely uncovered.** That last one is deliberate. `crates/bioethics` discharges §36's sandboxing
 module and in the same paragraph records that all thirteen of its required controls need a process
 boundary, a network stack or a scanner, none of which exists here — so the register carries a second
@@ -85,13 +96,13 @@ state is a backlog whose residue is explained rather than empty.
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 702 |
-| **code-bearing coverage** | **92.5%** |
+| cited | 703 |
+| **code-bearing coverage** | **92.6%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 92.5% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 92.6% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 

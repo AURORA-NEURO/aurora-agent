@@ -1,4 +1,4 @@
-//! The fifty-seven, transcribed.
+//! The fifty-six, transcribed.
 //!
 //! Every module `docs/BACKLOG.md` lists, with the verdict a classifying crate reached about it and
 //! the file that verdict was written in. Nothing here is a new judgement about a module a crate
@@ -198,20 +198,6 @@ fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
                  Rust; the subscription, retry and signature machinery is a property of a running \
                  endpoint.",
                 ForeignSurface::NetworkApi,
-            )?],
-        )?,
-        entry(
-            11,
-            10,
-            "Mcp Server",
-            vec![transcribed(
-                "bioprism-devplat",
-                DEVPLAT,
-                "title: \"MCP Server\",",
-                "`bioprism-mcp` serves the protocol and advertises the tool definitions, citing a \
-                 different module for the same subject. A second server would be a second answer \
-                 to what tools the platform exposes.",
-                Classification::discharged_by(["bioprism-mcp"])?,
             )?],
         )?,
         entry(

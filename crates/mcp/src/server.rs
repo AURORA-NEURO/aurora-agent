@@ -16,26 +16,228 @@
 //! how much was excluded and whether the sufficiency claim holds.
 
 use crate::rpc::{code, Request, Response};
+use bioprism_adapter::{certify, Source, SourceProvenance, TabularAdapter, TabularProfile};
+use bioprism_adaptive::{
+    AdaptivePanel, Candidate as AdaptiveCandidate, CapabilityId as AdaptiveCapabilityId,
+};
+use bioprism_atlas::{composite as atlas_composite, Atlas, CoverageReport, WeightingPolicy};
+use bioprism_atlashub::{CiReport, ResultUnderReview};
+use bioprism_atlasx::{named_in_scope, ATLASX_SCHEMA_VERSION, DEFINED_HERE, NAMED_NEVER_DEFINED};
+use bioprism_backends::{Budget as InfluenceBudget, QueryRegion, RegionFactor};
+use bioprism_benchcompiler::{
+    analyse as analyse_benchmark, boundaries as benchmark_boundaries,
+    episodes as benchmark_episodes, repetitions as benchmark_repetitions,
+};
+use bioprism_bioethics::action::{refer as refer_physical_action, ActionPlan, Authorisation};
+use bioprism_bioethics::dualuse::{refer as refer_dual_use, CapabilityRelease};
+use bioprism_bioethics::humansubject::{screen as screen_human_subject, StudyDescription};
+use bioprism_bioethics::representation::{
+    attribute as attribute_representation, summarise, ContextAxis, StratumObservation,
+};
+use bioprism_bioethics::validation::ValidationDossier;
+use bioprism_bioeval::{Dispersion, ReferenceDistribution, ReferenceStandard};
+use bioprism_bioevalx::{Reexecution, Trajectory, Worldline as EvaluationWorldline};
+use bioprism_biolang::{compile as compile_bioql, QuerySchema};
+use bioprism_bioworlds::SliceCatalog;
+use bioprism_bundle::ResultBundle;
+use bioprism_choreography::{
+    ExplorationBound, GlobalType, System as ChoreographySystem, WellFormedGlobal,
+};
+use bioprism_conformance::fiber_suite::workspace_fixture_root;
+use bioprism_conformance::{
+    assess as assess_conformance, fiber_suite, shipped_baseline, FiberReference, FixtureStore,
+};
+use bioprism_cookbook::{standard_cookbook, Workspace as CookbookWorkspace};
+use bioprism_dataops::{
+    declared_objective_names, parity as topology_parity, reference_local, reference_team,
+    DataClass, Plane, TenantPattern,
+};
+use bioprism_devplat::{standard_walkthroughs, DevPlatReport};
+use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
+use bioprism_docgraph::{
+    compile_bundle, impact_of, lint, scan_markdown_tree, DocEdgeType, ModuleId, NodeStatus,
+    ScanOptions, TaskRoute, TraversalPolicy,
+};
+use bioprism_epistemic::{
+    complementarity as epistemic_complementarity, joint_value as epistemic_joint_value,
+    value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
+    Belief as EpistemicBelief, DecisionProblem as EpistemicDecisionProblem,
+    Outcome as EpistemicOutcome,
+};
+use bioprism_evalengine::{
+    CapabilityPosterior, CreditPolicy, Observation, ReleaseGate as EvalReleaseGate,
+};
+use bioprism_fabric::synth::{
+    synthesize as synthesize_fabric, unimplemented_stages, Candidate as FabricCandidate,
+    Goal as FabricGoal,
+};
+use bioprism_factory::{Job as FactoryJob, JobStore, WorkerCapability};
 use bioprism_fiber::{compile, Query};
+use bioprism_foundation::contract::{ContractDraft, FalsifiableContract};
+use bioprism_foundation::maturity::ApplicabilityEnvelope;
+use bioprism_foundation::worldclass::{BioWorldDeclaration, CounterfactualClaim, Transition};
+use bioprism_governance::known as known_schemas;
+use bioprism_graph::{project_all as project_graph_bundle, ProjectionSource};
+use bioprism_hub::{
+    accept as accept_hub_submission, BioAtlasCard, Board as HubBoard, ContaminationWitness,
+    Decision as HubDecision, DisclosureLedger, Entry as HubEntry, Epoch as HubEpoch,
+    ModerationLedger, ModerationState, Score as HubScore, SubmissionDraft, SubmissionId, Submitter,
+    VerificationStatus,
+};
+use bioprism_hubapi::{
+    resolve_dependencies as hub_resolve_dependencies, resolve_in as hub_resolve_in,
+    search as hub_search_query, Catalog as HubCatalog, Federation as HubFederation,
+    Query as HubQuery, Request as HubRequest,
+};
+use bioprism_influence::{InfluenceAnalyzer, Perturbation};
+use bioprism_infra::{Dataset as QualityDataset, Gate as QualityGate, ReferenceSets};
+use bioprism_interweave::workflow::{catalogue as interweave_catalogue, outstanding_deliverables};
+use bioprism_lab::{
+    expand as expand_acquisitions, separate as separate_hypotheses, AcquisitionAction,
+    AcquisitionCost, HypothesisSet as LabHypothesisSet, Observations,
+};
+use bioprism_ledger::{ClassCounts, Event, EventLedger, SubjectLatest, TemporalCut};
+use bioprism_lens::{catalogue as lens_catalogue, run as run_lens, CohortLeakageLens, CohortSplit};
+use bioprism_metrics::{
+    CapabilityVector, ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting,
+    PartialRanking, RankInstability, METRICS_SCHEMA_VERSION,
+};
+use bioprism_modalities::{catalog::all as all_modalities, Modality, Resolution};
+use bioprism_mutation::{
+    generate as generate_mutations, measure as measure_diversity, standard_suite,
+};
+use bioprism_onco::{
+    assess as onco_assess, classify as onco_classify, AcquisitionTime, AvailabilityTime,
+    BoundaryRequest, ClinicalObservation, Estimand, FollowUp, Histology, ImagingObservation,
+    MarkerPanel, ProgressionEvidence, ResearchBoundary, ResponseCriterion, ResponseRequest,
+    Timepoint, TreatmentContext, TumourWorldline,
+};
+use bioprism_oncoworlds::{
+    assert_claim as onco_assert_radiogenomic_claim, classify as onco_classify_methylation,
+    compatible_histories as onco_compatible_histories, joinable_with_bridge,
+    reconcile_versions as onco_reconcile_methylation,
+    transport_to_patients as onco_transport_model, AnalysisUnit, Artifact, ClassifierVersion,
+    ClonalHistory, DeclaredTransport, EpochBridge, EstablishmentCohort, EvaluationDesign,
+    FidelityEvidence, IdentityEvidence, JoinReport, JoinVerdict, MethylationClass, ModelResult,
+    RadiogenomicClaim, SampleContext, TumourPopulation, VersionedResult,
+};
+use bioprism_ops::{
+    audit_statement as telemetry_audit_statement, CapacityModel, DegradationPlan, Demand,
+    DomainEvent, MetricDefinition, Observations as TelemetryObservations, RedactionPolicy, TraceId,
+    Workload,
+};
+use bioprism_oracle::{EvidenceTier as OracleEvidenceTier, Judgement, MeshPolicy, UtcTimestamp};
+use bioprism_oraclex::missing::{
+    complete_case_admissible, egress as oraclex_egress, informativeness, AbsencePattern, Boundary,
+    Field, MissingnessMechanism,
+};
+use bioprism_oraclex::panel::{ConsensusRule, ReaderPanel};
+use bioprism_packs::health::{
+    assess as assess_pack_health, HealthPolicy, Observations as PackObservations,
+};
+use bioprism_packs::ir::PackIr;
+use bioprism_packs::portfolio::{
+    all as all_packs, duplicate_signatures as duplicate_pack_signatures,
+};
+use bioprism_policy::{PolicyLabel, PolicyLattice, PolicyRule, Request as PolicyRequest};
+use bioprism_prism::{minimize, minimize_world, preserves};
+use bioprism_registry::{gate_document, Policy as RegistryPolicy};
+use bioprism_routing::{EvidenceLedger, Fingerprint, RoutingPolicy};
+use bioprism_runtime::{EffectPolicy, EffectRequest, WorldTape};
+use bioprism_safety::model::section_13;
+use bioprism_safety::release::{MedicalBoundary, ReleaseGate, RequestedOutput, RiskAssessment};
+use bioprism_scale::corpus::{Corpus, GeneratedItem};
+use bioprism_scale::split::{verify_item_assignment, Tier as ScaleTier};
+use bioprism_scope::{DimensionRegistry, ScopeKey, Timestamp as FactoryTimestamp};
+use bioprism_sdk::{
+    conformance_note, PluginManifest, PluginRegistry, RegistryPolicy as SdkRegistryPolicy,
+};
 use bioprism_section::{CertificateProfile, ContextCertificate, Layer, RenderContext};
+use bioprism_services::{audit as service_audit, AuditSummary};
+use bioprism_standards::{
+    report as comparability_report, ComparabilityPolicy as StandardsComparabilityPolicy,
+    Measurement,
+};
+use bioprism_stewardship::review::ReviewRecord;
 use bioprism_store::LazyWorld;
-use bioprism_world::{World, WorldSource};
+use bioprism_stress::{
+    profile as stress_profile_run, standard_panel, Cohort, Procedure, Stress, StressReport,
+};
+use bioprism_sweep::conform::{
+    differential as sweep_differential, gate as sweep_gate, CapabilityCard as SweepCapabilityCard,
+    Check as SweepCheck,
+};
+use bioprism_tokens::{
+    compare as compare_token_plans, plan as plan_token_context, ContextRequest, PlanCandidate,
+};
+use bioprism_trace::{
+    excluded as excluded_trace, first_divergence, from_jsonl as trace_from_jsonl,
+    is_actionable as divergence_is_actionable, review_reduction, segment as segment_trace,
+    validate as validate_trace, CellProposal, Trace as TraceIr,
+};
+use bioprism_weave::ActKind;
+use bioprism_weavelang::{compile as compile_weave, ExecutionMode, Machine};
+use bioprism_world::{validate, Severity, World, WorldSource};
+use bioprism_worldfactory::contradiction::{
+    check_intent, cue_scan, expectedness as contradiction_expectedness,
+    next_actions as contradiction_next_actions, pose as pose_contradiction,
+    validate as validate_contradiction, ContradictionProgram, DiscordanceClass,
+    DiscriminatingAction, EvidenceId, Hypothesis, HypothesisSet, MissingEvidence, Reading,
+    ReferenceDiscordance,
+};
+use bioprism_worldfactory::lineage::{audit as audit_lineage, SpecimenRegistry};
+use bioprism_worldfactory::observed::{
+    declare as declare_observed_world, SourceRef as ObservedSourceRef, StudyDesign,
+};
+use bioprism_worldfactory::preanalytic::{
+    apply as apply_preanalytic, check_response as check_preanalytic_response, detectability_floor,
+    validate_family, PreanalyticMutation, Specimen,
+};
+use bioprism_worldfactory::provenance::{
+    support as support_world_claim, Claim, Provenance as WorldProvenance,
+};
+use bioprism_worldgen::{generate as generate_world, WorldSpec};
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SERVER_NAME: &str = "bioprism";
+pub const QUERY_SCHEMA_URI: &str = "bioprism://schema/fiber-query/0.2";
+pub const CERTIFICATE_SCHEMA_URI: &str = "bioprism://schema/fiber-context-certificate/0.1";
+pub const WORLD_SCHEMA_URI: &str = "bioprism://schema/fiber-world/0.1";
+pub const CAPABILITIES_URI: &str = "bioprism://capabilities/0.1";
+
+const QUERY_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../schemas/fiber-v0.1/query.schema.json"
+));
+const CERTIFICATE_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../schemas/fiber-v0.1/context_certificate.schema.json"
+));
+const WORLD_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../schemas/fiber-v0.1/world.schema.json"
+));
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lifecycle {
+    New,
+    Initialized,
+    Ready,
+}
 
 pub struct Server {
     root: PathBuf,
-    initialized: bool,
+    lifecycle: Lifecycle,
 }
 
 impl Server {
     pub fn new(root: PathBuf) -> Self {
         Server {
-            root,
-            initialized: false,
+            root: std::fs::canonicalize(&root).unwrap_or(root),
+            lifecycle: Lifecycle::New,
         }
     }
 
@@ -43,10 +245,18 @@ impl Server {
         &self.root
     }
 
+    pub fn lifecycle(&self) -> Lifecycle {
+        self.lifecycle
+    }
+
     /// Resolves a client-supplied path inside the root.
     ///
-    /// Rejects absolute paths and any `..` component before touching the filesystem, so the check
-    /// does not depend on the path existing and cannot be defeated by a symlink race on lookup.
+    /// Rejects absolute paths, traversal, and symlink escapes from the root.
+    ///
+    /// The lexical check runs before touching the filesystem. For an existing path, the resolved
+    /// target is then canonicalised; for a new write, the nearest existing ancestor is checked.
+    /// This closes the common `root/link/outside` escape without pretending that a later filesystem
+    /// rename can be made race-free by a pure path helper.
     pub fn resolve(&self, relative: &str) -> Result<PathBuf, String> {
         let candidate = Path::new(relative);
         if candidate.is_absolute() {
@@ -62,7 +272,36 @@ impl Server {
                 }
             }
         }
-        Ok(self.root.join(candidate))
+
+        let resolved = self.root.join(candidate);
+        self.ensure_inside_root(&resolved)?;
+        Ok(resolved)
+    }
+
+    fn ensure_inside_root(&self, path: &Path) -> Result<(), String> {
+        let mut existing = path;
+        while !existing.exists() {
+            existing = existing.parent().ok_or_else(|| {
+                format!(
+                    "path cannot be checked against the server root: {}",
+                    path.display()
+                )
+            })?;
+        }
+
+        let canonical = existing.canonicalize().map_err(|error| {
+            format!(
+                "cannot resolve path against the server root: {} ({error})",
+                path.display()
+            )
+        })?;
+        if !canonical.starts_with(&self.root) {
+            return Err(format!(
+                "path escapes the server root and is refused: {}",
+                path.display()
+            ));
+        }
+        Ok(())
     }
 
     fn load_source(&self, relative: &str) -> Result<Box<dyn WorldSource>, String> {
@@ -93,19 +332,46 @@ impl Server {
 
     pub fn handle(&mut self, request: &Request) -> Option<Response> {
         if request.is_notification() {
-            if request.method == "notifications/initialized" {
-                self.initialized = true;
+            if request.method == "notifications/initialized"
+                && self.lifecycle == Lifecycle::Initialized
+            {
+                self.lifecycle = Lifecycle::Ready;
             }
             return None;
         }
 
         let id = request.id.clone();
         let response = match request.method.as_str() {
-            "initialize" => Response::result(id, self.initialize()),
+            "initialize" => {
+                if self.lifecycle != Lifecycle::New {
+                    Response::error(
+                        id,
+                        code::INVALID_REQUEST,
+                        "initialize may only be called once per server session".into(),
+                        None,
+                    )
+                } else {
+                    let result = self.initialize();
+                    self.lifecycle = Lifecycle::Initialized;
+                    Response::result(id, result)
+                }
+            }
             "ping" => Response::result(id, json!({})),
-            "tools/list" => Response::result(id, json!({ "tools": tool_definitions() })),
-            "tools/call" => self.call_tool(request),
-            "resources/list" => Response::result(id, json!({ "resources": [] })),
+            "tools/list" if self.ready() => {
+                Response::result(id, json!({ "tools": tool_definitions() }))
+            }
+            "tools/call" if self.ready() => self.call_tool(request),
+            "resources/list" if self.ready() => {
+                Response::result(id, json!({ "resources": resource_definitions() }))
+            }
+            "resources/read" if self.ready() => self.read_resource(request),
+            "tools/list" | "tools/call" | "resources/list" | "resources/read" => Response::error(
+                id,
+                code::INVALID_REQUEST,
+                "server is not ready; call initialize and then send notifications/initialized"
+                    .into(),
+                None,
+            ),
             other => Response::error(
                 id,
                 code::METHOD_NOT_FOUND,
@@ -116,19 +382,65 @@ impl Server {
         Some(response)
     }
 
+    fn ready(&self) -> bool {
+        self.lifecycle == Lifecycle::Ready
+    }
+
     fn initialize(&self) -> Value {
         json!({
             "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": { "tools": { "listChanged": false } },
+            "capabilities": {
+                "tools": { "listChanged": false },
+                "resources": { "subscribe": false, "listChanged": false }
+            },
             "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
             "instructions": "Compiles a typed decision query against a FIBER world into the \
                 smallest decision-sufficient context, with a machine-verifiable certificate of \
                 what was omitted. Call fiber_compile first: it returns the decision contract and \
-                a refinement handle, not the evidence. Call fiber_refine to descend layers only \
+                a content-addressed refinement handle, not the evidence. Call fiber_refine with that \
+                handle to descend layers only \
                 when the contract is insufficient to act. Every response reports what was omitted \
                 and whether the sufficiency claim holds. Research infrastructure, not a medical \
                 device."
         })
+    }
+
+    fn read_resource(&self, request: &Request) -> Response {
+        let id = request.id.clone();
+        let Some(uri) = request.params.get("uri").and_then(Value::as_str) else {
+            return Response::error(
+                id,
+                code::INVALID_PARAMS,
+                "resources/read requires a uri".into(),
+                None,
+            );
+        };
+
+        let (mime_type, text) = match uri {
+            QUERY_SCHEMA_URI => ("application/schema+json", QUERY_SCHEMA.to_string()),
+            CERTIFICATE_SCHEMA_URI => ("application/schema+json", CERTIFICATE_SCHEMA.to_string()),
+            WORLD_SCHEMA_URI => ("application/schema+json", WORLD_SCHEMA.to_string()),
+            CAPABILITIES_URI => ("application/json", workspace_capabilities().to_string()),
+            other => {
+                return Response::error(
+                    id,
+                    code::INVALID_PARAMS,
+                    format!("unknown resource uri {other:?}"),
+                    None,
+                )
+            }
+        };
+
+        Response::result(
+            id,
+            json!({
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": mime_type,
+                    "text": text,
+                }]
+            }),
+        )
     }
 
     fn call_tool(&self, request: &Request) -> Response {
@@ -154,7 +466,131 @@ impl Server {
             "fiber_refine" => self.fiber_refine(&arguments),
             "fiber_explain" => self.fiber_explain(&arguments),
             "fiber_verify" => self.fiber_verify(&arguments),
+            "projection_bundle" => self.projection_bundle(&arguments),
             "world_index" => self.world_index(&arguments),
+            "world_validate" => self.world_validate(&arguments),
+            "world_generate" => self.world_generate(&arguments),
+            "factory_lifecycle_simulate" => self.factory_lifecycle_simulate(&arguments),
+            "context_compare" => self.context_compare(&arguments),
+            "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
+            "modality_catalog" => self.modality_catalog(&arguments),
+            "mutation_family" => self.mutation_family(&arguments),
+            "prism_minimize" => self.prism_minimize(&arguments),
+            "registry_gate" => self.registry_gate(&arguments),
+            "release_audit" => self.release_audit(&arguments),
+            "operations_catalog" => self.operations_catalog(&arguments),
+            "ops_acceptance" => self.ops_acceptance(&arguments),
+            "ops_capacity" => self.ops_capacity(&arguments),
+            "research_ci_check" => self.research_ci_check(&arguments),
+            "capability_rank" => self.capability_rank(&arguments),
+            "safety_release_gate" => self.safety_release_gate(&arguments),
+            "medical_boundary_check" => self.medical_boundary_check(&arguments),
+            "hub_search" => self.hub_search(&arguments),
+            "hub_submission_review" => self.hub_submission_review(&arguments),
+            "hub_disclosure_review" => self.hub_disclosure_review(&arguments),
+            "hub_card_render" => self.hub_card_render(&arguments),
+            "hub_leaderboard_render" => self.hub_leaderboard_render(&arguments),
+            "measurement_compare" => self.measurement_compare(&arguments),
+            "hub_resolve" => self.hub_resolve(&arguments),
+            "hub_lock" => self.hub_lock(&arguments),
+            "tabular_ingest" => self.tabular_ingest(&arguments),
+            "observed_world_declare" => self.observed_world_declare(&arguments),
+            "world_claim_check" => self.world_claim_check(&arguments),
+            "trace_analyze" => self.trace_analyze(&arguments),
+            "lineage_audit" => self.lineage_audit(&arguments),
+            "preanalytic_apply" => self.preanalytic_apply(&arguments),
+            "contradiction_review" => self.contradiction_review(&arguments),
+            "lab_plan" => self.lab_plan(&arguments),
+            "lens_catalogue" => Ok(json!({
+                "ok": true,
+                "schema": bioprism_lens::LENS_REPORT_SCHEMA_VERSION,
+                "section_42_module_count": bioprism_lens::SECTION_42_MODULE_COUNT,
+                "implemented": lens_catalogue(),
+                "implemented_count": bioprism_lens::catalogue_ids().len(),
+                "not_implemented": bioprism_lens::NOT_IMPLEMENTED,
+                "guarantees": [
+                    "declarations expose evidence and scope requirements before execution",
+                    "implemented lenses are distinguished from the named section remainder",
+                    "the catalogue does not claim a renderer or external data connector",
+                ],
+            })),
+            "lens_leakage_check" => self.lens_leakage_check(&arguments),
+            "scale_family_split_verify" => self.scale_family_split_verify(&arguments),
+            "stewardship_review_check" => self.stewardship_review_check(&arguments),
+            "quality_gate_run" => self.quality_gate_run(&arguments),
+            "ledger_ingest" => self.ledger_ingest(&arguments),
+            "fabric_synthesize" => self.fabric_synthesize(&arguments),
+            "interweave_workflow_catalogue" => {
+                let workflows = interweave_catalogue();
+                let outstanding = outstanding_deliverables(&workflows);
+                Ok(json!({
+                    "ok": true,
+                    "workflow_count": workflows.len(),
+                    "deliverables_per_workflow": 9,
+                    "workflows": workflows,
+                    "outstanding_deliverables": outstanding,
+                    "guarantees": [
+                        "roles, effect envelopes, owed deliverables, and adapter requirements remain separate",
+                        "the catalogue describes reference workflows and does not fabricate their missing artefacts",
+                        "outstanding counts are derived from the typed deliverable set rather than a prose percentage",
+                    ],
+                }))
+            }
+            "atlas_report" => self.atlas_report(&arguments),
+            "adaptive_panel" => self.adaptive_panel(&arguments),
+            "posterior_gate" => self.posterior_gate(&arguments),
+            "oracle_combine" => self.oracle_combine(&arguments),
+            "oracle_reference_panel" => self.oracle_reference_panel(&arguments),
+            "oracle_missingness" => self.oracle_missingness(&arguments),
+            "evaluation_worldline_audit" => self.evaluation_worldline_audit(&arguments),
+            "evaluation_reproduction_check" => self.evaluation_reproduction_check(&arguments),
+            "evaluation_trajectory_check" => self.evaluation_trajectory_check(&arguments),
+            "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
+            "runtime_effect_check" => self.runtime_effect_check(&arguments),
+            "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
+            "onco_boundary_check" => self.onco_boundary_check(&arguments),
+            "onco_response_assess" => self.onco_response_assess(&arguments),
+            "onco_worldline_view" => self.onco_worldline_view(&arguments),
+            "onco_classification_check" => self.onco_classification_check(&arguments),
+            "onco_outcome_analyze" => self.onco_outcome_analyze(&arguments),
+            "oncoworlds_identity_join" => self.oncoworlds_identity_join(&arguments),
+            "oncoworlds_model_transport" => self.oncoworlds_model_transport(&arguments),
+            "oncoworlds_methylation_classify" => self.oncoworlds_methylation_classify(&arguments),
+            "oncoworlds_methylation_compare" => self.oncoworlds_methylation_compare(&arguments),
+            "oncoworlds_radiogenomic_check" => self.oncoworlds_radiogenomic_check(&arguments),
+            "oncoworlds_clonal_history_check" => self.oncoworlds_clonal_history_check(&arguments),
+            "stress_profile" => self.stress_profile(&arguments),
+            "stress_report" => self.stress_report(&arguments),
+            "bundle_verify" => self.bundle_verify(&arguments),
+            "policy_screen" => self.policy_screen(&arguments),
+            "bioethics_action_review" => self.bioethics_action_review(&arguments),
+            "bioethics_human_subject_screen" => self.bioethics_human_subject_screen(&arguments),
+            "bioethics_dual_use_review" => self.bioethics_dual_use_review(&arguments),
+            "bioethics_validation_check" => self.bioethics_validation_check(&arguments),
+            "bioethics_representation_audit" => self.bioethics_representation_audit(&arguments),
+            "influence_analyze" => self.influence_analyze(&arguments),
+            "routing_decide" => self.routing_decide(&arguments),
+            "token_context_plan" => self.token_context_plan(&arguments),
+            "bioql_compile" => self.bioql_compile(&arguments),
+            "epistemic_voi" => self.epistemic_voi(&arguments),
+            "benchmark_trace_analyze" => self.benchmark_trace_analyze(&arguments),
+            "pack_catalogue" => self.pack_catalogue(&arguments),
+            "pack_health_assess" => self.pack_health_assess(&arguments),
+            "foundation_contract_check" => self.foundation_contract_check(&arguments),
+            "weavelang_compile" => self.weavelang_compile(&arguments),
+            "choreography_check" => self.choreography_check(&arguments),
+            "conformance_run" => self.conformance_run(&arguments),
+            "provider_capability_gate" => self.provider_capability_gate(&arguments),
+            "sdk_registry_check" => self.sdk_registry_check(&arguments),
+            "governance_schema_check" => self.governance_schema_check(&arguments),
+            "developer_platform_status" => self.developer_platform_status(&arguments),
+            "safety_posture" => self.safety_posture(&arguments),
+            "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
+            "workspace_capabilities" => Ok(workspace_capabilities()),
+            "repository_catalog" => self.repository_catalog(&arguments),
+            "repository_bundle" => self.repository_bundle(&arguments),
+            "repository_impact" => self.repository_impact(&arguments),
+            "telemetry_project" => self.telemetry_project(&arguments),
             other => Err(format!("unknown tool {other:?}")),
         };
 
@@ -171,18 +607,11 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<(bioprism_fiber::CompileOutput, RenderContext), String> {
-        let world = arguments
-            .get("world")
-            .and_then(Value::as_str)
-            .ok_or("world is required (a path relative to the server root)")?;
-        let query = arguments
-            .get("query")
-            .and_then(Value::as_str)
-            .ok_or("query is required (a path relative to the server root)")?;
+        let (world, query, expected_digest) = self.compile_paths(arguments)?;
 
-        let source = self.load_source(world)?;
-        let query = self.load_query(query)?;
-        let out = compile(source.as_ref(), &query).map_err(|e| e.to_string())?;
+        let source = self.load_source(&world)?;
+        let query_document = self.load_query(&query)?;
+        let out = compile(source.as_ref(), &query_document).map_err(|e| e.to_string())?;
 
         let context = RenderContext {
             omitted_facts: out.certificate.omissions.total_facts,
@@ -195,7 +624,58 @@ impl Server {
                 .ok()
                 .map(|digest| digest.as_str().to_string()),
         };
+
+        if let Some(expected) = expected_digest {
+            let actual = context
+                .certificate_sha256
+                .as_deref()
+                .ok_or("compiled certificate has no reference digest")?;
+            if actual != expected {
+                return Err(format!(
+                    "refinement handle is stale: it names certificate {expected}, but the current inputs compile to {actual}"
+                ));
+            }
+        }
+
         Ok((out, context))
+    }
+
+    fn compile_paths(&self, arguments: &Value) -> Result<(String, String, Option<String>), String> {
+        if let Some(handle) = arguments.get("handle") {
+            let handle = handle
+                .as_object()
+                .ok_or("handle must be an object returned by fiber_compile")?;
+            let version = handle
+                .get("version")
+                .and_then(Value::as_u64)
+                .ok_or("refinement handle is missing its version")?;
+            if version != 1 {
+                return Err(format!("unsupported refinement handle version {version}"));
+            }
+            let world = handle
+                .get("world")
+                .and_then(Value::as_str)
+                .ok_or("refinement handle is missing world")?;
+            let query = handle
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or("refinement handle is missing query")?;
+            let digest = handle
+                .get("certificate_sha256")
+                .and_then(Value::as_str)
+                .ok_or("refinement handle is missing certificate_sha256")?;
+            return Ok((world.into(), query.into(), Some(digest.into())));
+        }
+
+        let world = arguments
+            .get("world")
+            .and_then(Value::as_str)
+            .ok_or("world is required (a path relative to the server root)")?;
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .ok_or("query is required (a path relative to the server root)")?;
+        Ok((world.into(), query.into(), None))
     }
 
     fn fiber_compile(&self, arguments: &Value) -> Result<Value, String> {
@@ -216,6 +696,30 @@ impl Server {
                     "method": "four-characters-per-token heuristic, not a tokenizer",
                 }),
             );
+
+            let world = arguments
+                .get("world")
+                .and_then(Value::as_str)
+                .ok_or("world is required (a path relative to the server root)")?;
+            let query = arguments
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or("query is required (a path relative to the server root)")?;
+            let digest = context
+                .certificate_sha256
+                .as_deref()
+                .ok_or("compiled certificate has no reference digest")?;
+            let handle = json!({
+                "version": 1,
+                "world": world,
+                "query": query,
+                "certificate_sha256": digest,
+            });
+            if let Some(refine) = map.get_mut("refine").and_then(Value::as_object_mut) {
+                refine.insert("handle".into(), handle);
+            } else {
+                map.insert("refine".into(), json!({ "handle": handle }));
+            }
         }
         Ok(rendered)
     }
@@ -265,7 +769,10 @@ impl Server {
         use bioprism_section::CertificateVerification::*;
         Ok(match &verification {
             Valid => json!({ "ok": true, "verified": true, "detail": "digest verifies" }),
-            DigestMismatch { claimed, recomputed } => json!({
+            DigestMismatch {
+                claimed,
+                recomputed,
+            } => json!({
                 "ok": true, "verified": false,
                 "detail": format!("digest mismatch: claims {claimed}, recomputes to {recomputed}")
             }),
@@ -276,6 +783,44 @@ impl Server {
     }
 
     /// The one tool with side effects. Without `confirm: true` it previews and writes nothing.
+    fn projection_bundle(&self, arguments: &Value) -> Result<Value, String> {
+        let (out, _) = self.compiled(arguments)?;
+        let source = ProjectionSource::bind(
+            &out.section,
+            &out.certificate,
+            CertificateProfile::Reference,
+        )
+        .map_err(|error| format!("projection provenance refused: {error}"))?;
+        let bundle = project_graph_bundle(&out.section, &[], source)
+            .map_err(|error| format!("projection refused: {error}"))?;
+        let include_views = arguments
+            .get("include_views")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let fidelity = bundle
+            .fidelity_summary()
+            .into_iter()
+            .map(|(kind, dropped)| json!({ "kind": kind, "dropped": dropped }))
+            .collect::<Vec<_>>();
+        let obstructions_survive = bundle.obstructions_survive_everywhere(&out.section);
+        let source = bundle.graph.source().clone();
+
+        Ok(json!({
+            "ok": true,
+            "provenance": source,
+            "projections": ["graph", "hypergraph", "timeline", "table"],
+            "fidelity": fidelity,
+            "obstructions_survive_everywhere": obstructions_survive,
+            "views": include_views.then_some(bundle),
+            "guarantees": [
+                "all four views are generated from one compiled section and one bound certificate",
+                "projection provenance is recomputed and cannot be asserted from caller-supplied digests",
+                "unresolved obligations and oracle conflicts cannot be silently dropped to close a view",
+                "a projection is navigation data, never proof of evidence completeness or clinical truth",
+            ],
+        }))
+    }
+
     fn world_index(&self, arguments: &Value) -> Result<Value, String> {
         let world = arguments
             .get("world")
@@ -317,6 +862,8078 @@ impl Server {
             "factors": manifest.total_factors,
         }))
     }
+
+    fn world_validate(&self, arguments: &Value) -> Result<Value, String> {
+        let relative = arguments
+            .get("world")
+            .and_then(Value::as_str)
+            .ok_or("world is required (a path relative to the server root)")?;
+        let path = self.resolve(relative)?;
+        let raw = self.read_json(&path)?;
+        let world = World::from_json(raw).map_err(|error| error.to_string())?;
+        let report = validate(&world, &DimensionRegistry::default());
+        let errors = report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .count();
+        let warnings = report.diagnostics.len() - errors;
+        Ok(json!({
+            "ok": errors == 0,
+            "world_id": world.world_id,
+            "world_sha256": world.content_hash(),
+            "counts": {
+                "facts": world.facts.len(),
+                "factors": world.factors.len(),
+                "events": world.events.len(),
+            },
+            "errors": errors,
+            "warnings": warnings,
+            "diagnostics": report.diagnostics,
+        }))
+    }
+
+    fn world_generate(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_spec = arguments
+            .get("spec")
+            .cloned()
+            .ok_or("spec is required and must be a serialized WorldSpec")?;
+        let encoded = serde_json::to_vec(&raw_spec)
+            .map_err(|error| format!("cannot measure world-generation input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("world-generation input exceeds the 20000000-byte safety bound".into());
+        }
+        let spec: WorldSpec = serde_json::from_value(raw_spec)
+            .map_err(|error| format!("invalid world-generation spec: {error}"))?;
+        if spec.subjects == 0 || spec.subjects > 1_000 {
+            return Err("spec.subjects must be between 1 and 1000".into());
+        }
+        if spec.distractors > 10_000 {
+            return Err("spec.distractors is bounded at 10000".into());
+        }
+        if spec.relay_depth > 64 {
+            return Err("spec.relay_depth is bounded at 64".into());
+        }
+        if spec.events.len() > 128
+            || spec.leakage.len() > 64
+            || spec.hypotheses.len() > 128
+            || spec.declared_absent.len() > 512
+        {
+            return Err(
+                "spec events, leakage mechanisms, hypotheses, and declared absences exceed their safety bounds"
+                    .into(),
+            );
+        }
+
+        let generated = generate_world(&spec);
+        let world_document = generated.world.clone();
+        let query_document = generated.query.clone();
+        let world = match World::from_json(world_document.clone()) {
+            Ok(world) => world,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "generated_world_parse",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "world": Value::Null,
+                    "query": Value::Null,
+                }))
+            }
+        };
+        let query = match Query::from_json(query_document.clone()) {
+            Ok(query) => query,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "generated_query_parse",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "world": Value::Null,
+                    "query": Value::Null,
+                }))
+            }
+        };
+        let report = validate(&world, &DimensionRegistry::default());
+        let errors = report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .count();
+        if errors != 0 {
+            return Ok(json!({
+                "ok": false,
+                "stage": "generated_world_validation",
+                "refusal": "generated world contains validation errors",
+                "fail_closed": true,
+                "world_digest": world.content_hash(),
+                "query_digest": bioprism_ids::ContentHash::of_value(&query_document)
+                    .map_err(|error| error.to_string())?,
+                "diagnostics": report.diagnostics,
+            }));
+        }
+
+        let array_len = |document: &Value, field: &str| {
+            document
+                .get(field)
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len)
+        };
+        let include_world = arguments
+            .get("include_world")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let include_query = arguments
+            .get("include_query")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        Ok(json!({
+            "ok": true,
+            "world_id": world.world_id,
+            "query_id": query.query_id,
+            "world_digest": world.content_hash(),
+            "query_digest": bioprism_ids::ContentHash::of_value(&query_document)
+                .map_err(|error| error.to_string())?,
+            "counts": {
+                "facts": world.facts.len(),
+                "factors": world.factors.len(),
+                "events": world.events.len(),
+                "subjects": spec.subjects,
+                "distractors": spec.distractors,
+                "relay_depth": spec.relay_depth,
+                "generated_query_targets": array_len(&query_document, "targets"),
+            },
+            "validation": {
+                "errors": errors,
+                "warnings": report.diagnostics.len() - errors,
+                "diagnostics": report.diagnostics,
+            },
+            "world": include_world.then_some(world_document),
+            "query": include_query.then_some(query_document),
+            "guarantees": [
+                "generation is a pure deterministic function of the serialized WorldSpec and seed",
+                "both generated documents are parsed by their typed runtime models before success",
+                "world and query digests bind the exact generated JSON documents returned or withheld",
+                "generation performs no file, network, model, clinical, or publication side effect",
+            ],
+        }))
+    }
+
+    fn factory_lifecycle_simulate(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_jobs = arguments
+            .get("jobs")
+            .and_then(Value::as_array)
+            .ok_or("jobs is required and must be an array of serialized Job values")?;
+        let raw_workers = arguments.get("workers").and_then(Value::as_array).ok_or(
+            "workers is required and must be an array of serialized WorkerCapability values",
+        )?;
+        let raw_actions = arguments
+            .get("actions")
+            .and_then(Value::as_array)
+            .ok_or("actions is required and must be an array of lifecycle operations")?;
+        if raw_jobs.is_empty() || raw_jobs.len() > 256 {
+            return Err("jobs must contain between 1 and 256 entries".into());
+        }
+        if raw_workers.is_empty() || raw_workers.len() > 256 {
+            return Err("workers must contain between 1 and 256 entries".into());
+        }
+        if raw_actions.len() > 2_000 {
+            return Err("actions are bounded at 2000 entries".into());
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "jobs": raw_jobs,
+            "workers": raw_workers,
+            "actions": raw_actions,
+        }))
+        .map_err(|error| format!("cannot measure factory simulation input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("factory simulation input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let jobs = raw_jobs
+            .iter()
+            .cloned()
+            .map(serde_json::from_value::<FactoryJob>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("invalid factory job: {error}"))?;
+        let workers = raw_workers
+            .iter()
+            .cloned()
+            .map(serde_json::from_value::<WorkerCapability>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("invalid worker capability: {error}"))?;
+        let mut worker_by_id = BTreeMap::new();
+        for worker in workers {
+            if worker_by_id
+                .insert(worker.worker_id.clone(), worker)
+                .is_some()
+            {
+                return Err("workers must have unique worker_id values".into());
+            }
+        }
+
+        let mut store = JobStore::new();
+        let mut job_ids = BTreeSet::new();
+        for job in jobs {
+            let requested_id = job.id.clone();
+            let enqueued = store
+                .enqueue(job)
+                .map_err(|error| format!("initial enqueue of {requested_id:?} refused: {error}"))?;
+            job_ids.insert(enqueued);
+        }
+
+        let mut trace = Vec::with_capacity(raw_actions.len());
+        let mut failures = 0usize;
+        for (index, raw_action) in raw_actions.iter().enumerate() {
+            let kind = raw_action
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("<missing>")
+                .to_string();
+            let action_result: Result<Value, String> = (|| match kind.as_str() {
+                "enqueue" => {
+                    let raw_job = raw_action
+                        .get("job")
+                        .cloned()
+                        .ok_or("enqueue requires a serialized job in `job`")?;
+                    let job: FactoryJob = serde_json::from_value(raw_job)
+                        .map_err(|error| format!("invalid enqueue job: {error}"))?;
+                    let requested_id = job.id.clone();
+                    let id = store.enqueue(job).map_err(|error| {
+                        format!("enqueue refused for {requested_id:?}: {error}")
+                    })?;
+                    job_ids.insert(id.clone());
+                    Ok(json!({ "job_id": id }))
+                }
+                "lease" => {
+                    let worker_id = raw_action
+                        .get("worker_id")
+                        .and_then(Value::as_str)
+                        .ok_or("lease requires worker_id")?;
+                    let worker = worker_by_id
+                        .get(worker_id)
+                        .ok_or_else(|| format!("unknown worker {worker_id:?}"))?;
+                    let now = FactoryTimestamp::from_nanos_utc(json_i128(
+                        raw_action.get("now_nanos"),
+                        "now_nanos",
+                    )?);
+                    let lease = store
+                        .lease(worker, now)
+                        .map_err(|error| format!("lease refused: {error}"))?;
+                    if let Some(lease) = &lease {
+                        job_ids.insert(lease.job_id.clone());
+                    }
+                    serde_json::to_value(lease)
+                        .map_err(|error| format!("cannot serialize lease result: {error}"))
+                }
+                "heartbeat" => {
+                    let job_id = raw_action
+                        .get("job_id")
+                        .and_then(Value::as_str)
+                        .ok_or("heartbeat requires job_id")?;
+                    let worker_id = raw_action
+                        .get("worker_id")
+                        .and_then(Value::as_str)
+                        .ok_or("heartbeat requires worker_id")?;
+                    let now = FactoryTimestamp::from_nanos_utc(json_i128(
+                        raw_action.get("now_nanos"),
+                        "now_nanos",
+                    )?);
+                    let duration = json_i128(raw_action.get("duration_nanos"), "duration_nanos")?;
+                    store
+                        .heartbeat(job_id, worker_id, now, duration)
+                        .map_err(|error| format!("heartbeat refused: {error}"))?;
+                    Ok(json!({ "job_id": job_id, "worker_id": worker_id }))
+                }
+                "stage" => {
+                    let job_id = raw_action
+                        .get("job_id")
+                        .and_then(Value::as_str)
+                        .ok_or("stage requires job_id")?;
+                    let worker_id = raw_action
+                        .get("worker_id")
+                        .and_then(Value::as_str)
+                        .ok_or("stage requires worker_id")?;
+                    let now = FactoryTimestamp::from_nanos_utc(json_i128(
+                        raw_action.get("now_nanos"),
+                        "now_nanos",
+                    )?);
+                    let output = raw_action
+                        .get("output")
+                        .cloned()
+                        .ok_or("stage requires output")?;
+                    store
+                        .stage(job_id, worker_id, now, output)
+                        .map_err(|error| format!("stage refused: {error}"))?;
+                    Ok(json!({ "job_id": job_id, "visible_before_commit": false }))
+                }
+                "commit" => {
+                    let job_id = raw_action
+                        .get("job_id")
+                        .and_then(Value::as_str)
+                        .ok_or("commit requires job_id")?;
+                    let worker_id = raw_action
+                        .get("worker_id")
+                        .and_then(Value::as_str)
+                        .ok_or("commit requires worker_id")?;
+                    let now = FactoryTimestamp::from_nanos_utc(json_i128(
+                        raw_action.get("now_nanos"),
+                        "now_nanos",
+                    )?);
+                    store
+                        .commit(job_id, worker_id, now)
+                        .map_err(|error| format!("commit refused: {error}"))?;
+                    Ok(json!({ "job_id": job_id, "committed": true }))
+                }
+                "fail" => {
+                    let job_id = raw_action
+                        .get("job_id")
+                        .and_then(Value::as_str)
+                        .ok_or("fail requires job_id")?;
+                    let worker_id = raw_action
+                        .get("worker_id")
+                        .and_then(Value::as_str)
+                        .ok_or("fail requires worker_id")?;
+                    let now = FactoryTimestamp::from_nanos_utc(json_i128(
+                        raw_action.get("now_nanos"),
+                        "now_nanos",
+                    )?);
+                    let reason = raw_action
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .ok_or("fail requires reason")?;
+                    let recovery = store
+                        .fail(job_id, worker_id, now, reason)
+                        .map_err(|error| format!("failure report refused: {error}"))?;
+                    serde_json::to_value(recovery)
+                        .map_err(|error| format!("cannot serialize recovery: {error}"))
+                }
+                "recover_expired" => {
+                    let now = FactoryTimestamp::from_nanos_utc(json_i128(
+                        raw_action.get("now_nanos"),
+                        "now_nanos",
+                    )?);
+                    let recoveries = store.recover_expired(now);
+                    serde_json::to_value(recoveries)
+                        .map_err(|error| format!("cannot serialize recoveries: {error}"))
+                }
+                "compensate" => {
+                    let job_id = raw_action
+                        .get("job_id")
+                        .and_then(Value::as_str)
+                        .ok_or("compensate requires job_id")?;
+                    store
+                        .compensate(job_id)
+                        .map_err(|error| format!("compensation refused: {error}"))?;
+                    Ok(json!({ "job_id": job_id, "compensated": true }))
+                }
+                "release_quarantine" => {
+                    let job_id = raw_action
+                        .get("job_id")
+                        .and_then(Value::as_str)
+                        .ok_or("release_quarantine requires job_id")?;
+                    let operator = raw_action
+                        .get("operator")
+                        .and_then(Value::as_str)
+                        .ok_or("release_quarantine requires operator")?;
+                    store
+                        .release_quarantine(job_id, operator)
+                        .map_err(|error| format!("quarantine release refused: {error}"))?;
+                    Ok(json!({ "job_id": job_id, "operator": operator, "released": true }))
+                }
+                "cancel" => {
+                    let job_id = raw_action
+                        .get("job_id")
+                        .and_then(Value::as_str)
+                        .ok_or("cancel requires job_id")?;
+                    let reason = raw_action
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .ok_or("cancel requires reason")?;
+                    store
+                        .cancel(job_id, reason)
+                        .map_err(|error| format!("cancellation refused: {error}"))?;
+                    Ok(json!({ "job_id": job_id, "cancelled": true }))
+                }
+                other => Err(format!("unknown factory action {other:?}")),
+            })();
+            match action_result {
+                Ok(result) => trace.push(json!({
+                    "index": index,
+                    "kind": kind,
+                    "ok": true,
+                    "result": result,
+                })),
+                Err(refusal) => {
+                    failures += 1;
+                    trace.push(json!({
+                        "index": index,
+                        "kind": kind,
+                        "ok": false,
+                        "refusal": refusal,
+                        "fail_closed": true,
+                    }));
+                }
+            }
+        }
+
+        let jobs = job_ids
+            .iter()
+            .filter_map(|id| {
+                store.job(id).map(|job| {
+                    json!({
+                        "id": id,
+                        "job": job,
+                        "committed_result": store.result(id),
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": failures == 0,
+            "action_count": raw_actions.len(),
+            "action_failures": failures,
+            "trace": trace,
+            "jobs": jobs,
+            "quarantined": store.quarantined(),
+            "dead_lettered": store.dead_lettered(),
+            "counts_by_class": store.counts_by_class(),
+            "guarantees": [
+                "the simulation delegates every lifecycle transition to the typed in-memory JobStore",
+                "lease expiry branches on idempotency and never treats non-idempotent ambiguity as a safe retry",
+                "staged outputs are reported invisible until atomic commit",
+                "compensation, quarantine release, cancellation, and every refusal remain explicit in the replay trace",
+                "no worker process, queue, clock, filesystem, network, or external side effect is created",
+            ],
+        }))
+    }
+
+    fn context_compare(&self, arguments: &Value) -> Result<Value, String> {
+        let world_relative = arguments
+            .get("world")
+            .and_then(Value::as_str)
+            .ok_or("world is required (a JSON world document relative to the server root)")?;
+        let query_relative = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .ok_or("query is required (a query document relative to the server root)")?;
+        let world_path = self.resolve(world_relative)?;
+        let query_path = self.resolve(query_relative)?;
+        if world_path.is_dir() {
+            return Err(
+                "context_compare requires a JSON world document, not an indexed store".into(),
+            );
+        }
+        let world =
+            World::from_json(self.read_json(&world_path)?).map_err(|error| error.to_string())?;
+        let query = self.load_query(query_relative)?;
+        let panel = bioprism_baseline::default_panel();
+        let borrowed: Vec<&dyn bioprism_baseline::ContextStrategy> =
+            panel.iter().map(|strategy| strategy.as_ref()).collect();
+        let comparison =
+            bioprism_baseline::compare(&world, &query, &borrowed).map_err(|error| {
+                format!(
+                    "comparing {} and {}: {error}",
+                    world_path.display(),
+                    query_path.display()
+                )
+            })?;
+        Ok(comparison.to_json())
+    }
+
+    fn bioworlds_catalog(&self, arguments: &Value) -> Result<Value, String> {
+        let catalog = SliceCatalog::standard().map_err(|error| error.to_string())?;
+        let include_render = arguments
+            .get("include_render")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        if let Some(slice_id) = arguments.get("slice").and_then(Value::as_str) {
+            let report = catalog.run(slice_id).map_err(|error| error.to_string())?;
+            let mut result = json!({
+                "ok": true,
+                "mode": "slice",
+                "slice": slice_id,
+                "report": report,
+            });
+            if include_render {
+                result["render"] = json!(report.render());
+            }
+            return Ok(result);
+        }
+
+        let report = catalog.run_all().map_err(|error| error.to_string())?;
+        let mut result = json!({
+            "ok": true,
+            "mode": "catalog",
+            "slice_count": catalog.len(),
+            "report": report,
+            "unbuilt_worlds": bioprism_bioworlds::UNBUILT_BLUEPRINT_WORLDS,
+        });
+        if include_render {
+            result["render"] = json!(report.render());
+        }
+        Ok(result)
+    }
+
+    fn modality_catalog(&self, arguments: &Value) -> Result<Value, String> {
+        let include_failure_modes = arguments
+            .get("include_failure_modes")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let requested = arguments.get("modality").and_then(Value::as_str);
+        let descriptors = all_modalities();
+        let selected = descriptors
+            .iter()
+            .filter(|descriptor| requested.is_none_or(|name| descriptor.modality.as_str() == name))
+            .collect::<Vec<_>>();
+        if selected.is_empty() {
+            return Err(format!(
+                "unknown modality {:?}; call modality_catalog without a filter to list all modalities",
+                requested.unwrap_or("")
+            ));
+        }
+
+        let mut mechanised = 0usize;
+        let mut unmechanised = 0usize;
+        let modalities = selected
+            .into_iter()
+            .map(|descriptor| {
+                for mode in descriptor.failure_modes() {
+                    if mode.is_mechanised() {
+                        mechanised += 1;
+                    } else {
+                        unmechanised += 1;
+                    }
+                }
+                let mut item = json!({
+                    "modality": descriptor.modality.as_str(),
+                    "blueprint_module": descriptor.modality.blueprint_module(),
+                    "measurand": descriptor.measurand.as_str(),
+                    "purpose": descriptor.purpose,
+                    "design": descriptor.design.as_str(),
+                    "complete": descriptor.is_complete(),
+                    "resolutions": Resolution::ALL.into_iter().map(|axis| json!({
+                        "axis": axis,
+                        "status": descriptor.resolution(axis),
+                    })).collect::<Vec<_>>(),
+                    "caller_supplied_constants": descriptor.caller_supplied_constants(),
+                    "failure_mode_count": descriptor.failure_modes().len(),
+                });
+                if include_failure_modes {
+                    item["failure_modes"] = json!(descriptor.failure_modes());
+                }
+                item
+            })
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "ok": true,
+            "returned": modalities.len(),
+            "total_catalogue": Modality::ALL.len(),
+            "mechanised_failure_modes": mechanised,
+            "unmechanised_failure_modes": unmechanised,
+            "failure_modes_are_not_claims_of_detection": true,
+            "modalities": modalities,
+        }))
+    }
+
+    fn mutation_family(&self, arguments: &Value) -> Result<Value, String> {
+        let relative = arguments
+            .get("world")
+            .and_then(Value::as_str)
+            .ok_or("world is required (a JSON world document relative to the server root)")?;
+        let path = self.resolve(relative)?;
+        if path.is_dir() {
+            return Err(
+                "mutation_family requires a JSON world document, not an indexed store".into(),
+            );
+        }
+        let suite_name = arguments
+            .get("suite")
+            .and_then(Value::as_str)
+            .unwrap_or("standard");
+        if suite_name != "standard" {
+            return Err(format!(
+                "unknown mutation suite {suite_name:?}; only the deterministic standard suite is available"
+            ));
+        }
+        let raw = self.read_json(&path)?;
+        let mutations = standard_suite();
+        let family = generate_mutations(&raw, &mutations).map_err(|error| error.to_string())?;
+        let diversity = measure_diversity(std::slice::from_ref(&family));
+        let attempted = family.accepted.len() + family.rejected.len() + family.duplicates.len();
+        let include_worlds = arguments
+            .get("include_worlds")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let mut result = json!({
+            "ok": true,
+            "suite": suite_name,
+            "world": relative,
+            "parent": {
+                "id": family.parent_id,
+                "sha256": family.parent_sha256,
+            },
+            "counts": {
+                "attempted": attempted,
+                "accepted": family.accepted.len(),
+                "rejected": family.rejected.len(),
+                "duplicates": family.duplicates.len(),
+            },
+            "yield_rate": family.yield_rate(),
+            "accepted": family.accepted,
+            "rejected": family.rejected,
+            "duplicates": family.duplicates,
+            "diversity": diversity,
+        });
+
+        if include_worlds {
+            let max_worlds = arguments
+                .get("max_worlds")
+                .and_then(Value::as_u64)
+                .unwrap_or(100);
+            if max_worlds == 0 || max_worlds > 1_000 {
+                return Err("max_worlds must be between 1 and 1000".into());
+            }
+            let worlds = family
+                .worlds
+                .iter()
+                .take(max_worlds as usize)
+                .map(|(id, world)| json!({ "id": id, "world": world }))
+                .collect::<Vec<_>>();
+            result["worlds"] = json!(worlds);
+            result["omitted_worlds"] = json!(family.worlds.len().saturating_sub(worlds.len()));
+        }
+        Ok(result)
+    }
+
+    fn prism_minimize(&self, arguments: &Value) -> Result<Value, String> {
+        let relative = arguments
+            .get("world")
+            .and_then(Value::as_str)
+            .ok_or("world is required (a JSON world document relative to the server root)")?;
+        let path = self.resolve(relative)?;
+        if path.is_dir() {
+            return Err(
+                "prism_minimize requires a JSON world document, not an indexed store".into(),
+            );
+        }
+        let world = World::from_json(self.read_json(&path)?).map_err(|error| error.to_string())?;
+        let minimization = if let Some(facts) = arguments.get("facts") {
+            let facts = facts
+                .as_array()
+                .ok_or("facts must be an array of fact ids")?;
+            let mut candidate = BTreeSet::new();
+            for fact in facts {
+                let fact = fact.as_str().ok_or("facts must be an array of fact ids")?;
+                if world.fact(fact).is_none() {
+                    return Err(format!("fact {fact:?} is not present in the world"));
+                }
+                candidate.insert(fact.to_string());
+            }
+            minimize(&world, &candidate).map_err(|error| error.to_string())?
+        } else {
+            minimize_world(&world).map_err(|error| error.to_string())?
+        };
+        let preservation = preserves(&world, &minimization);
+
+        Ok(json!({
+            "ok": true,
+            "world": relative,
+            "world_id": world.world_id,
+            "world_sha256": world.content_hash(),
+            "minimization": minimization,
+            "preservation": preservation,
+            "preserved": preservation.is_preserved(),
+            "guarantee_is_not_global_minimum": true,
+        }))
+    }
+
+    fn release_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_checks = arguments
+            .get("checks")
+            .and_then(Value::as_array)
+            .ok_or("checks is required and must be an array of release check requests")?;
+        if raw_checks.is_empty() || raw_checks.len() > 32 {
+            return Err("checks must contain between 1 and 32 release check requests".into());
+        }
+        let include_details = arguments
+            .get("include_details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let encoded = serde_json::to_vec(&json!({
+            "checks": raw_checks,
+            "include_details": include_details,
+        }))
+        .map_err(|error| format!("cannot measure release-audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("release-audit input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let mut rows = Vec::with_capacity(raw_checks.len());
+        let mut blockers = Vec::new();
+        let mut invocation_failures = 0usize;
+        let mut required_count = 0usize;
+
+        for (index, raw_check) in raw_checks.iter().enumerate() {
+            let kind = raw_check
+                .get("kind")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("checks[{index}].kind is required"))?;
+            let arguments = raw_check
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            if !arguments.is_object() {
+                return Err(format!("checks[{index}].arguments must be an object"));
+            }
+            let advisory_kind = matches!(kind, "repository_impact" | "developer_platform_status");
+            let required = raw_check
+                .get("required")
+                .and_then(Value::as_bool)
+                .unwrap_or(!advisory_kind);
+            if advisory_kind && required {
+                return Err(format!(
+                    "{kind} is advisory-only and cannot be marked required"
+                ));
+            }
+            if required {
+                required_count += 1;
+            }
+
+            let result = match kind {
+                "registry_gate" => self.registry_gate(&arguments),
+                "bundle_verify" => self.bundle_verify(&arguments),
+                "conformance_run" => self.conformance_run(&arguments),
+                "research_ci_check" => self.research_ci_check(&arguments),
+                "quality_gate_run" => self.quality_gate_run(&arguments),
+                "ops_acceptance" => self.ops_acceptance(&arguments),
+                "pack_health_assess" => self.pack_health_assess(&arguments),
+                "repository_impact" => self.repository_impact(&arguments),
+                "developer_platform_status" => self.developer_platform_status(&arguments),
+                other => Err(format!(
+                    "unknown release check {other:?}; choose registry_gate, bundle_verify, conformance_run, research_ci_check, quality_gate_run, ops_acceptance, pack_health_assess, repository_impact, or developer_platform_status"
+                )),
+            };
+
+            match result {
+                Ok(result) => {
+                    let gate = release_gate_outcome(kind, &result);
+                    let passed = gate == Some(true);
+                    if required && !passed {
+                        blockers.push(json!({
+                            "index": index,
+                            "kind": kind,
+                            "reason": result
+                                .get("refusal")
+                                .and_then(Value::as_str)
+                                .unwrap_or("required release check did not pass"),
+                            "fail_closed": result
+                                .get("fail_closed")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                        }));
+                    }
+                    let digest = bioprism_ids::ContentHash::of_value(&result)
+                        .map_err(|error| format!("cannot digest {kind} result: {error}"))?;
+                    let mut row = json!({
+                        "index": index,
+                        "kind": kind,
+                        "required": required,
+                        "advisory": !required,
+                        "evaluated": true,
+                        "gate": gate,
+                        "passed": passed,
+                        "result_digest": digest,
+                        "result_ok": result.get("ok").and_then(Value::as_bool),
+                        "refusal": result.get("refusal"),
+                        "fail_closed": result.get("fail_closed"),
+                    });
+                    if include_details {
+                        row["result"] = result;
+                    }
+                    rows.push(row);
+                }
+                Err(refusal) => {
+                    invocation_failures += 1;
+                    if required {
+                        blockers.push(json!({
+                            "index": index,
+                            "kind": kind,
+                            "reason": refusal,
+                            "fail_closed": true,
+                        }));
+                    }
+                    rows.push(json!({
+                        "index": index,
+                        "kind": kind,
+                        "required": required,
+                        "advisory": !required,
+                        "evaluated": false,
+                        "gate": Value::Null,
+                        "passed": false,
+                        "refusal": refusal,
+                        "fail_closed": true,
+                    }));
+                }
+            }
+        }
+
+        let release_ready = invocation_failures == 0
+            && required_count > 0
+            && blockers.is_empty()
+            && rows
+                .iter()
+                .filter(|row| row["required"] == json!(true))
+                .all(|row| row["passed"] == json!(true));
+        Ok(json!({
+            "ok": true,
+            "release_ready": release_ready,
+            "required_check_count": required_count,
+            "check_count": rows.len(),
+            "invocation_failures": invocation_failures,
+            "blocking_count": blockers.len(),
+            "blockers": blockers,
+            "checks": rows,
+            "guarantees": [
+                "release readiness is the conjunction of named required gates; no score or advisory can offset a blocker",
+                "verification refusals, invocation failures, and advisory observations remain distinct in the audit projection",
+                "bundle, registry, quality, conformance, research-CI, operations, and pack-health checks delegate to their typed implementations",
+                "repository impact and developer-platform status are visible advisory evidence and cannot be promoted into release gates by accident",
+                "the projection is bounded, deterministic, local, and side-effect free; it does not publish, sign, deploy, or mutate artifacts",
+            ],
+            "limitations": [
+                "a passing composition is evidence that supplied local checks passed, not a cryptographic signature, security scan, scientific validity claim, or deployment approval",
+                "referenced documents and paths retain the limitations of the delegated tool and are not fetched from a network",
+            ],
+        }))
+    }
+
+    fn registry_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let relative = arguments.get("pack").and_then(Value::as_str).ok_or(
+            "pack is required (a path to an attested benchmark pack relative to the server root)",
+        )?;
+        let path = self.resolve(relative)?;
+        if path.is_dir() {
+            return Err("registry_gate requires an attested JSON pack document".into());
+        }
+        let policy_name = arguments
+            .get("policy")
+            .and_then(Value::as_str)
+            .unwrap_or("default");
+        let policy = match policy_name {
+            "default" => RegistryPolicy::default(),
+            "experimental" => RegistryPolicy::experimental(),
+            other => {
+                return Err(format!(
+                    "unknown registry policy {other:?}; choose default or experimental"
+                ))
+            }
+        };
+        let outcome = gate_document(&self.read_json(&path)?, &policy);
+        Ok(json!({
+            "ok": true,
+            "pack": relative,
+            "policy": policy_name,
+            "passed": outcome.is_pass(),
+            "blocked": outcome.is_block(),
+            "outcome": outcome,
+            "fail_closed": true,
+            "note": "a pass establishes internal conformance for the earned tier, not scientific validity or runtime security",
+        }))
+    }
+
+    fn operations_catalog(&self, arguments: &Value) -> Result<Value, String> {
+        let include_details = arguments
+            .get("include_details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+
+        let local = reference_local().map_err(|error| error.to_string())?;
+        let team = reference_team().map_err(|error| error.to_string())?;
+        let parity = topology_parity(&local, &team);
+        let topology = |topology: &bioprism_dataops::StorageTopology| {
+            json!({
+                "deployment": topology.deployment(),
+                "technologies": topology.technologies(),
+                "classes": DataClass::ALL.into_iter().map(|class| json!({
+                    "class": class,
+                    "name": class.name(),
+                    "store": topology.store_for(class),
+                    "promises": topology.promises(class),
+                    "holds_immutable_evidence": class.holds_immutable_evidence(),
+                })).collect::<Vec<_>>(),
+            })
+        };
+
+        let service_entries = service_audit();
+        let service_summary = AuditSummary::of(&service_entries);
+        let service_rows = service_entries
+            .iter()
+            .take(max_items)
+            .map(|entry| {
+                json!({
+                    "module_id": entry.module_id,
+                    "title": entry.title,
+                    "contract": entry.contract,
+                    "crates": entry.crates,
+                    "verdict": entry.verdict,
+                    "divergence_count": entry.divergence_count(),
+                    "divergences": entry.divergences.iter().take(max_items).collect::<Vec<_>>(),
+                    "omitted_divergences": entry.divergences.len().saturating_sub(max_items),
+                })
+            })
+            .collect::<Vec<_>>();
+        let tenant_patterns = [
+            TenantPattern::SharedControl,
+            TenantPattern::DedicatedInstallation,
+            TenantPattern::AirGappedRegistry,
+            TenantPattern::HybridPublicMetadata,
+        ]
+        .into_iter()
+        .map(|pattern| {
+            json!({
+                "pattern": pattern,
+                "name": pattern.name(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+        let mut result = json!({
+            "ok": true,
+            "detail_mode": if include_details { "full" } else { "summary" },
+            "max_items": max_items,
+            "topologies": {
+                "local": topology(&local),
+                "team": topology(&team),
+                "promise_parity": {
+                    "compared": parity.compared,
+                    "holds": parity.holds(),
+                    "differences": parity.differences,
+                },
+                "technology_is_not_promise_parity": true,
+            },
+            "data_classes": DataClass::ALL.into_iter().map(|class| json!({
+                "class": class,
+                "name": class.name(),
+                "holds_immutable_evidence": class.holds_immutable_evidence(),
+            })).collect::<Vec<_>>(),
+            "deployment_planes": Plane::ALL.into_iter().map(|plane| json!({
+                "plane": plane,
+                "name": plane.name(),
+                "control_plane": plane.is_control_plane(),
+            })).collect::<Vec<_>>(),
+            "tenant_patterns": tenant_patterns,
+            "slo_objectives": declared_objective_names(),
+            "service_contracts": {
+                "summary": {
+                    "satisfied": service_summary.satisfied,
+                    "diverges": service_summary.diverges,
+                    "not_implemented": service_summary.not_implemented,
+                    "divergences": service_summary.divergences,
+                    "total": service_summary.total(),
+                },
+                "entries": service_rows,
+                "entry_count": service_entries.len(),
+                "omitted_entries": service_entries.len().saturating_sub(max_items),
+            },
+            "metrics": {
+                "metrics_schema_version": METRICS_SCHEMA_VERSION,
+                "atlasx_schema_version": ATLASX_SCHEMA_VERSION,
+                "named_in_scope": named_in_scope(),
+                "named_but_undefined": NAMED_NEVER_DEFINED.len(),
+                "defined_here": DEFINED_HERE,
+                "undefined_metrics_returned": NAMED_NEVER_DEFINED.iter().take(max_items).collect::<Vec<_>>(),
+                "omitted_undefined_metrics": NAMED_NEVER_DEFINED.len().saturating_sub(max_items),
+                "undefined_is_not_zero": true,
+            },
+            "sdk": {
+                "registration_note": conformance_note(),
+                "execution_and_isolation_are_not_implied": true,
+            },
+            "limitations": [
+                "reference topologies validate promise parity, not a live deployment or network route",
+                "service audits compare the transcribed contracts with in-tree reports; they do not provision hosted services",
+                "the metrics catalogue records undefined metric names and denominators where stated; it does not fabricate measurements",
+            ],
+        });
+        if include_details {
+            result["details"] = json!({
+                "service_entries": service_entries,
+                "undefined_metrics": NAMED_NEVER_DEFINED,
+            });
+        }
+        Ok(result)
+    }
+
+    fn ops_acceptance(&self, arguments: &Value) -> Result<Value, String> {
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let findings = bioprism_ops::alpha::report();
+        let summary = bioprism_ops::alpha::summary();
+        let returned = findings.iter().take(max_items).collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "summary": {
+                "met": summary.met,
+                "refuted": summary.refuted,
+                "unverifiable": summary.unverifiable,
+                "total": summary.total(),
+                "is_release_ready": summary.met == summary.total(),
+                "is_decidable": summary.unverifiable == 0,
+            },
+            "findings": returned,
+            "omitted_findings": findings.len().saturating_sub(max_items),
+            "guarantees": [
+                "acceptance criteria remain a closed typed enumeration with met, refuted, and unverifiable states",
+                "unverifiable criteria are never counted as passes or folded into a percentage",
+                "non-unverifiable findings retain the basis that can entail their verdict",
+            ],
+            "limitations": [
+                "the library can inspect its embedded workspace manifest and linked types, not run a clean checkout, demo, CI workflow, or external service",
+                "is_release_ready is a mechanical summary predicate, not a claim that the twelve unverifiable criteria passed",
+                "signature verification remains refuted by the workspace's symmetric-only attestation boundary",
+            ],
+        }))
+    }
+
+    fn ops_capacity(&self, arguments: &Value) -> Result<Value, String> {
+        let model: CapacityModel = serde_json::from_value(
+            arguments
+                .get("model")
+                .cloned()
+                .ok_or("model is required and must be a serialized CapacityModel")?,
+        )
+        .map_err(|error| format!("invalid capacity model: {error}"))?;
+        let workload: Workload = serde_json::from_value(
+            arguments
+                .get("workload")
+                .cloned()
+                .ok_or("workload is required and must be a serialized Workload")?,
+        )
+        .map_err(|error| format!("invalid workload: {error}"))?;
+        if workload.operations().len() > 1_000 {
+            return Err("workload may contain at most 1000 operations".into());
+        }
+        let projection = match model.project(&workload) {
+            Ok(projection) => projection,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "projection",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "unbounded traversals and over-ceiling materialised artifacts are refused before a capacity number is produced",
+                }))
+            }
+        };
+
+        let demand = arguments
+            .get("demand")
+            .cloned()
+            .map(serde_json::from_value::<Demand>)
+            .transpose()
+            .map_err(|error| format!("invalid demand: {error}"))?;
+        if let Some(demand) = demand {
+            if !demand.calls_per_epoch.is_finite() || demand.calls_per_epoch < 0.0 {
+                return Err("demand.calls_per_epoch must be finite and non-negative".into());
+            }
+        }
+        let plan = arguments
+            .get("degradation_plan")
+            .cloned()
+            .map(serde_json::from_value::<DegradationPlan>)
+            .transpose()
+            .map_err(|error| format!("invalid degradation_plan: {error}"))?;
+        let saturation = match (demand, plan) {
+            (None, None) => Value::Null,
+            (None, Some(_)) => return Err("degradation_plan requires demand".into()),
+            (Some(_), None) => json!({
+                "ok": false,
+                "refusal": "demand requires a named degradation_plan before saturation is evaluated",
+                "fail_closed": true,
+            }),
+            (Some(demand), Some(plan)) => json!({
+                "ok": true,
+                "value": projection.under(&demand, &plan),
+            }),
+        };
+        Ok(json!({
+            "ok": true,
+            "workload": workload.name(),
+            "memory_ceiling_bytes": model.memory_ceiling_bytes(),
+            "projection": projection,
+            "work_per_call": projection.work_per_call(),
+            "utilisation": projection.utilisation(),
+            "sustainable_calls_per_epoch": projection.sustainable_calls_per_epoch(),
+            "peak_resident_bytes": projection.peak_resident_bytes(),
+            "fully_measured": projection.is_fully_measured(),
+            "assumptions": projection.assumptions(),
+            "saturation": saturation,
+            "guarantees": [
+                "capacity numbers retain measured-versus-assumed inputs and never become bare unqualified rates",
+                "unbounded work and over-ceiling materialisation fail before projection",
+                "saturation carries an explicit visible degradation plan rather than silently relaxing correctness or policy",
+            ],
+            "limitations": [
+                "the model is caller-supplied and does not benchmark, profile, schedule, or observe a live deployment",
+                "work is measured in abstract units per epoch; no wall-clock latency, queueing distribution, or currency is inferred",
+                "a saturation plan describes declared concessions; it does not enforce backpressure or provision capacity",
+            ],
+        }))
+    }
+
+    fn research_ci_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw = match (
+            arguments.get("document").and_then(Value::as_str),
+            arguments.get("result").cloned(),
+        ) {
+            (Some(_), Some(_)) => {
+                return Err("provide either document or inline result, not both".into())
+            }
+            (Some(relative), None) => {
+                let path = self.resolve(relative)?;
+                if path.is_dir() {
+                    return Err(
+                        "research_ci_check requires a JSON result document, not a directory".into(),
+                    );
+                }
+                self.read_json(&path)?
+            }
+            (None, Some(result)) => result,
+            (None, None) => {
+                return Err("research_ci_check requires document or inline result".into())
+            }
+        };
+        let result: ResultUnderReview = serde_json::from_value(raw)
+            .map_err(|error| format!("invalid research result document: {error}"))?;
+        let report = CiReport::full(result.subject.clone(), &result);
+        let publishability = report.publishability();
+        let publishable = matches!(
+            publishability,
+            bioprism_atlashub::Publishability::Publishable
+        );
+        let checks = report
+            .outcomes
+            .iter()
+            .map(|(check, outcome)| {
+                json!({
+                    "check": check.as_str(),
+                    "outcome": outcome,
+                    "passed": outcome.is_pass(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let failed = report
+            .outcomes
+            .iter()
+            .filter(|(_, outcome)| matches!(outcome, bioprism_atlashub::CheckOutcome::Fail { .. }))
+            .map(|(check, _)| check.as_str())
+            .collect::<Vec<_>>();
+        let undetermined = report
+            .outcomes
+            .iter()
+            .filter(|(_, outcome)| {
+                matches!(
+                    outcome,
+                    bioprism_atlashub::CheckOutcome::Undetermined { .. }
+                )
+            })
+            .map(|(check, _)| check.as_str())
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "ok": true,
+            "subject": result.subject,
+            "observation_count": result.observations.len(),
+            "check_count": checks.len(),
+            "publishable": publishable,
+            "publishability": publishability,
+            "failed_checks": failed,
+            "undetermined_checks": undetermined,
+            "checks": checks,
+            "lines": report.lines(),
+            "limitations": [
+                "this runs deterministic predicates over observations supplied by the caller",
+                "it does not inspect a repository, execute a workflow, recompute a figure, or authenticate an external CI runner",
+                "undetermined is blocked publication, not a passing result",
+            ],
+        }))
+    }
+
+    fn capability_rank(&self, arguments: &Value) -> Result<Value, String> {
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let raw_vectors = arguments
+            .get("vectors")
+            .and_then(Value::as_array)
+            .ok_or("vectors is required and must contain at least two capability vectors")?;
+        if raw_vectors.len() < 2 || raw_vectors.len() > 100 {
+            return Err("vectors must contain between 2 and 100 capability vectors".into());
+        }
+        let vectors = raw_vectors
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                serde_json::from_value::<CapabilityVector>(value.clone())
+                    .map_err(|error| format!("invalid capability vector at index {index}: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let waiver_values = arguments
+            .get("waived_dimensions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut policy = MetricsComparabilityPolicy::strict();
+        for (index, value) in waiver_values.iter().enumerate() {
+            let dimension = value.as_str().ok_or_else(|| {
+                format!("waived_dimensions[{index}] must be a string dimension name")
+            })?;
+            policy = policy.waiving(dimension);
+        }
+        let ranking = PartialRanking::over_under(vectors, &policy)
+            .map_err(|error| format!("capability ranking refused: {error}"))?;
+        let vector_rows = ranking
+            .vectors()
+            .iter()
+            .take(max_items)
+            .map(|vector| {
+                let holes = vector
+                    .grid
+                    .holes()
+                    .map(|(capability, reason)| {
+                        json!({ "capability": capability, "reason": reason })
+                    })
+                    .collect::<Vec<_>>();
+                json!({
+                    "system": vector.system,
+                    "grid": vector.grid.label,
+                    "cells": vector.grid.len(),
+                    "measured_cells": vector.grid.measured().count(),
+                    "holes": holes,
+                    "unrecorded_coordinates": vector.grid.conditions.unrecorded_coordinates(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let relation_rows = ranking
+            .relations()
+            .iter()
+            .take(max_items)
+            .map(|relation| {
+                json!({
+                    "left": relation.left,
+                    "right": relation.right,
+                    "dominance": relation.dominance,
+                })
+            })
+            .collect::<Vec<_>>();
+        let unresolved_rows = ranking
+            .unresolved()
+            .into_iter()
+            .take(max_items)
+            .map(|relation| {
+                json!({
+                    "left": relation.left,
+                    "right": relation.right,
+                    "dominance": relation.dominance,
+                })
+            })
+            .collect::<Vec<_>>();
+        let relation_count = ranking.relations().len();
+        let unresolved_count = ranking.unresolved().len();
+        let omitted_vectors = ranking.vectors().len().saturating_sub(max_items);
+        let omitted_relations = relation_count.saturating_sub(max_items);
+        let omitted_unresolved = unresolved_count.saturating_sub(max_items);
+        let mut output = json!({
+            "ok": true,
+            "metrics_schema_version": METRICS_SCHEMA_VERSION,
+            "max_items": max_items,
+            "waived_dimensions": policy.waived().collect::<Vec<_>>(),
+            "partial_order": {
+                "system_count": ranking.vectors().len(),
+                "relation_count": relation_count,
+                "unresolved_count": unresolved_count,
+                "is_total": ranking.is_total(),
+                "maximal_systems": ranking.maximal(),
+                "vectors": vector_rows,
+                "relations": relation_rows,
+                "unresolved": unresolved_rows,
+                "omitted_vectors": omitted_vectors,
+                "omitted_relations": omitted_relations,
+                "omitted_unresolved": omitted_unresolved,
+            },
+            "guarantees": [
+                "unmeasured cells remain incomparable rather than becoming zero",
+                "different conditions are blocked unless the caller names a waiver",
+                "a partial order is not silently converted into a total order",
+            ],
+        });
+
+        if let Some(raw_weighting) = arguments.get("weighting") {
+            let weighting: DeclaredWeighting = serde_json::from_value(raw_weighting.clone())
+                .map_err(|error| format!("invalid declared weighting: {error}"))?;
+            let total = ranking
+                .totalise(&weighting)
+                .map_err(|error| format!("weighted ranking refused: {error}"))?;
+            let instability = RankInstability::measure(&ranking, &weighting)
+                .map_err(|error| format!("weight sensitivity refused: {error}"))?;
+            output["declared_weighting"] = json!({
+                "intended_use": weighting.intended_use(),
+                "digest": weighting.digest(),
+                "capabilities": weighting.capabilities().collect::<Vec<_>>(),
+                "weights": weighting.weights().map(|(capability, weight)| json!({
+                    "capability": capability,
+                    "weight": weight,
+                })).collect::<Vec<_>>(),
+            });
+            output["total_order"] = json!({
+                "headline": total.headline(),
+                "leaders": total.leaders(),
+                "overwrote_a_refusal": total.overwrote_a_refusal(),
+                "order": total.order.iter().take(max_items).map(|row| json!({
+                    "rank": row.rank,
+                    "system": row.system,
+                    "aggregate": row.aggregate,
+                })).collect::<Vec<_>>(),
+                "collapsed": total.collapsed.iter().take(max_items).map(|pair| json!({
+                    "left": pair.left,
+                    "right": pair.right,
+                    "dominance": pair.dominance,
+                })).collect::<Vec<_>>(),
+                "omitted_order": total.order.len().saturating_sub(max_items),
+                "omitted_collapsed": total.collapsed.len().saturating_sub(max_items),
+            });
+            output["rank_instability"] = json!(instability);
+        }
+        Ok(output)
+    }
+
+    fn safety_release_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_assessment = arguments
+            .get("assessment")
+            .cloned()
+            .ok_or("assessment is required and must contain subject, category, and ratings")?;
+        let assessment: RiskAssessment = serde_json::from_value(raw_assessment)
+            .map_err(|error| format!("invalid risk assessment: {error}"))?;
+        let unrated = assessment
+            .unrated()
+            .into_iter()
+            .map(|dimension| dimension.to_string())
+            .collect::<Vec<_>>();
+        let high_risk_dimensions = assessment
+            .high_risk_dimensions()
+            .into_iter()
+            .map(|dimension| dimension.to_string())
+            .collect::<Vec<_>>();
+        let decision = ReleaseGate
+            .decide(&assessment)
+            .map_err(|error| format!("safety release gate refused: {error}"))?;
+        let cleared = decision.is_cleared();
+        Ok(json!({
+            "ok": true,
+            "subject": assessment.subject,
+            "category": assessment.category,
+            "decision": decision,
+            "cleared": cleared,
+            "unrated_dimensions": unrated,
+            "high_risk_dimensions": high_risk_dimensions,
+            "rule": "zero high non-mitigating dimensions clears; one conditions release; two or more block; any unrated dimension refuses the gate",
+            "fail_closed": true,
+            "limitations": [
+                "ratings are reviewer-supplied labels; this process does not classify content or validate the reviewer",
+                "the threshold is the explicit bioprism-safety rule because the blueprint does not specify numeric thresholds",
+                "this is a release decision model, not runtime sandboxing, egress control, authentication, or clinical approval",
+            ],
+        }))
+    }
+
+    fn medical_boundary_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_output = arguments
+            .get("output")
+            .cloned()
+            .ok_or("output is required and must be a serialized RequestedOutput")?;
+        let output: RequestedOutput = serde_json::from_value(raw_output)
+            .map_err(|error| format!("invalid requested output: {error}"))?;
+        let boundary = MedicalBoundary;
+        match boundary.admit(&output) {
+            Ok(use_case) => Ok(json!({
+                "ok": true,
+                "admitted": true,
+                "use_case": use_case,
+                "research_only_label": boundary.label(),
+                "boundary_is_unconditional": true,
+                "limitations": [
+                    "admission means the requested category is inside the research-only model; it does not validate scientific quality or runtime safety",
+                    "clinical outputs have no override, force flag, or reviewer bypass in this boundary",
+                ],
+            })),
+            Err(error) => Ok(json!({
+                "ok": false,
+                "admitted": false,
+                "refusal": error.to_string(),
+                "research_only_label": boundary.label(),
+                "boundary_is_unconditional": true,
+                "clinical_output_is_never_admitted": true,
+            })),
+        }
+    }
+
+    fn hub_search(&self, arguments: &Value) -> Result<Value, String> {
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let federation: HubFederation =
+            serde_json::from_value(arguments.get("federation").cloned().ok_or(
+                "federation is required and must be a serialized bioprism-hubapi Federation",
+            )?)
+            .map_err(|error| format!("invalid federation: {error}"))?;
+        let catalogs: Vec<HubCatalog> = serde_json::from_value(
+            arguments
+                .get("catalogs")
+                .cloned()
+                .ok_or("catalogs is required and must be an array of serialized Catalog values")?,
+        )
+        .map_err(|error| format!("invalid catalogs: {error}"))?;
+        if catalogs.len() > 100 {
+            return Err("catalogs must contain at most 100 catalogs".into());
+        }
+        let release_count = catalogs.iter().map(HubCatalog::len).sum::<usize>();
+        if release_count > 10_000 {
+            return Err("catalogs may contain at most 10000 releases in one request".into());
+        }
+        let query: HubQuery = serde_json::from_value(
+            arguments
+                .get("query")
+                .cloned()
+                .ok_or("query is required and must be a serialized bioprism-hubapi Query")?,
+        )
+        .map_err(|error| format!("invalid hub query: {error}"))?;
+        if query.limit == Some(0) {
+            return Err("query.limit must be at least 1 when supplied".into());
+        }
+        let requested_limit = query.limit;
+        let effective_limit =
+            requested_limit.map_or(max_items as usize, |limit| limit.min(max_items as usize));
+        let mut bounded_query = query;
+        bounded_query.limit = Some(effective_limit);
+        let results = hub_search_query(&federation, &catalogs, &bounded_query)
+            .map_err(|error| format!("hub search refused: {error}"))?;
+        let match_count = results.matches.len();
+        let excluded_count = results.excluded.len();
+        let matches = results.matches;
+        let excluded = results
+            .excluded
+            .iter()
+            .take(max_items as usize)
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "catalog_count": catalogs.len(),
+            "release_count": release_count,
+            "requested_limit": requested_limit,
+            "effective_limit": effective_limit,
+            "matches": matches,
+            "match_count": match_count,
+            "excluded": excluded,
+            "excluded_count": excluded_count,
+            "omitted_excluded": excluded_count.saturating_sub(max_items as usize),
+            "truncated": results.truncated || excluded_count > max_items as usize,
+            "guarantees": [
+                "empty facet queries refuse rather than returning unexplained recommendations",
+                "every match carries its matching facets, authority, tier, digest, and freshness",
+                "near misses retain the facet that excluded them",
+                "ranking uses declared catalog evidence and tier, never popularity telemetry",
+            ],
+            "limitations": [
+                "federation membership, catalog contents, and freshness epochs are caller-supplied in-memory values",
+                "this is exact facet and lexical search; it does not fetch registries, verify signatures, embed text, or infer semantic similarity",
+            ],
+        }))
+    }
+
+    fn measurement_compare(&self, arguments: &Value) -> Result<Value, String> {
+        let left: Measurement = serde_json::from_value(
+            arguments
+                .get("left")
+                .cloned()
+                .ok_or("left is required and must be a serialized Measurement")?,
+        )
+        .map_err(|error| format!("invalid left measurement: {error}"))?;
+        let right: Measurement = serde_json::from_value(
+            arguments
+                .get("right")
+                .cloned()
+                .ok_or("right is required and must be a serialized Measurement")?,
+        )
+        .map_err(|error| format!("invalid right measurement: {error}"))?;
+        let policy = StandardsComparabilityPolicy {
+            require_bound_terms: arguments
+                .get("require_bound_terms")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        };
+        let report = comparability_report(&left, &right, policy);
+        let comparable = report.verdict.is_comparable();
+        let digest = report
+            .digest()
+            .map_err(|error| format!("could not hash comparability report: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "comparable": comparable,
+            "policy": policy,
+            "report": report,
+            "report_sha256": digest.to_string(),
+            "guarantees": [
+                "kind, frame, dimension, unit, and ontology mismatches remain typed refusals",
+                "unit conversion is explicit and recorded rather than silently applied",
+                "unbound ontology terms are reported as caveats by default and can be refused by policy",
+            ],
+            "limitations": [
+                "this compares caller-supplied declarations; it does not parse source files, validate instrument provenance, load ontologies, or perform coordinate registration",
+                "the closed unit vocabulary is the standards crate's declared table, not a general UCUM parser",
+            ],
+        }))
+    }
+
+    fn hub_inputs(&self, arguments: &Value) -> Result<(HubFederation, Vec<HubCatalog>), String> {
+        let federation: HubFederation =
+            serde_json::from_value(arguments.get("federation").cloned().ok_or(
+                "federation is required and must be a serialized bioprism-hubapi Federation",
+            )?)
+            .map_err(|error| format!("invalid federation: {error}"))?;
+        let catalogs: Vec<HubCatalog> = serde_json::from_value(
+            arguments
+                .get("catalogs")
+                .cloned()
+                .ok_or("catalogs is required and must be an array of serialized Catalog values")?,
+        )
+        .map_err(|error| format!("invalid catalogs: {error}"))?;
+        if catalogs.len() > 100 {
+            return Err("catalogs must contain at most 100 catalogs".into());
+        }
+        let release_count = catalogs.iter().map(HubCatalog::len).sum::<usize>();
+        if release_count > 10_000 {
+            return Err("catalogs may contain at most 10000 releases in one request".into());
+        }
+        Ok((federation, catalogs))
+    }
+
+    fn hub_resolve(&self, arguments: &Value) -> Result<Value, String> {
+        let (federation, catalogs) = self.hub_inputs(arguments)?;
+        let request: HubRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or("request is required and must be a serialized bioprism-hubapi Request")?,
+        )
+        .map_err(|error| format!("invalid hub resolution request: {error}"))?;
+        let resolution = hub_resolve_in(&federation, &catalogs, &request)
+            .map_err(|error| format!("hub resolution refused: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "resolution": resolution,
+            "answered_by": resolution.answered_by(),
+            "authoritative": resolution.is_authoritative(),
+            "catalog_count": catalogs.len(),
+            "guarantees": [
+                "the federation is checked before a catalog answer is accepted",
+                "authoritative catalogs are preferred and every agreeing catalog is cross-checked for digest divergence",
+                "freshness policy and lifecycle intent travel inside the resolution provenance",
+            ],
+            "limitations": [
+                "catalogs, federation membership, signatures, and epochs are caller-supplied values; this process does not fetch or authenticate registries",
+            ],
+        }))
+    }
+
+    fn hub_lock(&self, arguments: &Value) -> Result<Value, String> {
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let (federation, catalogs) = self.hub_inputs(arguments)?;
+        let root: HubRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or("request is required and must be a serialized root Request")?,
+        )
+        .map_err(|error| format!("invalid root dependency request: {error}"))?;
+        let lock = hub_resolve_dependencies(&federation, &catalogs, &root)
+            .map_err(|error| format!("dependency closure refused: {error}"))?;
+        let entries = lock
+            .entries()
+            .take(max_items as usize)
+            .map(|(name, locked)| json!({ "name": name, "locked": locked }))
+            .collect::<Vec<_>>();
+        let entry_count = lock.len();
+        Ok(json!({
+            "ok": true,
+            "entry_count": entry_count,
+            "fully_authoritative": lock.is_fully_authoritative(),
+            "answering_registries": lock.answering_registries(),
+            "remarked_entry_count": lock.remarked().len(),
+            "entries": entries,
+            "omitted_entries": entry_count.saturating_sub(max_items as usize),
+            "max_items": max_items,
+            "guarantees": [
+                "transitive dependencies are fixed by a bounded deterministic fixpoint rather than silently omitted",
+                "version collisions and missing satisfiers refuse with the imposing requirements named",
+                "each lock entry preserves resolution authority, freshness, digest, lifecycle notes, and required-by provenance",
+            ],
+        }))
+    }
+
+    fn tabular_ingest(&self, arguments: &Value) -> Result<Value, String> {
+        let profile: TabularProfile = serde_json::from_value(
+            arguments
+                .get("profile")
+                .cloned()
+                .ok_or("profile is required and must be a serialized TabularProfile")?,
+        )
+        .map_err(|error| format!("invalid tabular profile: {error}"))?;
+        let source_id = arguments
+            .get("source_id")
+            .and_then(Value::as_str)
+            .ok_or("source_id is required")?;
+        let inline = arguments.get("csv").and_then(Value::as_str);
+        let document = arguments.get("document").and_then(Value::as_str);
+        if inline.is_some() && document.is_some() {
+            return Err("provide either csv or document, not both".into());
+        }
+        let bytes = match (inline, document) {
+            (Some(csv), None) => csv.as_bytes().to_vec(),
+            (None, Some(relative)) => {
+                let path = self.resolve(relative)?;
+                if path.is_dir() {
+                    return Err("tabular_ingest requires a file, not a directory".into());
+                }
+                std::fs::read(&path).map_err(|error| {
+                    format!("cannot read tabular source {}: {error}", path.display())
+                })?
+            }
+            (None, None) => return Err("tabular_ingest requires csv or document".into()),
+            (Some(_), Some(_)) => unreachable!("the mutually exclusive inputs were checked"),
+        };
+        let max_bytes = arguments
+            .get("max_bytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(10_000_000);
+        if max_bytes == 0 || max_bytes > 10_000_000 {
+            return Err("max_bytes must be between 1 and 10000000".into());
+        }
+        if bytes.len() as u64 > max_bytes {
+            return Err(format!(
+                "tabular source is {} bytes, above max_bytes {}",
+                bytes.len(),
+                max_bytes
+            ));
+        }
+        let mut source = Source::bytes(source_id, bytes);
+        if let Some(format) = arguments.get("format").and_then(Value::as_str) {
+            source = source.with_format(format);
+        }
+        if let Some(raw_provenance) = arguments.get("provenance") {
+            let provenance: SourceProvenance = serde_json::from_value(raw_provenance.clone())
+                .map_err(|error| format!("invalid source provenance: {error}"))?;
+            source = source.with_provenance(provenance);
+        }
+        let adapter = TabularAdapter::new(profile);
+        let (report, ingestion) = certify(&adapter, &source)
+            .map_err(|error| format!("tabular ingestion refused: {error}"))?;
+        let digest = ingestion
+            .digest()
+            .map_err(|error| format!("could not hash ingestion: {error}"))?;
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let include_facts = arguments
+            .get("include_facts")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mut output = json!({
+            "ok": true,
+            "source_id": source_id,
+            "fact_count": ingestion.fact_count(),
+            "ingestion_sha256": digest,
+            "manifest": ingestion.manifest(),
+            "semantic_loss": ingestion.loss(),
+            "conformance": {
+                "report": report,
+                "passed": report.passed(),
+                "verified": report.verified(),
+                "summary": report.summary(),
+            },
+            "max_items": max_items,
+            "limitations": [
+                "this executes the in-process CSV/TSV tabular adapter over caller-supplied bytes; it does not parse DICOM, NIfTI, AnnData, OME-Zarr, BAM/CRAM, or VCF",
+                "conformance verifies deterministic output and loss accounting, not the truth of the source declarations",
+            ],
+        });
+        if include_facts {
+            output["facts"] = json!(ingestion
+                .facts()
+                .iter()
+                .take(max_items as usize)
+                .cloned()
+                .collect::<Vec<_>>());
+            output["omitted_facts"] =
+                json!(ingestion.fact_count().saturating_sub(max_items as usize));
+        }
+        Ok(output)
+    }
+
+    fn observed_world_declare(&self, arguments: &Value) -> Result<Value, String> {
+        let id = arguments
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("id is required")?;
+        let sources: Vec<ObservedSourceRef> = serde_json::from_value(
+            arguments
+                .get("sources")
+                .cloned()
+                .ok_or("sources is required and must be an array of SourceRef values")?,
+        )
+        .map_err(|error| format!("invalid observed-world sources: {error}"))?;
+        let mut source_names = BTreeSet::new();
+        for source in &sources {
+            if !source_names.insert(source.name.clone()) {
+                return Err(format!("duplicate observed-world source {:?}", source.name));
+            }
+        }
+        let design: StudyDesign = serde_json::from_value(
+            arguments
+                .get("design")
+                .cloned()
+                .ok_or("design is required and must be a serialized StudyDesign")?,
+        )
+        .map_err(|error| format!("invalid observed-world study design: {error}"))?;
+        let labels = arguments
+            .get("outcome_labels")
+            .and_then(Value::as_array)
+            .ok_or("outcome_labels is required and must be an array of strings")?;
+        let mut outcome_labels = BTreeSet::new();
+        for (index, label) in labels.iter().enumerate() {
+            let label = label
+                .as_str()
+                .ok_or_else(|| format!("outcome_labels[{index}] must be a string"))?;
+            if !outcome_labels.insert(label.to_string()) {
+                return Err(format!("duplicate outcome label {label:?}"));
+            }
+        }
+        let world = declare_observed_world(id, sources, design, outcome_labels)
+            .map_err(|error| format!("observed-world declaration refused: {error}"))?;
+        let provenance = world.provenance();
+        let controlled = world
+            .controlled_sources()
+            .iter()
+            .map(|source| source.name.clone())
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "world": world,
+            "provenance": provenance,
+            "world_id": world.id(),
+            "source_count": world.sources().len(),
+            "controlled_sources": controlled,
+            "outcome_label_count": world.outcome_labels().len(),
+            "guarantees": [
+                "unpinned sources, unreconciled strata, and undeclared selection for population claims refuse before publication",
+                "the observed rung remains distinct from synthetic and mechanistic provenance",
+                "controlled sources are retained as a redistribution boundary rather than silently embedded",
+            ],
+        }))
+    }
+
+    fn world_claim_check(&self, arguments: &Value) -> Result<Value, String> {
+        let provenance: WorldProvenance = serde_json::from_value(
+            arguments
+                .get("provenance")
+                .cloned()
+                .ok_or("provenance is required and must be a serialized world provenance")?,
+        )
+        .map_err(|error| format!("invalid world provenance: {error}"))?;
+        let claim: Claim = serde_json::from_value(
+            arguments
+                .get("claim")
+                .cloned()
+                .ok_or("claim is required and must be a serialized Claim")?,
+        )
+        .map_err(|error| format!("invalid world claim: {error}"))?;
+        match support_world_claim(&provenance, claim.clone()) {
+            Ok(grounded) => Ok(json!({
+                "ok": true,
+                "supported": true,
+                "claim": grounded.claim(),
+                "grounded": grounded,
+                "caveat": grounded.caveat(),
+                "provenance": provenance,
+            })),
+            Err(error) => Ok(json!({
+                "ok": false,
+                "supported": false,
+                "claim": claim,
+                "refusal": error.to_string(),
+                "provenance": provenance,
+                "fail_closed": true,
+            })),
+        }
+    }
+
+    fn trace_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let trace_id = arguments
+            .get("trace_id")
+            .and_then(Value::as_str)
+            .ok_or("trace_id is required")?;
+        if trace_id.trim().is_empty() {
+            return Err("trace_id must not be empty".into());
+        }
+
+        let max_bytes = arguments
+            .get("max_bytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(10_000_000);
+        if max_bytes == 0 || max_bytes > 10_000_000 {
+            return Err("max_bytes must be between 1 and 10000000".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+
+        let load_text = |inline_key: &str, document_key: &str| -> Result<Option<String>, String> {
+            let inline = arguments.get(inline_key).and_then(Value::as_str);
+            let document = arguments.get(document_key).and_then(Value::as_str);
+            if inline.is_some() && document.is_some() {
+                return Err(format!(
+                    "provide either {inline_key} or {document_key}, not both"
+                ));
+            }
+            match (inline, document) {
+                (Some(text), None) => {
+                    if text.len() as u64 > max_bytes {
+                        return Err(format!(
+                            "{inline_key} is {} bytes, above max_bytes {}",
+                            text.len(),
+                            max_bytes
+                        ));
+                    }
+                    Ok(Some(text.to_string()))
+                }
+                (None, Some(relative)) => {
+                    let path = self.resolve(relative)?;
+                    if path.is_dir() {
+                        return Err(format!(
+                            "{document_key} requires a JSONL file, not a directory"
+                        ));
+                    }
+                    let metadata = std::fs::metadata(&path).map_err(|error| {
+                        format!("cannot inspect trace document {}: {error}", path.display())
+                    })?;
+                    if metadata.len() > max_bytes {
+                        return Err(format!(
+                            "trace document is {} bytes, above max_bytes {}",
+                            metadata.len(),
+                            max_bytes
+                        ));
+                    }
+                    std::fs::read_to_string(&path).map(Some).map_err(|error| {
+                        format!("cannot read trace document {}: {error}", path.display())
+                    })
+                }
+                (None, None) => Ok(None),
+                (Some(_), Some(_)) => unreachable!("trace inputs were checked as exclusive"),
+            }
+        };
+
+        let failing_text = load_text("jsonl", "document")?
+            .ok_or("trace_analyze requires jsonl or document for the failing trace")?;
+        let succeeded = arguments
+            .get("succeeded")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let failing = trace_from_jsonl(trace_id, &failing_text, succeeded);
+        validate_trace(failing.trace())
+            .map_err(|error| format!("trace validation refused: {error}"))?;
+
+        let passing = load_text("passing_jsonl", "passing_document")?.map(|text| {
+            trace_from_jsonl(
+                arguments
+                    .get("passing_trace_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("passing"),
+                &text,
+                arguments
+                    .get("passing_succeeded")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+            )
+        });
+        if let Some(passing) = &passing {
+            validate_trace(passing.trace())
+                .map_err(|error| format!("passing trace validation refused: {error}"))?;
+        }
+
+        let usable_divergence = passing.as_ref().and_then(|passing| {
+            (failing.is_compilable() && passing.is_compilable())
+                .then(|| first_divergence(failing.trace(), passing.trace()))
+        });
+        let divergence_refusal = passing.as_ref().and_then(|passing| {
+            if failing.is_compilable() && passing.is_compilable() {
+                None
+            } else {
+                Some("divergence is withheld because both traces must be non-empty and lossless")
+            }
+        });
+        let divergence_step = usable_divergence
+            .as_ref()
+            .and_then(|item| item.failing_step());
+        let candidates = segment_trace(failing.trace(), divergence_step);
+        let excluded = excluded_trace(failing.trace());
+        let candidate_count = candidates.len();
+        let excluded_count = excluded.len();
+        let bounded_candidates = candidates
+            .iter()
+            .take(max_items as usize)
+            .cloned()
+            .collect::<Vec<_>>();
+        let proposals = bounded_candidates
+            .iter()
+            .filter_map(|candidate| {
+                CellProposal::from_candidate(failing.trace(), candidate, usable_divergence.as_ref())
+                    .ok()
+            })
+            .collect::<Vec<_>>();
+        let bounded_excluded = excluded
+            .iter()
+            .take(max_items as usize)
+            .map(|(step, reason)| json!({ "step": step, "reason": reason }))
+            .collect::<Vec<_>>();
+        let failing_digest = failing.trace().digest().as_str().to_string();
+
+        Ok(json!({
+            "ok": true,
+            "trace_id": failing.trace().trace_id,
+            "event_count": failing.trace().len(),
+            "succeeded": failing.trace().succeeded,
+            "trace_sha256": failing_digest,
+            "valid": true,
+            "loss": failing.loss(),
+            "lossless": failing.loss().is_lossless(),
+            "dropped_events": failing.loss().dropped_events(),
+            "compilable": failing.is_compilable(),
+            "passing": passing.as_ref().map(|item| json!({
+                "trace_id": item.trace().trace_id,
+                "event_count": item.trace().len(),
+                "succeeded": item.trace().succeeded,
+                "trace_sha256": item.trace().digest().as_str().to_string(),
+                "loss": item.loss(),
+                "lossless": item.loss().is_lossless(),
+                "dropped_events": item.loss().dropped_events(),
+                "compilable": item.is_compilable(),
+            })),
+            "divergence": usable_divergence,
+            "divergence_actionable": usable_divergence
+                .as_ref()
+                .map(|item| divergence_is_actionable(item, failing.trace()))
+                .unwrap_or(false),
+            "divergence_refusal": divergence_refusal,
+            "candidate_count": candidate_count,
+            "candidates": bounded_candidates,
+            "omitted_candidates": candidate_count.saturating_sub(max_items as usize),
+            "proposals": proposals,
+            "approval_required": true,
+            "excluded_count": excluded_count,
+            "excluded": bounded_excluded,
+            "omitted_excluded": excluded_count.saturating_sub(max_items as usize),
+            "review_reduction": review_reduction(failing.trace(), &candidates),
+            "guarantees": [
+                "JSONL import always returns an explicit loss report; untyped or unparsed lines are never guessed into events",
+                "structural validation runs before divergence or candidate generation",
+                "divergence compares semantic event content and only becomes usable when both traces are lossless and non-empty",
+                "candidate scores expose alternatives, newly visible evidence, downstream reach, and divergence bonus",
+                "cell proposals retain trace digest and review context but cannot become Decision Cells without a named reviewer",
+            ],
+            "limitations": [
+                "this accepts native JSONL only; the blueprint's OpenTelemetry adapter is not implemented in this offline workspace",
+                "segmentation is a transparent arithmetic heuristic, not a validated model or claim that the top candidate is correct",
+                "this tool does not minimize state, replay tools, run a benchmark, or publish a Decision Cell",
+            ],
+        }))
+    }
+
+    fn lineage_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let registry: SpecimenRegistry = serde_json::from_value(
+            arguments
+                .get("registry")
+                .cloned()
+                .ok_or("registry is required and must be a serialized SpecimenRegistry")?,
+        )
+        .map_err(|error| format!("invalid specimen registry: {error}"))?;
+        if registry.nodes.len() > 10_000 {
+            return Err("registry must contain at most 10000 specimens".into());
+        }
+        if registry.artifacts.len() > 20_000 {
+            return Err("registry must contain at most 20000 artifacts".into());
+        }
+
+        let audit = audit_lineage(&registry);
+        let finding_count = audit.findings.len();
+        let fingerprint_count = audit.fingerprints.len();
+        let unchecked = audit.unchecked_specimens();
+        let unchecked_count = unchecked.len();
+        let identity_complete = audit.fingerprints.iter().all(|check| check.is_consistent());
+        Ok(json!({
+            "ok": true,
+            "specimen_count": registry.nodes.len(),
+            "artifact_count": registry.artifacts.len(),
+            "finding_count": finding_count,
+            "clean": audit.is_clean(),
+            "identity_complete": identity_complete,
+            "fingerprint_count": fingerprint_count,
+            "fingerprints": audit.fingerprints.iter().take(max_items as usize).collect::<Vec<_>>(),
+            "omitted_fingerprints": fingerprint_count.saturating_sub(max_items as usize),
+            "unchecked_identity_count": unchecked_count,
+            "unchecked_identity": unchecked
+                .iter()
+                .take(max_items as usize)
+                .map(|specimen| specimen.as_str())
+                .collect::<Vec<_>>(),
+            "finding_count_returned": finding_count.min(max_items as usize),
+            "findings": audit
+                .findings
+                .iter()
+                .take(max_items as usize)
+                .collect::<Vec<_>>(),
+            "omitted_findings": finding_count.saturating_sub(max_items as usize),
+            "guarantees": [
+                "lineage cycles, mass over-allocation, temporal implausibility, duplicate material, artifact disagreement, and fingerprint mismatch remain typed findings",
+                "missing fingerprint evidence is reported separately from a consistent fingerprint and never counts as a pass",
+                "the audit consumes declared registry records without silently sealing or rewriting artifact observations",
+            ],
+            "limitations": [
+                "fingerprints are opaque donor identifiers compared by equality; no genotyping, call-rate, or discrimination calculation is performed",
+                "access_domain is a declared boundary, not an access-control enforcement point",
+                "the audit checks the supplied registry and cannot establish that source records or laboratory assertions are true",
+            ],
+        }))
+    }
+
+    fn preanalytic_apply(&self, arguments: &Value) -> Result<Value, String> {
+        let specimen: Specimen = serde_json::from_value(
+            arguments
+                .get("specimen")
+                .cloned()
+                .ok_or("specimen is required and must be a serialized Specimen")?,
+        )
+        .map_err(|error| format!("invalid pre-analytic specimen: {error}"))?;
+        let mutation: PreanalyticMutation = serde_json::from_value(
+            arguments
+                .get("mutation")
+                .cloned()
+                .ok_or("mutation is required and must be a serialized PreanalyticMutation")?,
+        )
+        .map_err(|error| format!("invalid pre-analytic mutation: {error}"))?;
+        if mutation.edits.len() > 100 {
+            return Err("mutation may contain at most 100 edits".into());
+        }
+        let before_biology = specimen.biology_digest();
+        let before_digest = specimen.digest();
+
+        let available_actions = arguments
+            .get("available_actions")
+            .map(|raw| {
+                raw.as_array()
+                    .ok_or("available_actions must be an array of strings")?
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| {
+                        value
+                            .as_str()
+                            .map(ToString::to_string)
+                            .ok_or_else(|| format!("available_actions[{index}] must be a string"))
+                    })
+                    .collect::<Result<std::collections::BTreeSet<_>, _>>()
+            })
+            .transpose()?;
+        let response_check = available_actions.as_ref().map(|actions| {
+            check_preanalytic_response(&mutation, actions)
+                .map(|()| json!({ "ok": true }))
+                .unwrap_or_else(|error| {
+                    json!({ "ok": false, "refusal": error.to_string(), "fail_closed": true })
+                })
+        });
+
+        let family = arguments
+            .get("family")
+            .map(|raw| {
+                serde_json::from_value::<Vec<PreanalyticMutation>>(raw.clone())
+                    .map_err(|error| format!("invalid pre-analytic family: {error}"))
+            })
+            .transpose()?;
+        if family.as_ref().is_some_and(|members| members.len() > 100) {
+            return Err("pre-analytic family may contain at most 100 mutations".into());
+        }
+        let family_validation = family.as_ref().map(|members| {
+            let family_name = arguments
+                .get("family_name")
+                .and_then(Value::as_str)
+                .unwrap_or(&mutation.family);
+            validate_family(&specimen, family_name, members)
+                .map(|()| json!({ "ok": true, "family": family_name }))
+                .unwrap_or_else(|error| {
+                    json!({
+                        "ok": false,
+                        "family": family_name,
+                        "refusal": error.to_string(),
+                        "fail_closed": true
+                    })
+                })
+        });
+        let detectability = match (
+            family.as_ref(),
+            arguments.get("qc_field").and_then(Value::as_str),
+            arguments.get("alert_at").and_then(Value::as_i64),
+        ) {
+            (Some(members), Some(qc_field), Some(alert_at)) if alert_at >= 0 => {
+                detectability_floor(&specimen, members, qc_field, alert_at).map(|intensity| {
+                    json!({ "qc_field": qc_field, "alert_at": alert_at, "intensity": intensity.get() })
+                })
+            }
+            (Some(_), Some(_), Some(_)) => {
+                return Err("alert_at must be non-negative".into())
+            }
+            _ => None,
+        };
+
+        match apply_preanalytic(&specimen, &mutation) {
+            Ok(faulted) => Ok(json!({
+                "ok": true,
+                "applied": true,
+                "mutation": mutation,
+                "stage": faulted.stage,
+                "faulted": faulted,
+                "biology_digest_before": before_biology,
+                "biology_digest_after": faulted.specimen.biology_digest(),
+                "biology_unchanged": before_biology == faulted.specimen.biology_digest(),
+                "specimen_digest_before": before_digest,
+                "specimen_digest_after": faulted.specimen.digest(),
+                "has_signature": faulted.has_signature(),
+                "response_check": response_check,
+                "family_validation": family_validation,
+                "detectability": detectability,
+                "guarantees": [
+                    "a non-null pre-analytic mutation is admitted only when biology remains byte-identical and QC or measurability carries a signature",
+                    "QC labels that name the injected fault, stale downstream state, biological edits, and absent signatures refuse",
+                    "false-positive family controls and response availability are independently reported rather than folded into application success",
+                ],
+                "limitations": [
+                    "fault kinds and effects are caller-declared abstractions; this does not model a laboratory, assay physics, or clinical thresholds",
+                    "detectability_floor uses the caller's QC field and alert threshold and skips mutations that refuse application",
+                ],
+            })),
+            Err(error) => Ok(json!({
+                "ok": false,
+                "applied": false,
+                "mutation": mutation,
+                "biology_digest_before": before_biology,
+                "specimen_digest_before": before_digest,
+                "refusal": error.to_string(),
+                "response_check": response_check,
+                "family_validation": family_validation,
+                "detectability": detectability,
+                "fail_closed": true,
+            })),
+        }
+    }
+
+    fn contradiction_review(&self, arguments: &Value) -> Result<Value, String> {
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let left: Reading = serde_json::from_value(
+            arguments
+                .get("left")
+                .cloned()
+                .ok_or("left is required and must be a serialized contradiction Reading")?,
+        )
+        .map_err(|error| format!("invalid left reading: {error}"))?;
+        let right: Reading = serde_json::from_value(
+            arguments
+                .get("right")
+                .cloned()
+                .ok_or("right is required and must be a serialized contradiction Reading")?,
+        )
+        .map_err(|error| format!("invalid right reading: {error}"))?;
+        let intent: DiscordanceClass = serde_json::from_value(
+            arguments
+                .get("intent")
+                .cloned()
+                .ok_or("intent is required and must be expected, resolvable, or irreducible")?,
+        )
+        .map_err(|error| format!("invalid contradiction intent: {error}"))?;
+        let hypotheses: Vec<Hypothesis> = serde_json::from_value(
+            arguments
+                .get("hypotheses")
+                .cloned()
+                .ok_or("hypotheses is required and must be an array of Hypothesis values")?,
+        )
+        .map_err(|error| format!("invalid contradiction hypotheses: {error}"))?;
+        if hypotheses.is_empty() {
+            return Err("hypotheses must contain at least one account".into());
+        }
+        if hypotheses.len() > 1_000 {
+            return Err("hypotheses may contain at most 1000 accounts".into());
+        }
+        let mut hypothesis_ids = BTreeSet::new();
+        for hypothesis in &hypotheses {
+            if !hypothesis_ids.insert(hypothesis.id.to_string()) {
+                return Err(format!(
+                    "hypotheses must not contain duplicate id {:?}",
+                    hypothesis.id.to_string()
+                ));
+            }
+        }
+        let actions: Vec<DiscriminatingAction> = serde_json::from_value(
+            arguments
+                .get("actions")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid discriminating actions: {error}"))?;
+        if actions.len() > 1_000 {
+            return Err("actions may contain at most 1000 entries".into());
+        }
+        let mut action_ids = BTreeSet::new();
+        for action in &actions {
+            if !action_ids.insert(action.evidence.to_string()) {
+                return Err(format!(
+                    "actions must not contain duplicate evidence {:?}",
+                    action.evidence.to_string()
+                ));
+            }
+        }
+        let missing: Vec<MissingEvidence> = serde_json::from_value(
+            arguments
+                .get("missing_evidence")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid missing evidence: {error}"))?;
+        let references: Vec<ReferenceDiscordance> = serde_json::from_value(
+            arguments
+                .get("references")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid reference discordance: {error}"))?;
+        for (name, count) in [
+            ("missing_evidence", missing.len()),
+            ("references", references.len()),
+        ] {
+            if count > 1_000 {
+                return Err(format!("{name} may contain at most 1000 entries"));
+            }
+        }
+        let examine: Vec<String> = serde_json::from_value(
+            arguments
+                .get("examine")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid examine list: {error}"))?;
+        if examine.len() > 1_000 {
+            return Err("examine may contain at most 1000 evidence ids".into());
+        }
+        let mut examine_ids = BTreeSet::new();
+        for evidence in &examine {
+            if !examine_ids.insert(evidence.clone()) {
+                return Err(format!(
+                    "examine must not contain duplicate evidence {evidence:?}"
+                ));
+            }
+        }
+
+        let contradiction = match pose_contradiction(left, right) {
+            Ok(contradiction) => contradiction,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "pose",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                }))
+            }
+        };
+        let mut hypothesis_set = HypothesisSet::new();
+        for hypothesis in hypotheses {
+            hypothesis_set = hypothesis_set.with(hypothesis);
+        }
+        let mut program = ContradictionProgram::new(contradiction, intent, hypothesis_set);
+        for action in actions {
+            program = program.with_action(action);
+        }
+        for item in missing {
+            program = program.with_missing(item);
+        }
+        for reference in references {
+            program = program.with_reference(reference);
+        }
+        let validated = match validate_contradiction(program) {
+            Ok(validated) => validated,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "validation",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                }))
+            }
+        };
+        let validation_intent = validated.intent_check().clone();
+        let admissible_count = validated.admissible().len();
+        let mut examined_program = validated.program().clone();
+        let mut examined = Vec::new();
+        for evidence in &examine {
+            match examined_program.examine(&EvidenceId::new(evidence)) {
+                Ok(_) => examined.push(evidence.clone()),
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "validated": true,
+                        "stage": "examine",
+                        "examined": examined,
+                        "refusal": error.to_string(),
+                        "state": examined_program.state(),
+                        "fail_closed": true,
+                    }))
+                }
+            }
+        }
+        let expectedness = arguments
+            .get("notable_below_per_ten_thousand")
+            .and_then(Value::as_u64)
+            .map(|threshold| {
+                contradiction_expectedness(&examined_program, threshold)
+                    .map(|value| json!({ "ok": true, "value": value, "threshold": threshold }))
+                    .unwrap_or_else(|error| {
+                        json!({
+                            "ok": false,
+                            "threshold": threshold,
+                            "refusal": error.to_string(),
+                            "fail_closed": true
+                        })
+                    })
+            });
+        let state = examined_program.state();
+        let next_actions = contradiction_next_actions(&examined_program);
+        let cues = cue_scan(&examined_program);
+        let post_intent = check_intent(&examined_program);
+        Ok(json!({
+            "ok": true,
+            "validated": true,
+            "contradiction": examined_program.contradiction(),
+            "intent": examined_program.intent(),
+            "declared_hypothesis_count": examined_program.declared().len(),
+            "admissible_hypothesis_count": admissible_count,
+            "admissible_hypotheses": validated.admissible(),
+            "validation_intent_check": validation_intent,
+            "post_examination_intent_check": post_intent,
+            "examined": examined,
+            "state": state,
+            "state_name": state.as_str(),
+            "live_hypothesis_count": examined_program.live().len(),
+            "next_actions": next_actions.iter().take(max_items as usize).collect::<Vec<_>>(),
+            "omitted_next_actions": next_actions.len().saturating_sub(max_items as usize),
+            "cue_count": cues.len(),
+            "cues": cues.iter().take(max_items as usize).collect::<Vec<_>>(),
+            "omitted_cues": cues.len().saturating_sub(max_items as usize),
+            "expectedness": expectedness,
+            "guarantees": [
+                "readings are posed only when they concern the same quantity, overlap in scope, were both examined, and disagree beyond declared uncertainty",
+                "hypotheses are filtered by structural admissibility and answer cues are refused rather than silently tolerated",
+                "resolution keeps resolved, not-yet-examined, and unresolvable states distinct",
+                "narrowing requires named discriminating evidence and refuses an action that would erase every live account",
+                "next-action ranking is a declared set-cover surrogate with cost tie-breaking, not an invented probability or information-gain claim",
+            ],
+            "limitations": [
+                "modality, quantity, scope, and reading values are caller-supplied declarations; no imaging, pathology, assay, or biological truth is loaded",
+                "expectedness requires a caller-supplied reference discordance distribution and threshold",
+                "this tool does not choose a correct modality, reconcile contradictory evidence, or execute missing acquisitions",
+            ],
+        }))
+    }
+
+    fn lab_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let graph_value = arguments
+            .get("graph")
+            .cloned()
+            .ok_or("graph is required and must be a serialized ObligationGraph")?;
+        let graph: bioprism_obligation::ObligationGraph = serde_json::from_value(graph_value)
+            .map_err(|error| format!("invalid obligation graph: {error}"))?;
+        if graph.len() > 10_000 {
+            return Err("graph exceeds the 10000-obligation safety bound".into());
+        }
+
+        let action_values = arguments
+            .get("actions")
+            .cloned()
+            .ok_or("actions is required and must be an array of AcquisitionAction values")?;
+        let action_values = action_values.as_array().ok_or("actions must be an array")?;
+        if action_values.len() > 1_000 {
+            return Err("actions exceeds the 1000-action safety bound".into());
+        }
+        let actions: Vec<AcquisitionAction> = action_values
+            .iter()
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("invalid acquisition action: {error}"))
+            })
+            .collect::<Result<_, _>>()?;
+
+        let budget: AcquisitionCost = serde_json::from_value(
+            arguments
+                .get("budget")
+                .cloned()
+                .ok_or("budget is required and must be an AcquisitionCost")?,
+        )
+        .map_err(|error| format!("invalid acquisition budget: {error}"))?;
+        let marginal_value_floor = arguments
+            .get("marginal_value_floor")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        if !marginal_value_floor.is_finite() || marginal_value_floor < 0.0 {
+            return Err("marginal_value_floor must be finite and non-negative".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+
+        let separation = if let Some(raw) = arguments.get("hypotheses") {
+            let set: LabHypothesisSet = serde_json::from_value(raw.clone())
+                .map_err(|error| format!("invalid hypothesis set: {error}"))?;
+            if set.len() > 1_000 {
+                return Err("hypotheses exceeds the 1000-hypothesis safety bound".into());
+            }
+            let observations: Observations = arguments
+                .get("observations")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| format!("invalid observations map: {error}"))?
+                .unwrap_or_default();
+            match separate_hypotheses(&set, &graph, &observations) {
+                Ok(verdict) => Some(verdict),
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "stage": "separation",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "guarantee": "a lab plan never treats an unseparated hypothesis set as settled"
+                    }))
+                }
+            }
+        } else if arguments.get("observations").is_some() {
+            return Err("observations may only be supplied with hypotheses".into());
+        } else {
+            None
+        };
+
+        let frontier = graph
+            .frontier()
+            .map_err(|error| format!("invalid obligation graph: {error}"))?;
+        let expansion = match expand_acquisitions(
+            &actions,
+            &graph,
+            budget,
+            marginal_value_floor,
+            separation.as_ref(),
+        ) {
+            Ok(expansion) => expansion,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "planning",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "privacy boundaries, obligation reachability, budget, and marginal value are enforced by the in-tree lab contract"
+                }))
+            }
+        };
+
+        Ok(json!({
+            "ok": true,
+            "goal": graph.goal.as_str(),
+            "obligation_count": graph.len(),
+            "frontier": frontier.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_frontier": frontier.len().saturating_sub(max_items),
+            "separation": separation,
+            "ordered": expansion.ordered.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_ordered": expansion.ordered.len().saturating_sub(max_items),
+            "excluded": expansion.excluded.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_excluded": expansion.excluded.len().saturating_sub(max_items),
+            "spent": expansion.spent,
+            "stop": expansion.stop,
+            "should_escalate": expansion.should_escalate(),
+            "guarantees": [
+                "evidence acquisition is ordered by caller-declared value per unit cost, not fabricated information gain",
+                "crossing a privacy or permission boundary is exclusion rather than a discount",
+                "the obligation graph's effective dependency states gate what can be planned",
+                "a robust single surviving hypothesis stops expansion instead of consuming context budget",
+            ],
+            "limitations": [
+                "the tool plans named acquisitions; it does not read files, query databases, run tests, or ask a user",
+                "values, costs, privacy declarations, and observations are caller-supplied",
+                "hypothesis generation, posterior probabilities, confidence intervals, and execution scheduling are outside the crate",
+            ]
+        }))
+    }
+
+    fn lens_leakage_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_cohort = arguments
+            .get("cohort")
+            .cloned()
+            .ok_or("cohort is required and must be a serialized CohortSplit")?;
+        let encoded = serde_json::to_vec(&raw_cohort)
+            .map_err(|error| format!("cannot measure cohort envelope: {error}"))?;
+        if encoded.len() > 5_000_000 {
+            return Err("cohort exceeds the 5000000-byte safety bound".into());
+        }
+        let cohort: CohortSplit = serde_json::from_value(raw_cohort)
+            .map_err(|error| format!("invalid lens cohort: {error}"))?;
+        if cohort.subjects.is_empty() {
+            return Err("cohort.subjects must contain at least one subject".into());
+        }
+        if cohort.subjects.len() > 10_000 {
+            return Err("cohort.subjects may contain at most 10000 subjects".into());
+        }
+        if cohort.preprocessing.len() > 10_000 {
+            return Err("cohort.preprocessing may contain at most 10000 steps".into());
+        }
+        for subject in &cohort.subjects {
+            if subject.subject.is_empty() || subject.subject.len() > 256 {
+                return Err("each subject id must contain between 1 and 256 bytes".into());
+            }
+            if subject.split.is_empty() || subject.split.len() > 256 {
+                return Err("each split id must contain between 1 and 256 bytes".into());
+            }
+            if subject.aliases.len() > 256 {
+                return Err("each subject may contain at most 256 aliases".into());
+            }
+        }
+        for step in &cohort.preprocessing {
+            if step.name.is_empty() || step.name.len() > 256 {
+                return Err("each preprocessing name must contain between 1 and 256 bytes".into());
+            }
+            if step.fit_over.len() > 256 {
+                return Err("each preprocessing step may name at most 256 splits".into());
+            }
+        }
+
+        let raw_scope = arguments
+            .get("scope")
+            .cloned()
+            .ok_or("scope is required; bind the lens's cohort dimension explicitly")?;
+        let scope = ScopeKey::from_json(&raw_scope)
+            .map_err(|error| format!("invalid lens scope: {error}"))?;
+        let report = run_lens(&CohortLeakageLens, &scope, &cohort)
+            .map_err(|error| format!("lens execution refused: {error}"))?;
+        if report.witnesses().len() > 20_000 {
+            return Err("lens report exceeds the 20000-witness safety bound".into());
+        }
+        let include_spoken = arguments
+            .get("include_spoken")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let report_json = serde_json::to_value(&report)
+            .map_err(|error| format!("cannot serialize sealed lens report: {error}"))?;
+
+        Ok(json!({
+            "ok": true,
+            "lens": report.lens(),
+            "blueprint_module": report.blueprint_module(),
+            "scope": scope,
+            "outcome": report.outcome().as_str(),
+            "completeness": report.completeness(),
+            "witness_count": report.witnesses().len(),
+            "receipt": report.receipt(),
+            "report": report_json,
+            "spoken": include_spoken.then(|| report.spoken()),
+            "guarantees": [
+                "scope preconditions are checked before evidence is answered",
+                "identity, site, temporal, and preprocessing findings remain distinct",
+                "an unrunnable check is underdetermined rather than a clean pass",
+                "the sealed report receipt covers the canonical nonvisual witness rows",
+                "this lens detects leakage and never repairs or regenerates a split",
+            ],
+        }))
+    }
+
+    fn scale_family_split_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_corpus = arguments
+            .get("corpus")
+            .cloned()
+            .ok_or("corpus is required and must be an array of GeneratedItem values")?;
+        let corpus_items = raw_corpus
+            .as_array()
+            .ok_or("corpus must be an array of GeneratedItem values")?;
+        if corpus_items.is_empty() || corpus_items.len() > 50_000 {
+            return Err("corpus must contain between 1 and 50000 items".into());
+        }
+        let items: Vec<GeneratedItem> = serde_json::from_value(raw_corpus)
+            .map_err(|error| format!("invalid scale corpus: {error}"))?;
+        let mut corpus = Corpus::new();
+        for item in items {
+            corpus
+                .insert(item)
+                .map_err(|error| format!("invalid scale corpus: {error}"))?;
+        }
+
+        let raw_assignment = arguments.get("assignment").cloned().ok_or(
+            "assignment is required and must map item ids to public, validation, or hidden",
+        )?;
+        let assignment_object = raw_assignment
+            .as_object()
+            .ok_or("assignment must be an object keyed by item id")?;
+        if assignment_object.len() > 50_000 {
+            return Err("assignment may contain at most 50000 item ids".into());
+        }
+        let assignment: BTreeMap<String, ScaleTier> = serde_json::from_value(raw_assignment)
+            .map_err(|error| format!("invalid scale assignment: {error}"))?;
+        let unknown: Vec<&String> = assignment
+            .keys()
+            .filter(|id| corpus.get(id).is_none())
+            .take(10)
+            .collect();
+        if !unknown.is_empty() {
+            return Err(format!(
+                "assignment contains ids absent from the corpus: {}",
+                unknown
+                    .iter()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+
+        let families = match corpus.families() {
+            Ok(families) => families,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "lineage",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "a family split cannot be verified when lineage is cyclic or dangling"
+                }))
+            }
+        };
+        match verify_item_assignment(&corpus, &assignment) {
+            Ok(report) => Ok(json!({
+                "ok": true,
+                "valid": true,
+                "item_count": corpus.len(),
+                "family_count": families.len(),
+                "report": report,
+                "guarantees": [
+                    "the verification is over lineage roots, not surface similarity or item names",
+                    "every corpus item must be assigned exactly once",
+                    "a valid report keeps item counts and family counts separate",
+                    "this endpoint verifies an imported assignment and never repairs or reassigns it",
+                ],
+            })),
+            Err(error) => Ok(json!({
+                "ok": false,
+                "valid": false,
+                "item_count": corpus.len(),
+                "family_count": families.len(),
+                "stage": "assignment",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+                "guarantee": "a family that straddles public, validation, and hidden cannot produce a release report"
+            })),
+        }
+    }
+
+    fn stewardship_review_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_review = arguments
+            .get("review")
+            .cloned()
+            .ok_or("review is required and must be a serialized ReviewRecord")?;
+        let encoded = serde_json::to_vec(&raw_review)
+            .map_err(|error| format!("cannot measure review envelope: {error}"))?;
+        if encoded.len() > 5_000_000 {
+            return Err("review exceeds the 5000000-byte safety bound".into());
+        }
+        let review: ReviewRecord = serde_json::from_value(raw_review)
+            .map_err(|error| format!("invalid stewardship review: {error}"))?;
+        let nondeterministic = review.revision.nondeterministic;
+        let mandatory =
+            bioprism_stewardship::review::ReviewDimension::mandatory_for(nondeterministic);
+        let evaluator = review.revision.evaluator.clone();
+        match review.conclude() {
+            Ok(approval) => {
+                let covered = approval
+                    .covered()
+                    .into_iter()
+                    .map(|dimension| dimension.as_str())
+                    .collect::<Vec<_>>();
+                let unreviewed = approval
+                    .unreviewed()
+                    .into_iter()
+                    .map(|(dimension, why)| json!({ "dimension": dimension.as_str(), "why": why }))
+                    .collect::<Vec<_>>();
+                let approval_json = serde_json::to_value(&approval)
+                    .map_err(|error| format!("cannot serialize scoped approval: {error}"))?;
+                Ok(json!({
+                    "ok": true,
+                    "decision": "issued",
+                    "evaluator": evaluator,
+                    "nondeterministic": nondeterministic,
+                    "mandatory_dimensions": mandatory.iter().map(|d| d.as_str()).collect::<Vec<_>>(),
+                    "covered_dimensions": covered,
+                    "unreviewed_dimensions": unreviewed,
+                    "approval": approval_json,
+                    "guarantees": [
+                        "approval is dimension-scoped rather than a universal evaluator endorsement",
+                        "self-review, non-independent review, empty corpus, failed dimensions, and unsupported passes block issuance",
+                        "unreviewed calibration dimensions remain visible in the issued approval",
+                        "the transport does not authenticate actor identities or create an expiry clock",
+                    ],
+                }))
+            }
+            Err(error) => Ok(json!({
+                "ok": false,
+                "decision": "refused",
+                "evaluator": evaluator,
+                "nondeterministic": nondeterministic,
+                "mandatory_dimensions": mandatory.iter().map(|d| d.as_str()).collect::<Vec<_>>(),
+                "refusal": error.to_string(),
+                "fail_closed": true,
+                "guarantee": "a review never becomes an approval when any mandatory governance condition is absent"
+            })),
+        }
+    }
+
+    fn quality_gate_run(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_dataset = arguments
+            .get("dataset")
+            .cloned()
+            .ok_or("dataset is required and must be a serialized Dataset")?;
+        let raw_gate = arguments
+            .get("gate")
+            .cloned()
+            .ok_or("gate is required and must be a serialized Gate")?;
+        let dataset: QualityDataset = serde_json::from_value(raw_dataset)
+            .map_err(|error| format!("invalid quality dataset: {error}"))?;
+        let gate: QualityGate = serde_json::from_value(raw_gate)
+            .map_err(|error| format!("invalid quality gate: {error}"))?;
+        if dataset.rows() > 100_000 {
+            return Err("dataset may contain at most 100000 rows".into());
+        }
+        if dataset.column_names().len() > 1_000 {
+            return Err("dataset may contain at most 1000 columns".into());
+        }
+        if gate.is_empty() {
+            return Err("gate must contain at least one named check".into());
+        }
+        if gate.len() > 1_000 {
+            return Err("gate may contain at most 1000 checks".into());
+        }
+        let references: ReferenceSets = arguments
+            .get("references")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid quality reference sets: {error}"))?
+            .unwrap_or_else(ReferenceSets::new);
+        let report = gate.run(&dataset, &references);
+        Ok(json!({
+            "ok": true,
+            "verdict": report.verdict.name(),
+            "passed": report.verdict.is_passed(),
+            "dataset": report.dataset,
+            "rows": report.rows,
+            "check_count": report.outcomes.len(),
+            "report": report,
+            "guarantees": [
+                "pass requires every named check to run and hold",
+                "failed checks carry a concrete row and expected value witness",
+                "missing columns, null-only columns, wrong types, and missing references remain not_runnable",
+                "the gate never repairs data, infers a schema, samples rows, or converts indeterminate into pass",
+            ],
+        }))
+    }
+
+    fn ledger_ingest(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_events = arguments
+            .get("events")
+            .cloned()
+            .ok_or("events is required and must be an array of serialized Event values")?;
+        let event_values = raw_events
+            .as_array()
+            .ok_or("events must be an array of serialized Event values")?;
+        if event_values.is_empty() || event_values.len() > 50_000 {
+            return Err("events must contain between 1 and 50000 events".into());
+        }
+        let encoded = serde_json::to_vec(&raw_events)
+            .map_err(|error| format!("cannot measure ledger envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("events exceed the 20000000-byte safety bound".into());
+        }
+        let events: Vec<Event> = serde_json::from_value(raw_events)
+            .map_err(|error| format!("invalid ledger event stream: {error}"))?;
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let include_receipts = arguments
+            .get("include_receipts")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let mut ledger = EventLedger::new();
+        let mut admissions = Vec::new();
+        let mut recorded = 0usize;
+        let mut duplicates = 0usize;
+        let mut quarantined = 0usize;
+        let mut released = 0usize;
+        for (index, event) in events.into_iter().enumerate() {
+            match ledger.append(event) {
+                Ok(receipt) => {
+                    recorded += usize::from(matches!(
+                        &receipt.admission,
+                        bioprism_ledger::Admission::Recorded { .. }
+                    )) + receipt.released.len();
+                    duplicates += usize::from(receipt.admission.is_duplicate());
+                    quarantined += usize::from(receipt.admission.is_quarantined());
+                    released += receipt.released.len();
+                    if include_receipts && admissions.len() < max_items {
+                        admissions.push(json!({
+                            "event_index": index,
+                            "receipt": receipt,
+                        }));
+                    }
+                }
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "stage": "append",
+                        "event_index": index,
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "ledger_before_refusal": {
+                            "recorded_entries": ledger.len(),
+                            "quarantined": ledger.quarantined().len(),
+                            "next_seq": ledger.next_seq(),
+                            "chain": ledger.verify_chain(),
+                        },
+                        "guarantee": "events after the first append refusal are not processed or silently discarded"
+                    }));
+                }
+            }
+        }
+
+        let cut = if let Some(raw_cut) = arguments.get("cut") {
+            Some(
+                serde_json::from_value::<TemporalCut>(raw_cut.clone())
+                    .map_err(|error| format!("invalid temporal cut: {error}"))?,
+            )
+        } else {
+            None
+        };
+        let cut_summary = if let Some(cut) = cut {
+            match ledger.cut(&cut) {
+                Ok(entries) => json!({
+                    "requested": cut,
+                    "count": entries.len(),
+                    "entries": entries.iter().take(max_items).map(|entry| json!({
+                        "seq": entry.seq,
+                        "id": entry.id,
+                        "class": entry.event.class,
+                        "kind": entry.event.kind,
+                        "subject": entry.event.subject,
+                        "valid": entry.event.times.valid,
+                        "record": entry.event.times.record,
+                        "release": entry.event.times.release,
+                    })).collect::<Vec<_>>(),
+                    "omitted": entries.len().saturating_sub(max_items),
+                }),
+                Err(error) => json!({
+                    "requested": cut,
+                    "ok": false,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                }),
+            }
+        } else {
+            Value::Null
+        };
+
+        let subject_projection = ledger.project(&SubjectLatest);
+        let latest = subject_projection
+            .state
+            .iter()
+            .take(max_items)
+            .map(|(subject, fact)| {
+                json!({
+                    "subject": subject,
+                    "event": fact.event,
+                    "seq": fact.seq,
+                    "valid": fact.valid,
+                    "payload_digest": fact.payload_digest,
+                })
+            })
+            .collect::<Vec<_>>();
+        let class_projection = ledger.project(&ClassCounts);
+        let quarantined_entries = ledger
+            .quarantined()
+            .iter()
+            .take(max_items)
+            .map(|held| {
+                json!({
+                    "key": held.key,
+                    "missing": held.missing,
+                    "note": held.note,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "ok": true,
+            "entries": ledger.len(),
+            "next_seq": ledger.next_seq(),
+            "head": ledger.head(),
+            "admissions": {
+                "recorded": recorded,
+                "duplicates": duplicates,
+                "quarantined": quarantined,
+                "released": released,
+                "receipts": include_receipts.then_some(admissions),
+            },
+            "chain": ledger.verify_chain(),
+            "clock_anomalies": ledger.clock_consistency(),
+            "quarantine": {
+                "count": ledger.quarantined().len(),
+                "items": quarantined_entries,
+                "omitted": ledger.quarantined().len().saturating_sub(max_items),
+            },
+            "class_counts": class_projection.state,
+            "latest_by_subject": {
+                "count": subject_projection.state.len(),
+                "items": latest,
+                "omitted": subject_projection.state.len().saturating_sub(max_items),
+            },
+            "cut": cut_summary,
+            "guarantees": [
+                "valid, record, and release times remain separate and caller-supplied",
+                "unknown causal parents quarantine instead of creating dangling history",
+                "duplicate idempotent events converge while conflicting keys refuse",
+                "hash-chain, clock-anomaly, quarantine, and projection states remain independently visible",
+                "payload bodies are not returned by default; projections carry digests rather than copied payloads",
+            ],
+        }))
+    }
+
+    fn fabric_synthesize(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_goal = arguments
+            .get("goal")
+            .cloned()
+            .ok_or("goal is required and must be a serialized fabric Goal")?;
+        let raw_candidates = arguments
+            .get("candidates")
+            .cloned()
+            .ok_or("candidates is required and must be an array of fabric Candidate values")?;
+        let candidate_values = raw_candidates
+            .as_array()
+            .ok_or("candidates must be an array of fabric Candidate values")?;
+        if candidate_values.is_empty() || candidate_values.len() > 1_000 {
+            return Err("candidates must contain between 1 and 1000 candidates".into());
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "goal": raw_goal.clone(),
+            "candidates": raw_candidates.clone(),
+        }))
+        .map_err(|error| format!("cannot measure fabric synthesis envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("fabric synthesis input exceeds the 20000000-byte safety bound".into());
+        }
+        let goal: FabricGoal = serde_json::from_value(
+            arguments
+                .get("goal")
+                .cloned()
+                .expect("goal was checked above"),
+        )
+        .map_err(|error| format!("invalid fabric goal: {error}"))?;
+        let candidates: Vec<FabricCandidate> = serde_json::from_value(raw_candidates)
+            .map_err(|error| format!("invalid fabric candidates: {error}"))?;
+        let mut names = BTreeSet::new();
+        for candidate in &candidates {
+            if candidate.name.trim().is_empty() || candidate.name.len() > 256 {
+                return Err(
+                    "each fabric candidate name must contain between 1 and 256 bytes".into(),
+                );
+            }
+            if !names.insert(candidate.name.as_str()) {
+                return Err(format!(
+                    "fabric candidates contain duplicate name {:?}",
+                    candidate.name
+                ));
+            }
+            if candidate.graph.roles.len() > 1_000
+                || candidate.graph.verifies.len() > 10_000
+                || candidate.bindings.len() > 1_000
+                || candidate.cards.len() > 1_000
+            {
+                return Err(format!(
+                    "fabric candidate {:?} exceeds a role, verification, binding, or card bound",
+                    candidate.name
+                ));
+            }
+        }
+        let artifact = synthesize_fabric(&goal, &candidates);
+        Ok(json!({
+            "ok": true,
+            "goal": goal,
+            "candidate_count": candidates.len(),
+            "admissible_count": artifact.scores.len(),
+            "eliminated_count": artifact.eliminated.len(),
+            "artifact": artifact,
+            "unimplemented_stages": unimplemented_stages(),
+            "guarantees": [
+                "hard constraint failures are returned as rejection reasons and never converted into soft penalties",
+                "the frontier is Pareto-based and does not smuggle in caller-unstated weights",
+                "role graphs and assurance requirements are checked before a candidate can score",
+                "this endpoint performs no participant binding, runtime execution, registry lookup, or effect",
+            ],
+        }))
+    }
+
+    fn bioql_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .ok_or("query is required and must be a BioQL source string")?;
+        if query.trim().is_empty() || query.len() > 1_000_000 {
+            return Err("query must contain between 1 and 1000000 bytes".into());
+        }
+        let raw_schema = arguments
+            .get("schema")
+            .cloned()
+            .ok_or("schema is required and must be a serialized BioQL QuerySchema")?;
+        let encoded = serde_json::to_vec(&json!({
+            "query": query,
+            "schema": raw_schema.clone(),
+        }))
+        .map_err(|error| format!("cannot measure BioQL envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("BioQL input exceeds the 20000000-byte safety bound".into());
+        }
+        let schema: QuerySchema = serde_json::from_value(raw_schema)
+            .map_err(|error| format!("invalid BioQL schema: {error}"))?;
+        let field_count = schema
+            .names()
+            .map(|name| {
+                schema
+                    .get(name)
+                    .map(|collection| collection.len())
+                    .unwrap_or(0)
+            })
+            .sum::<usize>();
+        if schema.len() > 1_000 || field_count > 100_000 {
+            return Err("BioQL schema exceeds the 1000-collection or 100000-field bound".into());
+        }
+
+        match compile_bioql(query, &schema) {
+            Ok(typed) => Ok(json!({
+                "ok": true,
+                "typed_query": typed,
+                "schema": {
+                    "collections": schema.len(),
+                    "fields": field_count,
+                },
+                "execution": "not_performed",
+                "guarantees": [
+                    "unknown fields and collections refuse instead of being inferred",
+                    "units, frames, genome builds, ontology expansion, clocks, labels, provenance, and cost bounds are checked before execution",
+                    "the cost estimate is syntactic and declared; no rows, statistics, store, planner, or permission decision is consulted",
+                    "successful compilation returns a typed contract, not evidence or a result set",
+                ],
+            })),
+            Err(error) => Ok(json!({
+                "ok": false,
+                "stage": "bioql_typecheck",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+                "schema": {
+                    "collections": schema.len(),
+                    "fields": field_count,
+                },
+                "guarantees": [
+                    "parse and type failures remain distinct from execution results",
+                    "no partial query is returned as if it were typed",
+                    "no execution, permission bypass, ontology expansion, or unit conversion occurs",
+                ],
+            })),
+        }
+    }
+
+    fn epistemic_voi(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required and must be a serialized epistemic DecisionProblem")?;
+        let raw_belief = arguments
+            .get("belief")
+            .cloned()
+            .ok_or("belief is required and must be a serialized epistemic Belief")?;
+        let raw_acquisitions = if let Some(raw) = arguments.get("acquisition") {
+            vec![raw.clone()]
+        } else {
+            arguments
+                .get("acquisitions")
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or("provide acquisition or acquisitions")?
+        };
+        if raw_acquisitions.is_empty() || raw_acquisitions.len() > 64 {
+            return Err("acquisitions must contain between 1 and 64 actions".into());
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "belief": raw_belief.clone(),
+            "acquisitions": raw_acquisitions.clone(),
+        }))
+        .map_err(|error| format!("cannot measure epistemic envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("epistemic input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let parsed_problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        if parsed_problem.action_count() > 1_000 || parsed_problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let action_count = parsed_problem.action_count();
+        let model_count = parsed_problem.model_count();
+        let problem_ref = &parsed_problem;
+        let loss = (0..action_count)
+            .flat_map(|action| (0..model_count).map(move |model| problem_ref.loss(action, model)))
+            .collect::<Vec<_>>();
+        let problem = EpistemicDecisionProblem::new(
+            parsed_problem.actions().to_vec(),
+            parsed_problem.models().to_vec(),
+            loss,
+        )
+        .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+
+        let parsed_belief: EpistemicBelief = serde_json::from_value(raw_belief)
+            .map_err(|error| format!("invalid belief: {error}"))?;
+        if parsed_belief.len() > 1_000 {
+            return Err("belief is bounded at 1000 models".into());
+        }
+        let belief = EpistemicBelief::new(parsed_belief.masses().to_vec())
+            .map_err(|error| format!("belief invariant failed: {error}"))?;
+
+        let parse_acquisition = |raw: &Value| -> Result<EpistemicAcquisition, String> {
+            let id = raw
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("each acquisition requires an id")?;
+            if id.trim().is_empty() || id.len() > 256 {
+                return Err("acquisition ids must contain between 1 and 256 bytes".into());
+            }
+            let cost = raw
+                .get("cost")
+                .and_then(Value::as_f64)
+                .ok_or_else(|| format!("acquisition {id:?} requires a finite numeric cost"))?;
+            let raw_outcomes = raw
+                .get("outcomes")
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("acquisition {id:?} requires outcomes"))?;
+            if raw_outcomes.is_empty() || raw_outcomes.len() > 1_000 {
+                return Err(format!(
+                    "acquisition {id:?} must contain 1 to 1000 outcomes"
+                ));
+            }
+            let mut outcomes = Vec::with_capacity(raw_outcomes.len());
+            for raw_outcome in raw_outcomes {
+                let label = raw_outcome
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("acquisition {id:?} outcomes require labels"))?;
+                let likelihood = raw_outcome
+                    .get("likelihood")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| format!("acquisition {id:?}/{label:?} requires likelihood"))?
+                    .iter()
+                    .map(|value| {
+                        value.as_f64().ok_or_else(|| {
+                            format!("acquisition {id:?}/{label:?} has a non-numeric likelihood")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                outcomes.push(EpistemicOutcome::new(label, likelihood));
+            }
+            EpistemicAcquisition::new(id, cost, outcomes, problem.model_count())
+                .map_err(|error| format!("acquisition {id:?} invariant failed: {error}"))
+        };
+
+        let acquisitions = raw_acquisitions
+            .iter()
+            .map(parse_acquisition)
+            .collect::<Result<Vec<_>, _>>()?;
+        let value = if acquisitions.len() == 1 {
+            epistemic_value_of_information(&problem, &belief, &acquisitions[0])
+        } else {
+            epistemic_joint_value(&problem, &belief, &acquisitions)
+        };
+        let value = match value {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "value_of_information",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "improper likelihood partitions, non-finite values, contradictory beliefs, and exhaustive outcome explosions remain refusals",
+                        "gross value is not reported as net value; declared acquisition cost remains separate",
+                    ],
+                }))
+            }
+        };
+        let action_after = value
+            .action_after
+            .iter()
+            .map(|index| problem.actions()[*index].clone())
+            .collect::<Vec<_>>();
+        let action_without = problem.actions()[value.action_without].clone();
+        let complementarity = if acquisitions.len() > 1 {
+            match epistemic_complementarity(&problem, &belief, &acquisitions) {
+                Ok(report) => json!(report),
+                Err(error) => json!({
+                    "ok": false,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                }),
+            }
+        } else {
+            Value::Null
+        };
+        Ok(json!({
+            "ok": true,
+            "mode": if acquisitions.len() == 1 { "single" } else { "non_adaptive_joint_bundle" },
+            "value": value,
+            "actions": {
+                "without": action_without,
+                "after": action_after,
+            },
+            "complementarity": complementarity,
+            "guarantees": [
+                "gross risk reduction and declared acquisition cost remain separate",
+                "action changes are reported by action identity rather than rounded numeric value",
+                "joint bundles are explicitly non-adaptive and enumerate bounded outcome products",
+                "no causal identification, adaptive policy, execution, or hidden prior is invented",
+            ],
+        }))
+    }
+
+    fn benchmark_trace_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_failing = arguments
+            .get("failing")
+            .cloned()
+            .ok_or("failing is required and must be a serialized Trace")?;
+        let raw_reference = arguments.get("reference").cloned();
+        let encoded = serde_json::to_vec(&json!({
+            "failing": raw_failing.clone(),
+            "reference": raw_reference.clone(),
+        }))
+        .map_err(|error| format!("cannot measure benchmark envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("benchmark input exceeds the 20000000-byte safety bound".into());
+        }
+        let failing: TraceIr = serde_json::from_value(raw_failing)
+            .map_err(|error| format!("invalid failing trace: {error}"))?;
+        if failing.events.len() > 100_000 {
+            return Err("failing trace is bounded at 100000 events".into());
+        }
+        let reference: Option<TraceIr> = raw_reference
+            .map(|raw| {
+                serde_json::from_value(raw)
+                    .map_err(|error| format!("invalid reference trace: {error}"))
+            })
+            .transpose()?;
+        if reference
+            .as_ref()
+            .is_some_and(|trace| trace.events.len() > 100_000)
+        {
+            return Err("reference trace is bounded at 100000 events".into());
+        }
+
+        let analysis = match analyse_benchmark(&failing, reference.as_ref()) {
+            Ok(analysis) => analysis,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "benchmark_causal_analysis",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "empty or non-decision-bearing trajectories do not produce a fabricated cell",
+                        "environment divergences are not relocated to a nearby agent step",
+                    ],
+                }))
+            }
+        };
+        let boundaries = benchmark_boundaries(&failing, analysis.first_causal_step());
+        let episodes = benchmark_episodes(&failing);
+        let repetitions = benchmark_repetitions(&failing);
+        Ok(json!({
+            "ok": true,
+            "trace_id": failing.trace_id,
+            "succeeded": failing.succeeded,
+            "event_count": failing.events.len(),
+            "reference_trace_id": reference.as_ref().map(|trace| trace.trace_id.clone()),
+            "analysis": analysis,
+            "episodes": episodes,
+            "boundaries": boundaries,
+            "repetitions": repetitions,
+            "summary": {
+                "episode_count": episodes.len(),
+                "boundary_count": boundaries.len(),
+                "extractable_boundaries": boundaries.iter().filter(|boundary| boundary.extractable()).count(),
+                "repetition_groups": repetitions.len(),
+            },
+            "guarantees": [
+                "causal ranking, boundary ranking, repetition, and episode segmentation remain separate evidence layers",
+                "observed textual divergence is not treated as intervention effect",
+                "this endpoint proposes review material; it does not replay tools, fork an architecture, approve a cell, or package a benchmark",
+            ],
+        }))
+    }
+
+    fn pack_catalogue(&self, arguments: &Value) -> Result<Value, String> {
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let section = arguments
+            .get("section")
+            .and_then(Value::as_str)
+            .unwrap_or("all");
+        if !matches!(section, "all" | "15" | "29") {
+            return Err("section must be one of all, 15, or 29".into());
+        }
+        let selected = all_packs()
+            .iter()
+            .filter(|pack| {
+                section == "all"
+                    || (section == "15" && pack.blueprint_module.starts_with("15."))
+                    || (section == "29" && pack.blueprint_module.starts_with("29."))
+            })
+            .collect::<Vec<_>>();
+        let portfolio_count = all_packs().len();
+        let returned = selected
+            .iter()
+            .take(max_items as usize)
+            .map(|pack| {
+                json!({
+                    "id": pack.id,
+                    "title": pack.title,
+                    "blueprint_module": pack.blueprint_module,
+                    "axis": pack.axis,
+                    "measures": pack.measures,
+                    "capabilities": pack.capabilities.iter().map(|capability| capability.code()).collect::<Vec<_>>(),
+                    "domains": pack.domains.iter().map(|domain| domain.label()).collect::<Vec<_>>(),
+                    "decision_families": pack.decision_families,
+                    "oracles": pack.oracles,
+                    "strongest_oracle": pack.strongest_oracle(),
+                    "has_execution_grounded_oracle": pack.has_grounded_oracle(),
+                    "release_wave": pack.release_wave,
+                    "capability_signature": pack.capability_signature(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let section_15_count = all_packs()
+            .iter()
+            .filter(|pack| pack.blueprint_module.starts_with("15."))
+            .count();
+        let section_29_count = all_packs()
+            .iter()
+            .filter(|pack| pack.blueprint_module.starts_with("29."))
+            .count();
+        let duplicate_signatures = duplicate_pack_signatures()
+            .into_iter()
+            .map(|(signature, ids)| json!({ "signature": signature, "pack_ids": ids }))
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "section": section,
+            "portfolio_count": portfolio_count,
+            "section_counts": { "15": section_15_count, "29": section_29_count },
+            "returned": returned,
+            "omitted": selected.len().saturating_sub(max_items as usize),
+            "duplicate_signature_groups": duplicate_signatures,
+            "guarantees": [
+                "catalogue rows are typed portfolio declarations, not measured system scores",
+                "oracle tier is an upper bound on how disagreement could be decided and is not reliability evidence",
+                "release order is reported only where the blueprint declared one; unsequenced packs remain unsequenced",
+                "duplicate signatures are review candidates and are not silently deduplicated",
+            ],
+        }))
+    }
+
+    fn hub_submission_review(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_draft = arguments
+            .get("draft")
+            .cloned()
+            .ok_or("draft is required and must be a serialized SubmissionDraft")?;
+        let raw_submitter = arguments
+            .get("submitter")
+            .cloned()
+            .ok_or("submitter is required and must be a serialized Submitter")?;
+        let encoded = serde_json::to_vec(&json!({
+            "draft": raw_draft,
+            "submitter": raw_submitter,
+            "moderation": arguments.get("moderation"),
+        }))
+        .map_err(|error| format!("cannot measure public-hub input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("public-hub input exceeds the 20000000-byte safety bound".into());
+        }
+        let draft: SubmissionDraft = serde_json::from_value(raw_draft)
+            .map_err(|error| format!("invalid submission draft: {error}"))?;
+        let submitter: Submitter = serde_json::from_value(raw_submitter)
+            .map_err(|error| format!("invalid submitter: {error}"))?;
+        let submission = match accept_hub_submission(draft, &submitter) {
+            Ok(submission) => submission,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "submission_acceptance",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "submission": Value::Null,
+                    "ledger": Value::Null,
+                    "guarantees": [
+                        "required provenance, scope, licence, evidence scale, conflict, and nonclaim fields are checked before any moderation state exists",
+                        "a refused draft is never represented as submitted or publishable",
+                    ],
+                }))
+            }
+        };
+        let submission_value = serde_json::to_value(&submission)
+            .map_err(|error| format!("cannot serialize accepted submission: {error}"))?;
+        let submission_id = submission.id.clone();
+        let Some(raw_moderation) = arguments.get("moderation") else {
+            return Ok(json!({
+                "ok": true,
+                "stage": "submission_acceptance",
+                "submission": submission_value,
+                "limitation_card": submission.limitations_card(),
+                "moderation": Value::Null,
+                "guarantees": [
+                    "acceptance is a contract check, not identity authentication or content verification",
+                    "self-reported verification remains self-reported until an independent ledger attestation",
+                    "public publication requires a separate moderation action",
+                ],
+            }));
+        };
+        let moderation = raw_moderation
+            .as_object()
+            .ok_or("moderation must be an object")?;
+        let open_actor = moderation
+            .get("actor")
+            .and_then(Value::as_str)
+            .unwrap_or("hub-mcp");
+        let open_at = moderation
+            .get("at")
+            .cloned()
+            .map(serde_json::from_value::<HubEpoch>)
+            .transpose()
+            .map_err(|error| format!("invalid moderation opening epoch: {error}"))?
+            .unwrap_or(submission.submitted_at);
+        let mut ledger = ModerationLedger::new();
+        if let Err(error) = ledger.open(submission, open_actor, open_at) {
+            return Ok(json!({
+                "ok": false,
+                "stage": "moderation_open",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+                "submission": submission_value,
+                "ledger": Value::Null,
+            }));
+        }
+
+        let transitions = moderation
+            .get("transitions")
+            .map(|value| {
+                value
+                    .as_array()
+                    .ok_or("moderation.transitions must be an array")
+            })
+            .transpose()?
+            .cloned()
+            .unwrap_or_default();
+        let attestations = moderation
+            .get("attestations")
+            .map(|value| {
+                value
+                    .as_array()
+                    .ok_or("moderation.attestations must be an array")
+            })
+            .transpose()?
+            .cloned()
+            .unwrap_or_default();
+        let revocations = moderation
+            .get("revocations")
+            .map(|value| {
+                value
+                    .as_array()
+                    .ok_or("moderation.revocations must be an array")
+            })
+            .transpose()?
+            .cloned()
+            .unwrap_or_default();
+        if transitions.len() > 32 || attestations.len() > 32 || revocations.len() > 32 {
+            return Err("moderation action lists are bounded at 32 entries each".into());
+        }
+
+        for raw in transitions {
+            let to: ModerationState = serde_json::from_value(
+                raw.get("to")
+                    .cloned()
+                    .ok_or("each moderation transition requires `to`")?,
+            )
+            .map_err(|error| format!("invalid moderation state: {error}"))?;
+            let decision: HubDecision = serde_json::from_value(
+                raw.get("decision")
+                    .cloned()
+                    .ok_or("each moderation transition requires `decision`")?,
+            )
+            .map_err(|error| format!("invalid moderation decision: {error}"))?;
+            if let Err(error) = ledger.transition(&submission_id, to, decision) {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "moderation_transition",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "submission": submission_value,
+                    "ledger": ledger,
+                }));
+            }
+        }
+        for raw in attestations {
+            let to: VerificationStatus = serde_json::from_value(
+                raw.get("to")
+                    .cloned()
+                    .ok_or("each attestation requires `to`")?,
+            )
+            .map_err(|error| format!("invalid verification status: {error}"))?;
+            let actor = raw
+                .get("actor")
+                .and_then(Value::as_str)
+                .ok_or("each attestation requires an actor")?;
+            let at: HubEpoch = serde_json::from_value(
+                raw.get("at")
+                    .cloned()
+                    .ok_or("each attestation requires `at`")?,
+            )
+            .map_err(|error| format!("invalid attestation epoch: {error}"))?;
+            if let Err(error) = ledger.attest(&submission_id, to, actor, at) {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "moderation_attestation",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "submission": submission_value,
+                    "ledger": ledger,
+                }));
+            }
+        }
+        for raw in revocations {
+            let actor = raw
+                .get("actor")
+                .and_then(Value::as_str)
+                .ok_or("each attestation revocation requires an actor")?;
+            let at: HubEpoch = serde_json::from_value(
+                raw.get("at")
+                    .cloned()
+                    .ok_or("each attestation revocation requires `at`")?,
+            )
+            .map_err(|error| format!("invalid revocation epoch: {error}"))?;
+            let reason = raw
+                .get("reason")
+                .and_then(Value::as_str)
+                .ok_or("each attestation revocation requires a reason")?;
+            if let Err(error) = ledger.revoke_attestation(&submission_id, actor, at, reason) {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "moderation_attestation_revocation",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "submission": submission_value,
+                    "ledger": ledger,
+                }));
+            }
+        }
+        Ok(json!({
+            "ok": true,
+            "stage": "moderation_ledger",
+            "submission": submission_value,
+            "limitation_card": ledger.record(&submission_id).map(|record| record.submission.limitations_card()),
+            "state": ledger.state(&submission_id).map(ModerationState::as_str),
+            "verification": ledger.verification(&submission_id),
+            "published": ledger.published(),
+            "event_count": ledger.events().len(),
+            "ledger": ledger,
+            "guarantees": [
+                "moderation is an append-only in-memory state machine with monotonic epochs",
+                "rejection, withdrawal, reopening, and supersession carry typed transition rules and reasons",
+                "self-review and self-asserted verification are refused",
+                "this call does not persist, authenticate, publish to a network, or render a public web page",
+            ],
+        }))
+    }
+
+    fn hub_disclosure_review(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_actions = arguments
+            .get("actions")
+            .and_then(Value::as_array)
+            .ok_or("actions is required and must be an array of disclosure operations")?;
+        if raw_actions.len() > 256 {
+            return Err("disclosure actions are bounded at 256 entries".into());
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "ledger": arguments.get("ledger"),
+            "actions": raw_actions,
+        }))
+        .map_err(|error| format!("cannot measure disclosure input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("disclosure input exceeds the 20000000-byte safety bound".into());
+        }
+        let mut ledger = arguments
+            .get("ledger")
+            .cloned()
+            .map(serde_json::from_value::<DisclosureLedger>)
+            .transpose()
+            .map_err(|error| format!("invalid disclosure ledger: {error}"))?
+            .unwrap_or_else(DisclosureLedger::new);
+        let mut trace = Vec::with_capacity(raw_actions.len());
+        let mut failures = 0usize;
+        for (index, raw_action) in raw_actions.iter().enumerate() {
+            let kind = raw_action
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("<missing>")
+                .to_string();
+            let action_result: Result<Value, String> = (|| {
+                let pack = content_hash_argument(raw_action.get("pack"), "pack")?;
+                match kind.as_str() {
+                    "declare_held_out" => {
+                        ledger
+                            .declare_held_out(&pack)
+                            .map_err(|error| format!("declare held-out refused: {error}"))?;
+                        Ok(json!({ "pack": pack, "state": ledger.state(&pack) }))
+                    }
+                    "disclose" => {
+                        let at = HubEpoch(
+                            raw_action
+                                .get("at")
+                                .and_then(Value::as_u64)
+                                .ok_or("disclose requires non-negative integer at")?,
+                        );
+                        ledger
+                            .disclose(&pack, at)
+                            .map_err(|error| format!("disclosure refused: {error}"))?;
+                        Ok(json!({ "pack": pack, "state": ledger.state(&pack) }))
+                    }
+                    "contaminate" => {
+                        let witness: ContaminationWitness = serde_json::from_value(
+                            raw_action
+                                .get("witness")
+                                .cloned()
+                                .ok_or("contaminate requires witness")?,
+                        )
+                        .map_err(|error| format!("invalid contamination witness: {error}"))?;
+                        ledger
+                            .record_contamination(&pack, witness)
+                            .map_err(|error| format!("contamination record refused: {error}"))?;
+                        Ok(json!({ "pack": pack, "state": ledger.state(&pack) }))
+                    }
+                    "split_integrity" => {
+                        let verdict: bioprism_section::OracleVerdict = serde_json::from_value(
+                            raw_action
+                                .get("verdict")
+                                .cloned()
+                                .ok_or("split_integrity requires verdict")?,
+                        )
+                        .map_err(|error| format!("invalid split-integrity verdict: {error}"))?;
+                        let at = HubEpoch(
+                            raw_action
+                                .get("at")
+                                .and_then(Value::as_u64)
+                                .ok_or("split_integrity requires non-negative integer at")?,
+                        );
+                        let reported_by = raw_action
+                            .get("reported_by")
+                            .and_then(Value::as_str)
+                            .ok_or("split_integrity requires reported_by")?;
+                        let state = ledger
+                            .record_split_integrity(&pack, &verdict, at, reported_by)
+                            .map_err(|error| format!("split-integrity record refused: {error}"))?;
+                        Ok(json!({ "pack": pack, "state": state }))
+                    }
+                    "headline_eligibility" => {
+                        let computed_at = HubEpoch(
+                            raw_action
+                                .get("computed_at")
+                                .and_then(Value::as_u64)
+                                .ok_or("headline_eligibility requires computed_at")?,
+                        );
+                        let acknowledges = raw_action
+                            .get("acknowledges_disclosure")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        match ledger.headline_eligibility(&pack, computed_at, acknowledges) {
+                            Ok(label) => Ok(json!({
+                                "pack": pack,
+                                "eligible": true,
+                                "label": label,
+                                "caveat": label.caveat(),
+                            })),
+                            Err(error) => Ok(json!({
+                                "pack": pack,
+                                "eligible": false,
+                                "refusal": error.to_string(),
+                                "fail_closed": true,
+                            })),
+                        }
+                    }
+                    other => Err(format!("unknown disclosure action {other:?}")),
+                }
+            })();
+            match action_result {
+                Ok(result) => trace.push(json!({
+                    "index": index,
+                    "kind": kind,
+                    "ok": true,
+                    "result": result,
+                })),
+                Err(refusal) => {
+                    failures += 1;
+                    trace.push(json!({
+                        "index": index,
+                        "kind": kind,
+                        "ok": false,
+                        "refusal": refusal,
+                        "fail_closed": true,
+                    }));
+                }
+            }
+        }
+        let entries = ledger
+            .entries()
+            .map(|(pack, state)| json!({ "pack": pack, "state": state }))
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": failures == 0,
+            "action_count": raw_actions.len(),
+            "action_failures": failures,
+            "trace": trace,
+            "entries": entries,
+            "ledger": ledger,
+            "guarantees": [
+                "disclosure is keyed by immutable pack digest rather than a mutable name",
+                "unknown, held-out, disclosed, and contaminated remain distinct states",
+                "disclosure is a ratchet and contamination cannot be walked back",
+                "headline eligibility returns a caveat or a typed refusal instead of a bare score",
+                "the review is in-memory and records caller-supplied findings; it does not detect leaks or publish data",
+            ],
+        }))
+    }
+
+    fn hub_card_render(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_ledger = arguments
+            .get("moderation")
+            .cloned()
+            .ok_or("moderation is required and must be a serialized ModerationLedger")?;
+        let moderation: ModerationLedger = serde_json::from_value(raw_ledger)
+            .map_err(|error| format!("invalid moderation ledger: {error}"))?;
+        let submission = arguments
+            .get("submission")
+            .cloned()
+            .ok_or("submission is required and must be a SubmissionId string")?;
+        let submission: SubmissionId = serde_json::from_value(submission)
+            .map_err(|error| format!("invalid submission id: {error}"))?;
+        let record = moderation
+            .record(&submission)
+            .ok_or_else(|| format!("submission {submission} is not on the moderation ledger"))?;
+        let version = arguments
+            .get("version")
+            .and_then(Value::as_str)
+            .unwrap_or("bioatlas-card/0.1");
+        let mut card = BioAtlasCard::render(record, version);
+        if let Some(raw_reason) = arguments.get("not_comparable") {
+            let reason: bioprism_hub::UnrankableReason = serde_json::from_value(raw_reason.clone())
+                .map_err(|error| format!("invalid not-comparable reason: {error}"))?;
+            card = card.as_not_comparable(&reason);
+        }
+
+        let score_result = if let Some(raw_score) = arguments.get("score") {
+            let score: HubScore = serde_json::from_value(raw_score.clone())
+                .map_err(|error| format!("invalid hub score: {error}"))?;
+            let pack = content_hash_argument(arguments.get("pack"), "pack")?;
+            let computed_at = HubEpoch(
+                arguments
+                    .get("computed_at")
+                    .and_then(Value::as_u64)
+                    .ok_or("computed_at is required when score is supplied")?,
+            );
+            let acknowledges = arguments
+                .get("acknowledges_disclosure")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let disclosure: DisclosureLedger = arguments
+                .get("disclosure")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| format!("invalid disclosure ledger: {error}"))?
+                .unwrap_or_else(DisclosureLedger::new);
+            let label = match disclosure.headline_eligibility(&pack, computed_at, acknowledges) {
+                Ok(label) => label,
+                Err(error) => {
+                    let base = serde_json::to_value(&card)
+                        .map_err(|serialize| format!("cannot serialize card: {serialize}"))?;
+                    return Ok(json!({
+                        "ok": false,
+                        "stage": "card_disclosure_gate",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "card": base,
+                        "score": Value::Null,
+                    }));
+                }
+            };
+            let base_card = serde_json::to_value(&card)
+                .map_err(|serialize| format!("cannot serialize card: {serialize}"))?;
+            match card.with_score(score, label) {
+                Ok(card_with_score) => {
+                    card = card_with_score;
+                    json!({ "attached": true, "pack": pack, "computed_at": computed_at })
+                }
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "stage": "card_publication_gate",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "card": base_card,
+                        "score": Value::Null,
+                    }));
+                }
+            }
+        } else {
+            json!({ "attached": false })
+        };
+        Ok(json!({
+            "ok": true,
+            "card": card,
+            "score": score_result,
+            "moderation_state": record.state,
+            "verification": record.verification,
+            "guarantees": [
+                "the card state is derived from moderation history, verification, withdrawal, supersession, and access terms",
+                "a card starts with a withheld score and never uses zero or blank as a failure state",
+                "scores require disclosure eligibility and an available publication state",
+                "the result is a renderer-facing object; it does not render HTML, resolve links, or publish a page",
+            ],
+        }))
+    }
+
+    fn hub_leaderboard_render(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_entries = arguments.get("entries").and_then(Value::as_array).ok_or(
+            "entries is required and must be an array of serialized leaderboard Entry values",
+        )?;
+        if raw_entries.len() > 2_000 {
+            return Err("leaderboard entries are bounded at 2000 entries".into());
+        }
+        let board: HubBoard = serde_json::from_value(
+            arguments
+                .get("board")
+                .cloned()
+                .ok_or("board is required and must be a serialized Board")?,
+        )
+        .map_err(|error| format!("invalid leaderboard board: {error}"))?;
+        let entries: Vec<HubEntry> = raw_entries
+            .iter()
+            .cloned()
+            .map(serde_json::from_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("invalid leaderboard entry: {error}"))?;
+        let moderation: ModerationLedger = serde_json::from_value(
+            arguments
+                .get("moderation")
+                .cloned()
+                .ok_or("moderation is required and must be a serialized ModerationLedger")?,
+        )
+        .map_err(|error| format!("invalid moderation ledger: {error}"))?;
+        let disclosure: DisclosureLedger = serde_json::from_value(
+            arguments
+                .get("disclosure")
+                .cloned()
+                .ok_or("disclosure is required and must be a serialized DisclosureLedger")?,
+        )
+        .map_err(|error| format!("invalid disclosure ledger: {error}"))?;
+        let ranked = board.rank(&entries, &moderation, &disclosure);
+        let include_details = arguments
+            .get("include_details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let rendered = if include_details {
+            serde_json::to_value(&ranked)
+                .map_err(|error| format!("cannot serialize ranked board: {error}"))?
+        } else {
+            Value::Null
+        };
+        Ok(json!({
+            "ok": true,
+            "board": ranked.board,
+            "ranked_count": ranked.ranked.len(),
+            "unranked_count": ranked.unranked.len(),
+            "leader_count": ranked.leaders().len(),
+            "headline": ranked.headline(),
+            "rendered": rendered,
+            "guarantees": [
+                "ranking is computed only within declared comparability conditions",
+                "withdrawn, under-review, below-floor, contaminated, undisclosed, and incomparable entries remain visible as unranked reasons",
+                "evidence scale and disclosure eligibility are checked before an entry is rankable",
+                "the board headline carries its conditions, caveat, and clinical/non-universal nonclaims",
+            ],
+        }))
+    }
+
+    fn pack_health_assess(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_pack = arguments
+            .get("pack")
+            .cloned()
+            .ok_or("pack is required and must be a serialized PackIr")?;
+        let raw_observations = arguments
+            .get("observations")
+            .cloned()
+            .ok_or("observations is required and must be serialized pack observations")?;
+        let raw_policy = arguments.get("policy").cloned();
+        let encoded = serde_json::to_vec(&json!({
+            "pack": raw_pack.clone(),
+            "observations": raw_observations.clone(),
+            "policy": raw_policy.clone(),
+        }))
+        .map_err(|error| format!("cannot measure pack-health envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("pack-health input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let pack: PackIr = serde_json::from_value(raw_pack)
+            .map_err(|error| format!("invalid pack IR: {error}"))?;
+        if let Err(error) = pack.validate() {
+            return Ok(json!({
+                "ok": false,
+                "stage": "pack_validation",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+                "score": Value::Null,
+                "guarantees": [
+                    "a pack that is not internally valid cannot be health-assessed",
+                    "no score is emitted for a malformed or unvalidated pack revision",
+                ],
+            }));
+        }
+        let observations: PackObservations = serde_json::from_value(raw_observations)
+            .map_err(|error| format!("invalid pack observations: {error}"))?;
+        let policy = match raw_policy {
+            Some(raw) => serde_json::from_value::<HealthPolicy>(raw)
+                .map_err(|error| format!("invalid pack health policy: {error}"))?,
+            None => HealthPolicy::default(),
+        };
+
+        let assessment = match assess_pack_health(&pack, &observations, &policy) {
+            Ok(assessment) => assessment,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "pack_health_assessment",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "score": Value::Null,
+                    "guarantees": [
+                        "digest, calibration, oracle, contamination, degeneracy, and materialization checks fail closed",
+                        "assessment errors are not converted to a zero score",
+                    ],
+                }))
+            }
+        };
+        let score_gate = match assessment.reportable_score(&pack) {
+            Ok(score) => json!({
+                "reportable": true,
+                "score": score,
+            }),
+            Err(error) => json!({
+                "reportable": false,
+                "refusal": error.to_string(),
+                "fail_closed": true,
+            }),
+        };
+        Ok(json!({
+            "ok": true,
+            "pack": assessment.pack,
+            "pack_digest": assessment.pack_digest,
+            "verdict": assessment.health.verdict(),
+            "finding_count": assessment.health.findings.len(),
+            "blocking_findings": assessment.health.blocking().len(),
+            "advisory_findings": assessment.health.advisories().len(),
+            "health": assessment.health,
+            "calibration": assessment.calibration,
+            "score_gate": score_gate,
+            "guarantees": [
+                "health is bound to the immutable pack digest that was assessed",
+                "blocking findings prevent any numeric score from being returned",
+                "advisories remain attached to a reportable score rather than being dropped",
+                "declarations, observed outcomes, oracle posture, and reportability remain separate",
+            ],
+        }))
+    }
+
+    fn foundation_contract_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_contract = arguments
+            .get("contract")
+            .cloned()
+            .ok_or("contract is required and must be a serialized ContractDraft")?;
+        let encoded = serde_json::to_vec(&json!({
+            "contract": raw_contract.clone(),
+            "parent": arguments.get("parent"),
+            "envelope": arguments.get("envelope"),
+            "world": arguments.get("world"),
+            "transition": arguments.get("transition"),
+        }))
+        .map_err(|error| format!("cannot measure foundation envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("foundation input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let draft: ContractDraft = serde_json::from_value(raw_contract)
+            .map_err(|error| format!("invalid contract draft: {error}"))?;
+        let contract = match FalsifiableContract::admit(draft) {
+            Ok(contract) => contract,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": true,
+                    "verdict": "refused",
+                    "contract": { "ok": false, "refusal": error.to_string(), "fail_closed": true },
+                    "guarantees": [
+                        "a contract without falsifiers, actions, claim schema, reference standard, or terminal states never becomes a checked contract",
+                        "partial contract fields are not presented as an evaluable result",
+                    ],
+                }))
+            }
+        };
+
+        let parent_check = if let Some(raw_parent) = arguments.get("parent") {
+            let parent_draft: ContractDraft = serde_json::from_value(raw_parent.clone())
+                .map_err(|error| format!("invalid parent contract draft: {error}"))?;
+            match FalsifiableContract::admit(parent_draft) {
+                Ok(parent) => match contract.refines(&parent) {
+                    Ok(()) => json!({ "ok": true, "relation": "refines" }),
+                    Err(error) => json!({
+                        "ok": false,
+                        "relation": "refused",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                    }),
+                },
+                Err(error) => json!({
+                    "ok": false,
+                    "relation": "refused",
+                    "refusal": format!("parent is not admissible: {error}"),
+                    "fail_closed": true,
+                }),
+            }
+        } else {
+            Value::Null
+        };
+
+        let envelope_check = if let Some(raw_envelope) = arguments.get("envelope") {
+            let envelope: ApplicabilityEnvelope = serde_json::from_value(raw_envelope.clone())
+                .map_err(|error| format!("invalid applicability envelope: {error}"))?;
+            let structure = envelope.check();
+            let maturity = if arguments
+                .get("present_as_established")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                envelope.present_as_established()
+            } else {
+                Ok(())
+            };
+            let structure_message = match &structure {
+                Ok(()) => "complete".to_string(),
+                Err(error) => error.to_string(),
+            };
+            let maturity_message = match &maturity {
+                Ok(()) => "not_requested_or_admissible".to_string(),
+                Err(error) => error.to_string(),
+            };
+            json!({
+                "ok": structure.is_ok() && maturity.is_ok(),
+                "structure": structure_message,
+                "maturity": maturity_message,
+                "maturity_rung": envelope.maturity.rung(),
+                "fail_closed": structure.is_err() || maturity.is_err(),
+            })
+        } else {
+            Value::Null
+        };
+
+        let world_check = if let Some(raw_world) = arguments.get("world") {
+            let world: BioWorldDeclaration = serde_json::from_value(raw_world.clone())
+                .map_err(|error| format!("invalid BioWorld declaration: {error}"))?;
+            let reveal = world.check_reveal_policy();
+            let claim_check = if let Some(raw_claim) = arguments.get("claim") {
+                let claim: CounterfactualClaim = serde_json::from_value(raw_claim.clone())
+                    .map_err(|error| format!("invalid counterfactual claim: {error}"))?;
+                Some(world.admits(claim))
+            } else {
+                None
+            };
+            let claim_message = claim_check.as_ref().map(|result| match result {
+                Ok(()) => "admitted".to_string(),
+                Err(error) => error.to_string(),
+            });
+            let reveal_message = match &reveal {
+                Ok(()) => "admissible".to_string(),
+                Err(error) => error.to_string(),
+            };
+            let claim_ok = claim_check.as_ref().is_none_or(Result::is_ok);
+            json!({
+                "ok": reveal.is_ok() && claim_ok,
+                "world_id": world.id,
+                "class": world.class,
+                "counterfactual_strength": world.class.counterfactual_strength(),
+                "reveal_policy": reveal_message,
+                "claim": claim_message,
+                "fail_closed": reveal.is_err() || !claim_ok,
+            })
+        } else {
+            Value::Null
+        };
+
+        let transition_check = if let Some(raw_transition) = arguments.get("transition") {
+            let transition: Transition = serde_json::from_value(raw_transition.clone())
+                .map_err(|error| format!("invalid world transition: {error}"))?;
+            match transition.check() {
+                Ok(()) => json!({ "ok": true, "verdict": "plane_consistent" }),
+                Err(error) => json!({
+                    "ok": false,
+                    "verdict": "plane_confusion",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                }),
+            }
+        } else {
+            Value::Null
+        };
+        let relation_ok = parent_check
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let envelope_ok = envelope_check
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let world_ok = world_check
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let transition_ok = transition_check
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        Ok(json!({
+            "ok": true,
+            "verdict": if relation_ok && envelope_ok && world_ok && transition_ok { "admitted" } else { "refused" },
+            "contract": {
+                "ok": true,
+                "id": contract.id(),
+                "intent": contract.intent(),
+                "falsifier_count": contract.falsifiers().count(),
+                "action_count": contract.actions().count(),
+                "evidence_obligation_count": contract.evidence_obligations().count(),
+                "minimum_reviewers": contract.minimum_reviewers(),
+                "uncertainty_required": contract.uncertainty_required(),
+            },
+            "parent_relation": parent_check,
+            "envelope": envelope_check,
+            "world": world_check,
+            "transition": transition_check,
+            "guarantees": [
+                "contract admissibility, inheritance, applicability, world-class claim strength, and transition-plane checks remain separate gates",
+                "out-of-envelope, weakened refinements, unsupported counterfactuals, missing reveal policy, and plane confusion remain typed refusals",
+                "this endpoint validates declarations; it does not execute a world, infer evidence, or manufacture treatment authority",
+            ],
+        }))
+    }
+
+    fn atlas_report(&self, arguments: &Value) -> Result<Value, String> {
+        let raw = arguments
+            .get("atlas")
+            .cloned()
+            .ok_or("atlas is required and must be a serialized bioprism-atlas Atlas")?;
+        let raw_bytes = serde_json::to_vec(&raw).map_err(|error| error.to_string())?;
+        if raw_bytes.len() > 10_000_000 {
+            return Err("atlas exceeds the 10000000-byte safety bound".into());
+        }
+        let atlas: Atlas =
+            serde_json::from_value(raw).map_err(|error| format!("invalid atlas: {error}"))?;
+        let report = CoverageReport::of(&atlas);
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+
+        let composite = if let Some(raw_policy) = arguments.get("weighting") {
+            let policy: WeightingPolicy = serde_json::from_value(raw_policy.clone())
+                .map_err(|error| format!("invalid weighting policy: {error}"))?;
+            match atlas_composite(&atlas, &policy) {
+                Ok(value) => json!({ "ok": true, "value": value }),
+                Err(error) => json!({
+                    "ok": false,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "unmeasured, confounded, or below-tier capabilities never become a numeric composite"
+                }),
+            }
+        } else {
+            Value::Null
+        };
+
+        Ok(json!({
+            "ok": true,
+            "ontology_version": report.ontology_version.as_str(),
+            "summary": {
+                "measured": report.measured.len(),
+                "holes": report.holes.len(),
+                "families": report.family_coverage.len(),
+                "inconsistencies": report.inconsistencies.len(),
+                "coverage_debt_ratio": report.debt.ratio(),
+                "has_holes": report.has_holes(),
+                "coverage_supports_aggregation": report.coverage_supports_aggregation(),
+            },
+            "debt": report.debt,
+            "measured": report.measured.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_measured": report.measured.len().saturating_sub(max_items),
+            "holes": report.holes.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_holes": report.holes.len().saturating_sub(max_items),
+            "family_coverage": report.family_coverage.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_families": report.family_coverage.len().saturating_sub(max_items),
+            "depth_histogram": report.depth_histogram.iter().take(max_items).collect::<Vec<_>>(),
+            "stage_histogram": report.first_divergence_histogram.iter().take(max_items).collect::<Vec<_>>(),
+            "inconsistencies": report.inconsistencies.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_inconsistencies": report.inconsistencies.len().saturating_sub(max_items),
+            "composite": composite,
+            "guarantees": [
+                "unmeasured capabilities remain holes and are never rendered as zero",
+                "coverage debt distinguishes measured poor, unmeasured, declared out-of-scope, unclassified, and undiagnosed states",
+                "composite eligibility delegates to ontology, measurement, confounding, and claim-tier gates",
+            ],
+            "limitations": [
+                "the atlas indexes caller-supplied evidence; it does not run trials or estimate metrics",
+                "confidence intervals, stratification beyond the atlas record, and public visual panels are outside this contract",
+            ]
+        }))
+    }
+
+    fn bundle_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let inline = arguments.get("bundle").cloned();
+        let document = arguments.get("document").and_then(Value::as_str);
+        if inline.is_some() && document.is_some() {
+            return Err("provide either bundle or document, not both".into());
+        }
+        let raw = match (inline, document) {
+            (Some(bundle), None) => bundle,
+            (None, Some(relative)) => {
+                let path = self.resolve(relative)?;
+                if path.is_dir() {
+                    return Err(
+                        "bundle_verify requires a JSON bundle document, not a directory".into(),
+                    );
+                }
+                let metadata = std::fs::metadata(&path)
+                    .map_err(|error| format!("cannot inspect bundle document: {error}"))?;
+                if metadata.len() > 20_000_000 {
+                    return Err("bundle document exceeds the 20000000-byte safety bound".into());
+                }
+                self.read_json(&path)?
+            }
+            (None, None) => return Err("bundle_verify requires bundle or document".into()),
+            (Some(_), Some(_)) => unreachable!("bundle inputs were checked as exclusive"),
+        };
+        let bundle: ResultBundle = serde_json::from_value(raw)
+            .map_err(|error| format!("invalid result bundle: {error}"))?;
+        if bundle.manifest.entries.len() > 10_000 || bundle.contents.len() > 10_000 {
+            return Err("bundle may contain at most 10000 manifest entries and contents".into());
+        }
+        match bundle.verify() {
+            Ok(verified) => Ok(json!({
+                "ok": true,
+                "schema_version": bundle.manifest.schema_version,
+                "bundle_id": bundle.manifest.bundle_id,
+                "manifest_digest": verified.manifest_digest(),
+                "entry_checks": verified.entry_checks(),
+                "not_recomputed": verified.not_recomputed(),
+                "certificate": verified.certificate(),
+                "supply_chain_posture": verified.supply_chain_posture(),
+                "honest_label": verified.honest_label(),
+                "guarantees": [
+                    "every carried inline digest is recomputed from content rather than trusted from the manifest",
+                    "unlisted content, missing inline content, duplicate certificate roles, and invalid embedded certificates are refused",
+                    "referenced entries remain visible as not recomputed rather than being reported as verified",
+                ],
+                "limitations": [
+                    "reference locators are not dereferenced; this is a local value check, not closure fetching",
+                    "the bundle library authenticates with a symmetric shared secret only, and this tool does not verify an attestation key",
+                    "verification establishes internal digest consistency, not scientific validity, provenance truth, or deployment security",
+                ],
+            })),
+            Err(error) => Ok(json!({
+                "ok": false,
+                "stage": "bundle_verification",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+                "guarantee": "a mismatch or missing closure never becomes a successful release result",
+            })),
+        }
+    }
+
+    fn adaptive_panel(&self, arguments: &Value) -> Result<Value, String> {
+        let panel: AdaptivePanel = serde_json::from_value(
+            arguments
+                .get("panel")
+                .cloned()
+                .ok_or("panel is required and must be a serialized AdaptivePanel")?,
+        )
+        .map_err(|error| format!("invalid adaptive panel: {error}"))?;
+        if panel.ledger().len() > 100_000 {
+            return Err("panel exceeds the 100000-trial safety bound".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+
+        let audit = match panel.audit() {
+            Ok(audit) => audit,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "audit",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "coverage floors and stopping uncertainty are never converted into a reportable estimate"
+                }))
+            }
+        };
+        let audit_digest = audit
+            .digest()
+            .ok()
+            .map(|digest| digest.as_str().to_string());
+        let audit_summary = json!({
+            "trials": audit.trials,
+            "scored_trials": audit.scored_trials,
+            "abstentions": audit.abstentions,
+            "total_cost": audit.total_cost,
+            "capabilities": audit.capabilities.len(),
+            "reported": audit.reported(),
+            "withheld": audit.withheld(),
+            "effective_trials": audit.effective_trials(),
+            "headline": audit.headline(),
+        });
+
+        let selection = if let Some(raw_candidates) = arguments.get("candidates") {
+            let values = raw_candidates
+                .as_array()
+                .ok_or("candidates must be an array of adaptive Candidate values")?;
+            if values.len() > 10_000 {
+                return Err("candidates exceeds the 10000-candidate safety bound".into());
+            }
+            let candidates: Vec<AdaptiveCandidate> = values
+                .iter()
+                .cloned()
+                .map(|value| {
+                    serde_json::from_value(value)
+                        .map_err(|error| format!("invalid adaptive candidate: {error}"))
+                })
+                .collect::<Result<_, _>>()?;
+            let batch_size = arguments.get("batch_size").and_then(Value::as_u64);
+            let outcome = if let Some(size) = batch_size {
+                if size == 0 || size > 1_000 {
+                    return Err("batch_size must be between 1 and 1000".into());
+                }
+                panel
+                    .select_batch(&candidates, size as usize)
+                    .map(|records| {
+                        json!({
+                            "mode": "batch",
+                            "records": records.iter().take(max_items).collect::<Vec<_>>(),
+                            "omitted": records.len().saturating_sub(max_items)
+                        })
+                    })
+            } else {
+                panel
+                    .select_next(&candidates)
+                    .map(|record| json!({ "mode": "next", "record": record }))
+            };
+            match outcome {
+                Ok(value) => json!({ "ok": true, "value": value }),
+                Err(error) => json!({
+                    "ok": false,
+                    "refusal": error.to_string(),
+                    "fail_closed": true
+                }),
+            }
+        } else if arguments.get("batch_size").is_some() {
+            return Err("batch_size requires candidates".into());
+        } else {
+            Value::Null
+        };
+
+        let capability_view = if let Some(raw_capability) = arguments.get("capability") {
+            let capability = raw_capability
+                .as_str()
+                .ok_or("capability must be a string")?;
+            let capability = AdaptiveCapabilityId::parse(capability)
+                .map_err(|error| format!("invalid adaptive capability: {error}"))?;
+            let coverage = panel.coverage(&capability);
+            let stopping = panel.stopping_verdict(&capability);
+            let estimate = panel.estimate(&capability);
+            json!({
+                "capability": capability,
+                "coverage": coverage,
+                "stopping": stopping.as_ref().ok(),
+                "stopping_refusal": stopping.as_ref().err().map(ToString::to_string),
+                "estimate": estimate.as_ref().ok(),
+                "estimate_refusal": estimate.as_ref().err().map(ToString::to_string),
+                "fail_closed": estimate.is_err()
+            })
+        } else {
+            Value::Null
+        };
+
+        let comparison = match (
+            arguments.get("left").and_then(Value::as_str),
+            arguments.get("right").and_then(Value::as_str),
+        ) {
+            (None, None) => Value::Null,
+            (Some(left), Some(right)) => {
+                let left = AdaptiveCapabilityId::parse(left)
+                    .map_err(|error| format!("invalid left capability: {error}"))?;
+                let right = AdaptiveCapabilityId::parse(right)
+                    .map_err(|error| format!("invalid right capability: {error}"))?;
+                match panel.compare(&left, &right) {
+                    Ok(value) => json!({ "ok": true, "value": value }),
+                    Err(error) => json!({
+                        "ok": false,
+                        "refusal": error.to_string(),
+                        "fail_closed": true
+                    }),
+                }
+            }
+            _ => return Err("left and right must be supplied together for comparison".into()),
+        };
+        let finished = panel.finished();
+
+        Ok(json!({
+            "ok": true,
+            "audit": audit,
+            "audit_summary": audit_summary,
+            "audit_digest": audit_digest,
+            "selection": selection,
+            "capability": capability_view,
+            "comparison": comparison,
+            "finished": finished.as_ref().ok(),
+            "finished_refusal": finished.as_ref().err().map(ToString::to_string),
+            "guarantees": [
+                "abstentions are retained and costed but never counted as failures",
+                "coverage floors, parent clustering, and stopping uncertainty remain explicit",
+                "selection records preserve the clustered objective and coverage gate rather than a hidden random choice",
+            ],
+            "limitations": [
+                "the panel consumes caller-supplied executed trials and predicted candidate costs",
+                "the model has one parent-clustering level, no item model, no anytime-valid confidence sequence, and no exploration reserve",
+                "this tool selects and audits; it does not execute candidates or establish release superiority over a fixed reference panel",
+            ]
+        }))
+    }
+
+    fn posterior_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_observations = arguments.get("observations").cloned().ok_or(
+            "observations is required and must be an array of evalengine Observation values",
+        )?;
+        let values = raw_observations
+            .as_array()
+            .ok_or("observations must be an array")?;
+        if values.len() > 10_000 {
+            return Err("observations exceeds the 10000-observation safety bound".into());
+        }
+        let observations: Vec<Observation> = values
+            .iter()
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("invalid evaluation observation: {error}"))
+            })
+            .collect::<Result<_, _>>()?;
+        let policy: CreditPolicy = arguments
+            .get("credit_policy")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid credit policy: {error}"))?
+            .unwrap_or_default();
+        if !policy.validate() {
+            return Ok(json!({
+                "ok": false,
+                "stage": "credit_policy",
+                "refusal": "unsupported and contradicted credit ceilings must both be finite values in [0,1)",
+                "fail_closed": true
+            }));
+        }
+        let posterior = match CapabilityPosterior::build(&observations, &policy) {
+            Ok(posterior) => posterior,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "posterior",
+                    "refusal": error.to_string(),
+                    "fail_closed": true
+                }))
+            }
+        };
+        if posterior.capabilities.len() > 1_000 {
+            return Err("posterior exceeds the 1000-capability safety bound".into());
+        }
+        let unprovenanced = bioprism_evalengine::unprovenanced(&observations).len();
+
+        let gate = if let Some(raw_gate) = arguments.get("gate") {
+            let gate: EvalReleaseGate = serde_json::from_value(raw_gate.clone())
+                .map_err(|error| format!("invalid release gate: {error}"))?;
+            match posterior.overall(&gate) {
+                Ok(value) => json!({ "ok": true, "value": value }),
+                Err(error) => json!({
+                    "ok": false,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "a scalar is available only behind an explicit rationale, coverage floors, evidence-tier requirements, and veto checks"
+                }),
+            }
+        } else {
+            Value::Null
+        };
+
+        let comparison = if let Some(raw_other) = arguments.get("other_observations") {
+            let values = raw_other
+                .as_array()
+                .ok_or("other_observations must be an array")?;
+            if values.len() > 10_000 {
+                return Err("other_observations exceeds the 10000-observation safety bound".into());
+            }
+            let other: Vec<Observation> = values
+                .iter()
+                .cloned()
+                .map(|value| {
+                    serde_json::from_value(value)
+                        .map_err(|error| format!("invalid comparison observation: {error}"))
+                })
+                .collect::<Result<_, _>>()?;
+            let other = match CapabilityPosterior::build(&other, &policy) {
+                Ok(other) => other,
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "stage": "comparison_posterior",
+                        "refusal": error.to_string(),
+                        "fail_closed": true
+                    }))
+                }
+            };
+            let tolerance = arguments
+                .get("tolerance")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let min_effective = arguments
+                .get("min_effective")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            if !tolerance.is_finite()
+                || tolerance < 0.0
+                || !min_effective.is_finite()
+                || min_effective < 0.0
+            {
+                return Err("tolerance and min_effective must be finite and non-negative".into());
+            }
+            json!({
+                "ok": true,
+                "dominance": posterior.compare(&other, tolerance, min_effective),
+                "tolerance": tolerance,
+                "min_effective": min_effective
+            })
+        } else {
+            Value::Null
+        };
+
+        Ok(json!({
+            "ok": true,
+            "schema_version": posterior.schema_version,
+            "observations": observations.len(),
+            "unprovenanced_observations": unprovenanced,
+            "capabilities": posterior.capabilities,
+            "gate": gate,
+            "comparison": comparison,
+            "guarantees": [
+                "capability vectors preserve pass rate, outcome rate, partial credit, unknown share, vetoes, disputes, and weakest evidence tier separately",
+                "unmeasured or thin capabilities remain incomparable rather than becoming zero or a forced tie",
+                "release scalars carry their rationale, formula, terms, and leave-one-out sensitivity",
+            ],
+            "limitations": [
+                "observations and provenance are caller-supplied; the tool does not execute evaluators or verify external run handles",
+                "the posterior is a clustered point-estimate vector, not a fitted probability distribution",
+                "cost, latency, calibration curves, failure-atlas clustering, and human dispute resolution remain outside this contract",
+            ]
+        }))
+    }
+
+    fn oracle_reference_panel(&self, arguments: &Value) -> Result<Value, String> {
+        let panel: ReaderPanel = serde_json::from_value(
+            arguments
+                .get("panel")
+                .cloned()
+                .ok_or("panel is required and must be a serialized ReaderPanel")?,
+        )
+        .map_err(|error| format!("invalid reader panel: {error}"))?;
+        if panel.reads().len() > 10_000 {
+            return Err("reader panel may contain at most 10000 reads".into());
+        }
+        let rule = arguments
+            .get("rule")
+            .cloned()
+            .map(serde_json::from_value::<ConsensusRule>)
+            .transpose()
+            .map_err(|error| format!("invalid consensus rule: {error}"))?
+            .unwrap_or(ConsensusRule::Majority);
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let reference = match panel.reference(rule) {
+            Ok(reference) => reference,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "reference",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "an empty independent panel never becomes a reference by default",
+                }))
+            }
+        };
+        let model_call = arguments.get("model_call").and_then(Value::as_str);
+        let rule_label = reference.rule.label();
+        Ok(json!({
+            "ok": true,
+            "rule": reference.rule,
+            "rule_label": rule_label,
+            "consensus": reference.consensus(),
+            "tally": reference.tally(),
+            "readers": reference.readers(),
+            "minority_calls": reference.minority_calls(),
+            "reads": reference.reads().iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_reads": reference.reads().len().saturating_sub(max_items),
+            "per_reader": model_call.map(|call| reference.per_reader(call)),
+            "model_call": model_call,
+            "adjudication": panel.adjudication(),
+            "guarantees": [
+                "only independent pre-discussion reads count toward the consensus rule",
+                "minority calls and all source reads remain visible even when a reference is settled",
+                "split panels and unblinded adjudication remain unresolved rather than defaulting to the first or majority call",
+            ],
+            "limitations": [
+                "reader calls, evidence citations, and adjudication blinding are caller-supplied and not independently audited",
+                "the tool reports raw agreement structure; it does not invent an agreement statistic or calibration model",
+                "a reference distribution is a measurement process claim, not a claim of biological truth",
+            ],
+        }))
+    }
+
+    fn oracle_missingness(&self, arguments: &Value) -> Result<Value, String> {
+        let pattern: AbsencePattern = serde_json::from_value(
+            arguments
+                .get("pattern")
+                .cloned()
+                .ok_or("pattern is required and must be a serialized AbsencePattern")?,
+        )
+        .map_err(|error| format!("invalid absence pattern: {error}"))?;
+        if pattern.groups().count() > 10_000 {
+            return Err("absence pattern may contain at most 10000 groups".into());
+        }
+        let field: Field = serde_json::from_value(
+            arguments
+                .get("field")
+                .cloned()
+                .ok_or("field is required and must be a serialized Field")?,
+        )
+        .map_err(|error| format!("invalid missingness field: {error}"))?;
+        let boundary: Boundary = serde_json::from_value(
+            arguments
+                .get("boundary")
+                .cloned()
+                .ok_or("boundary is required and must be a serialized Boundary")?,
+        )
+        .map_err(|error| format!("invalid missingness boundary: {error}"))?;
+        let small_cell_floor = arguments
+            .get("small_cell_floor")
+            .and_then(Value::as_u64)
+            .ok_or("small_cell_floor is required and must be a non-negative integer")?;
+        if small_cell_floor > 1_000_000_000 {
+            return Err("small_cell_floor is above the 1000000000 safety bound".into());
+        }
+        let mechanism = arguments
+            .get("mechanism")
+            .cloned()
+            .map(serde_json::from_value::<MissingnessMechanism>)
+            .transpose()
+            .map_err(|error| format!("invalid missingness mechanism: {error}"))?;
+        let complete_case = mechanism.as_ref().map(complete_case_admissible);
+        Ok(json!({
+            "ok": true,
+            "groups": pattern.groups().collect::<Vec<_>>(),
+            "informativeness": informativeness(&pattern),
+            "field": field,
+            "boundary": boundary,
+            "small_cell_floor": small_cell_floor,
+            "egress": oraclex_egress(&field, &boundary, small_cell_floor),
+            "mechanism": mechanism,
+            "complete_case": complete_case,
+            "guarantees": [
+                "absence informativeness distinguishes deterministic separation, unresolved partial separation, and equal supplied rates",
+                "individual data, small aggregates, and denominator-free aggregates are not silently released across an aggregate boundary",
+                "complete-case admissibility remains unresolved until a missingness mechanism is declared",
+            ],
+            "limitations": [
+                "counts and missingness mechanisms are caller-supplied; no imputation, causal model, or external audit is performed",
+                "the small-cell floor is a required policy input and is not a universal biological or legal threshold",
+                "egress is a determination over a value, not a network or storage access-control enforcement point",
+            ],
+        }))
+    }
+
+    fn bioeval_reference_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw = arguments
+            .get("reference")
+            .cloned()
+            .ok_or("reference is required and must be a serialized ReferenceStandard")?;
+        let reference = match raw.get("standard").and_then(Value::as_str) {
+            Some("distribution") => {
+                let mass = serde_json::from_value::<std::collections::BTreeMap<String, f64>>(
+                    raw.get("mass")
+                        .cloned()
+                        .ok_or("distribution reference is missing mass")?,
+                )
+                .map_err(|error| format!("invalid reference mass map: {error}"))?;
+                let dispersion: Dispersion = serde_json::from_value(
+                    raw.get("dispersion")
+                        .cloned()
+                        .ok_or("distribution reference is missing dispersion")?,
+                )
+                .map_err(|error| format!("invalid reference dispersion: {error}"))?;
+                ReferenceStandard::Distribution(
+                    ReferenceDistribution::new(mass, dispersion)
+                        .map_err(|error| format!("invalid reference distribution: {error}"))?,
+                )
+            }
+            _ => serde_json::from_value(raw)
+                .map_err(|error| format!("invalid reference standard: {error}"))?,
+        };
+        let state = arguments
+            .get("state")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let (modal_state, modal_mass, entropy_bits, dispersion, state_mass) =
+            match reference.distribution() {
+                Some(distribution) => {
+                    let (state_name, mass) = distribution.mode();
+                    (
+                        Some(state_name.to_string()),
+                        Some(mass),
+                        Some(distribution.entropy_bits()),
+                        Some(distribution.dispersion().as_str()),
+                        state.as_deref().and_then(|name| distribution.mass_on(name)),
+                    )
+                }
+                None => (None, None, None, None, None),
+            };
+        let reference_kind = reference.as_str();
+        let can_certify_clean_pass = reference.can_certify_a_clean_pass();
+        let resolution = reference
+            .distribution()
+            .map(|distribution| distribution.resolution());
+        let modal_confidence = reference
+            .distribution()
+            .map(ReferenceDistribution::modal_confidence);
+        Ok(json!({
+            "ok": true,
+            "reference": reference,
+            "reference_kind": reference_kind,
+            "can_certify_clean_pass": can_certify_clean_pass,
+            "resolution": resolution,
+            "modal_state": modal_state,
+            "modal_mass": modal_mass,
+            "modal_confidence": modal_confidence,
+            "entropy_bits": entropy_bits,
+            "dispersion": dispersion,
+            "queried_state": state,
+            "queried_state_mass": state_mass,
+            "guarantees": [
+                "distributed reference truth remains a distribution rather than being collapsed to a label",
+                "aleatoric, annotation, mixed, and unattributed dispersion remain distinct",
+                "unresolved and not-evaluable references are not treated as hidden negatives",
+                "mass normalization is validated through ReferenceDistribution::new before metrics are reported"
+            ],
+            "limitations": [
+                "this audits a reference standard and does not score a prediction or adjudicate an oracle",
+                "flat state distributions do not provide taxonomic or causal graph distance"
+            ]
+        }))
+    }
+
+    fn evaluation_worldline_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let worldline: EvaluationWorldline = serde_json::from_value(
+            arguments
+                .get("worldline")
+                .cloned()
+                .ok_or("worldline is required and must be a serialized bioevalx Worldline")?,
+        )
+        .map_err(|error| format!("invalid evaluation worldline: {error}"))?;
+        if worldline.decisions().len() > 10_000 {
+            return Err("worldline exceeds the 10000-decision safety bound".into());
+        }
+
+        let audit = worldline.audit();
+        let dangling = worldline.dangling();
+        let admissible_at = match arguments.get("at") {
+            None | Some(Value::Null) => Value::Null,
+            Some(value) => {
+                let at = value
+                    .as_str()
+                    .ok_or("at must be an RFC-3339 timestamp string")?;
+                let at = bioprism_scope::Timestamp::parse(at)
+                    .map_err(|error| format!("invalid at timestamp: {error}"))?;
+                json!(worldline.admissible_at(at))
+            }
+        };
+
+        Ok(json!({
+            "ok": true,
+            "decisions": worldline.decisions().len(),
+            "leak_count": audit.len(),
+            "leaks": audit,
+            "dangling_count": dangling.len(),
+            "dangling_references": dangling,
+            "admissible_at": admissible_at,
+            "guarantees": [
+                "future evidence and unresolved references are reported separately",
+                "the audit is based on accessibility time rather than occurrence time",
+                "the worldline contract keeps the numerator of leakage explicit instead of inventing a denominator",
+            ],
+            "limitations": [
+                "a serialized worldline is caller-supplied and this tool does not reconstruct missing observations",
+                "no leakage rate is emitted because the denominator must be chosen by the evaluation design",
+            ]
+        }))
+    }
+
+    fn evaluation_reproduction_check(&self, arguments: &Value) -> Result<Value, String> {
+        let reexecution: Reexecution = serde_json::from_value(
+            arguments
+                .get("reexecution")
+                .cloned()
+                .ok_or("reexecution is required and must be a serialized bioevalx Reexecution")?,
+        )
+        .map_err(|error| format!("invalid reexecution: {error}"))?;
+        if reexecution.specs().len() > 10_000 {
+            return Err("reexecution exceeds the 10000-output safety bound".into());
+        }
+
+        let certificate = match reexecution.certify() {
+            Ok(certificate) => certificate,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "certification",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "an empty or malformed comparison set never becomes a reproducibility certificate"
+                }))
+            }
+        };
+        let first_divergence = certificate
+            .first_divergence()
+            .map(|(output, verdict)| json!({ "output": output, "verdict": verdict }));
+        let validity_claim = arguments
+            .get("biological_claim")
+            .and_then(Value::as_str)
+            .map(|claim| match certificate.supports(claim) {
+                Ok(()) => json!({ "ok": true }),
+                Err(error) => json!({
+                    "ok": false,
+                    "refusal": error.to_string(),
+                    "fail_closed": true
+                }),
+            });
+
+        Ok(json!({
+            "ok": true,
+            "certificate": certificate,
+            "reproduced": certificate.reproduced(),
+            "first_divergence": first_divergence,
+            "missing_outputs": certificate.missing(),
+            "portability_demonstrated": certificate.portability_demonstrated(),
+            "validity_claim": validity_claim,
+            "guarantees": [
+                "missing outputs are distinct from numerical or digest divergence",
+                "the first divergence remains in declared output order",
+                "reproducibility is not promoted to biological validity",
+                "the tolerance and environment-pinning declarations travel with the certificate",
+            ],
+            "limitations": [
+                "the tool compares caller-supplied rerun observations and performs no execution",
+                "environment reconstruction, figure regeneration, and statistical validity remain outside this contract",
+            ]
+        }))
+    }
+
+    fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
+        let trajectory: Trajectory = serde_json::from_value(
+            arguments
+                .get("trajectory")
+                .cloned()
+                .ok_or("trajectory is required and must be a serialized bioevalx Trajectory")?,
+        )
+        .map_err(|error| format!("invalid trajectory: {error}"))?;
+        if trajectory.steps().len() > 100_000 {
+            return Err("trajectory exceeds the 100000-step safety bound".into());
+        }
+        if trajectory.properties().len() > 10_000 {
+            return Err("trajectory exceeds the 10000-property safety bound".into());
+        }
+
+        let bounded_suffix = match (
+            arguments.get("step").and_then(Value::as_u64),
+            arguments.get("horizon").and_then(Value::as_u64),
+        ) {
+            (None, None) => Value::Null,
+            (Some(step), Some(horizon)) => {
+                let step = usize::try_from(step).map_err(|_| "step is too large")?;
+                let horizon = usize::try_from(horizon).map_err(|_| "horizon is too large")?;
+                match trajectory.bounded_suffix(step, horizon) {
+                    Ok(value) => {
+                        json!({ "ok": true, "value": value, "complete": value.complete() })
+                    }
+                    Err(error) => json!({
+                        "ok": false,
+                        "refusal": error.to_string(),
+                        "fail_closed": true
+                    }),
+                }
+            }
+            _ => return Err("step and horizon must be supplied together".into()),
+        };
+
+        Ok(json!({
+            "ok": true,
+            "steps": trajectory.steps().len(),
+            "acts": trajectory.acts(),
+            "properties": trajectory.properties(),
+            "property_outcomes": trajectory.check(),
+            "recovery": trajectory.recovery(),
+            "bounded_suffix": bounded_suffix,
+            "guarantees": [
+                "violations retain step indices and vacuous properties are not credited as held",
+                "immediate and downstream progress remain separate and a horizon is explicit",
+                "recovery is reported as individual failure-to-strategy-change pairs rather than an average",
+            ],
+            "limitations": [
+                "progress values and act labels are caller-supplied",
+                "this contract evaluates declared path properties; it does not infer decision quality or partial observability",
+            ]
+        }))
+    }
+
+    fn runtime_effect_check(&self, arguments: &Value) -> Result<Value, String> {
+        let policy: EffectPolicy = serde_json::from_value(
+            arguments
+                .get("policy")
+                .cloned()
+                .ok_or("policy is required and must be a serialized runtime EffectPolicy")?,
+        )
+        .map_err(|error| format!("invalid effect policy: {error}"))?;
+        let request: EffectRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or("request is required and must be a serialized runtime EffectRequest")?,
+        )
+        .map_err(|error| format!("invalid effect request: {error}"))?;
+        let class = request.class();
+        let authorization = match policy.authorize(&request) {
+            Ok(authorization) => authorization,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "authorization",
+                    "request": request,
+                    "kind": request.kind(),
+                    "class": class,
+                    "class_label": class.to_string(),
+                    "target_host": request.target_host(),
+                    "target_path": request.target_path(),
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "undeclared, disallowed, non-canonical, and network-denied effects never become executable through this inspection tool"
+                }))
+            }
+        };
+        let simulated = matches!(authorization, bioprism_runtime::Authorization::Simulate)
+            .then(|| EffectPolicy::simulated_outcome(&request));
+        Ok(json!({
+            "ok": true,
+            "request": request,
+            "kind": request.kind(),
+            "class": class,
+            "class_label": class.to_string(),
+            "authorization": authorization,
+            "target_host": request.target_host(),
+            "target_path": request.target_path(),
+            "simulated_outcome": simulated,
+            "guarantees": [
+                "authorization is deny-by-default and checks declaration before path or network details",
+                "simulation is explicitly labelled and derived from the request",
+                "this tool authorizes or simulates a description only; it performs no effect"
+            ],
+            "limitations": [
+                "a successful authorization is not evidence that an external provider is available",
+                "filesystem and network state are not touched by this MCP surface"
+            ]
+        }))
+    }
+
+    fn runtime_tape_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let tape: WorldTape = serde_json::from_value(
+            arguments
+                .get("tape")
+                .cloned()
+                .ok_or("tape is required and must be a serialized runtime WorldTape")?,
+        )
+        .map_err(|error| format!("invalid or unverifiable world tape: {error}"))?;
+        if tape.entries().len() > 100_000 {
+            return Err("world tape exceeds the 100000-entry safety bound".into());
+        }
+        if tape.checkpoints().len() > 10_000 {
+            return Err("world tape exceeds the 10000-checkpoint safety bound".into());
+        }
+        let other = match arguments.get("other_tape") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                serde_json::from_value::<WorldTape>(value.clone())
+                    .map_err(|error| format!("invalid comparison world tape: {error}"))?,
+            ),
+        };
+        let checkpoint_results: Vec<Value> = tape
+            .checkpoints()
+            .iter()
+            .map(|checkpoint| match tape.verify_checkpoint(checkpoint) {
+                Ok(()) => json!({ "id": checkpoint.id, "ok": true }),
+                Err(error) => json!({
+                    "id": checkpoint.id,
+                    "ok": false,
+                    "refusal": error.to_string(),
+                    "fail_closed": true
+                }),
+            })
+            .collect();
+        let divergence = other
+            .as_ref()
+            .and_then(|candidate| tape.first_divergence(candidate));
+        Ok(json!({
+            "ok": true,
+            "run": tape.run(),
+            "lineage": tape.lineage(),
+            "entries": tape.len(),
+            "head": tape.head(),
+            "chain_verified": true,
+            "checkpoint_results": checkpoint_results,
+            "artifacts": tape.artifacts(),
+            "simulated_steps": tape.simulated_steps(),
+            "first_divergence": divergence,
+            "comparison_supplied": other.is_some(),
+            "guarantees": [
+                "deserialization verifies the hash chain before a tape is accepted",
+                "checkpoint identity, artifact reads/writes, simulated provenance, and suffix divergence remain separate",
+                "a comparison reports the earliest digest disagreement rather than an aggregate similarity score"
+            ],
+            "limitations": [
+                "the tool verifies a supplied tape but does not replay it or contact a provider",
+                "artifact digests identify recorded content and do not prove external filesystem state"
+            ]
+        }))
+    }
+
+    fn onco_boundary_check(&self, arguments: &Value) -> Result<Value, String> {
+        let boundary: ResearchBoundary = arguments
+            .get("boundary")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid research boundary: {error}"))?
+            .unwrap_or_else(ResearchBoundary::research_only);
+        let request: BoundaryRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or("request is required and must be a serialized BoundaryRequest")?,
+        )
+        .map_err(|error| format!("invalid boundary request: {error}"))?;
+        if request.requested_uses.len() > 100 {
+            return Err("boundary request exceeds the 100-use safety bound".into());
+        }
+
+        let disposition = match boundary.triage(&request) {
+            Ok(disposition) => disposition,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "research_boundary",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "direct identifier presence is refused before the request is echoed or analysed"
+                }))
+            }
+        };
+        Ok(json!({
+            "ok": true,
+            "permitted": boundary.permitted(),
+            "disposition": disposition,
+            "released": disposition.released(),
+            "refused": disposition.refused(),
+            "terminal_action": disposition.terminal_action(),
+            "escalation": disposition.escalation(),
+            "research_statement": "Research use only. Not for use in the diagnosis, prognosis, treatment, or triage of any individual.",
+            "guarantees": [
+                "research uses and individualized clinical uses are split rather than collapsed into a total refusal",
+                "claimed role, urgency, and context do not override the fixed research boundary",
+                "partial release preserves safe aggregate work while routing refused individual use to a human process"
+            ],
+            "limitations": [
+                "the boundary checks declared uses and identifier fields; it does not inspect embedded instructions in arbitrary source text",
+                "a boundary disposition is not clinical advice and does not execute escalation"
+            ]
+        }))
+    }
+
+    fn onco_response_assess(&self, arguments: &Value) -> Result<Value, String> {
+        let criterion: ResponseCriterion = serde_json::from_value(
+            arguments
+                .get("criterion")
+                .cloned()
+                .ok_or("criterion is required and must be a serialized ResponseCriterion")?,
+        )
+        .map_err(|error| format!("invalid response criterion: {error}"))?;
+        let baseline: ImagingObservation = serde_json::from_value(
+            arguments
+                .get("baseline")
+                .cloned()
+                .ok_or("baseline is required and must be an ImagingObservation")?,
+        )
+        .map_err(|error| format!("invalid baseline imaging observation: {error}"))?;
+        let current: ImagingObservation = serde_json::from_value(
+            arguments
+                .get("current")
+                .cloned()
+                .ok_or("current is required and must be an ImagingObservation")?,
+        )
+        .map_err(|error| format!("invalid current imaging observation: {error}"))?;
+        let current_acquired: AcquisitionTime = serde_json::from_value(
+            arguments
+                .get("current_acquired")
+                .cloned()
+                .ok_or("current_acquired is required and must be an RFC-3339 timestamp")?,
+        )
+        .map_err(|error| format!("invalid current_acquired timestamp: {error}"))?;
+        let baseline_clinical: ClinicalObservation = serde_json::from_value(
+            arguments
+                .get("baseline_clinical")
+                .cloned()
+                .ok_or("baseline_clinical is required and must be a ClinicalObservation")?,
+        )
+        .map_err(|error| format!("invalid baseline clinical observation: {error}"))?;
+        let current_clinical: ClinicalObservation = serde_json::from_value(
+            arguments
+                .get("current_clinical")
+                .cloned()
+                .ok_or("current_clinical is required and must be a ClinicalObservation")?,
+        )
+        .map_err(|error| format!("invalid current clinical observation: {error}"))?;
+        let treatment: TreatmentContext = serde_json::from_value(
+            arguments
+                .get("treatment")
+                .cloned()
+                .ok_or("treatment is required and must be a TreatmentContext")?,
+        )
+        .map_err(|error| format!("invalid treatment context: {error}"))?;
+        let evidence: ProgressionEvidence = arguments
+            .get("evidence")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid progression evidence: {error}"))?
+            .unwrap_or_default();
+        let nadir_spd_mm2 = match arguments.get("nadir_spd_mm2") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_f64()
+                    .ok_or("nadir_spd_mm2 must be a finite number or null")?,
+            ),
+        };
+        let measurement_error_fraction = arguments
+            .get("measurement_error_fraction")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+
+        let request = ResponseRequest {
+            criterion: &criterion,
+            baseline: &baseline,
+            current: &current,
+            current_acquired,
+            nadir_spd_mm2,
+            baseline_clinical: &baseline_clinical,
+            current_clinical: &current_clinical,
+            treatment: &treatment,
+            evidence: &evidence,
+            measurement_error_fraction,
+        };
+        let assessment = match onco_assess(&request) {
+            Ok(assessment) => assessment,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "response_assessment",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "invalid or unsupported measurements never become stable, response, or progression calls"
+                }))
+            }
+        };
+        Ok(json!({
+            "ok": true,
+            "assessment": assessment,
+            "call_label": assessment.call.label(),
+            "withheld_progression": assessment.withheld_progression(),
+            "hypothesis_count": assessment.hypotheses.entries().len(),
+            "evidence_requests": assessment.hypotheses.evidence_requests(),
+            "guarantees": [
+                "the unconfirmed radiologic reading is separate from the reportable call",
+                "post-treatment change without confirmation remains not evaluable and never becomes stable disease",
+                "the surviving differential and discriminating evidence requests remain visible"
+            ],
+            "limitations": [
+                "this is a research-world assessment, not a diagnosis, prognosis, treatment recommendation, or care triage",
+                "advanced imaging and calibrated probabilities are not inferred when they are absent from the request"
+            ]
+        }))
+    }
+
+    fn onco_worldline_view(&self, arguments: &Value) -> Result<Value, String> {
+        let worldline: TumourWorldline = serde_json::from_value(
+            arguments
+                .get("worldline")
+                .cloned()
+                .ok_or("worldline is required and must be a serialized TumourWorldline")?,
+        )
+        .map_err(|error| format!("invalid tumour worldline: {error}"))?;
+        if worldline.timepoints().len() > 100_000 {
+            return Err("tumour worldline exceeds the 100000-timepoint safety bound".into());
+        }
+
+        let cutoff = match arguments.get("visible_at") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let text = value
+                    .as_str()
+                    .ok_or("visible_at must be an RFC-3339 string or null")?;
+                let timestamp = bioprism_scope::Timestamp::parse(text)
+                    .map_err(|error| format!("invalid visible_at timestamp: {error}"))?;
+                Some(AvailabilityTime::new(timestamp))
+            }
+        };
+        let biological_order: Vec<&str> = worldline
+            .timepoints()
+            .iter()
+            .map(Timepoint::label)
+            .collect();
+        let record_order: Vec<&str> = worldline
+            .in_record_order()
+            .into_iter()
+            .map(Timepoint::label)
+            .collect();
+        let visible = cutoff.map(|at| worldline.visible_at(at));
+        let visible_labels = visible.as_ref().map(|timepoints| {
+            timepoints
+                .iter()
+                .map(|timepoint| timepoint.label())
+                .collect::<Vec<_>>()
+        });
+        let hidden_labels = cutoff.map(|at| {
+            worldline
+                .timepoints()
+                .iter()
+                .filter(|timepoint| timepoint.visible() > at)
+                .map(Timepoint::label)
+                .collect::<Vec<_>>()
+        });
+        let rows: Vec<Value> = worldline
+            .timepoints()
+            .iter()
+            .map(|timepoint| {
+                let clocks = timepoint.clocks();
+                json!({
+                    "label": timepoint.label(),
+                    "acquired": clocks.acquired,
+                    "recorded": clocks.recorded,
+                    "released": clocks.released,
+                    "visible": clocks.visible,
+                    "days_from_baseline": worldline.time_from_baseline(timepoint).days(),
+                    "observation": timepoint.observation(),
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "ok": true,
+            "subject": worldline.subject().as_str(),
+            "baseline": worldline.baseline().label(),
+            "timepoint_count": worldline.timepoints().len(),
+            "biological_order": biological_order,
+            "record_order": record_order,
+            "record_order_differs": biological_order != record_order,
+            "visibility_cutoff": cutoff.map(|at| at.timestamp().to_rfc3339()),
+            "visibility_filter_applied": cutoff.is_some(),
+            "visible_timepoints": visible_labels,
+            "hidden_from_agent": hidden_labels,
+            "timepoints": rows,
+            "guarantees": [
+                "biological order is acquisition order and is reported separately from record order",
+                "visibility is cut on agent-visibility time rather than acquisition time",
+                "the baseline-relative day count uses only the acquisition clock",
+                "hidden future evidence remains distinguishable from absent or unrecorded evidence"
+            ],
+            "limitations": [
+                "the tool audits and renders a supplied worldline; it does not infer missing observations or repair clocks",
+                "the worldline contains exact timestamps and does not model date uncertainty, treatment interruptions, or specimen lineage"
+            ]
+        }))
+    }
+
+    fn onco_classification_check(&self, arguments: &Value) -> Result<Value, String> {
+        let histology: Histology = serde_json::from_value(
+            arguments
+                .get("histology")
+                .cloned()
+                .ok_or("histology is required and must be a serialized Histology")?,
+        )
+        .map_err(|error| format!("invalid histology: {error}"))?;
+        let panel: MarkerPanel = serde_json::from_value(
+            arguments
+                .get("panel")
+                .cloned()
+                .ok_or("panel is required and must be a serialized MarkerPanel")?,
+        )
+        .map_err(|error| format!("invalid molecular marker panel: {error}"))?;
+        let states: Vec<Value> = panel
+            .iter()
+            .map(|(marker, state)| json!({ "marker": marker, "state": state }))
+            .collect();
+        if states.len() > 100 {
+            return Err("molecular marker panel exceeds the 100-marker safety bound".into());
+        }
+        let resolution = onco_classify(histology, &panel);
+        Ok(json!({
+            "ok": true,
+            "histology": histology,
+            "resolution": resolution,
+            "is_integrated": resolution.is_integrated(),
+            "entity": resolution.entity(),
+            "obligations": resolution.obligations(),
+            "panel_states": states,
+            "guarantees": [
+                "histology selects candidates but never supplies a molecular call",
+                "unobserved assays remain obligations and are never treated as negative",
+                "mixed, unresolved, provisional, and not-otherwise-resolved states remain distinct",
+                "an entity is returned only for an integrated resolution"
+            ],
+            "limitations": [
+                "the criteria table is the deliberately bounded worked instantiation shipped by bioprism-onco",
+                "methylation, fusion, purity, and lower-grade histologic evidence are not inferred"
+            ]
+        }))
+    }
+
+    fn oncoworlds_identity_join(&self, arguments: &Value) -> Result<Value, String> {
+        let left: Artifact = serde_json::from_value(
+            arguments
+                .get("left")
+                .cloned()
+                .ok_or("left is required and must be a serialized onco-worlds Artifact")?,
+        )
+        .map_err(|error| format!("invalid left artifact: {error}"))?;
+        let right: Artifact = serde_json::from_value(
+            arguments
+                .get("right")
+                .cloned()
+                .ok_or("right is required and must be a serialized onco-worlds Artifact")?,
+        )
+        .map_err(|error| format!("invalid right artifact: {error}"))?;
+        let unit: AnalysisUnit = serde_json::from_value(arguments.get("unit").cloned().ok_or(
+            "unit is required and must be participant, lesion, specimen, or imaging_series",
+        )?)
+        .map_err(|error| format!("invalid analysis unit: {error}"))?;
+        let evidence: IdentityEvidence = arguments
+            .get("evidence")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid identity evidence: {error}"))?
+            .unwrap_or_else(IdentityEvidence::new);
+        if evidence.links().len() > 1_000 {
+            return Err("identity evidence exceeds the 1000-link safety bound".into());
+        }
+        let bridge: Option<EpochBridge> = arguments
+            .get("epoch_bridge")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid epoch bridge: {error}"))?;
+        let verdict = match bridge.as_ref() {
+            Some(bridge) => joinable_with_bridge(&left, &right, unit, &evidence, Some(bridge)),
+            None => joinable_with_bridge(&left, &right, unit, &evidence, None),
+        };
+        let verdict = match verdict {
+            Ok(()) => JoinVerdict::Joinable,
+            Err(reason) => JoinVerdict::Declined { reason },
+        };
+        let report = JoinReport {
+            left: left.label.clone(),
+            right: right.label.clone(),
+            unit,
+            verdict,
+        };
+        Ok(json!({
+            "ok": true,
+            "joinable": report.verdict.is_joinable(),
+            "report": report,
+            "bridge_declared": bridge.is_some(),
+            "guarantees": [
+                "participant identity is checked before local specimen or lesion identifiers",
+                "truncated identifiers, unlicensed relations, missing permissible use, epoch mismatch, and specimen mismatch are typed refusals",
+                "a declined join is returned as an auditable result rather than discarded",
+                "an epoch bridge is accepted only when it names both epochs and carries a caller-supplied warrant"
+            ],
+            "limitations": [
+                "the tool consumes caller-supplied identity evidence and does not run fingerprint, sex-chromosome, or contamination oracles",
+                "a declared bridge is a warrant for review, not proof that the disease epochs are biologically interchangeable"
+            ]
+        }))
+    }
+
+    fn onco_outcome_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let follow_up: FollowUp = serde_json::from_value(
+            arguments
+                .get("follow_up")
+                .cloned()
+                .ok_or("follow_up is required and must be a serialized FollowUp")?,
+        )
+        .map_err(|error| format!("invalid oncology follow-up: {error}"))?;
+        let estimand: Estimand = serde_json::from_value(
+            arguments
+                .get("estimand")
+                .cloned()
+                .ok_or("estimand is required and must be declared before analysis")?,
+        )
+        .map_err(|error| format!("invalid oncology estimand: {error}"))?;
+        let analysis = follow_up.analyse(&estimand);
+        let at_risk_days = analysis.at_risk_days;
+        let immortal_time_days = analysis.immortal_time_days;
+        let event = analysis.outcome.is_event();
+        let censoring_reason = analysis.outcome.censoring_reason();
+        let informative_bias_flags = analysis
+            .bias_flags
+            .iter()
+            .filter(|bias| {
+                matches!(
+                    bias,
+                    bioprism_onco::AnalysisBias::InformativeLossToFollowUp
+                        | bioprism_onco::AnalysisBias::CompetingDeath
+                        | bioprism_onco::AnalysisBias::TreatmentSwitching
+                )
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "analysis": analysis,
+            "at_risk_days": at_risk_days,
+            "immortal_time_days": immortal_time_days,
+            "event": event,
+            "censoring_reason": censoring_reason,
+            "informative_bias_flags": informative_bias_flags,
+            "guarantees": [
+                "the caller must state the estimand before the per-subject outcome is interpreted",
+                "loss to follow-up is censoring and never an event",
+                "competing death remains distinguishable from ordinary non-informative censoring",
+                "delayed risk-set entry reports immortal-time exposure instead of counting it as at-risk time"
+            ],
+            "limitations": [
+                "this produces one-subject analysis records; it does not estimate survival, hazard ratios, or cumulative incidence",
+                "cohort-level landmark and follow-up-intensity bias require a cohort audit beyond this record"
+            ]
+        }))
+    }
+
+    fn oncoworlds_model_transport(&self, arguments: &Value) -> Result<Value, String> {
+        let result: ModelResult = serde_json::from_value(
+            arguments
+                .get("result")
+                .cloned()
+                .ok_or("result is required and must be a serialized ModelResult")?,
+        )
+        .map_err(|error| format!("invalid model result: {error}"))?;
+        let fidelity: FidelityEvidence = arguments
+            .get("fidelity")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid fidelity evidence: {error}"))?
+            .unwrap_or_default();
+        let cohort: EstablishmentCohort = serde_json::from_value(
+            arguments
+                .get("establishment")
+                .cloned()
+                .ok_or("establishment is required and must be an EstablishmentCohort")?,
+        )
+        .map_err(|error| format!("invalid establishment cohort: {error}"))?;
+        if cohort.attempted > 1_000_000 || cohort.established > 1_000_000 {
+            return Err("establishment counts exceed the 1000000-subject safety bound".into());
+        }
+        let claimed_n = arguments
+            .get("claimed_n")
+            .and_then(Value::as_u64)
+            .ok_or("claimed_n is required and must be a non-negative integer")?;
+        if claimed_n > 1_000_000 {
+            return Err("claimed_n exceeds the 1000000-subject safety bound".into());
+        }
+        let transport: DeclaredTransport = serde_json::from_value(
+            arguments
+                .get("transport")
+                .cloned()
+                .ok_or("transport is required and must be a serialized DeclaredTransport")?,
+        )
+        .map_err(|error| format!("invalid declared transport: {error}"))?;
+
+        match onco_transport_model(&result, &fidelity, cohort, claimed_n as usize, &transport) {
+            Ok(claim) => Ok(json!({
+                "ok": true,
+                "model_statement": result.as_stated(),
+                "effective_biological_n": result.replicates.effective_n(),
+                "patient_relevant_claim": claim,
+                "guarantees": [
+                    "model identity is checked before any patient-level transport",
+                    "fidelity is required at the passage on which the effect was observed",
+                    "establishment selection and technical-versus-biological replication remain explicit",
+                    "the transport carries a loss ledger and every required assumption"
+                ],
+                "limitations": [
+                    "the tool checks declared transport structure; it does not validate identity, fidelity, or assumptions against an external oracle",
+                    "a supported patient-relevant claim is still a research transport, not a clinical treatment recommendation"
+                ]
+            })),
+            Err(refusal) => Ok(json!({
+                "ok": false,
+                "stage": "model_to_patient_transport",
+                "refusal": serde_json::to_value(&refusal).map_err(|error| error.to_string())?,
+                "refusal_text": refusal.to_string(),
+                "fail_closed": true,
+                "model_statement": result.as_stated(),
+                "guarantee": "a model-system effect is never relabelled as patient evidence when an identity, fidelity, selection, replication, loss, or assumption boundary is missing"
+            })),
+        }
+    }
+
+    fn oncoworlds_methylation_classify(&self, arguments: &Value) -> Result<Value, String> {
+        let classifier: ClassifierVersion = serde_json::from_value(
+            arguments
+                .get("classifier")
+                .cloned()
+                .ok_or("classifier is required and must be a ClassifierVersion")?,
+        )
+        .map_err(|error| format!("invalid classifier version: {error}"))?;
+        let scores: std::collections::BTreeMap<
+            MethylationClass,
+            bioprism_oncoworlds::CalibratedScore,
+        > = serde_json::from_value(arguments.get("scores").cloned().ok_or(
+            "scores is required and must be a map from class labels to calibrated scores",
+        )?)
+        .map_err(|error| format!("invalid calibrated score map: {error}"))?;
+        if scores.len() > 10_000 {
+            return Err("methylation score map exceeds the 10000-class safety bound".into());
+        }
+        let context: SampleContext = serde_json::from_value(
+            arguments
+                .get("context")
+                .cloned()
+                .ok_or("context is required and must be a SampleContext")?,
+        )
+        .map_err(|error| format!("invalid methylation sample context: {error}"))?;
+        match onco_classify_methylation(&classifier, &scores, &context) {
+            Ok(report) => {
+                let classified = report.outcome.is_classified();
+                let class = report.outcome.class().cloned();
+                Ok(json!({
+                    "ok": true,
+                    "classified": classified,
+                    "class": class,
+                    "report": report,
+                    "denominator_policy": "an unclassifiable result remains a result and must stay in the evaluation denominator",
+                    "guarantees": [
+                        "a classifier must declare its own reporting threshold",
+                        "quality-control failure and below-threshold abstention remain distinct outcomes",
+                        "nearest class evidence never becomes a class call",
+                        "tumour-content absence is retained as a caveat rather than silently imputed"
+                    ],
+                    "limitations": [
+                        "no array preprocessing, batch correction, classifier fitting, or tumour-content threshold is inferred",
+                        "the tool evaluates supplied calibrated scores; it does not validate the classifier against a reference cohort"
+                    ]
+                }))
+            }
+            Err(refusal) => Ok(json!({
+                "ok": false,
+                "stage": "methylation_classification",
+                "refusal": serde_json::to_value(&refusal).map_err(|error| error.to_string())?,
+                "refusal_text": refusal.to_string(),
+                "fail_closed": true,
+                "guarantee": "an undeclared threshold or other typed methylation refusal never becomes a maximum-score class call"
+            })),
+        }
+    }
+
+    fn oncoworlds_methylation_compare(&self, arguments: &Value) -> Result<Value, String> {
+        let left: VersionedResult = serde_json::from_value(
+            arguments
+                .get("left")
+                .cloned()
+                .ok_or("left is required and must be a VersionedResult")?,
+        )
+        .map_err(|error| format!("invalid left versioned result: {error}"))?;
+        let right: VersionedResult = serde_json::from_value(
+            arguments
+                .get("right")
+                .cloned()
+                .ok_or("right is required and must be a VersionedResult")?,
+        )
+        .map_err(|error| format!("invalid right versioned result: {error}"))?;
+        let comparison = onco_reconcile_methylation(&left, &right);
+        Ok(json!({
+            "ok": true,
+            "comparison": comparison,
+            "left_classifier": left.classifier,
+            "right_classifier": right.classifier,
+            "guarantees": [
+                "classifier-version changes are reported as version-conditioned evidence",
+                "the earlier result is not rewritten as wrong merely because a reference updated",
+                "two unclassifiable results remain distinct from agreement on a class"
+            ],
+            "limitations": [
+                "no cross-version ontology mapping or stable corroborating evidence is inferred",
+                "this compares supplied results and does not rerun either classifier"
+            ]
+        }))
+    }
+
+    fn oncoworlds_radiogenomic_check(&self, arguments: &Value) -> Result<Value, String> {
+        let claim: RadiogenomicClaim = serde_json::from_value(
+            arguments
+                .get("claim")
+                .cloned()
+                .ok_or("claim is required and must be a RadiogenomicClaim")?,
+        )
+        .map_err(|error| format!("invalid radiogenomic claim: {error}"))?;
+        let design: EvaluationDesign = serde_json::from_value(
+            arguments
+                .get("design")
+                .cloned()
+                .ok_or("design is required and must be an EvaluationDesign")?,
+        )
+        .map_err(|error| format!("invalid radiogenomic evaluation design: {error}"))?;
+        let observation: bioprism_oncoworlds::SpecimenObservation = serde_json::from_value(
+            arguments
+                .get("observation")
+                .cloned()
+                .ok_or("observation is required and must be a SpecimenObservation")?,
+        )
+        .map_err(|error| format!("invalid specimen observation: {error}"))?;
+        let transport: DeclaredTransport = serde_json::from_value(
+            arguments
+                .get("transport")
+                .cloned()
+                .ok_or("transport is required and must be a DeclaredTransport")?,
+        )
+        .map_err(|error| format!("invalid declared transport: {error}"))?;
+        match onco_assert_radiogenomic_claim(claim, &design, &observation, &transport) {
+            Ok(supported) => Ok(json!({
+                "ok": true,
+                "supported_claim": supported,
+                "guarantees": [
+                    "participant-safe splitting, training-only feature fitting, and pre-specified external cohorts are checked before claim scope",
+                    "specimen negative calls do not silently become tumour-level labels",
+                    "mechanism claims require the declared site and scanner strata",
+                    "cross-scope transport carries losses and required assumptions"
+                ],
+                "limitations": [
+                    "no imaging feature extraction, predictive model, AUROC, or causal effect is computed",
+                    "the tool checks design and scope declarations supplied by the caller"
+                ]
+            })),
+            Err(refusal) => Ok(json!({
+                "ok": false,
+                "stage": "radiogenomic_claim",
+                "refusal": serde_json::to_value(&refusal).map_err(|error| error.to_string())?,
+                "refusal_text": refusal.to_string(),
+                "fail_closed": true,
+                "guarantee": "a leaky evaluation, specimen-scoped label, unstratified mechanism claim, or undeclared transport never becomes a supported mechanistic statement"
+            })),
+        }
+    }
+
+    fn oncoworlds_clonal_history_check(&self, arguments: &Value) -> Result<Value, String> {
+        let population: TumourPopulation = serde_json::from_value(
+            arguments
+                .get("population")
+                .cloned()
+                .ok_or("population is required and must be a TumourPopulation")?,
+        )
+        .map_err(|error| format!("invalid tumour population: {error}"))?;
+        let candidates: Vec<ClonalHistory> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or("candidates is required and must be an array of ClonalHistory values")?,
+        )
+        .map_err(|error| format!("invalid clonal history candidates: {error}"))?;
+        if candidates.len() > 10_000 {
+            return Err(
+                "clonal history candidate set exceeds the 10000-history safety bound".into(),
+            );
+        }
+        let result = onco_compatible_histories(&population, candidates);
+        let compatible_count = result.compatible.len();
+        let rejected_count = result.rejected.len();
+        let unique = match result.sole() {
+            Ok(history) => json!({ "ok": true, "history": history }),
+            Err(refusal) => json!({
+                "ok": false,
+                "refusal": serde_json::to_value(&refusal).map_err(|error| error.to_string())?,
+                "refusal_text": refusal.to_string()
+            }),
+        };
+        Ok(json!({
+            "ok": true,
+            "compatible_count": compatible_count,
+            "rejected_count": rejected_count,
+            "compatible": result.compatible,
+            "rejected": result.rejected,
+            "unique_history": unique,
+            "guarantees": [
+                "candidate histories are audited against fraction, ancestry, cycle, and whole-tumour constraints",
+                "rejected histories remain visible with their typed refusal",
+                "multiple compatible histories remain ambiguity rather than being collapsed to the first candidate",
+                "the tool checks supplied histories and does not infer a phylogeny from raw variant data"
+            ],
+            "limitations": [
+                "no clonal tree enumeration, sequencing error model, or causal treatment attribution is performed",
+                "compatibility is arithmetic consistency, not proof that one history is biologically true"
+            ]
+        }))
+    }
+
+    fn stress_profile(&self, arguments: &Value) -> Result<Value, String> {
+        let cohort: Cohort = serde_json::from_value(
+            arguments
+                .get("cohort")
+                .cloned()
+                .ok_or("cohort is required and must be a serialized stress Cohort")?,
+        )
+        .map_err(|error| format!("invalid stress cohort: {error}"))?;
+        if cohort.subjects.len() > 10_000 {
+            return Err("cohort exceeds the 10000-subject safety bound".into());
+        }
+        let stress: Stress = serde_json::from_value(
+            arguments
+                .get("stress")
+                .cloned()
+                .ok_or("stress is required and must be a serialized Stress")?,
+        )
+        .map_err(|error| format!("invalid stress: {error}"))?;
+        let procedures: Vec<Procedure> = match arguments.get("procedures") {
+            None => standard_panel(),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("invalid stress procedures: {error}"))?,
+        };
+        if procedures.len() > 100 {
+            return Err("stress procedure panel exceeds the 100-procedure safety bound".into());
+        }
+        match stress_profile_run(&cohort, &stress, &procedures) {
+            Ok(profile) => Ok(json!({
+                "ok": true,
+                "headline": profile.headline(),
+                "profile": profile,
+                "guarantees": [
+                    "breaking points are reported on the declared intensity ladder rather than collapsed into a survival score",
+                    "generator defects and batch confounding suppress robustness claims instead of being scored as findings",
+                    "effective sample size, unresolved subjects, and analysable prevalence remain visible at every rung"
+                ],
+                "limitations": [
+                    "procedures are closed-form reference summaries; no model is fitted",
+                    "the profile is conditional on this cohort, stress seed, family, and finite intensity ladder"
+                ]
+            })),
+            Err(error) => Ok(json!({
+                "ok": false,
+                "stage": "stress_profile",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+                "guarantee": "invalid cohorts, undefined conclusions, confounded stresses, and broken postconditions never become a robustness claim"
+            })),
+        }
+    }
+
+    fn stress_report(&self, arguments: &Value) -> Result<Value, String> {
+        let cohort: Cohort = serde_json::from_value(
+            arguments
+                .get("cohort")
+                .cloned()
+                .ok_or("cohort is required and must be a serialized stress Cohort")?,
+        )
+        .map_err(|error| format!("invalid stress cohort: {error}"))?;
+        if cohort.subjects.len() > 10_000 {
+            return Err("cohort exceeds the 10000-subject safety bound".into());
+        }
+        let raw_stresses = arguments
+            .get("stresses")
+            .cloned()
+            .ok_or("stresses is required and must be an array of Stress values")?;
+        let stresses: Vec<Stress> = serde_json::from_value(raw_stresses)
+            .map_err(|error| format!("invalid stress list: {error}"))?;
+        if stresses.len() > 100 {
+            return Err("stress program exceeds the 100-stress safety bound".into());
+        }
+        let procedures: Vec<Procedure> = match arguments.get("procedures") {
+            None => standard_panel(),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("invalid stress procedures: {error}"))?,
+        };
+        if procedures.len() > 100 {
+            return Err("stress procedure panel exceeds the 100-procedure safety bound".into());
+        }
+        match StressReport::run(&cohort, &stresses, &procedures) {
+            Ok(report) => Ok(json!({
+                "ok": true,
+                "headline": report.headline(),
+                "worst_family": report.worst_family(),
+                "report": report,
+                "guarantees": [
+                    "each family remains a separate robustness profile",
+                    "the worst-family view excludes non-identifiable and generator-defective profiles",
+                    "a report never turns a required relation failure into a fragile biological conclusion"
+                ],
+                "limitations": [
+                    "family magnitudes are comparable only as declared endpoint fractions, not as physical units",
+                    "no causal graph, preanalytic lifecycle, or ontology-drift stress is inferred beyond the supplied program"
+                ]
+            })),
+            Err(error) => Ok(json!({
+                "ok": false,
+                "stage": "stress_report",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+                "guarantee": "a partial stress program never becomes an apparently complete report"
+            })),
+        }
+    }
+
+    fn oracle_combine(&self, arguments: &Value) -> Result<Value, String> {
+        let subject = arguments
+            .get("subject")
+            .and_then(Value::as_str)
+            .ok_or("subject is required")?;
+        if subject.trim().is_empty() {
+            return Err("subject must not be empty".into());
+        }
+        let at = arguments
+            .get("at")
+            .and_then(Value::as_str)
+            .ok_or("at is required in YYYY-MM-DDTHH:MM:SSZ form")?;
+        let at = UtcTimestamp::parse(at).map_err(|error| error.to_string())?;
+        let values = arguments
+            .get("judgements")
+            .and_then(Value::as_array)
+            .ok_or("judgements is required and must be an array")?;
+        if values.is_empty() || values.len() > 1_000 {
+            return Err("judgements must contain between 1 and 1000 entries".into());
+        }
+        let judgements: Vec<Judgement> = values
+            .iter()
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("invalid oracle judgement: {error}"))
+            })
+            .collect::<Result<_, _>>()?;
+        let minimum = arguments
+            .get("minimum_deciding_tier")
+            .and_then(Value::as_str)
+            .map(|value| {
+                serde_json::from_value::<OracleEvidenceTier>(json!(value))
+                    .map_err(|error| format!("invalid minimum_deciding_tier: {error}"))
+            })
+            .transpose()?
+            .unwrap_or(OracleEvidenceTier::Judge);
+        let policy = MeshPolicy::new(minimum);
+        let verdict = policy.combine(subject, &at, judgements);
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        Ok(json!({
+            "ok": true,
+            "subject": verdict.subject,
+            "at": verdict.at,
+            "status": verdict.status(),
+            "underdetermined": verdict.is_underdetermined(),
+            "deciding_tier": verdict.deciding_tier(),
+            "judge_only": verdict.is_judge_only(),
+            "suppressed_override": verdict.has_suppressed_override(),
+            "acceptable": verdict.acceptable,
+            "basis": verdict.basis,
+            "confidence": verdict.confidence,
+            "establishes": verdict.establishes(),
+            "does_not_establish": verdict.does_not_establish(),
+            "contributing": verdict.contributing.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_contributing": verdict.contributing.len().saturating_sub(max_items),
+            "withheld": verdict.withheld.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_withheld": verdict.withheld.len().saturating_sub(max_items),
+            "inadmissible": verdict.inadmissible.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_inadmissible": verdict.inadmissible.len().saturating_sub(max_items),
+            "suppressed": verdict.suppressed.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_suppressed": verdict.suppressed.len().saturating_sub(max_items),
+            "disagreements": verdict.disagreements.iter().take(max_items).collect::<Vec<_>>(),
+            "omitted_disagreements": verdict.disagreements.len().saturating_sub(max_items),
+            "guarantees": [
+                "evidence tier, not confidence, determines which judgements may decide",
+                "same-tier disagreement remains set-valued and underdetermined rather than becoming a majority vote",
+                "expired, superseded, out-of-scope, and weaker judgements remain visible in separate ledgers",
+            ],
+            "limitations": [
+                "judgements are caller-supplied and this tool does not run an oracle, sandbox an evaluator, or authenticate provenance",
+                "the mesh combines positions; it does not infer biological truth, adjudicate a disputed result, or manufacture missing evidence",
+            ]
+        }))
+    }
+
+    fn policy_screen(&self, arguments: &Value) -> Result<Value, String> {
+        let relative = arguments
+            .get("world")
+            .and_then(Value::as_str)
+            .ok_or("world is required (a JSON world document relative to the server root)")?;
+        let path = self.resolve(relative)?;
+        if path.is_dir() {
+            return Err(
+                "policy_screen requires a JSON world document, not an indexed store".into(),
+            );
+        }
+        let world = World::from_json(self.read_json(&path)?).map_err(|error| error.to_string())?;
+        let request_value = arguments
+            .get("request")
+            .cloned()
+            .ok_or("request is required and must bind principal, purpose, channel and at")?;
+        let request: PolicyRequest = serde_json::from_value(request_value)
+            .map_err(|error| format!("invalid policy request: {error}"))?;
+
+        let mut lattice = PolicyLattice::new();
+        if let Some(rules) = arguments.get("rules") {
+            let rules = rules
+                .as_array()
+                .ok_or("rules must be an array of policy rule objects")?;
+            for (index, raw_rule) in rules.iter().enumerate() {
+                let rule: PolicyRule = serde_json::from_value(raw_rule.clone())
+                    .map_err(|error| format!("invalid policy rule at index {index}: {error}"))?;
+                lattice.register(rule).map_err(|error| {
+                    format!("cannot register policy rule at index {index}: {error}")
+                })?;
+            }
+        }
+        if let Some(tags) = arguments.get("tags") {
+            let tags = tags
+                .as_object()
+                .ok_or("tags must be an object mapping tag names to policy labels")?;
+            for (tag, raw_label) in tags {
+                let label: PolicyLabel = serde_json::from_value(raw_label.clone())
+                    .map_err(|error| format!("invalid policy label for tag {tag:?}: {error}"))?;
+                lattice.register_tag(tag.clone(), label);
+            }
+        }
+
+        let selected: Vec<&bioprism_world::Fact> = match arguments.get("facts") {
+            None => world.facts.iter().collect(),
+            Some(raw_facts) => {
+                let ids = raw_facts
+                    .as_array()
+                    .ok_or("facts must be an array of fact ids")?;
+                let mut selected = Vec::with_capacity(ids.len());
+                let mut seen = BTreeSet::new();
+                for raw_id in ids {
+                    let id = raw_id
+                        .as_str()
+                        .ok_or("facts must be an array of fact ids")?;
+                    if !seen.insert(id) {
+                        return Err(format!("facts must not contain duplicate id {id:?}"));
+                    }
+                    selected.push(
+                        world
+                            .fact(id)
+                            .ok_or_else(|| format!("fact {id:?} is not present in the world"))?,
+                    );
+                }
+                selected
+            }
+        };
+        let selected_ids = selected
+            .iter()
+            .map(|fact| fact.id.as_str().to_string())
+            .collect::<Vec<_>>();
+        let unregistered_tags = selected
+            .iter()
+            .map(|fact| {
+                json!({
+                    "fact_id": fact.id.as_str(),
+                    "tags": lattice.unregistered_tags(fact),
+                })
+            })
+            .filter(|item| item["tags"].as_array().is_some_and(|tags| !tags.is_empty()))
+            .collect::<Vec<_>>();
+
+        let screening = lattice.screen(selected.iter().copied(), &request);
+        let admitted = screening
+            .admitted
+            .iter()
+            .map(|item| {
+                json!({
+                    "fact_id": item.fact.id.as_str(),
+                    "admission": item.admission,
+                })
+            })
+            .collect::<Vec<_>>();
+        let refused = screening
+            .refused
+            .iter()
+            .map(|item| {
+                json!({
+                    "fact_id": item.fact_id,
+                    "refusal": item.refusal,
+                    "constraint": item.refusal.constraint(),
+                    "escalatable": item.refusal.is_escalatable(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let complete = screening.is_complete();
+        let refusal_count = screening.refused.len();
+        Ok(json!({
+            "ok": true,
+            "world": relative,
+            "world_id": world.world_id,
+            "world_sha256": world.content_hash(),
+            "policy_version": lattice.version(),
+            "request": request,
+            "selected_facts": selected_ids,
+            "candidate_count": selected.len(),
+            "admitted_count": admitted.len(),
+            "refused_count": refusal_count,
+            "admitted": admitted,
+            "refused": refused,
+            "complete": complete,
+            "derived_label": screening.derived_label(),
+            "obligations": screening.obligations(),
+            "trace": screening.trace.to_json(),
+            "unregistered_tags": unregistered_tags,
+            "guarantees": {
+                "screened_before_selection": true,
+                "unknown_policy_denies_by_default": true,
+                "refusals_are_retained": true,
+                "obligations_are_declared_not_discharged": true,
+            },
+        }))
+    }
+
+    fn bioethics_action_review(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_plan = arguments
+            .get("plan")
+            .cloned()
+            .ok_or("plan is required and must be a serialized bioprism-bioethics ActionPlan")?;
+        let plan: ActionPlan = serde_json::from_value(raw_plan)
+            .map_err(|error| format!("invalid action plan: {error}"))?;
+        if plan.steps.len() > 10_000 {
+            return Err("plan may contain at most 10000 steps".into());
+        }
+
+        let boundary = match arguments.get("boundary") {
+            Some(raw) => serde_json::from_value(raw.clone())
+                .map_err(|error| format!("invalid research boundary: {error}"))?,
+            None => ResearchBoundary::research_only(),
+        };
+        let disposition = match plan.partition(&boundary) {
+            Ok(disposition) => disposition,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "research_boundary",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "a clinical use refuses the complete plan before physical or in-silico steps are separated"
+                }))
+            }
+        };
+
+        let physical_step_count = disposition.physical_steps().len();
+        let in_silico_step_count = disposition.in_silico_steps().len();
+        let referral = if disposition.requires_physical_authorisation() {
+            match arguments.get("authorisation") {
+                None => json!({
+                    "status": "not_attempted",
+                    "refusal": "physical steps require both human approval and institutional safety review before referral",
+                    "fail_closed": true,
+                }),
+                Some(raw) => {
+                    let authorisation: Authorisation = serde_json::from_value(raw.clone())
+                        .map_err(|error| format!("invalid action authorisation: {error}"))?;
+                    match refer_physical_action(&disposition, &authorisation) {
+                        Ok(referral) => json!({
+                            "status": "referred",
+                            "referral": referral,
+                            "statement": bioprism_bioethics::action::PhysicalReferral::STATEMENT,
+                            "executes_physical_action": false,
+                        }),
+                        Err(error) => json!({
+                            "status": "refused",
+                            "refusal": error.to_string(),
+                            "fail_closed": true,
+                            "executes_physical_action": false,
+                        }),
+                    }
+                }
+            }
+        } else {
+            json!({
+                "status": "not_required",
+                "refusal": null,
+                "executes_physical_action": false,
+            })
+        };
+
+        Ok(json!({
+            "ok": true,
+            "subject": disposition.subject(),
+            "declared_use": plan.declared_use,
+            "permitted_uses": boundary.permitted(),
+            "disposition": disposition,
+            "physical_step_count": physical_step_count,
+            "in_silico_step_count": in_silico_step_count,
+            "requires_external_authorisation": physical_step_count > 0,
+            "referral": referral,
+            "guarantees": [
+                "clinical-use refusal happens before plan partitioning",
+                "physical actions are only represented as a referral and are never executed",
+                "missing or incomplete human authorisation remains a typed refusal",
+            ],
+        }))
+    }
+
+    fn bioethics_human_subject_screen(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_study = arguments
+            .get("study")
+            .cloned()
+            .ok_or("study is required and must be a serialized StudyDescription")?;
+        let study: StudyDescription = serde_json::from_value(raw_study)
+            .map_err(|error| format!("invalid study description: {error}"))?;
+        if study.engagements.len() > 100 {
+            return Err("study may declare at most 100 engagement kinds".into());
+        }
+
+        let determination = screen_human_subject(&study);
+        let consent_check = match (arguments.get("consent"), arguments.get("at")) {
+            (None, None) => json!({
+                "status": "not_run",
+                "reason": "provide both consent and at to check every declared purpose",
+            }),
+            (Some(_), None) | (None, Some(_)) => {
+                return Err("consent and at must be supplied together".into())
+            }
+            (Some(raw_consent), Some(raw_at)) => {
+                let consent: bioprism_policy::Consent = serde_json::from_value(raw_consent.clone())
+                    .map_err(|error| format!("invalid consent: {error}"))?;
+                let at_text = raw_at
+                    .as_str()
+                    .ok_or("at must be an RFC-3339 timestamp string")?;
+                let at = bioprism_scope::Timestamp::parse(at_text)
+                    .map_err(|error| format!("invalid at timestamp: {error}"))?;
+                match study.check_consent(&consent, at) {
+                    Ok(()) => json!({ "status": "admitted", "at": at_text }),
+                    Err(error) => json!({
+                        "status": "refused",
+                        "at": at_text,
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                    }),
+                }
+            }
+        };
+
+        let boundary = match arguments.get("boundary") {
+            Some(raw) => serde_json::from_value(raw.clone())
+                .map_err(|error| format!("invalid research boundary: {error}"))?,
+            None => ResearchBoundary::research_only(),
+        };
+        let return_of_results = match study.check_return_of_results(&boundary) {
+            Ok(()) => json!({ "status": "admitted" }),
+            Err(error) => json!({
+                "status": "refused",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+            }),
+        };
+
+        Ok(json!({
+            "ok": true,
+            "subject": study.subject,
+            "determination": determination,
+            "requires_institutional_review": determination.requires_review(),
+            "triggers": determination.triggers(),
+            "consent": consent_check,
+            "return_of_results": return_of_results,
+            "clearance_issued": false,
+            "guarantees": [
+                "no-engagement screening is undetermined, never an exemption",
+                "consent is checked against the policy crate's closed purpose vocabulary",
+                "individual findings remain subject to the research-only boundary",
+            ],
+        }))
+    }
+
+    fn bioethics_dual_use_review(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_release = arguments
+            .get("release")
+            .cloned()
+            .ok_or("release is required and must be a serialized CapabilityRelease")?;
+        let release: CapabilityRelease = serde_json::from_value(raw_release)
+            .map_err(|error| format!("invalid capability release: {error}"))?;
+        let raw_risk = arguments
+            .get("risk")
+            .cloned()
+            .ok_or("risk is required and must be a serialized RiskAssessment")?;
+        let risk: RiskAssessment = serde_json::from_value(raw_risk)
+            .map_err(|error| format!("invalid risk assessment: {error}"))?;
+
+        let referral = match refer_dual_use(&release, &risk) {
+            Ok(referral) => referral,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "dual_use_release",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "unassessed misuse, subject mismatch, missing category, or unrated safety dimensions do not release"
+                }))
+            }
+        };
+
+        let withholding = match arguments.get("withhold") {
+            None => json!({ "status": "not_requested" }),
+            Some(raw) => {
+                let scope: bioprism_safety::release::WithholdScope =
+                    serde_json::from_value(raw.clone())
+                        .map_err(|error| format!("invalid withhold scope: {error}"))?;
+                let finding = arguments
+                    .get("finding")
+                    .and_then(Value::as_str)
+                    .unwrap_or("caller-supplied finding");
+                match referral.withhold(finding, scope) {
+                    Ok(scope) => json!({ "status": "admitted", "scope": scope }),
+                    Err(error) => json!({
+                        "status": "refused",
+                        "scope": scope,
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                    }),
+                }
+            }
+        };
+
+        Ok(json!({
+            "ok": true,
+            "subject": referral.subject(),
+            "surfaces": referral.surfaces(),
+            "assessor": referral.assessor(),
+            "sensitive_category": referral.category(),
+            "decision": referral.decision(),
+            "referral": referral,
+            "withholding": withholding,
+            "guarantees": [
+                "an assessed empty surface set is distinct from no assessment",
+                "the section 13 risk gate is reused without a second dual-use rule",
+                "suppressing exploit detail remains distinct from suppressing the existence of a finding",
+            ],
+        }))
+    }
+
+    fn bioethics_validation_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_dossier = arguments
+            .get("dossier")
+            .cloned()
+            .ok_or("dossier is required and must be a serialized ValidationDossier")?;
+        let raw_bytes = serde_json::to_vec(&raw_dossier).map_err(|error| error.to_string())?;
+        if raw_bytes.len() > 10_000_000 {
+            return Err("validation dossier exceeds the 10000000-byte safety bound".into());
+        }
+        let dossier: ValidationDossier = serde_json::from_value(raw_dossier)
+            .map_err(|error| format!("invalid validation dossier: {error}"))?;
+        let missing = dossier.missing();
+        let verification = match dossier.verify() {
+            Ok(verified) => json!({
+                "status": "verified",
+                "verified_module": verified,
+            }),
+            Err(error) => json!({
+                "status": "refused",
+                "refusal": error.to_string(),
+                "fail_closed": true,
+            }),
+        };
+        Ok(json!({
+            "ok": true,
+            "subject": dossier.subject,
+            "author": dossier.author,
+            "maturity": dossier.maturity(),
+            "missing": missing,
+            "missing_count": missing.len(),
+            "verification": verification,
+            "guarantees": [
+                "blank or absent evidence is not treated as satisfied",
+                "independent reproduction must name an actor other than the author",
+                "verified status is minted only by the in-process validation check",
+            ],
+        }))
+    }
+
+    fn bioethics_representation_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let subject = arguments
+            .get("subject")
+            .and_then(Value::as_str)
+            .ok_or("subject is required")?;
+        let raw_observations = arguments
+            .get("observations")
+            .and_then(Value::as_array)
+            .ok_or("observations is required and must be an array")?;
+        if raw_observations.len() > 10_000 {
+            return Err("observations may contain at most 10000 strata".into());
+        }
+        let observations = raw_observations
+            .iter()
+            .enumerate()
+            .map(|(index, raw)| {
+                serde_json::from_value::<StratumObservation>(raw.clone())
+                    .map_err(|error| format!("invalid observation at index {index}: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let summary = match summarise(subject, observations) {
+            Ok(summary) => summary,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "representation_partition",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                }))
+            }
+        };
+
+        let attribution = match arguments.get("attribution") {
+            None => json!({ "status": "not_requested" }),
+            Some(raw) => {
+                let object = raw.as_object().ok_or("attribution must be an object")?;
+                let axis: ContextAxis = serde_json::from_value(
+                    object
+                        .get("axis")
+                        .cloned()
+                        .ok_or("attribution.axis is required")?,
+                )
+                .map_err(|error| format!("invalid attribution axis: {error}"))?;
+                let raw_matched = object
+                    .get("matched")
+                    .and_then(Value::as_array)
+                    .ok_or("attribution.matched is required and must be an array")?;
+                let matched = raw_matched
+                    .iter()
+                    .cloned()
+                    .map(|item| {
+                        serde_json::from_value::<ContextAxis>(item)
+                            .map_err(|error| format!("invalid matched context axis: {error}"))
+                    })
+                    .collect::<Result<BTreeSet<_>, _>>()?;
+                let finding = object
+                    .get("finding")
+                    .and_then(Value::as_str)
+                    .ok_or("attribution.finding is required")?;
+                let decision = attribute_representation(axis, &matched);
+                let standing = match decision.clone().require_context(finding) {
+                    Ok(axis) => json!({ "status": "admitted", "axis": axis }),
+                    Err(error) => json!({
+                        "status": "refused",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                    }),
+                };
+                json!({ "status": "evaluated", "decision": decision, "standing": standing })
+            }
+        };
+
+        Ok(json!({
+            "ok": true,
+            "summary": summary,
+            "measured_count": summary.measured().len(),
+            "unmeasured_count": summary.unmeasured().len(),
+            "suppressed_count": summary.suppressed().len(),
+            "complete": summary.is_complete(),
+            "incomplete_axes": summary.incomplete_axes(),
+            "attribution": attribution,
+            "guarantees": [
+                "measured, unmeasured, and small-cell-suppressed strata remain separate",
+                "duplicate strata refuse rather than overwrite one another",
+                "resource-context mismatch blocks attribution to a demographic or geographic axis",
+            ],
+        }))
+    }
+
+    fn influence_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let label = arguments
+            .get("label")
+            .and_then(Value::as_str)
+            .ok_or("label is required")?;
+        let raw_variables = arguments
+            .get("variables")
+            .and_then(Value::as_object)
+            .ok_or("variables is required and must map variable names to positive cardinalities")?;
+        if raw_variables.is_empty() || raw_variables.len() > 10_000 {
+            return Err("variables must contain between 1 and 10000 entries".into());
+        }
+        let assumed = arguments
+            .get("assumed_variables")
+            .map(|raw| -> Result<BTreeSet<String>, String> {
+                let values = raw.as_array().ok_or("assumed_variables must be an array")?;
+                let assumed = values
+                    .iter()
+                    .map(|item| {
+                        item.as_str()
+                            .map(str::to_string)
+                            .ok_or("assumed_variables must contain strings")
+                    })
+                    .collect::<Result<BTreeSet<_>, _>>()?;
+                if assumed.len() != values.len() {
+                    return Err("assumed_variables must not contain duplicates".into());
+                }
+                Ok(assumed)
+            })
+            .transpose()?;
+        let assumed = assumed.unwrap_or_default();
+        if let Some(variable) = assumed
+            .iter()
+            .find(|variable| !raw_variables.contains_key(*variable))
+        {
+            return Err(format!(
+                "assumed_variables names undeclared variable {variable:?}"
+            ));
+        }
+        let mut builder = QueryRegion::builder(label);
+        for (name, raw_cardinality) in raw_variables {
+            let cardinality = raw_cardinality.as_u64().ok_or_else(|| {
+                format!("cardinality for variable {name:?} must be a positive integer")
+            })?;
+            if cardinality == 0 || cardinality > 1_000_000 {
+                return Err(format!(
+                    "cardinality for variable {name:?} must be between 1 and 1000000"
+                ));
+            }
+            if assumed.contains(name) {
+                builder = builder.assumed_variable(name.clone(), cardinality as usize);
+            } else {
+                builder = builder.observed_variable(name.clone(), cardinality as usize);
+            }
+        }
+
+        let raw_factors = arguments
+            .get("factors")
+            .and_then(Value::as_array)
+            .ok_or("factors is required and must be an array")?;
+        if raw_factors.is_empty() || raw_factors.len() > 1_000 {
+            return Err("factors must contain between 1 and 1000 entries".into());
+        }
+        for (index, raw_factor) in raw_factors.iter().enumerate() {
+            let object = raw_factor
+                .as_object()
+                .ok_or_else(|| format!("factor at index {index} must be an object"))?;
+            let id = object
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("factor at index {index} is missing id"))?;
+            let raw_scope = object
+                .get("scope")
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("factor {id:?} is missing scope"))?;
+            if raw_scope.is_empty() || raw_scope.len() > 128 {
+                return Err(format!(
+                    "factor {id:?} scope must contain between 1 and 128 variables"
+                ));
+            }
+            let scope = raw_scope
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| format!("factor {id:?} scope must contain strings"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let factor = match object.get("table") {
+                None | Some(Value::Null) => RegionFactor::structural(id, scope),
+                Some(raw_table) => {
+                    let raw_table = raw_table
+                        .as_array()
+                        .ok_or_else(|| format!("factor {id:?} table must be an array"))?;
+                    if raw_table.len() > 4_194_304 {
+                        return Err(format!(
+                            "factor {id:?} table exceeds the 4194304-entry safety bound"
+                        ));
+                    }
+                    let table = raw_table
+                        .iter()
+                        .map(|item| {
+                            item.as_f64().ok_or_else(|| {
+                                format!("factor {id:?} table must contain finite numbers")
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    RegionFactor::with_table(id, scope, table)
+                }
+            };
+            builder = builder.factor(factor);
+        }
+
+        let raw_free = arguments
+            .get("free")
+            .and_then(Value::as_array)
+            .ok_or("free is required and must be an array of variable names")?;
+        if raw_free.is_empty() || raw_free.len() > raw_variables.len() {
+            return Err(
+                "free must contain at least one and no more than the declared variables".into(),
+            );
+        }
+        let mut seen_free = BTreeSet::new();
+        for item in raw_free {
+            let variable = item.as_str().ok_or("free must contain strings")?;
+            if !seen_free.insert(variable) {
+                return Err(format!(
+                    "free must not contain duplicate variable {variable:?}"
+                ));
+            }
+            builder = builder.free(variable);
+        }
+        let region = builder
+            .build()
+            .map_err(|error| format!("invalid influence region: {error}"))?;
+
+        let raw_perturbation = arguments
+            .get("perturbation")
+            .cloned()
+            .ok_or("perturbation is required and must name removal or multiplicative_range")?;
+        let perturbation: Perturbation = serde_json::from_value(raw_perturbation)
+            .map_err(|error| format!("invalid perturbation: {error}"))?;
+        let subjects = match (arguments.get("factor"), arguments.get("factor_group")) {
+            (Some(_), Some(_)) => return Err("provide factor or factor_group, not both".into()),
+            (Some(raw), None) => vec![raw.as_str().ok_or("factor must be a string")?.to_string()],
+            (None, Some(raw)) => {
+                let values = raw
+                    .as_array()
+                    .ok_or("factor_group must be an array of factor ids")?;
+                if values.is_empty() || values.len() > 1_000 {
+                    return Err("factor_group must contain between 1 and 1000 ids".into());
+                }
+                let group = values
+                    .iter()
+                    .map(|item| {
+                        item.as_str()
+                            .map(str::to_string)
+                            .ok_or("factor_group must contain strings")
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if group.iter().collect::<BTreeSet<_>>().len() != group.len() {
+                    return Err("factor_group must not contain duplicate factor ids".into());
+                }
+                group
+            }
+            (None, None) => return Err("factor or factor_group is required".into()),
+        };
+
+        let mut budget = InfluenceBudget::default();
+        if let Some(raw_budget) = arguments.get("budget") {
+            let object = raw_budget.as_object().ok_or("budget must be an object")?;
+            if let Some(value) = object.get("max_induced_width") {
+                let width = value
+                    .as_u64()
+                    .ok_or("budget.max_induced_width must be an integer")?;
+                if width > 1024 {
+                    return Err("budget.max_induced_width must be at most 1024".into());
+                }
+                budget = budget.with_max_induced_width(width as usize);
+            }
+            if let Some(value) = object.get("max_peak_entries") {
+                let entries = value
+                    .as_f64()
+                    .ok_or("budget.max_peak_entries must be a number")?;
+                if !entries.is_finite() || entries <= 0.0 {
+                    return Err("budget.max_peak_entries must be a finite positive number".into());
+                }
+                budget = budget.with_max_peak_entries(entries);
+            }
+            if let Some(value) = object.get("max_ops") {
+                let ops = value.as_f64().ok_or("budget.max_ops must be a number")?;
+                if !ops.is_finite() || ops <= 0.0 {
+                    return Err("budget.max_ops must be a finite positive number".into());
+                }
+                budget = budget.with_max_ops(ops);
+            }
+        }
+        let execute = arguments
+            .get("execute")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let analyzer = InfluenceAnalyzer::new(budget);
+        let analyzer = if execute {
+            analyzer
+        } else {
+            analyzer.structural_only()
+        };
+        let analysis = if subjects.len() == 1 {
+            analyzer
+                .analyse_factor(&region, &subjects[0], &perturbation)
+                .map_err(|error| error.to_string())?
+        } else {
+            analyzer
+                .analyse_group(&region, &subjects, &perturbation)
+                .map_err(|error| error.to_string())?
+        };
+        let factor_summary = region
+            .factors()
+            .iter()
+            .map(|factor| {
+                json!({
+                    "id": factor.id(),
+                    "scope": factor.scope(),
+                    "arity": factor.arity(),
+                    "has_table": factor.table().is_some(),
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "region": {
+                "label": region.label(),
+                "variables": region.cardinality(),
+                "free": region.free_variables(),
+                "bound": region.bound_variables(),
+                "factors": factor_summary,
+                "has_tables": region.has_tables(),
+                "joint_entries": region.joint_entries(),
+                "free_entries": region.free_entries(),
+                "assumed_cardinality_fraction": region.assumed_cardinality_fraction(),
+            },
+            "subjects": subjects,
+            "perturbation": perturbation,
+            "execute": execute,
+            "analysis": analysis,
+            "looseness": analysis.looseness(),
+            "guarantees": [
+                "unknown influence remains an InfluenceEstimate::Unknown rather than a numeric infinity",
+                "the default is structural-only and does not execute a query",
+                "every reported bound carries its metric, method, approximation direction, and validity scope",
+            ],
+        }))
+    }
+
+    fn routing_decide(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_fingerprint = arguments
+            .get("fingerprint")
+            .cloned()
+            .ok_or("fingerprint is required and must be a serialized Fingerprint")?;
+        let fingerprint: Fingerprint = serde_json::from_value(raw_fingerprint)
+            .map_err(|error| format!("invalid routing fingerprint: {error}"))?;
+
+        let raw_evidence = arguments
+            .get("evidence")
+            .cloned()
+            .ok_or("evidence is required and must be an array of observations")?;
+        let evidence_items = raw_evidence
+            .as_array()
+            .ok_or("evidence must be an array of serialized observations")?;
+        if evidence_items.len() > 20_000 {
+            return Err("evidence may contain at most 20000 observations".into());
+        }
+        let evidence: EvidenceLedger = serde_json::from_value(raw_evidence)
+            .map_err(|error| format!("invalid routing evidence ledger: {error}"))?;
+
+        let raw_policy = arguments
+            .get("policy")
+            .cloned()
+            .ok_or("policy is required and must be a serialized RoutingPolicy")?;
+        let policy: RoutingPolicy = serde_json::from_value(raw_policy)
+            .map_err(|error| format!("invalid routing policy: {error}"))?;
+        policy
+            .validate()
+            .map_err(|error| format!("routing policy is invalid: {error}"))?;
+
+        let task_id = arguments.get("task_id").and_then(Value::as_str);
+        if arguments.get("task_id").is_some() && task_id.is_none() {
+            return Err("task_id must be a string when supplied".into());
+        }
+        if task_id.is_some_and(str::is_empty) {
+            return Err("task_id must not be empty".into());
+        }
+        let decision = match task_id {
+            Some(task_id) => policy
+                .route_unseen(task_id, &fingerprint, &evidence)
+                .map_err(|error| format!("routing refused: {error}"))?,
+            None => policy
+                .route(&fingerprint, &evidence)
+                .map_err(|error| format!("routing refused: {error}"))?,
+        };
+        let neighbourhood = evidence
+            .neighbourhood(&fingerprint, policy.neighbourhood_radius)
+            .len();
+
+        Ok(json!({
+            "ok": true,
+            "decision": decision,
+            "task_id": task_id,
+            "holdout_check": if task_id.is_some() { "enforced" } else { "caller_must_supply_unseen_identity" },
+            "evidence": {
+                "observations": evidence.len(),
+                "distinct_tasks": evidence.task_ids().len(),
+                "neighbourhood_observations": neighbourhood,
+                "neighbourhood_radius": policy.neighbourhood_radius,
+            },
+            "guarantees": [
+                "the policy can select only from its approved architecture set",
+                "insufficient coverage or margin abstains to the declared safe default",
+                "route_unseen refuses evidence containing the routed task identity",
+                "confidence is a routing score, not a posterior probability",
+            ],
+        }))
+    }
+
+    fn token_context_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_request = arguments
+            .get("request")
+            .cloned()
+            .ok_or("request is required and must be a serialized ContextRequest")?;
+        let request: ContextRequest = serde_json::from_value(raw_request)
+            .map_err(|error| format!("invalid token context request: {error}"))?;
+        if request.envelope.total > 10_000_000 {
+            return Err("request.envelope.total must be at most 10000000".into());
+        }
+
+        let parse_candidates = |name: &str| -> Result<Vec<PlanCandidate>, String> {
+            let raw = arguments
+                .get(name)
+                .cloned()
+                .ok_or_else(|| format!("{name} is required and must be an array"))?;
+            let items = raw
+                .as_array()
+                .ok_or_else(|| format!("{name} must be an array"))?;
+            if items.is_empty() || items.len() > 10_000 {
+                return Err(format!(
+                    "{name} must contain between 1 and 10000 candidates"
+                ));
+            }
+            let candidates: Vec<PlanCandidate> =
+                serde_json::from_value(raw).map_err(|error| format!("invalid {name}: {error}"))?;
+            let mut seen = BTreeSet::new();
+            for candidate in &candidates {
+                if candidate.node_id.is_empty() {
+                    return Err(format!("{name} contains a candidate with an empty node_id"));
+                }
+                if candidate.estimate.tokens > 10_000_000 {
+                    return Err(format!(
+                        "candidate {:?} exceeds the 10000000-token safety bound",
+                        candidate.node_id
+                    ));
+                }
+                if !seen.insert(candidate.node_id.as_str()) {
+                    return Err(format!(
+                        "{name} contains duplicate node_id {:?}",
+                        candidate.node_id
+                    ));
+                }
+            }
+            Ok(candidates)
+        };
+
+        let candidates = parse_candidates("candidates")?;
+        let base_plan = plan_token_context(&request, &candidates)
+            .map_err(|error| format!("token planning refused: {error}"))?;
+
+        let has_variant_request = arguments.get("variant_request").is_some();
+        let has_variant_candidates = arguments.get("variant_candidates").is_some();
+        if has_variant_request != has_variant_candidates {
+            return Err(
+                "variant_request and variant_candidates must be supplied together for comparison"
+                    .into(),
+            );
+        }
+        let comparison = if has_variant_request {
+            let variant_request: ContextRequest = serde_json::from_value(
+                arguments
+                    .get("variant_request")
+                    .cloned()
+                    .expect("variant request was checked above"),
+            )
+            .map_err(|error| format!("invalid variant token context request: {error}"))?;
+            if variant_request.envelope.total > 10_000_000 {
+                return Err("variant_request.envelope.total must be at most 10000000".into());
+            }
+            let variant_candidates = parse_candidates("variant_candidates")?;
+            Some(
+                compare_token_plans(
+                    "mcp-token-policy-comparison",
+                    &request,
+                    &variant_request,
+                    &candidates,
+                    &variant_candidates,
+                )
+                .map_err(|error| format!("token comparison refused: {error}"))?,
+            )
+        } else {
+            None
+        };
+
+        Ok(json!({
+            "ok": true,
+            "plan": base_plan,
+            "comparison": comparison,
+            "guarantees": [
+                "dry_run refuses before touching any candidate marked restricted",
+                "the mandatory closure is checked before a plan is returned",
+                "candidate ids are unique and stable at the transport boundary",
+                "policy comparisons are admitted only when request fields other than policy match",
+                "token counts retain their estimation method and are never presented as measured by this server",
+            ],
+        }))
+    }
+
+    fn weavelang_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let source = arguments
+            .get("source")
+            .and_then(Value::as_str)
+            .ok_or("source is required and must be WeaveLang text")?;
+        if source.is_empty() {
+            return Err("source must not be empty".into());
+        }
+        if source.len() > 2_000_000 {
+            return Err("source exceeds the 2000000-byte safety bound".into());
+        }
+        let execute = arguments
+            .get("execute")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mode_text = arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("replay");
+        let mode: ExecutionMode = serde_json::from_value(json!(mode_text))
+            .map_err(|error| format!("mode must be replay or live: {error}"))?;
+        let thread_id = arguments
+            .get("thread_id")
+            .and_then(Value::as_str)
+            .unwrap_or("mcp-weavelang");
+        if thread_id.is_empty() || thread_id.len() > 256 {
+            return Err("thread_id must contain between 1 and 256 bytes".into());
+        }
+        let include_ir = arguments
+            .get("include_ir")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let include_trace = arguments
+            .get("include_trace")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let ir = compile_weave(source)
+            .map_err(|error| format!("WeaveLang compilation refused: {error}"))?;
+        let digest = ir.digest().map_err(|error| error.to_string())?;
+        let semantic_digest = ir.semantic_digest().map_err(|error| error.to_string())?;
+        let mut machine = Machine::load(ir.clone(), mode, thread_id);
+        let initial_state = machine.state().to_string();
+        let initial_invariants = machine.check_invariants();
+        let initial_liveness = machine.liveness();
+        let execution = if execute {
+            match machine.run() {
+                Ok(trace) => json!({
+                    "status": "completed",
+                    "mode": mode,
+                    "state": machine.state(),
+                    "event_count": trace.events.len(),
+                    "trace_digest": trace.digest,
+                    "trace": include_trace.then_some(trace),
+                    "liveness": machine.liveness(),
+                    "invariant_violations": machine.check_invariants(),
+                }),
+                Err(error) => json!({
+                    "status": "refused",
+                    "mode": mode,
+                    "error": error.to_string(),
+                    "fail_closed": true,
+                    "state": machine.state(),
+                    "liveness": machine.liveness(),
+                    "invariant_violations": machine.check_invariants(),
+                }),
+            }
+        } else {
+            json!({
+                "status": "not_requested",
+                "mode": mode,
+                "state": initial_state,
+                "liveness": initial_liveness,
+                "invariant_violations": initial_invariants,
+            })
+        };
+
+        Ok(json!({
+            "ok": true,
+            "program": {
+                "program_id": ir.program_id.clone(),
+                "digest": digest,
+                "semantic_digest": semantic_digest,
+                "weave_ir_version": ir.weave_ir_version.clone(),
+                "roles": ir.roles.len(),
+                "participants": ir.participants.len(),
+                "interfaces": ir.interfaces.len(),
+                "policies": ir.policies.len(),
+                "state_nodes": ir.state_graph.nodes.len(),
+                "transitions": ir.state_graph.transitions.len(),
+                "monitors": ir.monitors.len(),
+                "initial_state": ir.choreography.initial_state.clone(),
+                "terminal_states": ir.choreography.terminal_states.clone(),
+            },
+            "execution": execution,
+            "ir": include_ir.then_some(ir),
+            "guarantees": [
+                "compilation is deterministic and returns both whole-document and semantic digests",
+                "replay is the default execution mode and refuses world-mutating transitions",
+                "execution is a local semantic trace; it performs no network, model, or tool call",
+                "unimplemented language phases remain visible as compiler limitations rather than inferred capabilities",
+            ],
+        }))
+    }
+
+    fn choreography_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_global = arguments
+            .get("global")
+            .cloned()
+            .ok_or("global is required and must be a serialized GlobalType")?;
+        let encoded = serde_json::to_vec(&raw_global).map_err(|error| error.to_string())?;
+        if encoded.len() > 2_000_000 {
+            return Err("global choreography exceeds the 2000000-byte safety bound".into());
+        }
+        let global: GlobalType = serde_json::from_value(raw_global)
+            .map_err(|error| format!("invalid global choreography: {error}"))?;
+        let bound: ExplorationBound = match arguments.get("bound") {
+            None => ExplorationBound::default(),
+            Some(raw) => serde_json::from_value(raw.clone())
+                .map_err(|error| format!("invalid exploration bound: {error}"))?,
+        };
+        if bound.max_states == 0
+            || bound.max_states > 100_000
+            || bound.max_depth == 0
+            || bound.max_depth > 10_000
+            || bound.channel_capacity > 64
+        {
+            return Err(
+                "bound must use 1..=100000 states, 1..=10000 depth, and at most 64 queued messages"
+                    .into(),
+            );
+        }
+        let roles = global
+            .roles()
+            .into_iter()
+            .map(|role| role.to_string())
+            .collect::<Vec<_>>();
+        let checked = match WellFormedGlobal::check(global) {
+            Ok(checked) => checked,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": true,
+                    "well_formed": false,
+                    "roles": roles,
+                    "refusal": error.to_string(),
+                    "protocol_error": error,
+                    "fail_closed": true,
+                    "guarantees": [
+                        "an ill-formed global type yields no local projections",
+                        "projection failures are returned before model checking",
+                        "no protocol repair is inferred or silently applied",
+                    ],
+                }))
+            }
+        };
+        let digest = checked.digest().map_err(|error| error.to_string())?;
+        let system = ChoreographySystem::from_projection(&checked);
+        let report = system.check(bound);
+
+        Ok(json!({
+            "ok": true,
+            "well_formed": true,
+            "digest": digest,
+            "roles": roles,
+            "projection_count": checked.projections().len(),
+            "bound": bound,
+            "model_check": report,
+            "all_proved": report.all_proved(),
+            "omissions": report.omissions(),
+            "guarantees": [
+                "well-formedness is established by projecting every named role",
+                "deadlock, liveness, orphan, and unexpected-message verdicts preserve holds, fails, and inconclusive states",
+                "a bounded search is never presented as universal proof when it hit a bound",
+                "model checking is local and performs no network or participant execution",
+            ],
+        }))
+    }
+
+    fn conformance_run(&self, arguments: &Value) -> Result<Value, String> {
+        let include_details = arguments
+            .get("include_details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+
+        let suite = fiber_suite();
+        let fixtures = FixtureStore::load(workspace_fixture_root(), &suite.manifest)
+            .map_err(|error| format!("conformance fixture load refused: {error}"))?;
+        fixtures
+            .verify()
+            .map_err(|error| format!("conformance fixture verification refused: {error}"))?;
+        let report = suite
+            .run(&FiberReference, &fixtures)
+            .map_err(|error| format!("conformance run refused: {error}"))?
+            .declaring_baseline(shipped_baseline());
+        let decision = assess_conformance(&report);
+        let results = if include_details {
+            Some(
+                report
+                    .results
+                    .iter()
+                    .take(max_items as usize)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
+        Ok(json!({
+            "ok": true,
+            "suite": {
+                "id": report.suite_id.clone(),
+                "version": report.suite_version.clone(),
+                "digest": report.suite_digest.clone(),
+                "fixture_manifest_id": report.fixture_manifest_id.clone(),
+                "fixture_count": report.fixture_count,
+                "synthetic_fixture_count": report.synthetic_fixtures.len(),
+                "case_count": report.results.len(),
+                "passed": report.passed(),
+                "failed": report.failed(),
+                "unsupported": report.unsupported(),
+                "errored": report.errored(),
+                "fixture_drift": report.fixture_drift.clone(),
+                "pyramid": report.pyramid(),
+                "fully_conformant": report.is_fully_conformant(),
+            },
+            "release_decision": decision,
+            "summary": report.summary(),
+            "results": results,
+            "guarantees": [
+                "fixture digests are verified before any case result is trusted",
+                "required failures, unsupported artifacts, and fixture drift remain distinct",
+                "the equal-engineering baseline is declared in the report and is not silently invented",
+                "a conformance run is evidence for release review, not an assertion of clinical or production readiness",
+            ],
+        }))
+    }
+
+    fn provider_capability_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_card = arguments
+            .get("card")
+            .cloned()
+            .ok_or("card is required and must be a serialized CapabilityCard")?;
+        let card_bytes = serde_json::to_vec(&raw_card).map_err(|error| error.to_string())?;
+        if card_bytes.len() > 5_000_000 {
+            return Err("capability card exceeds the 5000000-byte safety bound".into());
+        }
+        let card: SweepCapabilityCard = serde_json::from_value(raw_card)
+            .map_err(|error| format!("invalid provider capability card: {error}"))?;
+        let raw_required = arguments
+            .get("required")
+            .cloned()
+            .ok_or("required is required and must contain capability check names")?;
+        let required_items = raw_required.as_array().ok_or("required must be an array")?;
+        if required_items.is_empty() || required_items.len() > 17 {
+            return Err("required must contain between 1 and 17 checks".into());
+        }
+        let required: Vec<SweepCheck> = serde_json::from_value(raw_required)
+            .map_err(|error| format!("invalid required capability checks: {error}"))?;
+        if required.iter().any(|check| !check.is_pass_fail()) {
+            return Err(
+                "performance checks are measurements and cannot be used as pass/fail requirements"
+                    .into(),
+            );
+        }
+        let include_card = arguments
+            .get("include_card")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let differential = match arguments.get("other_card") {
+            None => None,
+            Some(raw_other) => {
+                let other: SweepCapabilityCard = serde_json::from_value(raw_other.clone())
+                    .map_err(|error| format!("invalid other provider capability card: {error}"))?;
+                Some(sweep_differential(&card, &other))
+            }
+        };
+        let required_states = required
+            .iter()
+            .map(|check| (format!("{check:?}"), json!(card.state(*check))))
+            .collect::<serde_json::Map<String, Value>>();
+        let gate = sweep_gate(&card, &required);
+
+        Ok(json!({
+            "ok": true,
+            "provider": serde_json::to_value(&card)
+                .ok()
+                .and_then(|value| value.get("provider").cloned()),
+            "required": required,
+            "required_states": required_states,
+            "gate": gate,
+            "claims": card.claims(),
+            "measurement_count": card.measurements().len(),
+            "differential": differential,
+            "card": include_card.then_some(card),
+            "guarantees": [
+                "untested and failed capabilities both block a required claim",
+                "performance measurements cannot be turned into pass/fail claims without an authorized threshold",
+                "a differential with an untested side remains indeterminate, not agreement",
+                "the gate reports provider evidence and does not execute runtime tests",
+            ],
+        }))
+    }
+
+    fn sdk_registry_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_manifests = arguments
+            .get("manifests")
+            .and_then(Value::as_array)
+            .ok_or("manifests is required and must be an array of PluginManifest values")?;
+        if raw_manifests.is_empty() || raw_manifests.len() > 256 {
+            return Err("manifests must contain between 1 and 256 entries".into());
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "manifests": raw_manifests,
+            "policy": arguments.get("policy"),
+        }))
+        .map_err(|error| format!("cannot measure SDK registry envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("SDK registry input exceeds the 20000000-byte safety bound".into());
+        }
+        let policy = arguments
+            .get("policy")
+            .cloned()
+            .map(serde_json::from_value::<SdkRegistryPolicy>)
+            .transpose()
+            .map_err(|error| format!("invalid registry policy: {error}"))?
+            .unwrap_or_default();
+
+        let mut manifests = Vec::with_capacity(raw_manifests.len());
+        let mut rows = Vec::with_capacity(raw_manifests.len());
+        let mut invalid = false;
+        for (index, raw) in raw_manifests.iter().enumerate() {
+            let manifest: PluginManifest = match serde_json::from_value(raw.clone()) {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    invalid = true;
+                    rows.push(json!({
+                        "index": index,
+                        "valid": false,
+                        "refusal": format!("invalid plugin manifest: {error}"),
+                    }));
+                    continue;
+                }
+            };
+            let validation = manifest.validate();
+            let digest = manifest.digest().ok().map(|value| value.to_string());
+            let core_digest = manifest.core_digest().ok().map(|value| value.to_string());
+            let trust = manifest.trust().ok();
+            if validation.is_err() {
+                invalid = true;
+            }
+            rows.push(json!({
+                "index": index,
+                "id": manifest.id(),
+                "valid": validation.is_ok(),
+                "validation_error": validation.as_ref().err().map(ToString::to_string),
+                "digest": digest,
+                "core_digest": core_digest,
+                "capability_kinds": manifest.capability_kinds().into_iter().map(|kind| format!("{kind:?}")).collect::<Vec<_>>(),
+                "trust": trust,
+            }));
+            if validation.is_ok() {
+                manifests.push(manifest);
+            }
+        }
+        if invalid {
+            return Ok(json!({
+                "ok": false,
+                "stage": "manifest_validation",
+                "manifests": rows,
+                "registry": Value::Null,
+                "fail_closed": true,
+                "guarantees": [
+                    "registration never repairs or infers a malformed manifest",
+                    "digest and trust metadata are diagnostic claims, not behavioural verification",
+                    "no partial registry is returned when one manifest is invalid",
+                ],
+            }));
+        }
+
+        let registry = match PluginRegistry::from_manifests(policy, manifests) {
+            Ok(registry) => registry,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "registry_registration",
+                    "manifests": rows,
+                    "registry": Value::Null,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "schema negotiation, effect policy, duplicate identities, and capability conflicts remain refusals",
+                        "registration order is normalized before conflict reporting",
+                        "a refused set is never projected as a resolved capability map",
+                    ],
+                }))
+            }
+        };
+        let resolution = registry
+            .resolution()
+            .into_iter()
+            .map(|(kind, plugin)| (format!("{kind:?}"), json!(plugin)))
+            .collect::<BTreeMap<_, _>>();
+        let registrations = registry
+            .registrations()
+            .map(|registration| {
+                json!({
+                    "id": registration.id(),
+                    "digest": registration.digest,
+                    "core_digest": registration.core_digest,
+                    "negotiated": registration.negotiated,
+                    "trust": registration.trust,
+                    "load_bearing_selectable": registration.is_selectable_for_load_bearing(registry.policy().load_bearing_floor),
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "manifest_count": rows.len(),
+            "manifests": rows,
+            "registry": {
+                "registration_count": registry.len(),
+                "resolution": resolution,
+                "registrations": registrations,
+                "policy": registry.policy(),
+            },
+            "conformance_note": conformance_note(),
+            "guarantees": [
+                "manifest declarations are validated before registry admission",
+                "resolved capabilities are deterministic only after the full set registers cleanly",
+                "trust and load-bearing selection remain separate from registration success",
+                "no dynamic loading, signature verification, isolation, network access, or conformance execution is implied",
+            ],
+        }))
+    }
+
+    fn governance_schema_check(&self, arguments: &Value) -> Result<Value, String> {
+        let requested = arguments.get("schema").and_then(Value::as_str);
+        if arguments.get("schema").is_some() && requested.is_none() {
+            return Err("schema must be a schema id string".into());
+        }
+        let document_relative = arguments.get("document").and_then(Value::as_str);
+        let document = match document_relative {
+            None => None,
+            Some(relative) => {
+                let path = self.resolve(relative)?;
+                if path.is_dir() {
+                    return Err(
+                        "governance_schema_check requires a JSON document, not a directory".into(),
+                    );
+                }
+                Some((relative, self.read_json(&path)?))
+            }
+        };
+        let descriptors = known_schemas::all();
+        let descriptor_json = |descriptor: &bioprism_governance::SchemaDescriptor| {
+            json!({
+                "id": descriptor.id,
+                "mode": descriptor.mode,
+                "field_count": descriptor.fields().len(),
+                "fields": descriptor.fields(),
+                "paths": descriptor.paths(),
+                "hashed_paths": descriptor.hashed_paths(),
+            })
+        };
+
+        if document.is_none() {
+            let selected = descriptors
+                .iter()
+                .filter(|descriptor| requested.is_none_or(|id| descriptor.id.to_string() == id))
+                .map(descriptor_json)
+                .collect::<Vec<_>>();
+            if selected.is_empty() {
+                return Err(format!(
+                    "unknown schema {:?}; known schemas are {:?}",
+                    requested.unwrap_or(""),
+                    descriptors
+                        .iter()
+                        .map(|descriptor| descriptor.id.to_string())
+                        .collect::<Vec<_>>()
+                ));
+            }
+            return Ok(json!({
+                "ok": true,
+                "mode": "catalog",
+                "schema_count": selected.len(),
+                "schemas": selected,
+                "unknown_fields_are_checked_by_declared_mode": true,
+            }));
+        }
+
+        let (document_relative, document) = document.expect("document was checked above");
+        let selected_id = requested.map(str::to_string).or_else(|| {
+            document
+                .get("schema_version")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        let selected_id =
+            selected_id.ok_or("schema is required when the document has no schema_version")?;
+        let descriptor = descriptors
+            .iter()
+            .find(|descriptor| descriptor.id.to_string() == selected_id)
+            .ok_or_else(|| {
+                format!(
+                    "unknown schema {selected_id:?}; known schemas are {:?}",
+                    descriptors
+                        .iter()
+                        .map(|descriptor| descriptor.id.to_string())
+                        .collect::<Vec<_>>()
+                )
+            })?;
+        let check = descriptor.check_document(&document);
+        let metadata = descriptor_json(descriptor);
+        Ok(json!({
+            "ok": true,
+            "mode": "document",
+            "document": document_relative,
+            "schema": metadata,
+            "check": check,
+            "conforms": check.conforms(),
+            "is_clean": check.is_clean(),
+            "unknown_fields_are_not_conformance_failures": true,
+        }))
+    }
+
+    fn developer_platform_status(&self, arguments: &Value) -> Result<Value, String> {
+        let include_details = arguments
+            .get("include_details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let walkthroughs = standard_walkthroughs().map_err(|error| error.to_string())?;
+        let devplat = DevPlatReport::of(&walkthroughs).map_err(|error| error.to_string())?;
+        let cookbook = standard_cookbook().map_err(|error| error.to_string())?;
+        let workspace =
+            CookbookWorkspace::open(self.root.clone()).map_err(|error| error.to_string())?;
+        let verification = cookbook.verify(&workspace);
+        let lint = lint_catalogue();
+        let exit_audit = devx_audit();
+        let contract = workspace_contract();
+        let defects = verification.defects();
+        let surface_summary = contract
+            .iter()
+            .take(max_items)
+            .map(|surface| {
+                json!({
+                    "id": surface.id,
+                    "owns_count": surface.owns.len(),
+                    "invalidates_count": surface.invalidates.len(),
+                    "rationale": surface.rationale,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut result = json!({
+            "ok": true,
+            "root": self.root,
+            "detail_mode": if include_details { "full" } else { "summary" },
+            "max_items": max_items,
+            "devplat": {
+                "digest": &devplat.digest,
+                "verdict_counts": devplat.verdict_counts,
+                "modules_classified": devplat.modules_classified(),
+                "implemented_count": devplat.implemented.len(),
+                "not_implemented_count": devplat.not_implemented.len(),
+                "foreign_subject_count": devplat.foreign_subjects.len(),
+                "walkthrough_count": devplat.walkthroughs.len(),
+                "guarded_claims": devplat.guarded_claims,
+                "unguarded_claims": devplat.unguarded_claims,
+            },
+            "walkthroughs": walkthroughs.iter().map(|walkthrough| json!({
+                "id": walkthrough.id(),
+                "goal": walkthrough.goal(),
+                "standing": walkthrough.standing(),
+                "standing_text": walkthrough.standing().as_str(),
+                "steps": walkthrough.steps().len(),
+                "claims": walkthrough.claims().len(),
+                "guarded_claims": walkthrough.standing().guarded_claims(),
+                "unguarded_claims": walkthrough.standing().unguarded_claims(),
+                "documents_absent_artifact": walkthrough.documents_absent_artifact(),
+                "refuted_claims": walkthrough.refuted_claims().len(),
+                "narration_permille": walkthrough.narration_permille(),
+            })).collect::<Vec<_>>(),
+            "cookbook": {
+                "recipes": cookbook.recipes().len(),
+                "anti_recipes": cookbook.anti_recipes().len(),
+                "crates": cookbook.crates(),
+                "enforcing_tests": cookbook.enforcing_tests().len(),
+                "quotes": cookbook.quotes().len(),
+                "verification": {
+                    "clean": verification.is_clean(),
+                    "crates_checked": verification.crates.len(),
+                    "entry_points_checked": verification.entry_points.len(),
+                    "tests_checked": verification.tests.len(),
+                    "quotes_checked": verification.quotes.len(),
+                    "defect_count": defects.len(),
+                    "defects_returned": defects.iter().take(max_items).collect::<Vec<_>>(),
+                    "omitted_defects": defects.len().saturating_sub(max_items),
+                },
+            },
+            "developer_contract": {
+                "surface_count": contract.len(),
+                "surfaces_returned": surface_summary,
+                "omitted_surfaces": contract.len().saturating_sub(max_items),
+            },
+            "diagnostic_catalogue": {
+                "clean": lint.is_clean(),
+                "checked": lint.checked,
+                "errors": lint.errors().len(),
+                "warnings": lint.warnings().len(),
+                "finding_count": lint.findings.len(),
+                "findings_returned": lint.findings.iter().take(max_items).collect::<Vec<_>>(),
+                "omitted_findings": lint.findings.len().saturating_sub(max_items),
+            },
+            "exit_code_audit": {
+                "clean": exit_audit.is_clean(),
+                "retry_decision_recoverable_from_code_alone": exit_audit.retry_decision_recoverable_from_the_code_alone,
+                "divergence_count": exit_audit.divergences.len(),
+                "divergences_returned": exit_audit.divergences.iter().take(max_items).collect::<Vec<_>>(),
+                "omitted_divergences": exit_audit.divergences.len().saturating_sub(max_items),
+            },
+            "limitations": [
+                "Python SDK, TypeScript SDK, REST/gRPC clients and GitHub Actions are foreign artifacts and are reported as such rather than implied by Rust checks",
+                "cookbook verification resolves names and tests textually; it does not execute every recipe",
+                "developer contracts describe declared blast radius; they do not watch files or run a live debugger",
+            ],
+        });
+        if include_details {
+            result["details"] = json!({
+                "devplat": devplat,
+                "cookbook_verification": verification,
+                "developer_contract": contract,
+                "diagnostic_findings": lint.findings,
+                "exit_code_divergences": exit_audit.divergences,
+            });
+        }
+
+        Ok(result)
+    }
+
+    fn safety_posture(&self, arguments: &Value) -> Result<Value, String> {
+        let include_threats = arguments
+            .get("include_threats")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let model = section_13();
+        let coverage = model.coverage();
+        let residual = model
+            .residual()
+            .into_iter()
+            .map(|threat| threat.id.clone())
+            .collect::<Vec<_>>();
+        let unanalysed = model
+            .unanalysed()
+            .into_iter()
+            .map(|threat| threat.id.clone())
+            .collect::<Vec<_>>();
+        let unreachable = model
+            .unreachable_threats()
+            .into_iter()
+            .map(|threat| threat.id.clone())
+            .collect::<Vec<_>>();
+        let mut result = json!({
+            "ok": true,
+            "model": "section_13",
+            "adversaries": model.adversaries.len(),
+            "threats": model.threats.len(),
+            "coverage": coverage,
+            "coverage_summary": coverage.summary(),
+            "residual_threat_ids": residual,
+            "unanalysed_threat_ids": unanalysed,
+            "unreachable_threat_ids": unreachable,
+            "audit_acceptances": model.audit_acceptances().is_ok(),
+            "perimeter_controls_are_not_claimed_as_enforced": true,
+        });
+        if include_threats {
+            result["threat_details"] = json!(model.threats);
+        }
+        Ok(result)
+    }
+
+    fn scan_repository(&self) -> Result<bioprism_docgraph::ScanReport, String> {
+        let options = ScanOptions::default()
+            .with_status("docs/", NodeStatus::Specification)
+            .with_status(".agents/", NodeStatus::Guide)
+            .with_status("README.md", NodeStatus::Guide)
+            .with_status("AGENTS.md", NodeStatus::Guide);
+        scan_markdown_tree(&self.root, &options).map_err(|error| error.to_string())
+    }
+
+    fn repository_catalog(&self, arguments: &Value) -> Result<Value, String> {
+        let prefix = arguments
+            .get("prefix")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let limit = arguments
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(200);
+        if limit == 0 || limit > 1_000 {
+            return Err("limit must be between 1 and 1000".into());
+        }
+        let include_briefs = arguments
+            .get("include_briefs")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let include_findings = arguments
+            .get("include_findings")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let report = self.scan_repository()?;
+        let lint_report = lint(&report.graph, &[]);
+        let matching: Vec<_> = report
+            .graph
+            .nodes()
+            .filter(|node| node.id.as_str().starts_with(prefix))
+            .collect();
+        let total_matching = matching.len();
+        let modules = matching
+            .into_iter()
+            .take(limit as usize)
+            .map(|node| {
+                let mut item = json!({
+                    "id": node.id,
+                    "path": node.path,
+                    "title": node.title,
+                    "status": node.status.as_str(),
+                    "declared_profile": node.declared_profile.as_str(),
+                    "protected_classes": node
+                        .protected_classes
+                        .iter()
+                        .map(|class| class.as_str())
+                        .collect::<Vec<_>>(),
+                    "sha256": node.hash.as_ref().map(|hash| hash.as_str()),
+                });
+                if include_briefs {
+                    item["brief"] = json!(node.body.brief);
+                }
+                item
+            })
+            .collect::<Vec<_>>();
+
+        let mut result = json!({
+            "ok": true,
+            "root": self.root,
+            "prefix": prefix,
+            "files_read": report.files_read,
+            "module_count": report.graph.node_count(),
+            "edge_count": report.graph.edges().len(),
+            "matching_modules": total_matching,
+            "returned_modules": modules.len(),
+            "omitted_modules": total_matching.saturating_sub(modules.len()),
+            "truncated": modules.len() < total_matching,
+            "modules": modules,
+            "unresolved_links": report.unresolved_links,
+            "out_of_corpus_links": report.out_of_corpus_links,
+            "unreadable_front_matter": report.unreadable_front_matter,
+            "lint": {
+                "errors": lint_report.errors().count(),
+                "warnings": lint_report.warnings().count(),
+                "counts": lint_report.counts(),
+            },
+        });
+        if include_findings {
+            result["lint"]["findings"] = json!(lint_report.findings);
+        }
+        Ok(result)
+    }
+
+    fn repository_bundle(&self, arguments: &Value) -> Result<Value, String> {
+        let route_value = arguments
+            .get("route")
+            .cloned()
+            .ok_or("route is required: provide id, intent and must_read")?;
+        let route: TaskRoute = serde_json::from_value(route_value)
+            .map_err(|error| format!("invalid documentation route: {error}"))?;
+        let policy = documentation_policy(arguments)?;
+        let include_markdown = arguments
+            .get("include_markdown")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let max_chars = arguments
+            .get("max_markdown_chars")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        if max_chars == 0 || max_chars > 2_000_000 {
+            return Err("max_markdown_chars must be between 1 and 2000000".into());
+        }
+
+        let report = self.scan_repository()?;
+        let bundle =
+            compile_bundle(&report.graph, &route, &policy).map_err(|error| error.to_string())?;
+        let mut result = json!({
+            "ok": true,
+            "root": self.root,
+            "bundle": bundle,
+            "scan": {
+                "files_read": report.files_read,
+                "module_count": report.graph.node_count(),
+                "edge_count": report.graph.edges().len(),
+                "unresolved_links": report.unresolved_links,
+                "unreadable_front_matter": report.unreadable_front_matter,
+            },
+        });
+        if include_markdown {
+            let markdown = bundle.render_markdown(&report.graph);
+            if markdown.chars().count() > max_chars as usize {
+                return Err(format!(
+                    "rendered documentation bundle is {} characters, over max_markdown_chars {max_chars}; raise the limit or request metadata only",
+                    markdown.chars().count()
+                ));
+            }
+            result["markdown"] = json!(markdown);
+        }
+        Ok(result)
+    }
+
+    fn telemetry_project(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_event = arguments
+            .get("event")
+            .cloned()
+            .ok_or("event is required and must be a serialized DomainEvent")?;
+        let raw_policy = arguments
+            .get("policy")
+            .cloned()
+            .ok_or("policy is required and must be a serialized RedactionPolicy")?;
+        let trace = arguments
+            .get("trace")
+            .and_then(Value::as_str)
+            .ok_or("trace is required and must be a string")?;
+        let encoded = serde_json::to_vec(&json!({
+            "event": raw_event,
+            "policy": raw_policy,
+            "trace": trace,
+            "metric": arguments.get("metric"),
+            "observations": arguments.get("observations"),
+        }))
+        .map_err(|error| format!("cannot measure telemetry input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("telemetry input exceeds the 20000000-byte safety bound".into());
+        }
+        let event: DomainEvent = serde_json::from_value(raw_event)
+            .map_err(|error| format!("invalid domain event: {error}"))?;
+        if event.fields.len() > 10_000 {
+            return Err("domain events are bounded at 10000 fields".into());
+        }
+        let policy: RedactionPolicy = serde_json::from_value(raw_policy)
+            .map_err(|error| format!("invalid redaction policy: {error}"))?;
+        let projected = match policy.project(&event, TraceId::new(trace)) {
+            Ok(projected) => projected,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "stage": "telemetry_projection",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "record": Value::Null,
+                    "loss": Value::Null,
+                    "guarantees": [
+                        "redaction denies by default when a field class has no policy treatment",
+                        "unclassified fields cannot be emitted",
+                        "no telemetry record is returned for an incomplete or invalid projection policy",
+                    ],
+                }))
+            }
+        };
+        let metric_result = match (
+            arguments.get("metric").cloned(),
+            arguments.get("observations").cloned(),
+        ) {
+            (None, None) => Value::Null,
+            (Some(raw_metric), Some(raw_observations)) => {
+                let metric: MetricDefinition = serde_json::from_value(raw_metric)
+                    .map_err(|error| format!("invalid metric definition: {error}"))?;
+                let observations: TelemetryObservations = serde_json::from_value(raw_observations)
+                    .map_err(|error| format!("invalid telemetry observations: {error}"))?;
+                match metric.evaluate(&observations) {
+                    Ok(value) => json!({
+                        "ok": true,
+                        "value": value,
+                        "audit_statement": telemetry_audit_statement("mcp", &value),
+                    }),
+                    Err(error) => json!({
+                        "ok": false,
+                        "refusal": error.to_string(),
+                        "asserted_signals": observations
+                            .asserted_signals()
+                            .into_iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>(),
+                        "observed_sample_count": observations.len(),
+                    }),
+                }
+            }
+            (Some(_), None) => {
+                return Err("observations is required when metric is supplied".into())
+            }
+            (None, Some(_)) => {
+                return Err("metric is required when observations is supplied".into())
+            }
+        };
+        Ok(json!({
+            "ok": true,
+            "event_id": projected.record.event_id(),
+            "event_kind": projected.record.kind(),
+            "trace": projected.record.trace(),
+            "policy_version": projected.record.policy(),
+            "record": projected.record,
+            "loss": projected.loss,
+            "lossless": projected.loss.is_lossless(),
+            "metric": metric_result,
+            "guarantees": [
+                "telemetry is a one-way projection of the canonical DomainEvent",
+                "semantic loss is returned beside every projected record",
+                "metric values exist only when every input signal is observed; asserted samples remain visible but do not support a value",
+                "the call performs no OTLP export, backend write, sampling, span creation, clock read, or network operation",
+            ],
+        }))
+    }
+
+    fn repository_impact(&self, arguments: &Value) -> Result<Value, String> {
+        let changed = arguments
+            .get("changed")
+            .and_then(Value::as_str)
+            .ok_or("changed is required and must be a repository module id")?;
+        let changed = ModuleId::parse(changed.to_string()).map_err(|error| error.to_string())?;
+        let raw_routes = if let Some(raw) = arguments.get("routes") {
+            raw.as_array()
+                .ok_or("routes must be an array of serialized TaskRoute values")?
+                .clone()
+        } else if let Some(raw) = arguments.get("route") {
+            vec![raw.clone()]
+        } else {
+            Vec::new()
+        };
+        if raw_routes.len() > 1_000 {
+            return Err("routes are bounded at 1000 entries".into());
+        }
+        let routes = raw_routes
+            .into_iter()
+            .map(|raw| {
+                serde_json::from_value::<TaskRoute>(raw)
+                    .map_err(|error| format!("invalid documentation route: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let report = self.scan_repository()?;
+        if !report.graph.contains(&changed) {
+            return Err(format!(
+                "changed module {:?} is not in the scanned repository",
+                changed
+            ));
+        }
+        let impact = impact_of(&report.graph, &changed, &routes);
+        let closure_count = impact.closure().len();
+        let affected_module_count = impact.affected.len();
+        let affected_route_count = impact.affected_routes.len();
+        Ok(json!({
+            "ok": true,
+            "root": self.root,
+            "changed": changed,
+            "impact": impact,
+            "closure_count": closure_count,
+            "affected_module_count": affected_module_count,
+            "affected_route_count": affected_route_count,
+            "scan": {
+                "files_read": report.files_read,
+                "module_count": report.graph.node_count(),
+                "edge_count": report.graph.edges().len(),
+                "unresolved_links": report.unresolved_links,
+                "unreadable_front_matter": report.unreadable_front_matter,
+            },
+            "guarantees": [
+                "impact walks incoming dependents and preserves the typed propagation stop reasons",
+                "schema- and governance-relevant downstream modules remain visible in the closure when graph edges declare them",
+                "the report is conservative change impact, not a semantic diff or a claim that every affected module must change",
+                "routes are only marked affected when their declared modules intersect the computed closure",
+            ],
+        }))
+    }
+}
+
+fn release_gate_outcome(kind: &str, result: &Value) -> Option<bool> {
+    match kind {
+        "registry_gate" => result.get("passed").and_then(Value::as_bool),
+        "bundle_verify" => result.get("ok").and_then(Value::as_bool),
+        "conformance_run" => Some(
+            result
+                .get("release_decision")
+                .and_then(|decision| decision.get("decision"))
+                .and_then(Value::as_str)
+                == Some("release"),
+        ),
+        "research_ci_check" => result.get("publishable").and_then(Value::as_bool),
+        "quality_gate_run" => result.get("passed").and_then(Value::as_bool),
+        "ops_acceptance" => result
+            .get("summary")
+            .and_then(|summary| summary.get("is_release_ready"))
+            .and_then(Value::as_bool),
+        "pack_health_assess" => result
+            .get("score_gate")
+            .and_then(|gate| gate.get("reportable"))
+            .and_then(Value::as_bool),
+        "repository_impact" | "developer_platform_status" => None,
+        _ => None,
+    }
+}
+
+fn json_i128(raw: Option<&Value>, field: &str) -> Result<i128, String> {
+    let value = raw.ok_or_else(|| format!("{field} is required and must be an integer"))?;
+    if let Some(value) = value.as_i64() {
+        return Ok(value as i128);
+    }
+    if let Some(value) = value.as_u64() {
+        return Ok(value as i128);
+    }
+    Err(format!("{field} is required and must be an integer"))
+}
+
+fn content_hash_argument(
+    raw: Option<&Value>,
+    field: &str,
+) -> Result<bioprism_ids::ContentHash, String> {
+    let value = raw.ok_or_else(|| format!("{field} is required and must be a content hash"))?;
+    serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid {field} content hash: {error}"))
+}
+
+fn documentation_policy(arguments: &Value) -> Result<TraversalPolicy, String> {
+    let mode = arguments
+        .get("policy")
+        .and_then(Value::as_str)
+        .unwrap_or("normative");
+    let mut policy = match mode {
+        "normative" => TraversalPolicy::normative(),
+        "exhaustive" => TraversalPolicy::exhaustive(),
+        other => return Err(format!("unknown documentation policy {other:?}")),
+    };
+    if let Some(depth) = arguments.get("max_depth") {
+        let depth = depth
+            .as_u64()
+            .ok_or("max_depth must be a non-negative integer")?;
+        if depth > u32::MAX as u64 {
+            return Err("max_depth is too large".into());
+        }
+        policy = policy.with_max_depth(depth as u32);
+    }
+    if let Some(labels) = arguments.get("denied_labels") {
+        let labels = labels
+            .as_array()
+            .ok_or("denied_labels must be an array of strings")?;
+        for label in labels {
+            policy = policy.denying(
+                label
+                    .as_str()
+                    .ok_or("denied_labels must be an array of strings")?,
+            );
+        }
+    }
+    if let Some(follow) = arguments.get("follow") {
+        let follow = follow
+            .as_array()
+            .ok_or("follow must be an array of documentation edge names")?;
+        policy.follow.clear();
+        for edge in follow {
+            let edge = edge
+                .as_str()
+                .ok_or("follow must be an array of documentation edge names")?;
+            let kind = DocEdgeType::parse(edge).map_err(|error| error.to_string())?;
+            policy = policy.following(kind);
+        }
+    }
+    Ok(policy)
 }
 
 fn tool_content(value: &Value, is_error: bool) -> Value {
@@ -337,6 +8954,294 @@ fn audit(tool: &str, arguments: &Value) {
     );
 }
 
+fn weave_protocol_catalog() -> Value {
+    let kinds = [
+        ActKind::Ask,
+        ActKind::Claim,
+        ActKind::Propose,
+        ActKind::Accept,
+        ActKind::Reject,
+        ActKind::Challenge,
+        ActKind::Discharge,
+        ActKind::Delegate,
+        ActKind::Revoke,
+        ActKind::Attest,
+    ];
+    json!({
+        "ok": true,
+        "protocol": "bioprism-weave",
+        "acts": kinds.into_iter().map(|kind| json!({
+            "kind": kind.as_str(),
+            "requires_antecedent": kind.requires_antecedent().map(|antecedents| {
+                antecedents.iter().map(|antecedent| antecedent.as_str()).collect::<Vec<_>>()
+            }).unwrap_or_default(),
+        })).collect::<Vec<_>>(),
+        "invariants": [
+            "accept and reject require a prior proposal",
+            "challenge requires a prior claim",
+            "discharge requires a prior acceptance",
+            "claims and challenges remain distinct ledger entries",
+            "payloads are opaque to the protocol kernel",
+        ],
+    })
+}
+
+pub fn resource_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "uri": QUERY_SCHEMA_URI,
+            "name": "fiber-query/0.2 schema",
+            "description": "The strict query document schema accepted by the FIBER compiler.",
+            "mimeType": "application/schema+json",
+        }),
+        json!({
+            "uri": CERTIFICATE_SCHEMA_URI,
+            "name": "fiber-context-certificate/0.1 schema",
+            "description": "The certificate contract emitted by a FIBER compilation.",
+            "mimeType": "application/schema+json",
+        }),
+        json!({
+            "uri": WORLD_SCHEMA_URI,
+            "name": "fiber-world/0.1 schema",
+            "description": "The world document schema consumed by the compiler.",
+            "mimeType": "application/schema+json",
+        }),
+        json!({
+            "uri": CAPABILITIES_URI,
+            "name": "workspace capability catalog",
+            "description": "The domain capabilities, executable entrypoints, and agent-facing surfaces shipped by this workspace.",
+            "mimeType": "application/json",
+        }),
+    ]
+}
+
+/// Stable, honest routing metadata for agents choosing among the workspace's domains.
+///
+/// This is deliberately a catalog rather than a claim that every domain is exposed over MCP:
+/// `mcp_tools` contains only callable tools, while `cli_entrypoints` and `crates` identify the
+/// available local surfaces. A consumer can therefore plan across all domains without confusing
+/// a library's existence with a transport it can invoke remotely.
+pub fn workspace_capabilities() -> Value {
+    json!([
+        {
+            "id": "world_and_ingestion",
+            "domains": ["world modeling", "data ingestion", "provenance"],
+            "crates": ["bioprism-world", "bioprism-adapter", "bioprism-worldfactory", "bioprism-standards"],
+            "mcp_tools": ["world_validate", "world_index", "tabular_ingest", "observed_world_declare", "world_claim_check", "lineage_audit", "preanalytic_apply"],
+            "cli_entrypoints": ["world validate", "world show", "world generate", "world index"],
+            "status": "available"
+        },
+        {
+            "id": "decision_context",
+            "domains": ["typed queries", "evidence selection", "omission accounting"],
+            "crates": ["bioprism-fiber", "bioprism-section", "bioprism-obligation", "bioprism-scope", "bioprism-graph"],
+            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle"],
+            "cli_entrypoints": ["context explain", "context compile", "context verify", "context compare"],
+            "status": "available"
+        },
+        {
+            "id": "token_efficient_context",
+            "domains": ["context budgets", "mandatory closure planning", "dry-run privacy", "policy-only comparisons", "estimation provenance"],
+            "crates": ["bioprism-tokens", "bioprism-obligation", "bioprism-section"],
+            "mcp_tools": ["token_context_plan"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "trajectory_and_decision_cells",
+            "domains": ["JSONL trajectory ingestion", "divergence localization", "decision segmentation", "review-gated cell proposals"],
+            "crates": ["bioprism-trace", "bioprism-prism", "bioprism-benchcompiler"],
+            "mcp_tools": ["trace_analyze", "benchmark_trace_analyze"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "evaluation_and_baselines",
+            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
+            "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "epistemic_voi"],
+            "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
+            "status": "available"
+        },
+        {
+            "id": "benchmark_pack_portfolio",
+            "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
+            "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
+            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "mutation_family", "scale_family_split_verify"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "mutation_and_causal_discovery",
+            "domains": ["metamorphic testing", "causal divergence", "robustness"],
+            "crates": ["bioprism-mutation", "bioprism-benchcompiler", "bioprism-stress", "bioprism-influence"],
+            "mcp_tools": ["mutation_family", "stress_profile", "stress_report", "influence_analyze"],
+            "cli_entrypoints": ["mutate family"],
+            "status": "available"
+        },
+        {
+            "id": "bioevaluation_reference_contracts",
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "evaluation refusal boundaries"],
+            "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
+            "mcp_tools": ["bioeval_reference_audit"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "biological_domains",
+            "domains": ["BioIR", "oncology", "modalities", "specimen lineage", "reference worlds"],
+            "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
+            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "biological_ir_and_query",
+            "domains": ["BioQL syntax", "typed biological fields", "units and frames", "genome builds", "temporal semantics", "query access declarations"],
+            "crates": ["bioprism-biolang", "bioprism-bioir", "bioprism-standards", "bioprism-scope"],
+            "mcp_tools": ["bioql_compile"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "foundation_contracts",
+            "domains": ["falsifiable biological contracts", "applicability envelopes", "world classes", "counterfactual boundaries", "plane consistency"],
+            "crates": ["bioprism-foundation", "bioprism-scope", "bioprism-bioir", "bioprism-standards"],
+            "mcp_tools": ["foundation_contract_check", "bioql_compile", "world_validate"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "oncoworlds_identity_and_transport",
+            "domains": ["participant identity", "specimen and lesion joins", "disease epochs", "cross-scope transport"],
+            "crates": ["bioprism-oncoworlds", "bioprism-scope", "bioprism-standards"],
+            "mcp_tools": ["oncoworlds_identity_join"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "oncoworlds_models_and_assays",
+            "domains": ["patient-derived models", "methylation classification", "classifier versioning", "radiogenomics"],
+            "crates": ["bioprism-oncoworlds", "bioprism-onco", "bioprism-scope"],
+            "mcp_tools": ["oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_model_transport"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "oncoworlds_clonal_evolution",
+            "domains": ["clonal populations", "phylogeny compatibility", "resistance hypotheses"],
+            "crates": ["bioprism-oncoworlds", "bioprism-onco"],
+            "mcp_tools": ["oncoworlds_clonal_history_check"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "safety_privacy_and_policy",
+            "domains": ["consent", "privacy", "information flow", "threat modeling", "sandbox posture"],
+            "crates": ["bioprism-policy", "bioprism-safety", "bioprism-bioethics", "bioprism-governance"],
+            "mcp_tools": ["policy_screen", "safety_posture", "safety_release_gate", "medical_boundary_check", "bioethics_action_review", "bioethics_human_subject_screen", "bioethics_dual_use_review", "bioethics_validation_check", "bioethics_representation_audit"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "influence_bounds_and_abstract_analysis",
+            "domains": ["numeric influence bounds", "structural omission analysis", "abstract interpretation", "sound perturbation analysis"],
+            "crates": ["bioprism-influence", "bioprism-backends", "bioprism-section"],
+            "mcp_tools": ["influence_analyze"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "agent_orchestration",
+            "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
+            "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "registry_operations_and_infrastructure",
+            "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
+            "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
+            "mcp_tools": ["registry_gate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "atlas_metrics_and_research_ci",
+            "domains": ["capability metrics", "partial rankings", "weight sensitivity", "research CI", "claim publication checks"],
+            "crates": ["bioprism-atlas", "bioprism-metrics", "bioprism-atlasx", "bioprism-atlashub"],
+            "mcp_tools": ["atlas_report", "capability_rank", "research_ci_check"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "release_and_reproduction",
+            "domains": ["result bundles", "digest verification", "operational acceptance", "release evidence"],
+            "crates": ["bioprism-bundle", "bioprism-ops", "bioprism-registry", "bioprism-safety"],
+            "mcp_tools": ["bundle_verify", "release_audit", "ops_acceptance", "safety_release_gate", "registry_gate", "evaluation_reproduction_check"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "public_hub_submission_and_moderation",
+            "domains": ["submission contracts", "provenance and licensing", "limitations cards", "append-only moderation", "independent verification"],
+            "crates": ["bioprism-hub", "bioprism-hubapi"],
+            "mcp_tools": ["hub_submission_review", "hub_disclosure_review", "hub_card_render", "hub_leaderboard_render", "hub_search", "hub_resolve", "hub_lock"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "observability_and_telemetry_boundaries",
+            "domains": ["redaction policy", "semantic-loss reporting", "observed-versus-asserted metrics", "trace correlation", "cardinality-safe operations"],
+            "crates": ["bioprism-ops", "bioprism-safety", "bioprism-scope"],
+            "mcp_tools": ["telemetry_project", "operations_catalog", "ops_capacity"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "inference_lab",
+            "domains": ["hypothesis separation", "evidence acquisition", "holdout-aware improvement", "risk-triggered research"],
+            "crates": ["bioprism-lab", "bioprism-obligation", "bioprism-routing", "bioprism-evalengine"],
+            "mcp_tools": ["lab_plan", "routing_decide"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "oracle_mesh",
+            "domains": ["tiered evidence", "oracle disagreement", "reference standards", "adjudication inputs"],
+            "crates": ["bioprism-oracle", "bioprism-oraclex", "bioprism-evalengine"],
+            "mcp_tools": ["oracle_combine", "oracle_reference_panel", "oracle_missingness"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "runtime_execution_and_replay",
+            "domains": ["effect authorization", "sandbox posture", "hash-chained replay", "checkpoint verification"],
+            "crates": ["bioprism-runtime", "bioprism-trace", "bioprism-store"],
+            "mcp_tools": ["runtime_effect_check", "runtime_tape_verify"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "documentation_and_knowledge",
+            "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
+            "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
+            "mcp_tools": ["workspace_capabilities", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "developer_and_release_contracts",
+            "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
+            "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "cli_entrypoints": ["--help", "--json"],
+            "status": "available"
+        }
+    ])
+}
+
 pub fn tool_definitions() -> Vec<Value> {
     let world_and_query = json!({
         "type": "object",
@@ -352,7 +9257,8 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "fiber_compile",
             "description": "Compile a typed decision query into the smallest decision-sufficient \
                 context. Returns the L0 decision contract — goal, verdict, what was omitted, and \
-                whether the sufficiency claim holds — plus a handle for descending to evidence. It \
+                whether the sufficiency claim holds — plus a content-addressed handle for descending \
+                to evidence. It \
                 deliberately does not return the evidence: call fiber_refine when the contract is \
                 not enough to act on.",
             "inputSchema": {
@@ -367,18 +9273,24 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "fiber_refine",
-            "description": "Descend one or more layers of a compiled Decision Section. l1 adds the \
+            "description": "Descend one or more layers of a compiled Decision Section using the \
+                content-addressed handle returned by fiber_compile. l1 adds the \
                 obligation and evidence inventory without values; l2 adds the evidence the verdict \
                 rests on; l3 adds factors, provenance and the refinement frontier; l4 adds raw \
                 artifacts. Omissions are reported at every layer.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "handle": { "type": "object", "description": "The refinement handle returned in fiber_compile.refine.handle. The server recompiles and verifies its certificate digest before disclosing the requested layer." },
                     "world": { "type": "string" },
                     "query": { "type": "string" },
                     "layer": { "type": "string", "enum": ["l0", "l1", "l2", "l3", "l4"] }
                 },
-                "required": ["world", "query", "layer"]
+                "required": ["layer"],
+                "anyOf": [
+                    { "required": ["handle"] },
+                    { "required": ["world", "query"] }
+                ]
             }
         }),
         json!({
@@ -401,6 +9313,24 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "projection_bundle",
+            "description": "Generate provenance-bound graph, hypergraph, timeline, and table projections from one compiled Decision Section and certificate. Returns fidelity and obstruction-survival metadata by default; full view bodies are opt-in and never presented as evidence completeness or clinical proof.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "world": { "type": "string", "description": "Path to a JSON world document or indexed store directory, relative to the server root." },
+                    "query": { "type": "string", "description": "Path to a FIBER query document, relative to the server root." },
+                    "handle": { "type": "object", "description": "Optional content-addressed refinement handle from fiber_compile; mutually exclusive with world/query." },
+                    "include_views": { "type": "boolean", "description": "Include complete serialized projection bodies; defaults false for bounded progressive disclosure." }
+                },
+                "required": [],
+                "anyOf": [
+                    { "required": ["world", "query"] },
+                    { "required": ["handle"] }
+                ]
+            }
+        }),
+        json!({
             "name": "world_index",
             "description": "Build a content-addressed index for a world so later compiles cost \
                 what the compiled region costs rather than what the corpus costs. Writes to disk: \
@@ -413,6 +9343,1283 @@ pub fn tool_definitions() -> Vec<Value> {
                     "confirm": { "type": "boolean", "description": "Must be true to actually write." }
                 },
                 "required": ["world", "store"]
+            }
+        }),
+        json!({
+            "name": "world_validate",
+            "description": "Validate a fiber-world document against the typed world model and default scope registry. Returns counts, content hash, every diagnostic, and a boolean that is false when any error exists.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "world": { "type": "string", "description": "Path to a fiber-world/0.1 JSON document, relative to the server root." }
+                },
+                "required": ["world"]
+            }
+        }),
+        json!({
+            "name": "world_generate",
+            "description": "Generate a deterministic synthetic fiber-world and matching fiber-query from a serialized WorldSpec. Both documents are parsed and scope-validated before success; exact digests, structural counts, diagnostics, and optional bounded documents are returned. Generation has no file, network, model, clinical, or publication side effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "spec": { "type": "object", "description": "Serialized bioprism-worldgen WorldSpec, including seed and structural knobs such as distractors, relay_depth, leakage, events, protected_variables, skeleton, and policy." },
+                    "include_world": { "type": "boolean", "description": "Include the generated world JSON; defaults false." },
+                    "include_query": { "type": "boolean", "description": "Include the generated query JSON; defaults false." }
+                },
+                "required": ["spec"]
+            }
+        }),
+        json!({
+            "name": "factory_lifecycle_simulate",
+            "description": "Replay a bounded in-memory factory lifecycle over serialized jobs, worker capabilities, and ordered actions. It exposes lease ownership, heartbeat expiry, idempotency-aware recovery, staged-versus-committed output, compensation, quarantine release, dead letters, cancellation, and typed action refusals without creating workers, queues, clocks, or external effects.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "jobs": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Serialized bioprism-factory Job values initially enqueued into the simulation." },
+                    "workers": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Serialized WorkerCapability values; worker_id values must be unique." },
+                    "actions": { "type": "array", "maxItems": 2000, "description": "Ordered actions: enqueue, lease, heartbeat, stage, commit, fail, recover_expired, compensate, release_quarantine, or cancel." }
+                },
+                "required": ["jobs", "workers", "actions"]
+            }
+        }),
+        json!({
+            "name": "context_compare",
+            "description": "Compare FIBER against the equal-engineering baseline panel over the same world and query. Returns every strategy, selection size, verdict, closure, admissibility, and refusal reason so compactness is never treated as quality without a matched result.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "world": { "type": "string", "description": "Path to a JSON world document, relative to the server root; indexed stores are not accepted by this comparison tool." },
+                    "query": { "type": "string", "description": "Path to a FIBER query document, relative to the server root." }
+                },
+                "required": ["world", "query"]
+            }
+        }),
+        json!({
+            "name": "bioworlds_catalog",
+            "description": "Run the deterministic reference BioWorld vertical-slice catalogue, or one named slice, and return structural checks, underdetermination findings, digests, and the explicitly unbuilt world list. This is a research characterisation surface, not a clinical conclusion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "slice": { "type": "string", "description": "Optional slice id; omit to run the complete standard catalogue." },
+                    "include_render": { "type": "boolean", "description": "Include the human-readable report rendering in addition to structured JSON." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "modality_catalog",
+            "description": "Return the seventeen biological modality contracts: measurand, evidence design, resolution declarations, caller-supplied constants, and mechanised versus unmechanised failure modes. Filter by modality for a smaller response.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "modality": { "type": "string", "description": "Optional exact modality name such as single-cell and multiome." },
+                    "include_failure_modes": { "type": "boolean", "description": "Include full blueprint failure-mode statements; defaults to false." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "mutation_family",
+            "description": "Apply and validate the deterministic metamorphic mutation suite to a world. Returns accepted instances, typed rejections, duplicates, oracle signatures, effective diversity, and optional generated worlds; a mutation never marks its own postcondition as passed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "world": { "type": "string", "description": "Path to a JSON world document, relative to the server root." },
+                    "suite": { "type": "string", "enum": ["standard"], "description": "Deterministic mutation suite; defaults to standard." },
+                    "include_worlds": { "type": "boolean", "description": "Include generated world documents; defaults to false for bounded disclosure." },
+                    "max_worlds": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum generated worlds to return when include_worlds is true." }
+                },
+                "required": ["world"]
+            }
+        }),
+        json!({
+            "name": "prism_minimize",
+            "description": "Reduce a world, or an explicitly supplied fact subset, to a deterministic 1-minimal set preserving the oracle signature. Returns unjudged removals separately and independently re-checks preservation; it never claims global minimality.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "world": { "type": "string", "description": "Path to a JSON world document, relative to the server root." },
+                    "facts": { "type": "array", "items": { "type": "string" }, "description": "Optional fact-id subset to minimize; omit to minimize all facts." }
+                },
+                "required": ["world"]
+            }
+        }),
+        json!({
+            "name": "registry_gate",
+            "description": "Run the registry's fail-closed gate over an attested benchmark-pack document. Returns pass, fail, or block with typed findings; experimental policy lowers the required tier but never disables attestation, diversity, or validation blockers.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pack": { "type": "string", "description": "Path to an attested benchmark-pack JSON document, relative to the server root." },
+                    "policy": { "type": "string", "enum": ["default", "experimental"], "description": "Gate policy; defaults to default and uses experimental for the loosest honest release." }
+                },
+                "required": ["pack"]
+            }
+        }),
+        json!({
+            "name": "release_audit",
+            "description": "Compose bounded release checks across registry gating, result-bundle verification, conformance, research CI, quality gates, operations acceptance, pack health, repository impact, and developer-platform diagnostics. Required checks form a strict conjunction; advisory evidence remains visible but cannot be promoted into a release pass. Each check retains its own refusal, digest, and limitation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "checks": { "type": "array", "minItems": 1, "maxItems": 32, "description": "Check requests of the form {kind, arguments, required}; arguments are the exact input object for the delegated MCP tool. repository_impact and developer_platform_status are advisory-only and default to required=false." },
+                    "include_details": { "type": "boolean", "description": "Include each delegated result in addition to its digest and gate projection; defaults false." }
+                },
+                "required": ["checks"]
+            }
+        }),
+        json!({
+            "name": "operations_catalog",
+            "description": "Execute the deterministic operations/deployment contract surface: compare local and team storage promises, enumerate data classes and deployment planes, audit the nine service contracts, expose SLO objective names, and preserve the distinction between defined metrics and the many named-but-undefined metrics. Summary output is bounded; full records are opt-in.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include_details": { "type": "boolean", "description": "Include full service audit entries and all named-but-undefined metric records; defaults to false." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows returned in repeated service/metric lists; defaults to 100." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "ops_acceptance",
+            "description": "Run the operational alpha acceptance contract over the workspace's linked types and embedded manifest. Returns typed met, refuted, and unverifiable findings with their bases; unverifiable criteria are never treated as passing and no release percentage is fabricated.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum acceptance findings returned; defaults to 100." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "ops_capacity",
+            "description": "Project a serialized operational CapacityModel against a Workload and retain measured-versus-assumed qualifications. Unbounded traversals and over-ceiling materialisation refuse before projection; optional demand requires a named visible DegradationPlan before saturation is evaluated.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "model": { "type": "object", "description": "Serialized bioprism-ops CapacityModel." },
+                    "workload": { "type": "object", "description": "Serialized bioprism-ops Workload with bounded operations and qualified costs." },
+                    "demand": { "type": "object", "description": "Optional Demand with non-negative calls_per_epoch." },
+                    "degradation_plan": { "type": "object", "description": "Optional serialized DegradationPlan; required when demand is supplied." }
+                },
+                "required": ["model", "workload"]
+            }
+        }),
+        json!({
+            "name": "research_ci_check",
+            "description": "Run the deterministic research-CI predicate suite over an inline result observation document or a JSON document under the server root. Checks claim resolution, split disjointness, figure reproduction, decision-cell regression, dependency pinning, egress policy, non-claims, and provenance rung; failures and undetermined checks remain distinct and both block publication.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "document": { "type": "string", "description": "Optional JSON result document path relative to the server root." },
+                    "result": { "type": "object", "description": "Optional inline bioprism-atlashub ResultUnderReview object; provide this or document, not both." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "capability_rank",
+            "description": "Compare capability vectors under strict metric conditions and return the honest partial order: dominance, equivalence, trade-offs, unmeasured axes, condition refusals, maximal systems, and bounded relation rows. An optional content-addressed declared weighting may totalise the order and receives explicit collapsed-refusal and leave-one-out rank-instability records.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "vectors": { "type": "array", "minItems": 2, "maxItems": 100, "description": "At least two serialized bioprism-metrics CapabilityVector objects." },
+                    "waived_dimensions": { "type": "array", "items": { "type": "string" }, "description": "Optional explicit comparability dimensions to waive; each waiver is retained in the response." },
+                    "weighting": { "type": "object", "description": "Optional serialized bioprism-metrics DeclaredWeighting with a validating policy and matching digest." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound repeated response rows; defaults to 100." }
+                },
+                "required": ["vectors"]
+            }
+        }),
+        json!({
+            "name": "safety_release_gate",
+            "description": "Apply the explicit dual-use release gate to a complete serialized risk assessment. Missing ratings refuse before any release decision; one high non-mitigating dimension conditions, two or more block, and mitigating dimensions are reported separately. This is a typed research-release model, not runtime security or clinical approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "assessment": { "type": "object", "description": "Serialized bioprism-safety RiskAssessment with subject, optional category, and ratings keyed by risk_dimension snake_case." }
+                },
+                "required": ["assessment"]
+            }
+        }),
+        json!({
+            "name": "medical_boundary_check",
+            "description": "Apply the unconditional research-only medical boundary to a serialized RequestedOutput. Research use cases are admitted with the required label; clinical categories are returned as structured refusals with no override or force path.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "output": { "type": "object", "description": "Serialized bioprism-safety RequestedOutput: research {use_case, label} or clinical {category, label}." }
+                },
+                "required": ["output"]
+            }
+        }),
+        json!({
+            "name": "hub_search",
+            "description": "Search caller-supplied bioprism-hubapi catalogs under an explicit federation and exact query facets. Returns matched features, excluded near misses, authority, trust tier, digest, freshness, bounded truncation, and the limits of in-memory lexical discovery; empty-facet searches are refused.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "federation": { "type": "object", "description": "Serialized bioprism-hubapi Federation; membership and namespace authority are explicit inputs." },
+                    "catalogs": { "type": "array", "maxItems": 100, "description": "Serialized bioprism-hubapi Catalog values; the server bounds the aggregate release count." },
+                    "query": { "type": "object", "description": "Serialized bioprism-hubapi Query with one or more exact facets, freshness policy, and optional limit." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound repeated result rows and impose an effective query limit; defaults to 100." }
+                },
+                "required": ["federation", "catalogs", "query"]
+            }
+        }),
+        json!({
+            "name": "hub_submission_review",
+            "description": "Check a serialized public-hub SubmissionDraft and Submitter, then optionally replay a bounded append-only moderation sequence of transitions, independent attestations, and attestation revocations. Missing provenance, scope, licence, evidence scale, clinical nonclaims, declared conflicts, self-review, backdated epochs, and illegal states remain typed refusals; this is an in-memory contract surface, not a network publisher or identity provider.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "draft": { "type": "object", "description": "Serialized bioprism-hub SubmissionDraft." },
+                    "submitter": { "type": "object", "description": "Serialized bioprism-hub Submitter; standing and conflict declaration are caller-supplied assertions checked by the contract." },
+                    "moderation": { "type": "object", "description": "Optional replay plan: actor, at, transitions [{to, decision}], attestations [{to, actor, at}], and revocations [{actor, at, reason}]. Epochs must be monotonic." }
+                },
+                "required": ["draft", "submitter"]
+            }
+        }),
+        json!({
+            "name": "hub_disclosure_review",
+            "description": "Replay bounded public-hub disclosure actions against a serialized DisclosureLedger: declare held-out, disclose, record contamination, fold in split-integrity verdicts, and check headline eligibility. Digest-keyed ratchets, caveats, and refusals remain visible; the call records supplied findings but does not detect leaks or publish artifacts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ledger": { "type": "object", "description": "Optional serialized DisclosureLedger to continue; omitted starts an empty in-memory ledger." },
+                    "actions": { "type": "array", "maxItems": 256, "description": "Ordered actions with kind and pack digest; disclose/split_integrity require at, contaminate requires a ContaminationWitness, and headline_eligibility requires computed_at." }
+                },
+                "required": ["actions"]
+            }
+        }),
+        json!({
+            "name": "hub_card_render",
+            "description": "Project one serialized moderation record into a BioAtlas card with derived publication state, limitations, provenance, access, verification, and score withholding. An optional score must pass digest-bound disclosure eligibility and the available-state gate; controlled, disputed, withdrawn, stale, non-reproducible, and not-comparable states never become numeric zeroes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "moderation": { "type": "object", "description": "Serialized ModerationLedger containing the requested submission." },
+                    "submission": { "type": "string", "description": "SubmissionId to project." },
+                    "version": { "type": "string", "description": "Card schema/render version; defaults to bioatlas-card/0.1." },
+                    "score": { "type": "object", "description": "Optional serialized Score. Requires pack, computed_at, and disclosure eligibility inputs." },
+                    "pack": { "type": "string", "description": "ContentHash of the benchmark pack scored by the optional score." },
+                    "computed_at": { "type": "integer", "minimum": 0, "description": "Epoch at which the optional score was computed." },
+                    "acknowledges_disclosure": { "type": "boolean", "description": "Whether the score explicitly acknowledges a disclosed pack." },
+                    "disclosure": { "type": "object", "description": "Serialized DisclosureLedger used for the optional score gate." },
+                    "not_comparable": { "type": "object", "description": "Optional serialized UnrankableReason that re-states the card as not-comparable." }
+                },
+                "required": ["moderation", "submission"]
+            }
+        }),
+        json!({
+            "name": "hub_leaderboard_render",
+            "description": "Render a serialized hub Board over serialized entries, moderation, and disclosure ledgers. It preserves rankable versus unranked entries, comparability refusals, verification floors, scale checks, disclosure caveats, and the typed non-universal/nonclinical headline; details are opt-in for bounded disclosure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "board": { "type": "object", "description": "Serialized bioprism-hub Board with comparability conditions and minimum verification." },
+                    "entries": { "type": "array", "maxItems": 2000, "description": "Serialized leaderboard Entry values." },
+                    "moderation": { "type": "object", "description": "Serialized ModerationLedger used to derive publication and verification state." },
+                    "disclosure": { "type": "object", "description": "Serialized DisclosureLedger used to gate headline scores." },
+                    "include_details": { "type": "boolean", "description": "Include the full RankedBoard; defaults false while always returning counts and headline." }
+                },
+                "required": ["board", "entries", "moderation", "disclosure"]
+            }
+        }),
+        json!({
+            "name": "measurement_compare",
+            "description": "Compare two serialized bioprism-standards measurements with typed checks for observable kind, coordinate frame/reference build, physical dimension, unit conversion, and ontology binding. Returns a content hash, explicit conversion records, caveats, and the first blocking reason; it never silently coerces a measurement.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "left": { "type": "object", "description": "Serialized bioprism-standards Measurement." },
+                    "right": { "type": "object", "description": "Serialized bioprism-standards Measurement." },
+                    "require_bound_terms": { "type": "boolean", "description": "Require both measurements to carry ontology bindings; defaults to false, while asymmetric binding always blocks." }
+                },
+                "required": ["left", "right"]
+            }
+        }),
+        json!({
+            "name": "hub_resolve",
+            "description": "Resolve one serialized bioprism-hubapi Request across caller-supplied federation catalogs. Prefers namespace authority, checks every agreeing binding for digest divergence, and preserves freshness policy, lifecycle intent, registry provenance, and refusal causes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "federation": { "type": "object", "description": "Serialized bioprism-hubapi Federation." },
+                    "catalogs": { "type": "array", "maxItems": 100, "description": "Serialized Catalog values, bounded by aggregate release count." },
+                    "request": { "type": "object", "description": "Serialized bioprism-hubapi Request with name, version requirement, intent, freshness policy, and optional reference epoch." }
+                },
+                "required": ["federation", "catalogs", "request"]
+            }
+        }),
+        json!({
+            "name": "hub_lock",
+            "description": "Resolve a transitive dependency closure into a bounded provenance-preserving lock. Version collisions, absent satisfiers, lifecycle exclusions, federation authority failures, and non-stabilising graphs refuse instead of producing a partial lock.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "federation": { "type": "object", "description": "Serialized bioprism-hubapi Federation." },
+                    "catalogs": { "type": "array", "maxItems": 100, "description": "Serialized Catalog values, bounded by aggregate release count." },
+                    "request": { "type": "object", "description": "Serialized root bioprism-hubapi Request." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum lock entries returned; defaults to 100." }
+                },
+                "required": ["federation", "catalogs", "request"]
+            }
+        }),
+        json!({
+            "name": "tabular_ingest",
+            "description": "Run the in-process CSV/TSV adapter and its independent conformance suite over inline bytes or a root-confined document, under a fully serialized TabularProfile. Returns source/profile digests, validated fact counts, semantic loss, deterministic conformance outcomes, and optionally bounded facts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_id": { "type": "string", "description": "Stable source identifier carried into every location and manifest." },
+                    "csv": { "type": "string", "description": "Inline CSV/TSV text; mutually exclusive with document." },
+                    "document": { "type": "string", "description": "Root-confined CSV/TSV path; mutually exclusive with csv." },
+                    "format": { "type": "string", "description": "Optional declared format such as text/csv; unsupported declarations refuse rather than being sniffed." },
+                    "provenance": { "type": "object", "description": "Optional SourceProvenance with caller-supplied accession, version, and retrieved_at." },
+                    "profile": { "type": "object", "description": "Serialized TabularProfile mapping every intended column and its loss policies." },
+                    "include_facts": { "type": "boolean", "description": "Include bounded validated fact documents; defaults to false." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound returned facts; defaults to 100." },
+                    "max_bytes": { "type": "integer", "minimum": 1, "maximum": 10000000, "description": "Hard input byte ceiling; defaults to 10000000." }
+                },
+                "required": ["source_id", "profile"]
+            }
+        }),
+        json!({
+            "name": "observed_world_declare",
+            "description": "Validate and seal an observed-world declaration from pinned SourceRef values, a StudyDesign, and outcome labels. It checks source pinning, stratum reconciliation, selection requirements for population claims, controlled-source boundaries, and returns the resulting provenance ladder.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Observed world identifier." },
+                    "sources": { "type": "array", "description": "Serialized bioprism-worldfactory SourceRef values." },
+                    "design": { "type": "object", "description": "Serialized StudyDesign with cohort_size, strata, selection, optional standing population, and unsupported counterfactuals." },
+                    "outcome_labels": { "type": "array", "items": { "type": "string" }, "description": "Observed outcome labels; duplicates are refused." }
+                },
+                "required": ["id", "sources", "design", "outcome_labels"]
+            }
+        }),
+        json!({
+            "name": "world_claim_check",
+            "description": "Check a serialized worldfactory Claim against serialized Provenance. Supported claims return a grounded caveat; circular assumptions, unsupported rungs, unidentified counterfactuals, and selection overreach return structured refusals without inventing evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provenance": { "type": "object", "description": "Serialized bioprism-worldfactory Provenance produced by an authoring workflow." },
+                    "claim": { "type": "object", "description": "Serialized Claim with kind, quantity, optional counterfactual, and optional population." }
+                },
+                "required": ["provenance", "claim"]
+            }
+        }),
+        json!({
+            "name": "trace_analyze",
+            "description": "Ingest a failing decision trajectory from native JSONL, preserve every import loss, validate causal ordering, segment review candidates, and optionally compare a lossless passing trajectory to localize first divergence. Returns transparent score components and review-gated CellProposal previews; it never silently replays, minimizes state, or publishes a cell.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "trace_id": { "type": "string", "description": "Stable identifier for the failing trace." },
+                    "jsonl": { "type": "string", "description": "Inline native JSONL event stream; mutually exclusive with document." },
+                    "document": { "type": "string", "description": "Root-confined native JSONL file; mutually exclusive with jsonl." },
+                    "succeeded": { "type": "boolean", "description": "Producer-supplied failing-trace outcome flag; defaults to false and is never inferred." },
+                    "passing_trace_id": { "type": "string", "description": "Optional identifier for the passing comparison trace." },
+                    "passing_jsonl": { "type": "string", "description": "Optional inline passing JSONL stream; mutually exclusive with passing_document." },
+                    "passing_document": { "type": "string", "description": "Optional root-confined passing JSONL file; mutually exclusive with passing_jsonl." },
+                    "passing_succeeded": { "type": "boolean", "description": "Producer-supplied passing-trace outcome flag; defaults to true." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum candidates, proposals, and excluded-step rows returned; defaults to 100." },
+                    "max_bytes": { "type": "integer", "minimum": 1, "maximum": 10000000, "description": "Hard byte ceiling applied independently to each inline or file trace; defaults to 10000000." }
+                },
+                "required": ["trace_id"],
+                "anyOf": [
+                    { "required": ["jsonl"] },
+                    { "required": ["document"] }
+                ]
+            }
+        }),
+        json!({
+            "name": "lineage_audit",
+            "description": "Audit a serialized specimen-and-artifact registry for ancestry cycles, mass over-allocation, temporal impossibility, duplicate material, artifact disagreement, and identity mismatch. Missing fingerprint evidence remains a distinct non-pass, and the server never silently seals or rewrites caller-supplied observations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "registry": { "type": "object", "description": "Serialized bioprism-worldfactory SpecimenRegistry with nodes and artifacts." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum findings, fingerprints, and unchecked specimens returned; defaults to 100." }
+                },
+                "required": ["registry"]
+            }
+        }),
+        json!({
+            "name": "preanalytic_apply",
+            "description": "Apply a serialized pre-analytic mutation to a serialized specimen under the real worldfactory postconditions. Reports biological-state preservation, QC and measurability signatures, family false-positive validation, response availability, and optional caller-threshold detectability without inventing laboratory physics or silently admitting a damaged specimen.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "specimen": { "type": "object", "description": "Serialized bioprism-worldfactory preanalytic Specimen." },
+                    "mutation": { "type": "object", "description": "Serialized PreanalyticMutation with fault kind, intensity, edits, and expected response." },
+                    "family": { "type": "array", "maxItems": 100, "description": "Optional serialized family members for the null false-positive control." },
+                    "family_name": { "type": "string", "description": "Optional family name used by the false-positive validation; defaults to mutation.family." },
+                    "available_actions": { "type": "array", "items": { "type": "string" }, "description": "Optional actions the benchmark world offers for response checking." },
+                    "qc_field": { "type": "string", "description": "Optional QC field used with family and alert_at for detectability_floor." },
+                    "alert_at": { "type": "integer", "minimum": 0, "description": "Optional non-negative absolute QC alert threshold." }
+                },
+                "required": ["specimen", "mutation"]
+            }
+        }),
+        json!({
+            "name": "contradiction_review",
+            "description": "Pose two serialized multimodal readings and run the real contradiction program: scope alignment, uncertainty-aware disagreement, admissible hypothesis filtering, answer-cue scanning, discriminating-action ranking, explicit evidence examination, expectedness against a caller reference, and the three-way resolution state. It never picks a correct modality or silently reconciles a disagreement.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "left": { "type": "object", "description": "Serialized bioprism-worldfactory contradiction Reading." },
+                    "right": { "type": "object", "description": "Serialized bioprism-worldfactory contradiction Reading." },
+                    "intent": { "type": "string", "enum": ["expected", "resolvable", "irreducible"], "description": "Author-declared discordance intent." },
+                    "hypotheses": { "type": "array", "maxItems": 1000, "description": "Serialized Hypothesis values; each id must be unique." },
+                    "actions": { "type": "array", "maxItems": 1000, "description": "Optional DiscriminatingAction values mapping evidence ids to hypotheses they refute." },
+                    "missing_evidence": { "type": "array", "maxItems": 1000, "description": "Optional MissingEvidence values carried when the contradiction is unresolvable." },
+                    "references": { "type": "array", "maxItems": 1000, "description": "Optional ReferenceDiscordance values for expectedness." },
+                    "examine": { "type": "array", "items": { "type": "string" }, "maxItems": 1000, "description": "Optional evidence ids to examine in order; empty means report not_yet_examined when actions exist." },
+                    "notable_below_per_ten_thousand": { "type": "integer", "minimum": 0, "description": "Optional caller threshold for expectedness classification." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum next actions and cue rows returned; defaults to 100." }
+                },
+                "required": ["left", "right", "intent", "hypotheses"]
+            }
+        }),
+        json!({
+            "name": "lab_plan",
+            "description": "Plan evidence acquisition against a serialized obligation graph using the in-tree inference-lab contract. It optionally separates a serialized hypothesis set from observations, orders admissible actions by declared value per unit cost, refuses privacy-boundary crossings and unreachable evidence, preserves budget and stop reasons, and never executes an acquisition or invents a posterior.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "graph": { "type": "object", "description": "Serialized bioprism-obligation ObligationGraph with dependency-aware state history." },
+                    "actions": { "type": "array", "maxItems": 1000, "description": "Serialized bioprism-lab AcquisitionAction values targeting obligation ids." },
+                    "budget": { "type": "object", "description": "Serialized AcquisitionCost with tokens and latency_units." },
+                    "marginal_value_floor": { "type": "number", "minimum": 0, "description": "Optional declared value-per-unit-cost floor; defaults to 0." },
+                    "hypotheses": { "type": "object", "description": "Optional serialized HypothesisSet. When present, observations may be supplied and separation gates planning." },
+                    "observations": { "type": "object", "description": "Optional observation-id to observed-value map used with hypotheses." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum frontier, ordered, and excluded rows returned; defaults to 100." }
+                },
+                "required": ["graph", "actions", "budget"]
+            }
+        }),
+        json!({
+            "name": "lens_catalogue",
+            "description": "List the implemented graph-lens declarations before evidence is supplied. Returns each lens question, required evidence, scope preconditions, declared refusals, the sealed report schema, and the explicit section-42 remainder; it does not imply that an unimplemented view exists.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
+            "name": "lens_leakage_check",
+            "description": "Run the typed section-42 cohort leakage lens over a serialized split: identity aliases, site confounding, temporal label leakage, and preprocessing fit crossings remain separate nonvisual witnesses. Missing inputs are underdetermined, scope is explicit, the report is sealed with a content receipt, and no split repair or regeneration is performed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cohort": { "type": "object", "description": "Serialized bioprism-lens CohortSplit with subjects, preprocessing, and decision_time." },
+                    "scope": { "type": "object", "description": "Serialized ScopeKey. It must bind the lens's cohort dimension, for example {\"cohort\": \"C-1\"}." },
+                    "include_spoken": { "type": "boolean", "description": "Include the deterministic nonvisual spoken rendition; defaults false." }
+                },
+                "required": ["cohort", "scope"]
+            }
+        }),
+        json!({
+            "name": "scale_family_split_verify",
+            "description": "Verify an imported item-to-tier assignment against generated-item lineage roots. Cycles, dangling parents, unassigned items, unknown ids, and family straddles fail closed; a valid report keeps item counts and family counts separate and never repairs or reassigns the split.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "corpus": { "type": "array", "maxItems": 50000, "description": "Serialized bioprism-scale GeneratedItem values with immediate-predecessor lineage." },
+                    "assignment": { "type": "object", "description": "Item id to tier map using public, validation, or hidden." }
+                },
+                "required": ["corpus", "assignment"]
+            }
+        }),
+        json!({
+            "name": "stewardship_review_check",
+            "description": "Conclude a serialized evaluator review record under the stewardship contract. Returns a dimension-scoped approval only when independence, corpus support, mandatory findings, and failure conditions pass; otherwise preserves a typed refusal and never upgrades unreviewed dimensions to approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "review": { "type": "object", "description": "Serialized bioprism-stewardship ReviewRecord with revision, author, reviewer, corpus, and findings." }
+                },
+                "required": ["review"]
+            }
+        }),
+        json!({
+            "name": "quality_gate_run",
+            "description": "Run the serialized in-memory infrastructure quality gate over a bounded columnar dataset. Returns pass, fail-with-witness, and not-runnable outcomes separately; indeterminate checks never become passes, and the tool does not infer schemas, sample rows, repair data, or access external storage.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "dataset": { "type": "object", "description": "Serialized bioprism-infra Dataset with named columns and equal-length rows." },
+                    "gate": { "type": "object", "description": "Serialized bioprism-infra Gate with named checks." },
+                    "references": { "type": "object", "description": "Optional serialized ReferenceSets for foreign-key checks." }
+                },
+                "required": ["dataset", "gate"]
+            }
+        }),
+        json!({
+            "name": "ledger_ingest",
+            "description": "Append a bounded serialized event stream to an in-memory bitemporal ledger and return idempotency, quarantine, causal-release, hash-chain, clock-anomaly, cut, and projection evidence. Payload bodies are not copied into projections; no durable storage, clock reading, network, or external side effect occurs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "events": { "type": "array", "maxItems": 50000, "description": "Serialized bioprism-ledger Event submissions in caller-supplied append order." },
+                    "cut": { "type": "object", "description": "Optional serialized TemporalCut with independent valid, record, and release bounds." },
+                    "include_receipts": { "type": "boolean", "description": "Include up to max_items append receipts; defaults false." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound projection, quarantine, cut, and receipt rows; defaults to 100." }
+                },
+                "required": ["events"]
+            }
+        }),
+        json!({
+            "name": "fabric_synthesize",
+            "description": "Evaluate a bounded set of serialized Agent Interweave Fabric candidates against a typed goal. Returns hard-constraint rejection reasons, admissible scores, and the Pareto frontier without selecting through unstated weights; unimplemented runtime and registry stages remain explicit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "goal": { "type": "object", "description": "Serialized bioprism-fabric synth::Goal naming the expected artifact, effects, budget, privacy label, and assurance requirements." },
+                    "candidates": { "type": "array", "maxItems": 1000, "description": "Serialized bioprism-fabric synth::Candidate values with role graphs and bindings." }
+                },
+                "required": ["goal", "candidates"]
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_catalogue",
+            "description": "Expose the six typed Agent Interweave reference workflows, roles, declared effects, owed deliverables, and derived outstanding counts. This is a specification inventory: absent artefacts remain absent and the tool does not invent programs, fixtures, adapters, tutorials, or runtime participants.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
+            "name": "atlas_report",
+            "description": "Produce a bounded capability-atlas coverage and failure-debt report from a serialized Atlas, preserving measured-versus-unmeasured distinctions, family/depth/failure histograms, inconsistencies, claim-supporting coverage, and optional predeclared composite eligibility. Unmeasured capabilities never become numeric zeroes and an ineligible composite returns a refusal.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "atlas": { "type": "object", "description": "Serialized bioprism-atlas Atlas including ontology, cells, and failure records." },
+                    "weighting": { "type": "object", "description": "Optional serialized WeightingPolicy; composite calculation remains gated by coverage, confounding, and claim tier." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows returned in each report list; defaults to 100." }
+                },
+                "required": ["atlas"]
+            }
+        }),
+        json!({
+            "name": "bundle_verify",
+            "description": "Recompute and verify an inline or root-confined ResultBundle. It checks carried entry digests, unlisted or missing content, embedded certificate integrity, and provenance posture; referenced entries remain not-recomputed and symmetric attestation is explicitly outside this keyless tool.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle": { "type": "object", "description": "Optional inline bioprism-bundle ResultBundle; mutually exclusive with document." },
+                    "document": { "type": "string", "description": "Optional root-confined JSON ResultBundle path; mutually exclusive with bundle." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "adaptive_panel",
+            "description": "Audit and query a serialized adaptive evaluation panel. It preserves abstentions, clustered effective sample size, coverage shortfalls, stopping verdicts, reportable-versus-withheld estimates, deterministic candidate selection, and optional capability comparison. Selection never executes a candidate and a coverage refusal never becomes a score.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "panel": { "type": "object", "description": "Serialized bioprism-adaptive AdaptivePanel containing PanelConfig and its TrialLedger." },
+                    "candidates": { "type": "array", "maxItems": 10000, "description": "Optional serialized adaptive Candidate values for next or batch selection." },
+                    "batch_size": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Optional batch size; when omitted with candidates, select one next instance." },
+                    "capability": { "type": "string", "description": "Optional capability id for a focused coverage, stopping, and estimate view." },
+                    "left": { "type": "string", "description": "Optional left capability id for a clustered comparison; requires right." },
+                    "right": { "type": "string", "description": "Optional right capability id for a clustered comparison; requires left." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum batch and repeated diagnostic rows returned; defaults to 100." }
+                },
+                "required": ["panel"]
+            }
+        }),
+        json!({
+            "name": "posterior_gate",
+            "description": "Build an evalengine capability posterior from serialized scored observations, optionally compare it to another posterior, and optionally apply a named release gate. Pass rate, outcome rate, partial credit, unknown share, vetoes, disputes, evidence tier, rationale, formula, coverage floors, and sensitivity remain separate; a scalar is returned only when its gate is defensible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "observations": { "type": "array", "maxItems": 10000, "description": "Serialized bioprism-evalengine Observation values." },
+                    "credit_policy": { "type": "object", "description": "Optional CreditPolicy; invalid ceilings refuse rather than silently clamping." },
+                    "gate": { "type": "object", "description": "Optional ReleaseGate with non-empty rationale and per-capability CoverageFloor declarations." },
+                    "other_observations": { "type": "array", "maxItems": 10000, "description": "Optional second observation set for capability-by-capability dominance comparison." },
+                    "tolerance": { "type": "number", "minimum": 0, "description": "Comparison tolerance; defaults to 0." },
+                    "min_effective": { "type": "number", "minimum": 0, "description": "Minimum effective sample for comparison; defaults to 0." }
+                },
+                "required": ["observations"]
+            }
+        }),
+        json!({
+            "name": "oracle_combine",
+            "description": "Combine serialized oracle judgements under the real tiered mesh policy. It validates the UTC evaluation instant, applies admissibility and minimum-tier rules, preserves weaker and inadmissible evidence, reports suppressed overrides, and keeps same-tier disagreement set-valued. It never runs or authenticates an oracle and never chooses a biological truth by majority vote.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject": { "type": "string", "description": "Evidence subject identifier." },
+                    "at": { "type": "string", "description": "Evaluation instant in fixed UTC form YYYY-MM-DDTHH:MM:SSZ." },
+                    "judgements": { "type": "array", "minItems": 1, "maxItems": 1000, "description": "Serialized bioprism-oracle Judgement values." },
+                    "minimum_deciding_tier": { "type": "string", "enum": ["judge", "statistical", "property", "execution", "deterministic"], "description": "Optional minimum evidence tier; defaults to judge." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum judgement and disagreement rows returned; defaults to 100." }
+                },
+                "required": ["subject", "at", "judgements"]
+            }
+        }),
+        json!({
+            "name": "oracle_reference_panel",
+            "description": "Apply a serialized bioprism-oraclex ReaderPanel under an explicit consensus rule. It preserves independent versus post-discussion reads, minority calls, blinded-adjudication requirements, raw tallies, and optional per-reader model agreement; a split or unblinded reference remains unresolved.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "panel": { "type": "object", "description": "Serialized bioprism-oraclex ReaderPanel." },
+                    "rule": { "type": "object", "description": "Optional ConsensusRule, for example {rule: majority}, {rule: unanimous}, {rule: adjudicated}, or {rule: super_majority, numerator, denominator}; defaults to majority." },
+                    "model_call": { "type": "string", "description": "Optional model call for raw per-reader agreement rows." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum retained read rows; defaults to 100." }
+                },
+                "required": ["panel"]
+            }
+        }),
+        json!({
+            "name": "oracle_missingness",
+            "description": "Evaluate serialized reference-standard missingness and small-cell boundary declarations. Returns deterministic or unresolved informativeness, complete-case admissibility when a mechanism is declared, and egress determination under a required caller-supplied floor; it never imputes, defaults a mechanism, or releases individual data as an aggregate.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pattern": { "type": "object", "description": "Serialized AbsencePattern with per-group present and absent counts." },
+                    "field": { "type": "object", "description": "Serialized Field with sensitivity and optional subject denominator." },
+                    "boundary": { "type": "object", "description": "Serialized Boundary with permitted sensitivity." },
+                    "small_cell_floor": { "type": "integer", "minimum": 0, "description": "Required policy floor for aggregate subject counts; no library default is used." },
+                    "mechanism": { "type": "object", "description": "Optional MissingnessMechanism; omit to keep complete-case admissibility unresolved." }
+                },
+                "required": ["pattern", "field", "boundary", "small_cell_floor"]
+            }
+        }),
+        json!({
+            "name": "bioeval_reference_audit",
+            "description": "Validate and audit a serialized bioprism-bioeval ReferenceStandard. It keeps distributed truth, modal confidence, entropy, dispersion attribution, unresolved scope, and not-evaluable scope separate; an invalid mass vector is refused before any metric is reported.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reference": { "type": "object", "description": "Serialized ReferenceStandard. Distribution form carries standard, mass, and dispersion; unresolved and not_evaluable forms carry a reason." },
+                    "state": { "type": "string", "description": "Optional reference state to query without treating an omitted state as zero mass." }
+                },
+                "required": ["reference"]
+            }
+        }),
+        json!({
+            "name": "evaluation_worldline_audit",
+            "description": "Audit a serialized bioevalx Worldline for future evidence leakage and dangling context references. It cuts admissibility on accessibility time, keeps missing references separate from future leakage, and optionally returns the evidence admissible at an explicit RFC-3339 decision instant.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "worldline": { "type": "object", "description": "Serialized bioprism-bioevalx Worldline with observations and decisions." },
+                    "at": { "type": "string", "description": "Optional RFC-3339 instant for an admissible-at view." }
+                },
+                "required": ["worldline"]
+            }
+        }),
+        json!({
+            "name": "evaluation_reproduction_check",
+            "description": "Certify a serialized bioevalx Reexecution. It reports matched, diverged, and missing outputs, first divergence, environment portability, and an explicit refusal when a caller tries to promote reproducibility into biological validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reexecution": { "type": "object", "description": "Serialized bioprism-bioevalx Reexecution with declared OutputSpec values and Observed rerun outputs." },
+                    "biological_claim": { "type": "string", "description": "Optional biological claim to test against the certificate's deliberate validity-claim refusal." }
+                },
+                "required": ["reexecution"]
+            }
+        }),
+        json!({
+            "name": "evaluation_trajectory_check",
+            "description": "Evaluate a serialized bioevalx Trajectory against its declared path properties. Violations, vacuous opportunities, recovery pairs, and optional immediate-versus-downstream bounded suffixes remain separate; the tool never scores step count as progress.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "trajectory": { "type": "object", "description": "Serialized bioprism-bioevalx Trajectory." },
+                    "step": { "type": "integer", "minimum": 0, "description": "Optional decision step for bounded_suffix; requires horizon." },
+                    "horizon": { "type": "integer", "minimum": 1, "description": "Optional declared downstream horizon; requires step." }
+                },
+                "required": ["trajectory"]
+            }
+        }),
+        json!({
+            "name": "runtime_effect_check",
+            "description": "Authorize one serialized runtime EffectRequest under an explicit EffectPolicy. It exposes declaration, reversibility class, canonical path, network, and simulation decisions while performing no filesystem, network, process, model, message, or payment effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "policy": { "type": "object", "description": "Serialized bioprism-runtime EffectPolicy. Deny-by-default is recommended." },
+                    "request": { "type": "object", "description": "Serialized bioprism-runtime EffectRequest tagged by kind." }
+                },
+                "required": ["policy", "request"]
+            }
+        }),
+        json!({
+            "name": "runtime_tape_verify",
+            "description": "Verify a serialized runtime WorldTape before trusting it. It checks the hash chain and checkpoints, exposes artifacts and simulated provenance, and optionally reports first divergence against another verified tape; it never replays or reaches a provider.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tape": { "type": "object", "description": "Serialized bioprism-runtime WorldTape." },
+                    "other_tape": { "type": "object", "description": "Optional second serialized WorldTape for earliest digest divergence." }
+                },
+                "required": ["tape"]
+            }
+        }),
+        json!({
+            "name": "onco_boundary_check",
+            "description": "Triage a serialized OncoWorld BoundaryRequest under the fixed research-only boundary. It preserves safe aggregate uses, refuses individualized clinical uses, escalates where required, and refuses direct identifiers before echoing them.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-onco BoundaryRequest." },
+                    "boundary": { "type": "object", "description": "Optional serialized ResearchBoundary; omitted means the fixed research-only boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "onco_response_assess",
+            "description": "Run the serialized OncoWorld criteria-aware response contract. It separates radiologic reading from reportable call, preserves post-treatment differential and threshold sensitivity, and never turns unconfirmed progression or not-evaluable evidence into a stable or clinical recommendation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "criterion": { "type": "object", "description": "Serialized ResponseCriterion, including id, version, compartment, thresholds, and confirmation interval." },
+                    "baseline": { "type": "object", "description": "Serialized baseline ImagingObservation." },
+                    "current": { "type": "object", "description": "Serialized current ImagingObservation." },
+                    "current_acquired": { "type": "string", "description": "Current acquisition instant as RFC-3339." },
+                    "nadir_spd_mm2": { "type": ["number", "null"], "minimum": 0 },
+                    "baseline_clinical": { "type": "object", "description": "Serialized baseline ClinicalObservation." },
+                    "current_clinical": { "type": "object", "description": "Serialized current ClinicalObservation." },
+                    "treatment": { "type": "object", "description": "Serialized TreatmentContext." },
+                    "evidence": { "type": "object", "description": "Optional serialized ProgressionEvidence; omitted means all confirmation evidence is unobserved." },
+                    "measurement_error_fraction": { "type": "number", "minimum": 0, "default": 0 }
+                },
+                "required": ["criterion", "baseline", "current", "current_acquired", "baseline_clinical", "current_clinical", "treatment"]
+            }
+        }),
+        json!({
+            "name": "onco_worldline_view",
+            "description": "Audit a serialized OncoWorld TumourWorldline. It reports biological acquisition order separately from record order, baseline-relative acquisition days, four-clock rows, and an optional agent-visibility cut that keeps hidden future evidence explicit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "worldline": { "type": "object", "description": "Serialized bioprism-onco TumourWorldline with a subject, baseline, and timepoints." },
+                    "visible_at": { "type": ["string", "null"], "description": "Optional RFC-3339 agent-visibility cutoff. Omit to inspect all supplied timepoints without a visibility cut." }
+                },
+                "required": ["worldline"]
+            }
+        }),
+        json!({
+            "name": "onco_classification_check",
+            "description": "Run the serialized OncoWorld integrated molecular classification table. Histology selects candidates, observed marker calls resolve or exclude them, and unobserved evidence becomes a prioritized obligation instead of a negative or a guessed entity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "histology": { "type": "string", "enum": ["diffuse_glioma", "outside_implemented_scope"] },
+                    "panel": { "type": "object", "description": "Serialized bioprism-onco MarkerPanel; an empty object means nothing was collected." }
+                },
+                "required": ["histology", "panel"]
+            }
+        }),
+        json!({
+            "name": "onco_outcome_analyze",
+            "description": "Analyse one serialized OncoWorld FollowUp under an explicitly declared Estimand. It keeps delayed entry, event versus censoring, competing death, loss to follow-up, treatment switching, and informative-bias flags visible; it does not estimate a cohort endpoint.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "follow_up": { "type": "object", "description": "Serialized bioprism-onco FollowUp with index, risk-set entry, last contact, and endpoint-agnostic terminal fact." },
+                    "estimand": { "type": "object", "description": "Serialized Estimand declared before analysis; do not replace it with an endpoint-only label." }
+                },
+                "required": ["follow_up", "estimand"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_identity_join",
+            "description": "Decide whether two serialized OncoWorld artifacts may be joined at a declared analysis unit. It enforces participant identity before local identifiers, permissible-use and relation licensing, lesion/specimen/epoch boundaries, and returns a typed auditable refusal rather than silently dropping the mismatch.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "left": { "type": "object", "description": "Serialized bioprism-oncoworlds Artifact." },
+                    "right": { "type": "object", "description": "Serialized bioprism-oncoworlds Artifact." },
+                    "unit": { "type": "string", "enum": ["participant", "lesion", "specimen", "imaging_series"] },
+                    "evidence": { "type": "object", "description": "Optional serialized IdentityEvidence; omitted means no cross-participant identity link is asserted." },
+                    "epoch_bridge": { "type": "object", "description": "Optional serialized EpochBridge with from, to, and a warrant for crossing disease epochs." }
+                },
+                "required": ["left", "right", "unit"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_model_transport",
+            "description": "Check whether a serialized patient-derived model result may be transported into a patient-relevant research claim. It enforces source identity, passage-matched fidelity, establishment selection, effective biological replication, declared losses, and required assumptions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "result": { "type": "object", "description": "Serialized bioprism-oncoworlds ModelResult." },
+                    "fidelity": { "type": "object", "description": "Optional serialized FidelityEvidence; omit to model no measured fidelity axes." },
+                    "establishment": { "type": "object", "description": "Serialized EstablishmentCohort with attempted, established, and selection_modelled." },
+                    "claimed_n": { "type": "integer", "minimum": 0, "maximum": 1000000, "description": "Number of biological units the patient-relevant claim would assert." },
+                    "transport": { "type": "object", "description": "Serialized DeclaredTransport with a non-empty loss ledger and required model-to-patient assumptions." }
+                },
+                "required": ["result", "establishment", "claimed_n", "transport"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_methylation_classify",
+            "description": "Classify a serialized methylation score map under its declared classifier threshold and sample QC context. It preserves unclassifiable results, nearest-class evidence, calibration, and tumour-content caveats instead of forcing a maximum-score label.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "classifier": { "type": "object", "description": "Serialized ClassifierVersion; reporting_threshold is required." },
+                    "scores": { "type": "object", "description": "Map from opaque methylation class labels to serialized CalibratedScore values." },
+                    "context": { "type": "object", "description": "Serialized SampleContext containing QC and observed/unobserved tumour content." }
+                },
+                "required": ["classifier", "scores", "context"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_methylation_compare",
+            "description": "Reconcile two serialized methylation VersionedResults without adjudicating across classifier or reference versions. Agreement, both-unclassifiable, and version-conditioned outcomes remain distinct and the earlier result is never rewritten as wrong.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "left": { "type": "object", "description": "Serialized left VersionedResult." },
+                    "right": { "type": "object", "description": "Serialized right VersionedResult." }
+                },
+                "required": ["left", "right"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_radiogenomic_check",
+            "description": "Check a serialized imaging-to-molecular claim against its evaluation design, specimen-scoped target, mechanism strata, and declared cross-scope transport. Leaky splits, specimen-negative promotion, post-hoc cohorts, unstratified mechanism claims, and missing assumptions fail closed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "claim": { "type": "object", "description": "Serialized RadiogenomicClaim." },
+                    "design": { "type": "object", "description": "Serialized EvaluationDesign." },
+                    "observation": { "type": "object", "description": "Serialized specimen-level molecular observation." },
+                    "transport": { "type": "object", "description": "Serialized DeclaredTransport with radiogenomic losses and assumptions." }
+                },
+                "required": ["claim", "design", "observation", "transport"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_clonal_history_check",
+            "description": "Check serialized candidate clonal histories against a tumour population. It reports compatible and rejected histories, preserves typed arithmetic refusals, and exposes ambiguity when more than one history survives instead of selecting the first tree.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "population": { "type": "object", "description": "Serialized TumourPopulation with subclone fractions and alterations." },
+                    "candidates": { "type": "array", "maxItems": 10000, "description": "Candidate serialized ClonalHistory values." }
+                },
+                "required": ["population", "candidates"]
+            }
+        }),
+        json!({
+            "name": "stress_profile",
+            "description": "Run one serialized bioprism-stress family across its intensity ladder. It reports breaking points, required-versus-probed relations, generator postcondition defects, identifiability, effective sample size, unresolved measurements, and a bounded caveat rather than a robustness score.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cohort": { "type": "object", "description": "Serialized bioprism-stress Cohort." },
+                    "stress": { "type": "object", "description": "Serialized Stress with a family-specific Knob, full endpoint, magnitude, and seed." },
+                    "procedures": { "type": "array", "maxItems": 100, "description": "Optional serialized Procedure values; omitted uses the standard seven-procedure panel." }
+                },
+                "required": ["cohort", "stress"]
+            }
+        }),
+        json!({
+            "name": "stress_report",
+            "description": "Run a serialized stress program across a cohort and return family-specific robustness profiles plus a guarded worst-family view. Non-identifiable families and generator defects are excluded from that comparison, and all refusal states remain explicit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cohort": { "type": "object", "description": "Serialized bioprism-stress Cohort." },
+                    "stresses": { "type": "array", "maxItems": 100, "description": "Serialized Stress values." },
+                    "procedures": { "type": "array", "maxItems": 100, "description": "Optional serialized Procedure values; omitted uses the standard seven-procedure panel." }
+                },
+                "required": ["cohort", "stresses"]
+            }
+        }),
+        json!({
+            "name": "policy_screen",
+            "description": "Screen world facts against a caller-supplied information-flow policy before selection. Rules and tag labels are joined monotonically; unknown policy refuses by default; typed refusals, escalation hints, obligations, policy version and the complete trace are retained instead of being silently filtered.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "world": { "type": "string", "description": "Path to a JSON world document, relative to the server root; indexed stores are not accepted." },
+                    "request": { "type": "object", "description": "bioprism-policy Request JSON: principal {id, role, clearance {max_classification, compartments}, site, authorities}, purpose, channel and RFC-3339 at." },
+                    "rules": { "type": "array", "description": "Optional PolicyRule objects with id, version, scope, label and optional consent. Omit to exercise deny-by-default." },
+                    "tags": { "type": "object", "description": "Optional map from fact tag names to full PolicyLabel objects." },
+                    "facts": { "type": "array", "items": { "type": "string" }, "description": "Optional fact-id subset; omit to screen every world fact." }
+                },
+                "required": ["world", "request"]
+            }
+        }),
+        json!({
+            "name": "bioethics_action_review",
+            "description": "Review a serialized physical or in-silico action plan against the research-only boundary, partition executable research planning from physical steps, and optionally mint a referral only when both human approval and institutional safety review are present. This process never executes a physical action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "plan": { "type": "object", "description": "Serialized bioprism-bioethics ActionPlan with subject, steps, and declared_use." },
+                    "boundary": { "type": "object", "description": "Optional serialized bioprism-onco ResearchBoundary; omitted uses the immutable research-only boundary." },
+                    "authorisation": { "type": "object", "description": "Optional Authorisation with human_approver and institutional_safety_review_body; required to refer physical steps." }
+                },
+                "required": ["plan"]
+            }
+        }),
+        json!({
+            "name": "bioethics_human_subject_screen",
+            "description": "Screen a serialized study for human-subject engagement, check declared purposes against an optional policy Consent at an explicit RFC-3339 time, and check individual return of results against the research boundary. Undetermined is never emitted as an exemption or clearance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "study": { "type": "object", "description": "Serialized bioprism-bioethics StudyDescription." },
+                    "consent": { "type": "object", "description": "Optional serialized bioprism-policy Consent; must be paired with at." },
+                    "at": { "type": "string", "description": "Optional RFC-3339 timestamp at which consent is checked; must be paired with consent." },
+                    "boundary": { "type": "object", "description": "Optional serialized ResearchBoundary for return-of-results checking." }
+                },
+                "required": ["study"]
+            }
+        }),
+        json!({
+            "name": "bioethics_dual_use_review",
+            "description": "Require an explicit misuse-surface assessment before routing a capability release through the section-13 risk gate. Subject mismatch, missing sensitive category, unrated risk, and existence suppression remain typed refusals; exploit-detail withholding is the only supported withholding scope.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "release": { "type": "object", "description": "Serialized CapabilityRelease with subject and SurfaceAssessment." },
+                    "risk": { "type": "object", "description": "Serialized bioprism-safety RiskAssessment with category and ratings keyed by risk dimension." },
+                    "withhold": { "type": "string", "enum": ["exploit_detail", "existence"], "description": "Optional withholding scope to check after a referral; existence is refused." },
+                    "finding": { "type": "string", "description": "Optional finding label attached to a withholding check." }
+                },
+                "required": ["release", "risk"]
+            }
+        }),
+        json!({
+            "name": "bioethics_validation_check",
+            "description": "Audit a serialized validation dossier for every required evidence kind and independent reproduction, returning experimental versus verified maturity and a typed refusal instead of treating missing evidence as a pass.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "dossier": { "type": "object", "description": "Serialized bioprism-bioethics ValidationDossier with subject, author, and evidence keyed by evidence kind." }
+                },
+                "required": ["dossier"]
+            }
+        }),
+        json!({
+            "name": "bioethics_representation_audit",
+            "description": "Summarize measured, unmeasured, and small-cell-suppressed representation strata and optionally test whether a finding may be attributed to a requested axis after resource-context matching. Duplicate strata refuse instead of overwriting coverage.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject": { "type": "string", "description": "Name of the study, cohort, or evaluation surface." },
+                    "observations": { "type": "array", "maxItems": 10000, "description": "Serialized StratumObservation values." },
+                    "attribution": { "type": "object", "description": "Optional object with axis, matched context axes, and finding; returns standing or a typed refusal." }
+                },
+                "required": ["subject", "observations"]
+            }
+        }),
+        json!({
+            "name": "influence_analyze",
+            "description": "Compute a sound numeric influence analysis over a caller-declared factor region. Structural bounds run by default; exact removal execution requires execute=true and an explicit budget. Unknown preconditions stay Unknown rather than becoming infinity or a vacuous claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "label": { "type": "string", "description": "Stable label for the query region." },
+                    "variables": { "type": "object", "description": "Map from variable names to positive integer cardinalities." },
+                    "assumed_variables": { "type": "array", "items": { "type": "string" }, "description": "Optional variable names whose cardinalities are assumptions rather than observations." },
+                    "factors": { "type": "array", "maxItems": 1000, "description": "Factors with id, scope, and optional non-negative table values; omit table to exercise structural Unknown states." },
+                    "free": { "type": "array", "items": { "type": "string" }, "description": "Free variables retained in the normalized answer." },
+                    "factor": { "type": "string", "description": "One factor to perturb; mutually exclusive with factor_group." },
+                    "factor_group": { "type": "array", "items": { "type": "string" }, "maxItems": 1000, "description": "A non-empty factor group to perturb jointly; mutually exclusive with factor." },
+                    "perturbation": { "type": "object", "description": "Perturbation enum: {class: removal} or {class: multiplicative_range, range: {lo, hi}}." },
+                    "budget": { "type": "object", "description": "Optional max_induced_width, max_peak_entries, and max_ops limits for physical influence execution." },
+                    "execute": { "type": "boolean", "description": "Explicitly permit exact removal execution; defaults false for structural-only analysis." }
+                },
+                "required": ["label", "variables", "factors", "free", "perturbation"]
+            }
+        }),
+        json!({
+            "name": "routing_decide",
+            "description": "Route an unseen task fingerprint among an explicitly approved architecture set using a serialized evidence ledger. Returns abstention reasons, supporting coverage, confidence, neighbourhood size, and the safe default; evidence leakage is refused when task_id is supplied.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "fingerprint": { "type": "object", "description": "Serialized bioprism-routing Fingerprint computed without consulting an oracle answer." },
+                    "evidence": { "type": "array", "maxItems": 20000, "description": "Serialized bioprism-routing Observation values; duplicate task/architecture rows are refused." },
+                    "policy": { "type": "object", "description": "Serialized bioprism-routing RoutingPolicy with approved architectures, safe default, thresholds, and radius." },
+                    "task_id": { "type": "string", "description": "Optional identity of the task being routed; when supplied, route_unseen refuses any evidence row with this identity." }
+                },
+                "required": ["fingerprint", "evidence", "policy"]
+            }
+        }),
+        json!({
+            "name": "token_context_plan",
+            "description": "Build a deterministic token-context plan from a declared request and candidate nodes, checking mandatory closure affordability and dry-run restricted-data privacy. Optionally compare two policy-only requests while preserving estimation methods and refusal causes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-tokens ContextRequest with envelope, depth, role, decision, policy, and pinned compiler version." },
+                    "candidates": { "type": "array", "maxItems": 10000, "description": "Serialized PlanCandidate values with node kind, estimate, mandatory, and restricted flags." },
+                    "variant_request": { "type": "object", "description": "Optional second ContextRequest for a policy-only comparison; must accompany variant_candidates." },
+                    "variant_candidates": { "type": "array", "maxItems": 10000, "description": "Optional candidate list for variant_request; must accompany variant_request." }
+                },
+                "required": ["request", "candidates"]
+            }
+        }),
+        json!({
+            "name": "weavelang_compile",
+            "description": "Compile bounded WeaveLang source to deterministic WeaveIR, return whole and semantic digests, inspect state/liveness/invariants, and optionally run the local replay semantics. Replay is the default and world-mutating transitions fail closed; no network, model, or tool invocation occurs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "maxLength": 2000000, "description": "WeaveLang source text." },
+                    "execute": { "type": "boolean", "description": "Run the local semantic machine after compilation; defaults false." },
+                    "mode": { "type": "string", "enum": ["replay", "live"], "description": "Execution mode when execute=true; defaults to replay." },
+                    "thread_id": { "type": "string", "maxLength": 256, "description": "Deterministic thread identity used for event ids; defaults to mcp-weavelang." },
+                    "include_ir": { "type": "boolean", "description": "Include the full serialized WeaveIR; defaults false." },
+                    "include_trace": { "type": "boolean", "description": "Include full events in a completed execution trace; defaults false." }
+                },
+                "required": ["source"]
+            }
+        }),
+        json!({
+            "name": "bioql_compile",
+            "description": "Lex, parse, and type-check a bounded BioQL query against a caller-supplied biological schema. Returns a typed query or a fail-closed refusal for missing fields, incomparable units or frames, temporal ambiguity, absent access labels, absent provenance, or missing cost bounds; never executes the query.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "minLength": 1, "maxLength": 1000000, "description": "BioQL source text; this endpoint compiles syntax and semantics only." },
+                    "schema": { "type": "object", "description": "Serialized bioprism-biolang QuerySchema; collections and fields must be explicit and are never inferred." }
+                },
+                "required": ["query", "schema"]
+            }
+        }),
+        json!({
+            "name": "epistemic_voi",
+            "description": "Price one evidence acquisition or a bounded non-adaptive bundle against an explicit decision problem and belief. Keeps gross value, declared cost, net value, action changes, complementarity, improper likelihoods, and exhaustive caps distinct; no adaptive policy or hidden prior is invented.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem with explicit actions, models, and row-major loss matrix." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief over the problem models." },
+                    "acquisition": { "type": "object", "description": "One acquisition with id, non-negative cost, and outcome likelihood vectors." },
+                    "acquisitions": { "type": "array", "maxItems": 64, "description": "Alternative bounded acquisition bundle; provide this instead of acquisition for joint non-adaptive pricing." }
+                },
+                "required": ["problem", "belief"]
+            }
+        }),
+        json!({
+            "name": "benchmark_trace_analyze",
+            "description": "Run the deeper benchmark-compiler analysis over serialized failing and optional reference trajectories: causal ancestry, agent-controlled localization, episode segmentation, ranked boundaries, and repetition progress. It returns review material and refuses fabricated cells or execution claims.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "failing": { "type": "object", "description": "Serialized bioprism-trace Trace for the failing or suspicious run." },
+                    "reference": { "type": "object", "description": "Optional serialized better/reference Trace used only for observed divergence comparison." }
+                },
+                "required": ["failing"]
+            }
+        }),
+        json!({
+            "name": "pack_catalogue",
+            "description": "Expose the typed benchmark-pack portfolio across agent and biological domains, including construct, decision families, capabilities, domains, oracle tiers, release sequencing, grounded-oracle posture, and duplicate-signature review candidates. Declarations are not measured scores.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "section": { "type": "string", "enum": ["all", "15", "29"], "description": "Optional portfolio section filter; defaults to all." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum catalogue rows returned; defaults to 100." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "pack_health_assess",
+            "description": "Assess a serialized benchmark PackIr against observed calibration, trivial baselines, contamination signals, oracle posture, and materialization policy. Returns a digest-bound health verdict and only emits a numeric score when the pack passes its reportability gate.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pack": { "type": "object", "description": "Serialized bioprism-packs PackIr revision; its digest binds the assessment." },
+                    "observations": { "type": "object", "description": "Serialized bioprism-packs Observations containing calibration, trivial_baselines, and contamination." },
+                    "policy": { "type": "object", "description": "Optional serialized HealthPolicy; omitted uses the typed default thresholds." }
+                },
+                "required": ["pack", "observations"]
+            }
+        }),
+        json!({
+            "name": "foundation_contract_check",
+            "description": "Validate a falsifiable biological contract and optional parent refinement, applicability envelope, BioWorld counterfactual declaration, and transition plane. Returns separate gates for admissibility, inheritance, maturity/scope, world-class authority, and plane consistency; it never turns a declaration into evidence or treatment authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "contract": { "type": "object", "description": "Serialized bioprism-foundation ContractDraft." },
+                    "parent": { "type": "object", "description": "Optional parent ContractDraft; child refinement is checked against it." },
+                    "envelope": { "type": "object", "description": "Optional ApplicabilityEnvelope with explicit positional bindings and maturity." },
+                    "present_as_established": { "type": "boolean", "description": "When true, apply the envelope's explicit established-maturity gate." },
+                    "world": { "type": "object", "description": "Optional BioWorldDeclaration for counterfactual and reveal-policy checks." },
+                    "claim": { "type": "string", "description": "Optional counterfactual claim enum value checked against world, for example real_treatment_effect or specified_ground_truth." },
+                    "transition": { "type": "object", "description": "Optional serialized world Transition checked for latent-biology plane confusion." }
+                },
+                "required": ["contract"]
+            }
+        }),
+        json!({
+            "name": "choreography_check",
+            "description": "Check a serialized multiparty global choreography, project every role, and run bounded deadlock/liveness/orphan/unexpected-message analysis. Ill-formed protocols produce no projections; bounded or inconclusive results remain explicit and are never rounded up to proof.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "global": { "type": "object", "description": "Serialized bioprism-choreography GlobalType using end, interaction, rec, and var nodes." },
+                    "bound": { "type": "object", "description": "Optional ExplorationBound with max_states, max_depth, and channel_capacity; defaults to the library bound." }
+                },
+                "required": ["global"]
+            }
+        }),
+        json!({
+            "name": "conformance_run",
+            "description": "Run the shipped FIBER conformance suite against the in-repository reference implementation after verifying fixture digests. Returns case counts, fixture drift, test-pyramid shape, the noncompensatory release decision, and optionally bounded case details.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include_details": { "type": "boolean", "description": "Include bounded individual case results; defaults false." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum case results when include_details is true; defaults to 100." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "provider_capability_gate",
+            "description": "Gate a serialized runtime/provider capability card against required correctness and security checks. Untested and failed states block, performance checks remain measurements without invented thresholds, and optional cross-provider differentials preserve indeterminate evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "card": { "type": "object", "description": "Serialized bioprism-sweep CapabilityCard." },
+                    "required": { "type": "array", "minItems": 1, "maxItems": 17, "items": { "type": "string" }, "description": "Pass/fail Check names required by the deployment." },
+                    "other_card": { "type": "object", "description": "Optional second CapabilityCard for a bounded cross-provider differential." },
+                    "include_card": { "type": "boolean", "description": "Include the full serialized card in the response; defaults false." }
+                },
+                "required": ["card", "required"]
+            }
+        }),
+        json!({
+            "name": "sdk_registry_check",
+            "description": "Validate a bounded set of serialized plugin manifests, compute immutable and core digests, assess attributed trust evidence, and attempt deterministic registry admission under an optional host policy. Invalid manifests and registration conflicts refuse without returning a partial capability resolution.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifests": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Serialized bioprism-sdk PluginManifest values; all declarations must validate before admission." },
+                    "policy": { "type": "object", "description": "Optional serialized RegistryPolicy; omitted uses workspace schema versions, deny-all effects, and the default trust floor." }
+                },
+                "required": ["manifests"]
+            }
+        }),
+        json!({
+            "name": "governance_schema_check",
+            "description": "Inspect the shipped schema-evolution descriptors or check a JSON document against one. Reports fields, digest membership, compatibility mode, missing and mistyped fields, and unknown fields without confusing preserve-and-forward unknowns with conformance failures.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "schema": { "type": "string", "description": "Optional schema id such as fiber-context-certificate/0.1; omit to list all or infer from document.schema_version." },
+                    "document": { "type": "string", "description": "Optional JSON document path relative to the server root; when present it is checked against the selected or inferred schema." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "developer_platform_status",
+            "description": "Run the in-repository developer-platform contract: classify walkthrough claims, distinguish foreign artifacts, verify cookbook references against this root, lint diagnostics, audit exit-code retry semantics, and expose declared change-impact surfaces. Foreign SDKs and CI artifacts stay explicitly unresolved.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include_details": { "type": "boolean", "description": "Include full catalogue, verification, lint and change-impact records; defaults to false for bounded discovery." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows returned in each repeated diagnostic/contract list; defaults to 100." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "safety_posture",
+            "description": "Summarize the executable section-13 threat model with separate mitigated, declared-only, unmitigated, residual, unanalysed, and unreachable populations. It explicitly reports that modelled declarations are not runtime security controls.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include_threats": { "type": "boolean", "description": "Include full threat records in addition to the bounded posture summary." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "weave_protocol_catalog",
+            "description": "Return the typed agent communication acts and their antecedent requirements, plus the protocol invariants that distinguish commitments and challenges from plain transcript messages.",
+            "inputSchema": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "workspace_capabilities",
+            "description": "Return the stable domain catalog: which biological, reasoning, safety, evaluation, mutation, orchestration, operations, and documentation surfaces exist, and whether each is callable through MCP, the CLI, or only as a library.",
+            "inputSchema": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "repository_catalog",
+            "description": "Scan the configured repository root into a deterministic documentation/module catalog. Returns hashes, titles, statuses, protected classes, link health, and graph lint counts without dumping document bodies. Use prefix and limit for bounded discovery.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "prefix": { "type": "string", "description": "Optional repository-relative module prefix such as docs/ or crates/fiber/." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum modules to return; defaults to 200." },
+                    "include_briefs": { "type": "boolean", "description": "Include the first-paragraph brief for each returned module." },
+                    "include_findings": { "type": "boolean", "description": "Include full graph lint findings in addition to counts." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "repository_bundle",
+            "description": "Compile a route-specific documentation context from the repository root. Protected closure, route obligations, traversal completeness, budget failures, and omission influence are preserved; request markdown explicitly when the metadata is insufficient.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "route": { "type": "object", "description": "TaskRoute JSON with id, intent, and at least one must_read module id." },
+                    "policy": { "type": "string", "enum": ["normative", "exhaustive"], "description": "Traversal policy; defaults to normative." },
+                    "max_depth": { "type": "integer", "minimum": 0, "description": "Optional depth cap. A cap makes the resulting completeness partial and never licenses zero-influence omissions." },
+                    "denied_labels": { "type": "array", "items": { "type": "string" } },
+                    "follow": { "type": "array", "items": { "type": "string" }, "description": "Optional closed edge vocabulary override, for example [requires, references]." },
+                    "include_markdown": { "type": "boolean", "description": "Include rendered source boundaries and text; defaults to false for progressive disclosure." },
+                    "max_markdown_chars": { "type": "integer", "minimum": 1, "maximum": 2000000, "description": "Hard ceiling for requested markdown; the server fails rather than truncating." }
+                },
+                "required": ["route"]
+            }
+        }),
+        json!({
+            "name": "repository_impact",
+            "description": "Compute conservative documentation change impact for one repository module. The result preserves incoming dependency propagation, typed transitivity stops, affected task routes, and scan/link diagnostics; it is not a semantic diff and never claims that every affected module must change.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "changed": { "type": "string", "description": "Repository module id present in the scanned documentation graph, for example docs/README." },
+                    "route": { "type": "object", "description": "Optional serialized TaskRoute to test for invalidation." },
+                    "routes": { "type": "array", "maxItems": 1000, "description": "Optional serialized TaskRoute values; use instead of route for multiple route checks." }
+                },
+                "required": ["changed"]
+            }
+        }),
+        json!({
+            "name": "telemetry_project",
+            "description": "Project a serialized canonical DomainEvent through a typed RedactionPolicy and return the TelemetryRecord beside its semantic-loss report. Optionally evaluate a serialized observed/asserted metric definition. Unclassified emission, missing treatments, missing observations, asserted-only inputs, and zero denominators remain refusals; no OTLP backend, sampling, span creation, clock read, storage, or network export is performed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "event": { "type": "object", "description": "Serialized bioprism-ops DomainEvent with fields carrying values and ScopeClass labels." },
+                    "policy": { "type": "object", "description": "Serialized bioprism-ops RedactionPolicy; every event field class needs an explicit emit, coarsen, or drop treatment." },
+                    "trace": { "type": "string", "description": "Opaque correlation TraceId; it connects records but does not define event identity." },
+                    "metric": { "type": "object", "description": "Optional serialized MetricDefinition using passthrough, ratio, sum, or difference derivation." },
+                    "observations": { "type": "object", "description": "Required when metric is supplied: serialized Observations with observed or asserted Sample provenance." }
+                },
+                "required": ["event", "policy", "trace"]
             }
         }),
     ]

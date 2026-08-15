@@ -27,8 +27,46 @@ fn main() {
                     "bioprism-mcp — Model Context Protocol server for the FIBER context compiler\n\n\
                      USAGE\n  bioprism-mcp [--root <dir>]\n\n\
                      Speaks JSON-RPC 2.0 over newline-delimited stdio. Every path an agent supplies \n\
-                     is resolved inside --root; absolute paths and traversal outside it are refused.\n\n\
-                     Tools: fiber_compile, fiber_refine, fiber_explain, fiber_verify, world_index"
+                     is resolved inside --root; absolute paths, traversal and symlink escapes are refused.\n\n\
+                     The client must initialize, acknowledge notifications/initialized, and then use\n\
+                     tools/list, tools/call, resources/list or resources/read. fiber_compile returns\n\
+                     a content-addressed refinement handle.\n\n\
+                     Tools: fiber_compile, fiber_refine, fiber_explain, fiber_verify, projection_bundle, world_validate,\n\
+                     context_compare, bioworlds_catalog, modality_catalog, mutation_family,\n\
+                     prism_minimize, registry_gate, release_audit, operations_catalog, ops_acceptance, ops_capacity,\n\
+                     research_ci_check, capability_rank,\n\
+                     safety_release_gate, medical_boundary_check, hub_search, measurement_compare,\n\
+                     hub_resolve, hub_lock, tabular_ingest, observed_world_declare, world_claim_check,\n\
+                    trace_analyze,\n\
+                    lineage_audit, preanalytic_apply,\n\
+                    contradiction_review,\n\
+                     lab_plan, lens_catalogue, lens_leakage_check, scale_family_split_verify, stewardship_review_check,\n\
+                     quality_gate_run, ledger_ingest,\n\
+                     fabric_synthesize,\n\
+                     interweave_workflow_catalogue,\n\
+                     atlas_report, bundle_verify, adaptive_panel, posterior_gate, oracle_combine,\n\
+                     oracle_reference_panel, oracle_missingness, bioeval_reference_audit,\n\
+                     evaluation_worldline_audit,\n\
+                     evaluation_reproduction_check, evaluation_trajectory_check,\n\
+                     runtime_effect_check, runtime_tape_verify, onco_boundary_check,\n\
+                     onco_response_assess, onco_worldline_view, onco_classification_check,\n\
+                     oncoworlds_identity_join, oncoworlds_model_transport,\n\
+                     oncoworlds_methylation_classify, oncoworlds_methylation_compare,\n\
+                     oncoworlds_radiogenomic_check, oncoworlds_clonal_history_check,\n\
+                     onco_outcome_analyze, stress_profile, stress_report,\n\
+                     policy_screen, bioethics_action_review, bioethics_human_subject_screen,\n\
+                     bioethics_dual_use_review, bioethics_validation_check, bioethics_representation_audit,\n\
+                     influence_analyze, routing_decide, token_context_plan, bioql_compile, epistemic_voi,\n\
+                     benchmark_trace_analyze, pack_catalogue, pack_health_assess, world_generate, factory_lifecycle_simulate, foundation_contract_check,\n\
+                     weavelang_compile,\n\
+                     choreography_check, conformance_run,\n\
+                     provider_capability_gate, sdk_registry_check, hub_submission_review, hub_disclosure_review,\n\
+                     hub_card_render, hub_leaderboard_render, telemetry_project,\n\
+                     governance_schema_check,\n\
+                     developer_platform_status, safety_posture, weave_protocol_catalog, world_index,\n\
+                     workspace_capabilities, repository_catalog, repository_bundle, repository_impact\n\
+                     Resources: fiber-world, fiber-query, context-certificate schemas and the\n\
+                     workspace capability catalog"
                 );
                 return;
             }
