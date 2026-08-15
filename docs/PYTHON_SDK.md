@@ -81,6 +81,11 @@ invent defaults:
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and
   task identity while leaving provenance support, privacy crossings, reachability, abstention, and
   safe-default decisions to Rust.
+- `world_claim_check_report(...)` adds a typed epistemic boundary over that request: observed,
+  semi-synthetic, and mechanistic rungs, selection declarations, assumptions, unsupported
+  counterfactuals, grounded claim evidence, caveats, and fail-closed refusal strings remain
+  distinct. Sync MCP preserves the kernel's `ok: false` structured refusal instead of converting
+  it into an uninspectable generic transport exception.
 - `FiberCompileRequest`, `FiberRefineRequest`, `FiberExplainRequest`, `FiberVerifyRequest`, and
   `ProjectionBundleRequest` make the full FIBER progressive-disclosure lifecycle typed across sync
   MCP, async MCP, and HTTP. `Workspace.fiber_compile(...)` validates relative world/query paths and

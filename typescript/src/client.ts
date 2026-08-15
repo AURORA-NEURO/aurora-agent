@@ -38,6 +38,8 @@ import type {
   HubResolveResult,
   HubLockArgs,
   HubLockResult,
+  WorldClaimCheckArgs,
+  WorldClaimCheckResult,
   MeasurementCompareArgs,
   MeasurementCompareResult,
   OpsAcceptanceArgs,
@@ -343,6 +345,10 @@ export class ApiClient {
 
   async hubLock(args: HubLockArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubLockResult>> {
     return this.callTool<HubLockResult>("hub_lock", args, options);
+  }
+
+  async worldClaimCheck(args: WorldClaimCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorldClaimCheckResult>> {
+    return this.callTool<WorldClaimCheckResult>("world_claim_check", args, options);
   }
 
   async measurementCompare(args: MeasurementCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MeasurementCompareResult>> {

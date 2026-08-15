@@ -111,6 +111,7 @@ from .hub import (
     hub_search_report,
 )
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
+from .world import WorldClaimCheckReport, world_claim_check_report
 from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
     RepositoryBundleRequest,
@@ -991,6 +992,15 @@ class ApiClient:
                 raise ArgumentError("claim is required when provenance is a mapping")
             request = WorldClaimCheckRequest(provenance, claim)
         return self.call_tool("world_claim_check", request.to_mcp_arguments())
+
+    def world_claim_check_report(
+        self,
+        provenance: Mapping[str, Any] | WorldClaimCheckRequest,
+        claim: Mapping[str, Any] | None = None,
+    ) -> WorldClaimCheckReport:
+        """Return typed HTTP grounded evidence or structured refusal."""
+
+        return world_claim_check_report(self.world_claim_check(provenance, claim))
 
     def lab_plan(
         self,
@@ -2026,6 +2036,15 @@ class AsyncApiClient:
                 raise ArgumentError("claim is required when provenance is a mapping")
             request = WorldClaimCheckRequest(provenance, claim)
         return await self.call_tool("world_claim_check", request.to_mcp_arguments())
+
+    async def world_claim_check_report(
+        self,
+        provenance: Mapping[str, Any] | WorldClaimCheckRequest,
+        claim: Mapping[str, Any] | None = None,
+    ) -> WorldClaimCheckReport:
+        """Return typed async HTTP grounded evidence or refusal."""
+
+        return world_claim_check_report(await self.world_claim_check(provenance, claim))
 
     async def lab_plan(
         self,

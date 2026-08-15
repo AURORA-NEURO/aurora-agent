@@ -111,6 +111,7 @@ from .hub import (
 )
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
+from .world import WorldClaimCheckReport, world_claim_check_report
 
 
 def _targets(request_id: str | None, targets: Sequence[str] | None) -> dict[str, Any] | None:
@@ -270,7 +271,19 @@ class Workspace:
             if claim is None:
                 raise ArgumentError("claim is required when provenance is a mapping")
             request = WorldClaimCheckRequest(provenance, claim)
-        return self.tool("world_claim_check", request.to_mcp_arguments())
+        result = self.client.call_tool("world_claim_check", request.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def world_claim_check_report(
+        self,
+        provenance: Mapping[str, Any] | WorldClaimCheckRequest,
+        claim: Mapping[str, Any] | None = None,
+    ) -> WorldClaimCheckReport:
+        """Return typed grounded evidence or the kernel's fail-closed refusal."""
+
+        return world_claim_check_report(self.world_claim_check(provenance, claim))
 
     def lab_plan(
         self,
@@ -1263,7 +1276,19 @@ class AsyncWorkspace:
             if claim is None:
                 raise ArgumentError("claim is required when provenance is a mapping")
             request = WorldClaimCheckRequest(provenance, claim)
-        return await self.tool("world_claim_check", request.to_mcp_arguments())
+        result = await self.client.call_tool("world_claim_check", request.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def world_claim_check_report(
+        self,
+        provenance: Mapping[str, Any] | WorldClaimCheckRequest,
+        claim: Mapping[str, Any] | None = None,
+    ) -> WorldClaimCheckReport:
+        """Return typed async grounded evidence or refusal."""
+
+        return world_claim_check_report(await self.world_claim_check(provenance, claim))
 
     async def lab_plan(
         self,

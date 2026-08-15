@@ -406,6 +406,17 @@ from .standards import (
     measurement_compare_report,
 )
 from .workbench import WorkbenchRequest
+from .world import (
+    WORLD_CLAIM_KINDS,
+    WORLD_RUNGS,
+    WORLD_SELECTION_KINDS,
+    GroundedWorldClaimReport,
+    WorldClaimCheckReport,
+    WorldClaimReport,
+    WorldProvenanceReport,
+    WorldSelectionReport,
+    world_claim_check_report,
+)
 from .tooling import (
     MAX_TOOL_ARGUMENT_DEPTH,
     MAX_TOOL_CATALOGUE_BYTES,
@@ -707,6 +718,15 @@ __all__ = [
     "ValidationReport",
     "Workspace",
     "WorkbenchRequest",
+    "WORLD_CLAIM_KINDS",
+    "WORLD_RUNGS",
+    "WORLD_SELECTION_KINDS",
+    "GroundedWorldClaimReport",
+    "WorldClaimCheckReport",
+    "WorldClaimReport",
+    "WorldProvenanceReport",
+    "WorldSelectionReport",
+    "world_claim_check_report",
     "canonical_bytes",
     "canonical_json",
     "content_digest",

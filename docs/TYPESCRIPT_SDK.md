@@ -197,6 +197,10 @@ semantic-search claims.
 accepted freshness policy, lifecycle notes, dependency requirement sources, digest provenance, and
 bounded lock omissions. A lock response remains visibly partial when `omitted_entries` is nonzero;
 the client does not infer a complete closure from a capped page.
+`worldClaimCheck` returns a discriminated `WorldClaimCheckResult`: grounded observed-world claims
+retain their caveat and rung ancestry, while mechanistic or otherwise unsupported claims remain
+structured `ok: false` refusals with `fail_closed: true`. The TypeScript boundary does not promote
+synthetic or simulator evidence to biological validity.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

@@ -1396,6 +1396,61 @@ export interface HubLockResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface WorldClaimCheckArgs extends JsonObject {
+  provenance: JsonObject;
+  claim: JsonObject;
+}
+
+export type WorldRung = "observed" | "semi_synthetic" | "mechanistic";
+export type WorldClaimKind = "the_world_as_built" | "detecting_injected_structure" | "simulator_behaviour" | "biology";
+
+export type WorldSelectionResult =
+  | { selection: "consecutive"; criterion: string }
+  | { selection: "convenience"; because: string }
+  | { selection: "enriched"; for_what: string }
+  | { selection: "undeclared" };
+
+export interface WorldProvenanceResult extends JsonObject {
+  top: WorldRung;
+  stands_on: WorldRung[];
+  assumptions: string[];
+  unsupported_counterfactuals: string[];
+  selection: WorldSelectionResult;
+}
+
+export interface WorldClaimResult extends JsonObject {
+  kind: WorldClaimKind;
+  quantity: string;
+  counterfactual: string | null;
+  population: string | null;
+}
+
+export interface GroundedWorldClaimResult extends JsonObject {
+  claim: WorldClaimResult;
+  stands_on: WorldRung[];
+  furthest_from_observation: WorldRung;
+}
+
+export interface SupportedWorldClaimResult extends JsonObject {
+  ok: true;
+  supported: true;
+  claim: WorldClaimResult;
+  grounded: GroundedWorldClaimResult;
+  caveat: string;
+  provenance: WorldProvenanceResult;
+}
+
+export interface RefusedWorldClaimResult extends JsonObject {
+  ok: false;
+  supported: false;
+  claim: WorldClaimResult;
+  refusal: string;
+  provenance: WorldProvenanceResult;
+  fail_closed: true;
+}
+
+export type WorldClaimCheckResult = SupportedWorldClaimResult | RefusedWorldClaimResult;
+
 export interface MeasurementCompareArgs extends JsonObject {
   left: JsonObject;
   right: JsonObject;

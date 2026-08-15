@@ -310,6 +310,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         max_items: 3,
         guarantees: ["transitive dependencies are fixed by a bounded deterministic fixpoint"],
       } } } });
+      if (path === "/v1/tools/world_claim_check") return jsonResponse({ ok: true, tool: "world_claim_check", request_id: "r25", mcp: { result: { structuredContent: {
+        ok: false,
+        supported: false,
+        claim: { kind: "biology", quantity: "tumour growth rate", counterfactual: null, population: null },
+        refusal: "claim exceeds the mechanistic rung",
+        provenance: { top: "mechanistic", stands_on: ["mechanistic"], assumptions: ["tumour growth rate"], unsupported_counterfactuals: [], selection: { selection: "undeclared" } },
+        fail_closed: true,
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -496,6 +504,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const hub = await client.hubSearch({ federation: { members: {} }, catalogs: [], query: { facets: [] }, max_items: 3 });
   const resolvedHub = await client.hubResolve({ federation: { members: {} }, catalogs: [], request: { name: "bioprism/root" } });
   const lockedHub = await client.hubLock({ federation: { members: {} }, catalogs: [], request: { name: "bioprism/root" }, max_items: 3 });
+  const worldClaim = await client.worldClaimCheck({ provenance: { top: "mechanistic" }, claim: { kind: "biology", quantity: "tumour growth rate" } });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -535,6 +544,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(hub.mcp.result.structuredContent.matches[0].authority.authority, "authoritative");
   assert.equal(resolvedHub.mcp.result.structuredContent.resolution.subject.digest, "sha256:root");
   assert.equal(lockedHub.mcp.result.structuredContent.entries[0].locked.required_by[0].source.source, "root");
+  assert.equal(worldClaim.mcp.result.structuredContent.fail_closed, true);
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

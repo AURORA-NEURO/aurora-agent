@@ -311,6 +311,10 @@ The Python SDK also exposes bounded envelope models and sync/async/HTTP helpers 
 `world_claim_check`, `lab_plan`, and `routing_decide`; serialized world/lab/routing semantics remain
 Rust-owned, including provenance support, privacy boundaries, evidence reachability, abstention, and
 safe defaults.
+`world_claim_check` is now typed at the result boundary as well: the SDK reconciles `ok` with
+`supported`, validates rung ancestry and selection shape, requires grounded evidence plus a caveat
+for success, and requires a refusal plus `fail_closed` for refusal. This keeps the observed versus
+synthetic versus mechanistic claim ladder inspectable without claiming to verify the underlying data.
 
 The table below is a snapshot; the script is the live source.
 
