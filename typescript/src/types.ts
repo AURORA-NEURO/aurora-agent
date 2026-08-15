@@ -60,17 +60,17 @@ export interface ToolDefinition {
   [key: string]: JsonValue;
 }
 
-export interface ToolValidationIssue {
+export interface ToolValidationIssue extends JsonObject {
   path: string;
   code: string;
   message: string;
 }
 
-export interface ToolValidationReport {
+export interface ToolValidationReport extends JsonObject {
   tool: string;
   schemaDigest: string;
-  issues: readonly ToolValidationIssue[];
-  warnings: readonly ToolValidationIssue[];
+  issues: ToolValidationIssue[];
+  warnings: ToolValidationIssue[];
   ok: boolean;
   fullyChecked: boolean;
 }
@@ -432,6 +432,34 @@ export interface AgentMissionArgs extends JsonObject {
   goal: string;
   steps: AgentMissionStep[];
   policy?: AgentMissionPolicy;
+}
+
+export interface MissionStepPreflight extends JsonObject {
+  id: string;
+  tool: string;
+  depends_on: string[];
+  wave: number | null;
+  status: "ready" | "invalid" | "blocked";
+  schema: ToolValidationReport | null;
+  issues: string[];
+  warnings: string[];
+}
+
+export interface MissionPreflightResult extends JsonObject {
+  schema: "bioprism-typescript-mission-preflight/0.1";
+  mission_id: string;
+  goal: string;
+  request_digest: string;
+  catalogue_digest: string;
+  execution: "planned" | "authorized";
+  ok: boolean;
+  fully_checked: boolean;
+  ordered_steps: string[];
+  waves: string[][];
+  issues: string[];
+  warnings: string[];
+  steps: MissionStepPreflight[];
+  limitations: string[];
 }
 
 export interface RuntimeExecutionSimulateArgs extends JsonObject {

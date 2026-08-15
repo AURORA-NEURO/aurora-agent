@@ -1,4 +1,5 @@
 import { ApiError, ArgumentError, ProtocolError, ResponseTooLargeError, ToolRefusalError, TransportError, isObject } from "./errors.js";
+import { preflightMission } from "./mission.js";
 import { parseSse } from "./sse.js";
 import { ToolCatalogue } from "./tooling.js";
 import type {
@@ -26,6 +27,7 @@ import type {
   JsonValue,
   MetricsAnalyticsAuditArgs,
   MetricsProfileAuditArgs,
+  MissionPreflightResult,
   RepositoryBundleArgs,
   RepositoryCatalogArgs,
   RepositoryImpactArgs,
@@ -244,6 +246,16 @@ export class ApiClient {
 
   async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions) {
     return this.callTool("agent_mission", args, options);
+  }
+
+  /** Review a mission against a live or caller-supplied catalogue without issuing any tool call. */
+  async missionPreflight(
+    args: AgentMissionArgs,
+    catalogue?: ToolCatalogue,
+    options?: ClientRequestOptions,
+  ): Promise<MissionPreflightResult> {
+    const snapshot = catalogue ?? await this.toolCatalogue(options);
+    return preflightMission(args, snapshot);
   }
 
   async runtimeExecutionSimulate(args: RuntimeExecutionSimulateArgs, options?: ClientRequestOptions) {

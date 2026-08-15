@@ -4,6 +4,8 @@ import {
   ApiClient,
   ApiError,
   ArgumentError,
+  assertMissionPreflight,
+  MissionPreflightError,
   ResponseTooLargeError,
   ToolCatalogue,
   ToolSchemaError,
@@ -52,6 +54,50 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(plan.tool, "echo");
   assert.equal(plan.report.fullyChecked, true);
   await assert.rejects(client.planTool("echo", { value: "not-an-integer" }, catalogue), ToolSchemaError);
+  const callsBeforeMissionPreflight = seen.length;
+  const preflight = await client.missionPreflight({
+    mission_id: "mission-preflight",
+    goal: "prepare and consume",
+    steps: [
+      { id: "prepare", domain: "workspace", capability: "discovery", objective: "prepare", tool: "echo", arguments: { value: 3 } },
+      {
+        id: "consume",
+        domain: "workspace",
+        capability: "discovery",
+        objective: "consume",
+        tool: "echo",
+        arguments: { value: 3 },
+        depends_on: ["prepare"],
+        bindings: [{ from_step: "prepare", source_pointer: "/value", target_pointer: "/value" }],
+      },
+    ],
+  }, catalogue);
+  assert.equal(preflight.ok, true);
+  assert.equal(preflight.fully_checked, true);
+  assert.deepEqual(preflight.waves, [["prepare"], ["consume"]]);
+  assert.equal(preflight.steps[1].status, "ready");
+  assert.equal(seen.length, callsBeforeMissionPreflight);
+  const cycle = await client.missionPreflight({
+    mission_id: "mission-cycle",
+    goal: "reject a cycle",
+    steps: [
+      { id: "a", domain: "workspace", capability: "discovery", objective: "a", tool: "echo", arguments: { value: 3 }, depends_on: ["b"] },
+      { id: "b", domain: "workspace", capability: "discovery", objective: "b", tool: "echo", arguments: { value: 3 }, depends_on: ["a"] },
+    ],
+  }, catalogue);
+  assert.equal(cycle.ok, false);
+  assert.equal(cycle.issues.some((issue) => issue.includes("dependency cycle")), true);
+  assert.equal(cycle.steps.every((step) => step.status === "blocked"), true);
+  assert.throws(() => assertMissionPreflight(cycle), MissionPreflightError);
+  const unauthorized = await client.missionPreflight({
+    mission_id: "mission-unauthorized",
+    goal: "reject implicit execution",
+    steps: [{ id: "only", domain: "workspace", capability: "discovery", objective: "only", tool: "echo", arguments: { value: 3 } }],
+    policy: { execute: true },
+  }, catalogue);
+  assert.equal(unauthorized.ok, false);
+  assert.equal(unauthorized.execution, "planned");
+  assert.equal(unauthorized.issues.some((issue) => issue.includes("allowed_tools")), true);
   const checked = await client.toolChecked("echo", { value: 4 }, undefined, catalogue);
   assert.equal(checked.mcp.result.structuredContent.value, 3);
   const response = await client.callTool("echo", { value: 3 }, { requestId: "request-1" });

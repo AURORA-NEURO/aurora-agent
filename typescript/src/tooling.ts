@@ -326,7 +326,7 @@ function jsonType(value: unknown): string {
   return typeof value;
 }
 
-function canonicalJson(value: unknown, depth = 0): string {
+export function canonicalJson(value: unknown, depth = 0): string {
   if (depth > MAX_TOOL_ARGUMENT_DEPTH) throw new ArgumentError(`JSON nesting exceeds ${MAX_TOOL_ARGUMENT_DEPTH} levels`);
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
@@ -344,6 +344,11 @@ function canonicalJson(value: unknown, depth = 0): string {
     return `{${entries.join(",")}}`;
   }
   throw new ArgumentError("JSON contains an unsupported value");
+}
+
+/** Compute the catalogue's canonical SHA-256 identity for an arbitrary JSON value. */
+export async function digestJson(value: unknown): Promise<string> {
+  return sha256Hex(canonicalJson(value));
 }
 
 async function sha256Hex(value: string): Promise<string> {

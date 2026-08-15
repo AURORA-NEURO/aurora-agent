@@ -284,7 +284,9 @@ typed API errors, SSE cursor parsing, webhook outbox lifecycle, and typed facade
 BioAtlas, OTLP, runtime, and developer-delivery workflows. See [`docs/TYPESCRIPT_SDK.md`](docs/TYPESCRIPT_SDK.md)
 for the compatibility, workbench, mission, secret-handling, and schema-aware full-catalogue
 invocation contract. `toolCatalogue()` and `planTool()` make arbitrary domain calls reviewable
-before `toolChecked()` executes them; remote refusals remain visible rather than becoming success.
+before `toolChecked()` executes them; `missionPreflight()` extends that review across dependency
+graphs, bindings, and execution policy before `agentMission()` is sent. Remote refusals remain
+visible rather than becoming success.
 
 The repository ships `bioprism-api` for deployments that need a network boundary:
 

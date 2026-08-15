@@ -47,6 +47,10 @@ if (result.mcp.result?.isError) {
   executes the reviewed call while preserving the raw refusal envelope. This covers every current
   or future domain even when no handwritten helper exists. Unsupported schema keywords remain
   warnings, and preflight never represents domain validity, authorization, or scientific success.
+- `missionPreflight()` performs the same no-side-effect review for `AgentMissionArgs`, while
+  `assertMissionPreflight()` turns a failed report into a typed local error: together they return
+  request and catalogue digests, deterministic dependency waves, JSON-pointer binding findings,
+  execution allow-list failures, and per-step schema reports before `agentMission()` is sent.
 - `eventStream` parses the gateway's bounded SSE snapshot and returns the `x-next-after` cursor;
   it is deliberately not a long-lived socket or an implicit reconnect loop.
 - Webhook delivery is poll/send/acknowledge: `deliveries`, `retry`, and `acknowledge` operate on

@@ -97,6 +97,13 @@ side-effect free and enforce only conservative transport-shape rules. Unsupporte
 features are warnings rather than hidden validation, and `toolChecked()` keeps structured MCP
 refusals in the same raw response envelope as `callTool()`.
 
+`missionPreflight()` applies the same contract to an `AgentMissionArgs` dependency graph, and
+`assertMissionPreflight()` converts a failed report into a typed local error. The report returns
+request and catalogue digests, deterministic waves, per-step schema reports, JSON-pointer binding
+findings, recursion checks, and execution allow-list findings without issuing a tool call. Pass
+the earlier `ToolCatalogue` snapshot to guarantee that mission review and subsequent checked calls
+refer to the same live schema set; the Rust `agent_mission` tool remains the execution authority.
+
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
 families without maintaining a fragile partial clone of 121 tool schemas. `capabilityDiscover`
