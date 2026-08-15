@@ -22,6 +22,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
 | `GET /v1/missions/{mission_id}` | Poll job state and retrieve the authoritative mission report |
+| `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
 | `POST /v1/rpc` | JSON-RPC/MCP-compatible request envelope for tools, resources, and lifecycle |
@@ -40,6 +41,10 @@ event payload by byte count and SHA-256, so observability cannot silently turn i
 memory sink. `agent_mission` reports include a clock-free `execution_trace`; when its raw response
 is omitted for size, the event retains a bounded mission-trace projection with lifecycle, refusal,
 block, digest, and byte-accounting evidence.
+Asynchronous jobs additionally emit one `mission.trace` event per retained trace event, with the
+mission id as subject and the exact trace row under `payload.trace`. Those events enter the same
+cursor, SSE, and signed webhook outbox as ordinary tool events, so an operator can monitor any
+domain mission without inventing a domain-specific subscription path.
 
 ## Asynchronous missions
 

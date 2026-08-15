@@ -60,6 +60,9 @@ identity, and domain interpretation remain owned by the final report and trace.
 The HTTP boundary also serves bounded cursor pages over retained mission trace events, with explicit
 `next_after`, retention-gap, and dropped-event fields; this gives every domain workflow the same
 replay/observability contract without inventing domain-specific event semantics.
+The same retained rows are emitted as `mission.trace` events into the gateway's cursor, SSE, and
+signed webhook surfaces, allowing lifecycle monitoring and delivery retry to share one event log
+and one retention-gap contract with ordinary tool calls.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 The authoritative executor validates every known tool's materialized arguments against its

@@ -5,7 +5,7 @@
 //! the event/webhook outbox.  A REST call and an MCP `tools/call` therefore reach exactly the same
 //! Rust implementation and produce the same evidence-bearing result.
 
-use crate::events::{EventLog, MAX_FILTERS};
+use crate::events::{EventLog, EventMetrics, MAX_FILTERS};
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
 use serde_json::{json, Value};
@@ -67,7 +67,7 @@ pub struct ApiRouter {
     server: bioprism_mcp::Server,
     mission_executor: Arc<bioprism_mcp::Server>,
     config: ApiConfig,
-    events: EventLog,
+    events: Arc<Mutex<EventLog>>,
     next_request_id: u64,
     mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
 }
@@ -228,7 +228,7 @@ impl MissionJobState {
 impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
         config.validate()?;
-        let events = EventLog::new(config.event_capacity)?;
+        let events = Arc::new(Mutex::new(EventLog::new(config.event_capacity)?));
         let mut server = bioprism_mcp::Server::new(root);
         let initialize = Request {
             id: Some(json!(0)),
@@ -349,7 +349,10 @@ impl ApiRouter {
     }
 
     pub fn event_metrics(&self) -> crate::events::EventMetrics {
-        self.events.metrics()
+        self.events
+            .lock()
+            .map(|events| events.metrics())
+            .unwrap_or_else(|_| unavailable_event_metrics())
     }
 
     pub fn limits(&self) -> (usize, usize) {
@@ -387,7 +390,7 @@ impl ApiRouter {
     }
 
     fn health(&self, _ready: bool) -> HttpResponse {
-        let metrics = self.events.metrics();
+        let metrics = self.event_metrics();
         let payload = json!({
             "ok": true,
             "ready": true,
@@ -472,10 +475,7 @@ impl ApiRouter {
     }
 
     fn metrics(&self) -> HttpResponse {
-        HttpResponse::json(
-            200,
-            &json!({ "ok": true, "metrics": self.events.metrics() }),
-        )
+        HttpResponse::json(200, &json!({ "ok": true, "metrics": self.event_metrics() }))
     }
 
     fn events(&self, request: &HttpRequest) -> HttpResponse {
@@ -491,7 +491,18 @@ impl ApiRouter {
             Ok(value) => value,
             Err(error) => return self.error(400, "invalid_query", &error, "query"),
         };
-        match self.events.events(after, limit) {
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    "query",
+                )
+            }
+        };
+        match events.events(after, limit) {
             Ok(page) => HttpResponse::json(200, &json!({ "ok": true, "page": page })),
             Err(error) => self.error(400, "invalid_query", &error, "query"),
         }
@@ -510,13 +521,22 @@ impl ApiRouter {
             Ok(value) => value,
             Err(error) => return self.error(400, "invalid_query", &error, "query"),
         };
-        match self.events.events(after, limit) {
-            Ok(page) => HttpResponse::text(
-                200,
-                "text/event-stream; charset=utf-8",
-                self.events.sse(&page),
-            )
-            .with_header("x-next-after", page.next_after.to_string()),
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    "query",
+                )
+            }
+        };
+        match events.events(after, limit) {
+            Ok(page) => {
+                HttpResponse::text(200, "text/event-stream; charset=utf-8", events.sse(&page))
+                    .with_header("x-next-after", page.next_after.to_string())
+            }
             Err(error) => self.error(400, "invalid_query", &error, "query"),
         }
     }
@@ -702,9 +722,20 @@ impl ApiRouter {
         }
 
         let progress_state = Arc::clone(&state);
+        let mission_events = Arc::clone(&self.events);
+        let mission_subject = mission_id.clone();
+        let mission_request_id = request_id.to_string();
         let observer = Arc::new(move |event: Value| {
             if let Ok(mut current) = progress_state.lock() {
-                current.record_trace(event);
+                current.record_trace(event.clone());
+            }
+            if let Ok(mut events) = mission_events.lock() {
+                let _ = events.emit(
+                    "mission.trace",
+                    &mission_subject,
+                    &mission_request_id,
+                    json!({ "mission_id": mission_subject.clone(), "trace": event }),
+                );
             }
         });
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
@@ -1187,7 +1218,11 @@ impl ApiRouter {
             200,
             &json!({
                 "ok": true,
-                "subscriptions": self.events.subscriptions(),
+                "subscriptions": self
+                    .events
+                    .lock()
+                    .map(|events| events.subscriptions())
+                    .unwrap_or_default(),
                 "secret_policy": "secrets are never returned; delivery signatures are computed over the unsigned envelope"
             }),
         )
@@ -1246,7 +1281,18 @@ impl ApiRouter {
                 )
             }
         };
-        match self.events.register_subscription(
+        let mut events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match events.register_subscription(
             body.get("id").and_then(Value::as_str),
             endpoint,
             filters.as_deref(),
@@ -1278,7 +1324,18 @@ impl ApiRouter {
                 request_id,
             );
         };
-        match self.events.remove_subscription(&id) {
+        let mut events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match events.remove_subscription(&id) {
             Ok(true) => HttpResponse::json(200, &json!({ "ok": true, "deleted": id })),
             Ok(false) => self.error(404, "not_found", "subscription does not exist", request_id),
             Err(error) => self.error(409, "subscription_error", &error, request_id),
@@ -1306,7 +1363,18 @@ impl ApiRouter {
             Ok(value) => value,
             Err(error) => return self.error(400, "invalid_query", &error, request_id),
         };
-        match self.events.deliveries(&id, after, limit) {
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match events.deliveries(&id, after, limit) {
             Ok(page) => HttpResponse::json(200, &json!({ "ok": true, "page": page })),
             Err(error) => self.error(404, "not_found", &error, request_id),
         }
@@ -1361,15 +1429,26 @@ impl ApiRouter {
             };
             ids.push(id);
         }
+        let mut events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
         if retry {
-            match self.events.retry(&id, &ids) {
+            match events.retry(&id, &ids) {
                 Ok(deliveries) => {
                     HttpResponse::json(200, &json!({ "ok": true, "retried": deliveries }))
                 }
                 Err(error) => self.error(404, "not_found", &error, request_id),
             }
         } else {
-            match self.events.acknowledge(&id, &ids) {
+            match events.acknowledge(&id, &ids) {
                 Ok(acknowledged) => {
                     HttpResponse::json(200, &json!({ "ok": true, "acknowledged": acknowledged }))
                 }
@@ -1396,7 +1475,7 @@ impl ApiRouter {
             .ok_or_else(|| "request body must be a JSON object".into())
     }
 
-    fn record_tool_event(&mut self, request_id: &str, tool: &str, wire: &Value) {
+    fn record_tool_event(&self, request_id: &str, tool: &str, wire: &Value) {
         let outcome = if wire.get("error").is_some() {
             "tool.rpc_error"
         } else if wire
@@ -1438,7 +1517,9 @@ impl ApiRouter {
             }
             projection
         };
-        let _ = self.events.emit(outcome, tool, request_id, payload);
+        if let Ok(mut events) = self.events.lock() {
+            let _ = events.emit(outcome, tool, request_id, payload);
+        }
     }
 
     fn error(&self, status: u16, code: &str, message: &str, request_id: &str) -> HttpResponse {
@@ -1490,6 +1571,19 @@ impl ApiRouter {
 
 fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
     job.state.lock().map(|state| state.clone()).map_err(|_| ())
+}
+
+fn unavailable_event_metrics() -> EventMetrics {
+    EventMetrics {
+        retained_events: 0,
+        dropped_events: 0,
+        subscriptions: 0,
+        active_subscriptions: 0,
+        pending_deliveries: 0,
+        dropped_deliveries: 0,
+        next_event_id: 0,
+        next_delivery_id: 0,
+    }
 }
 
 fn progress_count(report: &Value, key: &str) -> usize {
@@ -1778,6 +1872,17 @@ mod tests {
     fn asynchronous_missions_validate_poll_and_reject_duplicate_ids() {
         let mut router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let subscription = router.handle(request(
+            "POST",
+            "/v1/webhooks/subscriptions",
+            json!({
+                "id": "mission-events",
+                "endpoint": "https://example.test/mission-events",
+                "events": ["mission.trace"],
+                "secret": "0123456789abcdef"
+            }),
+        ));
+        assert_eq!(subscription.status, 201);
         let body = json!({
             "mission_id": "api-async-1",
             "goal": "plan an asynchronous cross-domain mission",
@@ -1823,6 +1928,26 @@ mod tests {
         );
         assert_eq!(trace["gap"], false);
         assert_eq!(trace["terminal"], true);
+        let events = router.handle(request("GET", "/v1/events?after=0&limit=64", json!({})));
+        assert_eq!(events.status, 200);
+        let events: Value = serde_json::from_slice(&events.body).unwrap();
+        let event_rows = events["page"]["events"].as_array().unwrap();
+        assert!(!event_rows.is_empty());
+        assert!(event_rows
+            .iter()
+            .all(|event| event["event_type"] == "mission.trace"));
+        assert_eq!(
+            event_rows[0]["payload"]["trace"]["event"],
+            "mission.started"
+        );
+        let deliveries = router.handle(request(
+            "GET",
+            "/v1/webhooks/subscriptions/mission-events/deliveries?after=0&limit=64",
+            json!({}),
+        ));
+        assert_eq!(deliveries.status, 200);
+        let deliveries: Value = serde_json::from_slice(&deliveries.body).unwrap();
+        assert_eq!(deliveries["page"]["pending_count"], event_rows.len());
         let next_after = trace["next_after"].as_u64().unwrap();
         let empty_trace = router.handle(request(
             "GET",
@@ -1954,7 +2079,7 @@ mod tests {
 
     #[test]
     fn oversized_mission_events_keep_trace_projection_when_raw_response_is_omitted() {
-        let mut router =
+        let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
         let report = json!({
             "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
@@ -1982,7 +2107,7 @@ mod tests {
             }
         });
         router.record_tool_event("request-oversized", "agent_mission", &wire);
-        let page = router.events.events(0, 10).unwrap();
+        let page = router.events.lock().unwrap().events(0, 10).unwrap();
         assert_eq!(page.events.len(), 1);
         assert_eq!(page.events[0].payload["response_omitted"], true);
         assert_eq!(

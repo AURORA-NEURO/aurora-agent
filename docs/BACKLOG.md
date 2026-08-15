@@ -171,6 +171,9 @@ distributed scheduling, force-kill semantics, or domain-level success claims.
 The gateway now also retains a bounded per-mission trace window and exposes cursor-based
 `GET /v1/missions/{mission_id}/trace` retrieval. SDKs type the event pages and make retention gaps
 explicit, so replay tooling can distinguish an empty page from history that was discarded.
+Each asynchronous trace row is also emitted as a `mission.trace` event through the shared cursor,
+SSE, and signed webhook outbox. This makes cross-domain mission monitoring composable with the
+existing delivery worker contract instead of requiring a second event transport.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full
