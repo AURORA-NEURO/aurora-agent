@@ -54,6 +54,10 @@ typed callers can supply exact delegated checks, retain each result digest and r
 the strict required-gate conjunction while repository impact and developer-platform diagnostics stay
 advisory-only. The SDK parser verifies count/index/blocker parity and rejects compensating or forged
 top-level readiness state.
+`operations_catalog` and `ops_acceptance` extend the same evidence posture to infrastructure:
+storage promises are compared independently of provider technology, service-contract divergence and
+undefined metric debt remain counted, and alpha acceptance keeps refuted and unverifiable criteria
+separate. Neither typed projection fabricates live deployment, CI, or external-service evidence.
 `agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
 deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
 blocking dependent work, bounding output, and refusing side-effect confirmations by default. Serial

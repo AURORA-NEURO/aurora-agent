@@ -24,6 +24,10 @@ import type {
   ConformanceRunResult,
   ReleaseAuditArgs,
   ReleaseAuditResult,
+  OperationsCatalogArgs,
+  OperationsCatalogResult,
+  OpsAcceptanceArgs,
+  OpsAcceptanceResult,
   BioAtlasPublicationAuditArgs,
   BioAtlasPublicationAuditResult,
   BioCapabilityEvidenceAuditArgs,
@@ -297,6 +301,14 @@ export class ApiClient {
 
   async releaseAudit(args: ReleaseAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ReleaseAuditResult>> {
     return this.callTool<ReleaseAuditResult>("release_audit", args, options);
+  }
+
+  async operationsCatalog(args: OperationsCatalogArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OperationsCatalogResult>> {
+    return this.callTool<OperationsCatalogResult>("operations_catalog", args, options);
+  }
+
+  async opsAcceptance(args: OpsAcceptanceArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OpsAcceptanceResult>> {
+    return this.callTool<OpsAcceptanceResult>("ops_acceptance", args, options);
   }
 
   async agentMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AgentMissionReport>> {

@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, TabularIngestReport, TabularIngestRequest, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, OperationsCatalogReport, OpsAcceptanceReport, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, TabularIngestReport, TabularIngestRequest, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -292,7 +292,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run", "/v1/tools/release_audit"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run", "/v1/tools/release_audit", "/v1/tools/operations_catalog", "/v1/tools/ops_acceptance"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -438,6 +438,14 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(
             client.release_audit(release_request)["mcp"]["result"]["checks"][0]["kind"],
             "conformance_run",
+        )
+        self.assertEqual(
+            client.operations_catalog(max_items=2)["mcp"]["result"]["max_items"],
+            2,
+        )
+        self.assertEqual(
+            client.ops_acceptance(max_items=3)["mcp"]["result"]["max_items"],
+            3,
         )
         evidence_request = BioCapabilityEvidenceAuditRequest(
             [EvidenceItem("grounding", "evidence_grounding", "observed", support={"source": "ledger", "scope": "pack/1"})],
@@ -702,6 +710,14 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(
                 (await client.release_audit(release_request))["mcp"]["result"]["checks"][0]["kind"],
                 "conformance_run",
+            )
+            self.assertEqual(
+                (await client.operations_catalog(max_items=2))["mcp"]["result"]["max_items"],
+                2,
+            )
+            self.assertEqual(
+                (await client.ops_acceptance(max_items=3))["mcp"]["result"]["max_items"],
+                3,
             )
             with patch.object(
                 AsyncApiClient,

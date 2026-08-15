@@ -79,6 +79,14 @@ from .mission import (
 )
 from .publication import BioAtlasPublicationAuditReport, bioatlas_publication_audit_report
 from .release import ReleaseAuditArgs, ReleaseAuditReport, release_audit_report
+from .operations import (
+    OpsAcceptanceArgs,
+    OpsAcceptanceReport,
+    OperationsCatalogArgs,
+    OperationsCatalogReport,
+    ops_acceptance_report,
+    operations_catalog_report,
+)
 from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
     RepositoryBundleRequest,
@@ -741,6 +749,40 @@ class ApiClient:
         """Return typed HTTP release readiness and delegated check evidence."""
 
         return release_audit_report(self.release_audit(request))
+
+    def operations_catalog(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Inspect operations contracts through the HTTP gateway."""
+
+        request = OperationsCatalogArgs(include_details, max_items)
+        return self.call_tool("operations_catalog", request.to_mcp_arguments())
+
+    def operations_catalog_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> OperationsCatalogReport:
+        """Return typed HTTP operations topology, service, and metric evidence."""
+
+        return operations_catalog_report(
+            self.operations_catalog(include_details=include_details, max_items=max_items)
+        )
+
+    def ops_acceptance(self, *, max_items: int = 100) -> dict[str, Any]:
+        """Run operational acceptance through the HTTP gateway."""
+
+        request = OpsAcceptanceArgs(max_items)
+        return self.call_tool("ops_acceptance", request.to_mcp_arguments())
+
+    def ops_acceptance_report(self, *, max_items: int = 100) -> OpsAcceptanceReport:
+        """Return typed HTTP met/refuted/unverifiable acceptance evidence."""
+
+        return ops_acceptance_report(self.ops_acceptance(max_items=max_items))
 
     def biocapability_evidence_audit(
         self,
@@ -1633,6 +1675,40 @@ class AsyncApiClient:
         """Return typed async HTTP release gates and delegated evidence."""
 
         return release_audit_report(await self.release_audit(request))
+
+    async def operations_catalog(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.operations_catalog`."""
+
+        request = OperationsCatalogArgs(include_details, max_items)
+        return await self.call_tool("operations_catalog", request.to_mcp_arguments())
+
+    async def operations_catalog_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> OperationsCatalogReport:
+        """Return typed async HTTP operations evidence."""
+
+        return operations_catalog_report(
+            await self.operations_catalog(include_details=include_details, max_items=max_items)
+        )
+
+    async def ops_acceptance(self, *, max_items: int = 100) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.ops_acceptance`."""
+
+        request = OpsAcceptanceArgs(max_items)
+        return await self.call_tool("ops_acceptance", request.to_mcp_arguments())
+
+    async def ops_acceptance_report(self, *, max_items: int = 100) -> OpsAcceptanceReport:
+        """Return typed async acceptance evidence and decidability state."""
+
+        return ops_acceptance_report(await self.ops_acceptance(max_items=max_items))
 
     async def biocapability_evidence_audit(
         self,

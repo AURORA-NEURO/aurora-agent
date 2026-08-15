@@ -95,6 +95,10 @@ calls or parallel batches;
   route-specific progressive disclosure, and changed-module impact checks;
 - `telemetryProject`: redacted telemetry projection with explicit treatment policy, trace, and
   optional observed-metric evidence fields.
+- `operationsCatalog`: bounded storage/topology parity, service-contract divergence, SLO-name,
+  and defined-versus-undefined metric-debt evidence;
+- `opsAcceptance`: typed `met`/`refuted`/`unverifiable` operational acceptance findings without
+  fabricating a release percentage.
 
 The complete live tool surface is also available through `toolCatalogue()`, `planTool()`, and
 `toolChecked()`. The catalogue is bounded and SHA-256 addressed from `/v1/tools`; plans are
@@ -164,6 +168,11 @@ drift, test-pyramid counts, bounded case outcomes, and all unmet noncompensatory
 digests, refusal and fail-closed fields, blocker references, and strict release conjunction state.
 `repository_impact` and `developer_platform_status` remain advisory-only with a null gate; callers
 must not infer release approval from their observations or from an optional check that passed.
+`operationsCatalog` returns `OperationsCatalogResult` with local/team storage classes, promise
+parity, deployment planes, tenant patterns, service-contract counts, metric definitions, and
+bounded omission metadata. `opsAcceptance` returns `OpsAcceptanceResult`; its `is_decidable` and
+`is_release_ready` fields remain mechanical predicates over the three-way verdict counts, not
+claims that unobservable checkout, CI, or external-service criteria passed.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

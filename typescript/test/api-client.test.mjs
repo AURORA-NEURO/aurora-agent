@@ -211,6 +211,28 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["required checks are conjunctive"],
         limitations: ["local evidence only"],
       } } } });
+      if (path === "/v1/tools/operations_catalog") return jsonResponse({ ok: true, tool: "operations_catalog", request_id: "r14", mcp: { result: { structuredContent: {
+        ok: true,
+        detail_mode: "summary",
+        max_items: 2,
+        topologies: { local: { deployment: "local", technologies: ["sqlite"], classes: [] }, team: { deployment: "team", technologies: ["postgresql"], classes: [] }, promise_parity: { compared: 5, holds: true, differences: [] }, technology_is_not_promise_parity: true },
+        data_classes: [],
+        deployment_planes: [],
+        tenant_patterns: [],
+        slo_objectives: ["api-read-availability"],
+        service_contracts: { summary: { satisfied: 0, diverges: 9, not_implemented: 0, divergences: 59, total: 9 }, entries: [], entry_count: 9, omitted_entries: 9 },
+        metrics: { metrics_schema_version: "bioprism-metrics/0.1", atlasx_schema_version: "bioprism-atlasx/0.1", named_in_scope: 118, named_but_undefined: 117, defined_here: [], undefined_metrics_returned: [], omitted_undefined_metrics: 117, undefined_is_not_zero: true },
+        sdk: { registration_note: "registration", execution_and_isolation_are_not_implied: true },
+        limitations: ["local only"],
+      } } } });
+      if (path === "/v1/tools/ops_acceptance") return jsonResponse({ ok: true, tool: "ops_acceptance", request_id: "r15", mcp: { result: { structuredContent: {
+        ok: true,
+        summary: { met: 0, refuted: 1, unverifiable: 2, total: 3, is_release_ready: false, is_decidable: false },
+        findings: [],
+        omitted_findings: 3,
+        guarantees: ["unverifiable is not a pass"],
+        limitations: ["no external CI"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -388,6 +410,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const tabular = await client.tabularIngest({ source_id: "cohort.csv", profile: { profile_id: "RG-DEMO-001" }, csv: "subject\nS1\n", format: "text/csv", include_facts: true });
   const conformance = await client.conformanceRun({ include_details: false, max_items: 100 });
   const release = await client.releaseAudit({ checks: [{ kind: "conformance_run", arguments: {} }] });
+  const operations = await client.operationsCatalog({ include_details: false, max_items: 2 });
+  const acceptance = await client.opsAcceptance({ max_items: 3 });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -417,6 +441,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(conformance.mcp.result.structuredContent.suite.pyramid.counts.unit, 1);
   assert.equal(release.mcp.result.structuredContent.release_ready, true);
   assert.equal(release.mcp.result.structuredContent.checks[0].advisory, false);
+  assert.equal(operations.mcp.result.structuredContent.topologies.promise_parity.holds, true);
+  assert.equal(operations.mcp.result.structuredContent.metrics.named_but_undefined, 117);
+  assert.equal(acceptance.mcp.result.structuredContent.summary.is_decidable, false);
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

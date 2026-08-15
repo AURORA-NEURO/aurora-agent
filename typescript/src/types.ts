@@ -975,6 +975,173 @@ export interface ReleaseAuditResult extends JsonObject {
   limitations: string[];
 }
 
+export interface OperationsCatalogArgs extends JsonObject {
+  include_details?: boolean;
+  max_items?: number;
+}
+
+export interface OperationsStoreResult extends JsonObject {
+  name: string;
+  technology: string;
+  durability: "Canonical" | "Rebuildable";
+  mutability: "immutable" | "append_only" | "mutable";
+  rebuilt_from: string[];
+}
+
+export interface OperationsTopologyClassResult extends JsonObject {
+  class: "metadata" | "artifact" | "event" | "analytics" | "search";
+  name: string;
+  store: OperationsStoreResult;
+  promises: JsonObject;
+  holds_immutable_evidence: boolean;
+}
+
+export interface OperationsTopologyResult extends JsonObject {
+  deployment: string;
+  technologies: string[];
+  classes: OperationsTopologyClassResult[];
+}
+
+export interface OperationsPromiseParityResult extends JsonObject {
+  compared: number;
+  holds: boolean;
+  differences: string[];
+}
+
+export interface OperationsDataClassResult extends JsonObject {
+  class: "metadata" | "artifact" | "event" | "analytics" | "search";
+  name: string;
+  holds_immutable_evidence: boolean;
+}
+
+export interface OperationsDeploymentPlaneResult extends JsonObject {
+  plane: string;
+  name: string;
+  control_plane: boolean;
+}
+
+export interface OperationsTenantPatternResult extends JsonObject {
+  pattern: string;
+  name: string;
+}
+
+export interface OperationsServiceSummaryResult extends JsonObject {
+  satisfied: number;
+  diverges: number;
+  not_implemented: number;
+  divergences: number;
+  total: number;
+}
+
+export interface OperationsServiceContractResult extends JsonObject {
+  module_id: string;
+  title: string;
+  contract: string;
+  crates: string[];
+  verdict: "satisfied" | "diverges" | "not_implemented";
+  divergence_count: number;
+  divergences: string[];
+  omitted_divergences: number;
+}
+
+export interface OperationsServiceContractsResult extends JsonObject {
+  summary: OperationsServiceSummaryResult;
+  entries: OperationsServiceContractResult[];
+  entry_count: number;
+  omitted_entries: number;
+}
+
+export interface OperationsMetricDefinitionResult extends JsonObject {
+  metric: string;
+  blueprint_name: boolean;
+  numerator: string;
+  denominator: string;
+  refuses: string;
+}
+
+export interface OperationsUndefinedMetricResult extends JsonObject {
+  origin: string;
+  module_title: string;
+  metric: string;
+  denominator?: string | null;
+}
+
+export interface OperationsMetricsResult extends JsonObject {
+  metrics_schema_version: string;
+  atlasx_schema_version: string;
+  named_in_scope: number;
+  named_but_undefined: number;
+  defined_here: OperationsMetricDefinitionResult[];
+  undefined_metrics_returned: OperationsUndefinedMetricResult[];
+  omitted_undefined_metrics: number;
+  undefined_is_not_zero: boolean;
+}
+
+export interface OperationsSdkResult extends JsonObject {
+  registration_note: string;
+  execution_and_isolation_are_not_implied: boolean;
+}
+
+export interface OperationsCatalogResult extends JsonObject {
+  ok: boolean;
+  detail_mode: "summary" | "full";
+  max_items: number;
+  topologies: {
+    local: OperationsTopologyResult;
+    team: OperationsTopologyResult;
+    promise_parity: OperationsPromiseParityResult;
+    technology_is_not_promise_parity: boolean;
+  };
+  data_classes: OperationsDataClassResult[];
+  deployment_planes: OperationsDeploymentPlaneResult[];
+  tenant_patterns: OperationsTenantPatternResult[];
+  slo_objectives: string[];
+  service_contracts: OperationsServiceContractsResult;
+  metrics: OperationsMetricsResult;
+  sdk: OperationsSdkResult;
+  details?: JsonObject;
+  limitations: string[];
+}
+
+export interface OpsAcceptanceArgs extends JsonObject {
+  max_items?: number;
+}
+
+export type OpsAcceptanceVerdict = "met" | "refuted" | "unverifiable";
+
+export interface OpsAcceptanceBasisResult extends JsonObject {
+  basis: "linked_type" | "workspace_manifest" | "author" | "no_observer";
+  krate?: string;
+  item?: string;
+  who?: string;
+  because?: string;
+}
+
+export interface OpsAcceptanceFindingResult extends JsonObject {
+  criterion: string;
+  verdict: OpsAcceptanceVerdict;
+  basis: OpsAcceptanceBasisResult;
+  detail: string;
+}
+
+export interface OpsAcceptanceSummaryResult extends JsonObject {
+  met: number;
+  refuted: number;
+  unverifiable: number;
+  total: number;
+  is_release_ready: boolean;
+  is_decidable: boolean;
+}
+
+export interface OpsAcceptanceResult extends JsonObject {
+  ok: boolean;
+  summary: OpsAcceptanceSummaryResult;
+  findings: OpsAcceptanceFindingResult[];
+  omitted_findings: number;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;

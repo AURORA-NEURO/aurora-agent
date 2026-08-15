@@ -236,6 +236,17 @@ invent defaults:
   row indexes, count parity, blocker references, advisory null gates, and the Rust aggregator's
   strict conjunction, so a forged or compensating top-level `release_ready` value is rejected.
   `Workspace`, `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient` expose the same typed boundary.
+- `OperationsCatalogArgs` and `operations_catalog(...)` expose the operations/infrastructure
+  contract surface: local/team storage topology, promise parity independent of technology,
+  five closed data classes, nine deployment planes, tenant patterns, named SLO objectives, nine
+  service-contract audits, defined-versus-undefined metric debt, and the SDK registration boundary.
+  `OperationsCatalogReport` validates the closed sets, truncation counts, topology parity, service
+  divergence accounting, and the explicit nonclaim that undefined metrics are not zeroes.
+- `OpsAcceptanceArgs` and `ops_acceptance(...)` preserve the fourteen-condition alpha acceptance
+  result as typed `met`, `refuted`, and `unverifiable` findings. `OpsAcceptanceReport` refuses to
+  turn unverifiable criteria into a percentage or release pass, validates basis variants such as
+  linked types and no-observer explanations, and exposes `release_ready` and `decidable` only as
+  the Rust summary predicates. Both workflows are available on sync/async MCP and HTTP facades.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

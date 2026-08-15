@@ -78,6 +78,14 @@ from .oracle import (
     ReferencePanelRequest,
     ReferenceStandardAuditRequest,
 )
+from .operations import (
+    OpsAcceptanceArgs,
+    OpsAcceptanceReport,
+    OperationsCatalogArgs,
+    OperationsCatalogReport,
+    ops_acceptance_report,
+    operations_catalog_report,
+)
 from .workbench import WorkbenchRequest
 
 
@@ -554,6 +562,40 @@ class Workspace:
         """Return typed noncompensatory release readiness and delegated check evidence."""
 
         return release_audit_report(self.release_audit(request))
+
+    def operations_catalog(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Inspect storage promises, service contracts, SLO names, and metric debt."""
+
+        request = OperationsCatalogArgs(include_details, max_items)
+        return self.tool("operations_catalog", request.to_mcp_arguments())
+
+    def operations_catalog_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> OperationsCatalogReport:
+        """Return typed operations topology, service, and metric evidence."""
+
+        return operations_catalog_report(
+            self.operations_catalog(include_details=include_details, max_items=max_items)
+        )
+
+    def ops_acceptance(self, *, max_items: int = 100) -> dict[str, Any]:
+        """Run the closed alpha-acceptance predicate set with explicit unverifiable findings."""
+
+        request = OpsAcceptanceArgs(max_items)
+        return self.tool("ops_acceptance", request.to_mcp_arguments())
+
+    def ops_acceptance_report(self, *, max_items: int = 100) -> OpsAcceptanceReport:
+        """Return typed met/refuted/unverifiable operational acceptance evidence."""
+
+        return ops_acceptance_report(self.ops_acceptance(max_items=max_items))
 
     def oracle_combine(
         self,
@@ -1399,6 +1441,40 @@ class AsyncWorkspace:
         """Return typed async release gates and delegated evidence."""
 
         return release_audit_report(await self.release_audit(request))
+
+    async def operations_catalog(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.operations_catalog`."""
+
+        request = OperationsCatalogArgs(include_details, max_items)
+        return await self.tool("operations_catalog", request.to_mcp_arguments())
+
+    async def operations_catalog_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> OperationsCatalogReport:
+        """Return typed async operations topology and metric evidence."""
+
+        return operations_catalog_report(
+            await self.operations_catalog(include_details=include_details, max_items=max_items)
+        )
+
+    async def ops_acceptance(self, *, max_items: int = 100) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.ops_acceptance`."""
+
+        request = OpsAcceptanceArgs(max_items)
+        return await self.tool("ops_acceptance", request.to_mcp_arguments())
+
+    async def ops_acceptance_report(self, *, max_items: int = 100) -> OpsAcceptanceReport:
+        """Return typed async acceptance evidence and decidability state."""
+
+        return ops_acceptance_report(await self.ops_acceptance(max_items=max_items))
 
     async def oracle_combine(
         self,
