@@ -89,10 +89,12 @@ Convenience methods currently cover:
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of 120 tool schemas. `capabilityDiscover`
+families without maintaining a fragile partial clone of 121 tool schemas. `capabilityDiscover`
 searches the explicit cross-domain catalogue and can request authoritative schemas for matches;
 `capabilityAudit` verifies catalogue/schema parity and exposes coverage gaps; `capabilityRoute`
-batches named needs into a non-executing, digest-bound route proposal.
+batches named needs into a non-executing, digest-bound route proposal; `adapterPlan` selects native
+or Python-delegated biological source routes by explicit format and source shape while preserving
+dependency and semantic-loss boundaries.
 
 ## Events and webhooks
 

@@ -335,6 +335,14 @@ export interface CapabilityRouteArgs extends JsonObject {
   include_tools?: boolean;
 }
 
+export interface AdapterPlanArgs extends JsonObject {
+  source_id: string;
+  declared_format?: string;
+  source_kind: "bytes" | "directory";
+  required_conformance?: "parse" | "normalize" | "execute" | "stream" | "replay";
+  available_dependencies?: string[];
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;

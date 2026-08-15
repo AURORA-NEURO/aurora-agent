@@ -13,6 +13,7 @@ from .analytics import (
     analytics_request,
 )
 from .authoring import PackArtifact
+from .biological import AdapterPlanRequest
 from .client import Client
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ArgumentError
@@ -185,6 +186,26 @@ class Workspace:
             include_tools,
         )
         return self.tool("capability_route", request.to_mcp_arguments())
+
+    def adapter_plan(
+        self,
+        source_id: str,
+        source_kind: str,
+        *,
+        declared_format: str | None = None,
+        required_conformance: str | None = None,
+        available_dependencies: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Plan native and Python-delegated adapters before any source bytes are read."""
+
+        request = AdapterPlanRequest(
+            source_id,
+            source_kind,
+            declared_format,
+            required_conformance,
+            available_dependencies,
+        )
+        return self.tool("adapter_plan", request.to_mcp_arguments())
 
     def oracle_combine(
         self,
@@ -502,6 +523,26 @@ class AsyncWorkspace:
             include_tools,
         )
         return await self.tool("capability_route", request.to_mcp_arguments())
+
+    async def adapter_plan(
+        self,
+        source_id: str,
+        source_kind: str,
+        *,
+        declared_format: str | None = None,
+        required_conformance: str | None = None,
+        available_dependencies: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.adapter_plan`."""
+
+        request = AdapterPlanRequest(
+            source_id,
+            source_kind,
+            declared_format,
+            required_conformance,
+            available_dependencies,
+        )
+        return await self.tool("adapter_plan", request.to_mcp_arguments())
 
     async def oracle_combine(
         self,

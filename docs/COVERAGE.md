@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 120 callable tools. That count is intentionally
+The MCP integration layer currently exposes 121 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -59,6 +59,11 @@ so a name-parity pass cannot conceal a malformed contract.
 `capability_route` batches named needs across those groups into a single route id, preserves each
 bounded search result, distinguishes explicit tool filters from ranked candidates, and never
 executes the proposed tools.
+`adapter_plan` makes the biological-format boundary callable: it matches explicit source formats
+and source shapes against native CSV/inventory adapters and Python-delegated DICOM, NIfTI/BIDS,
+AnnData/Zarr, VCF, BAM/CRAM, and OME-Zarr routes. It reports declared semantic-loss surfaces and
+distinguishes missing from unchecked optional dependencies before execution; it never sniffs
+content, fetches sources, imports packages, or claims that heavyweight parsing has occurred.
 These remain in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
 key completeness, dependency-graph invalidation, partial unknown-region handling, fail-closed
 misses, and explicit re-proving; `storage_lifecycle_simulate` adds deterministic tiering, pin

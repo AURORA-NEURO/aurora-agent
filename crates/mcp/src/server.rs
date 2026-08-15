@@ -16,7 +16,10 @@
 //! how much was excluded and whether the sufficiency claim holds.
 
 use crate::rpc::{code, Request, Response};
-use bioprism_adapter::{certify, Source, SourceProvenance, TabularAdapter, TabularProfile};
+use bioprism_adapter::{
+    certify, AdapterPlanRequest, AdapterRegistry, Source, SourceProvenance, TabularAdapter,
+    TabularProfile,
+};
 use bioprism_adaptive::{
     AdaptivePanel, Candidate as AdaptiveCandidate, CapabilityId as AdaptiveCapabilityId,
 };
@@ -534,6 +537,7 @@ impl Server {
             "measurement_compare" => self.measurement_compare(&arguments),
             "hub_resolve" => self.hub_resolve(&arguments),
             "hub_lock" => self.hub_lock(&arguments),
+            "adapter_plan" => self.adapter_plan(&arguments),
             "tabular_ingest" => self.tabular_ingest(&arguments),
             "observed_world_declare" => self.observed_world_declare(&arguments),
             "world_claim_check" => self.world_claim_check(&arguments),
@@ -4572,6 +4576,45 @@ impl Server {
                 json!(ingestion.fact_count().saturating_sub(max_items as usize));
         }
         Ok(output)
+    }
+
+    fn adapter_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdapterPlanRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid adapter plan request: {error}"))?;
+        let plan = AdapterRegistry::default()
+            .plan(request)
+            .map_err(|error| format!("adapter plan refused: {error}"))?;
+        let plan_value = serde_json::to_value(&plan)
+            .map_err(|error| format!("could not serialize adapter plan: {error}"))?;
+        let plan_id = bioprism_ids::ContentHash::of_value(&plan_value)
+            .map_err(|error| format!("could not hash adapter plan: {error}"))?;
+        let selected = plan.selected_adapter.as_ref().map(|adapter| {
+            json!({
+                "id": adapter.id,
+                "execution": adapter.execution,
+                "version": adapter.version,
+                "conformance_level": adapter.conformance_level,
+                "optional_dependency": adapter.optional_dependency,
+                "declared_loss_kinds": adapter.declared_loss_kinds,
+                "scope_dimensions": adapter.scope_dimensions,
+            })
+        });
+        Ok(json!({
+            "ok": true,
+            "workflow": "adapter_plan",
+            "plan_id": plan_id,
+            "registry": bioprism_adapter::ADAPTER_REGISTRY_SCHEMA_VERSION,
+            "executable": plan.executable,
+            "selected_adapter": selected,
+            "plan": plan,
+            "execution": "not_started",
+            "guarantees": [
+                "format matching is explicit and content sniffing is refused",
+                "native adapters and Python-delegated biological adapters share one declared loss vocabulary",
+                "optional dependency absence or uncertainty is surfaced before execution",
+                "the planner does not fetch bytes, import packages, execute adapters, or grant credentials",
+            ],
+        }))
     }
 
     fn observed_world_declare(&self, arguments: &Value) -> Result<Value, String> {
@@ -14124,7 +14167,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "world_and_ingestion",
             "domains": ["world modeling", "data ingestion", "provenance"],
             "crates": ["bioprism-world", "bioprism-adapter", "bioprism-worldfactory", "bioprism-standards"],
-            "mcp_tools": ["world_validate", "world_index", "tabular_ingest", "observed_world_declare", "world_claim_check", "lineage_audit", "preanalytic_apply"],
+            "mcp_tools": ["world_validate", "world_index", "adapter_plan", "tabular_ingest", "observed_world_declare", "world_claim_check", "lineage_audit", "preanalytic_apply"],
             "cli_entrypoints": ["world validate", "world show", "world generate", "world index"],
             "status": "available"
         },
@@ -14916,6 +14959,21 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_bytes": { "type": "integer", "minimum": 1, "maximum": 10000000, "description": "Hard input byte ceiling; defaults to 10000000." }
                 },
                 "required": ["source_id", "profile"]
+            }
+        }),
+        json!({
+            "name": "adapter_plan",
+            "description": "Plan a biological or general data adapter before reading bytes. Matches an explicit declared format and source shape against native and Python-delegated adapter contracts, reports conformance and semantic-loss surfaces, and distinguishes missing from unchecked optional dependencies without sniffing, fetching, or executing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_id": { "type": "string", "description": "Stable caller-owned source identifier carried into the plan." },
+                    "declared_format": { "type": "string", "description": "Explicit media type or profile such as application/dicom, application/h5ad, text/vcf, or text/csv. Omission is allowed only for adapters that explicitly accept undeclared formats." },
+                    "source_kind": { "type": "string", "enum": ["bytes", "directory"], "description": "Physical source shape already held by the caller." },
+                    "required_conformance": { "type": "string", "enum": ["parse", "normalize", "execute", "stream", "replay"], "description": "Optional minimum adapter conformance level." },
+                    "available_dependencies": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional caller-checked dependency names, for example pydicom, nibabel, anndata, pysam, or zarr. Omission means unknown, not installed." }
+                },
+                "required": ["source_id", "source_kind"]
             }
         }),
         json!({

@@ -62,5 +62,9 @@ runner. `MissionBinding` supports validated field-level dataflow between direct 
 and `CapabilityQuery` routes across the complete domain catalogue with optional tool schemas;
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
+`AdapterRegistry` and `adapter_plan()` add a dependency-free format boundary for tabular and
+biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM, and OME-Zarr routes
+are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and
+semantic-loss declarations remain visible before parsing. The planners never sniff or fetch bytes.
 See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

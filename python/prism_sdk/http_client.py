@@ -15,6 +15,7 @@ import ssl
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from .biological import AdapterPlanRequest
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ApiError, ArgumentError, TransportError
 
@@ -206,6 +207,26 @@ class ApiClient:
         )
         return self.call_tool("capability_route", request.to_mcp_arguments())
 
+    def adapter_plan(
+        self,
+        source_id: str,
+        source_kind: str,
+        *,
+        declared_format: str | None = None,
+        required_conformance: str | None = None,
+        available_dependencies: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Plan native and Python-delegated adapters through the HTTP gateway."""
+
+        request = AdapterPlanRequest(
+            source_id,
+            source_kind,
+            declared_format,
+            required_conformance,
+            available_dependencies,
+        )
+        return self.call_tool("adapter_plan", request.to_mcp_arguments())
+
     def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         if after < 0 or not 1 <= limit <= 1000:
             raise ArgumentError("after must be non-negative and limit must be 1..=1000")
@@ -315,6 +336,26 @@ class AsyncApiClient:
             include_tools,
         )
         return await self.call_tool("capability_route", request.to_mcp_arguments())
+
+    async def adapter_plan(
+        self,
+        source_id: str,
+        source_kind: str,
+        *,
+        declared_format: str | None = None,
+        required_conformance: str | None = None,
+        available_dependencies: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.adapter_plan`."""
+
+        request = AdapterPlanRequest(
+            source_id,
+            source_kind,
+            declared_format,
+            required_conformance,
+            available_dependencies,
+        )
+        return await self.call_tool("adapter_plan", request.to_mcp_arguments())
 
     async def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.events, after=after, limit=limit)

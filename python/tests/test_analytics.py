@@ -5,6 +5,8 @@ import sys
 import unittest
 
 from prism_sdk import (
+    AdapterPlanRequest,
+    AdapterRegistry,
     AnalyticsDirection,
     AnalyticsEvidence,
     AsyncClient,
@@ -22,6 +24,8 @@ from prism_sdk import (
     PairedObservation,
     WorkbenchRequest,
     Workspace,
+    PlanStatus,
+    SourceKind,
     analytics_request,
 )
 from prism_sdk.errors import ArgumentError
@@ -53,6 +57,32 @@ def observation() -> MetricObservation:
 
 
 class AnalyticsModelTests(unittest.TestCase):
+    def test_biological_adapter_registry_distinguishes_dependency_states(self) -> None:
+        request = AdapterPlanRequest(
+            "scan-1",
+            SourceKind.BYTES,
+            declared_format="APPLICATION/DICOM",
+            available_dependencies=["pydicom"],
+        )
+        plan = AdapterRegistry().plan(request, check_environment=False)
+        self.assertTrue(plan.executable)
+        self.assertEqual(plan.selected_adapter.id, "bioprism.python.dicom")
+
+        unknown = AdapterRegistry().plan(
+            AdapterPlanRequest("scan-1", SourceKind.BYTES, declared_format="application/dicom"),
+            check_environment=False,
+        )
+        self.assertEqual(unknown.candidates[0].status, PlanStatus.DEPENDENCY_UNKNOWN)
+
+    def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
+        with self.assertRaises(ArgumentError):
+            AdapterPlanRequest("", SourceKind.BYTES)
+        plan = AdapterRegistry().plan(
+            AdapterPlanRequest("variants", SourceKind.BYTES, declared_format="application/octet-stream"),
+            check_environment=False,
+        )
+        self.assertFalse(plan.executable)
+
     def test_models_emit_the_exact_rust_wire_shape(self) -> None:
         request = analytics_request(
             [observation()],
@@ -201,6 +231,17 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(result["echo"]["goal"], "compose evidence")
         self.assertEqual(result["echo"]["needs"][0]["id"], "oncology")
 
+    def test_sync_workspace_exposes_adapter_planning(self) -> None:
+        with Client(command(), timeout=2) as client:
+            result = Workspace(client).adapter_plan(
+                "scan-1",
+                "bytes",
+                declared_format="application/dicom",
+                available_dependencies=["pydicom"],
+            )
+        self.assertEqual(result["echo"]["source_id"], "scan-1")
+        self.assertEqual(result["echo"]["available_dependencies"], ["pydicom"])
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -244,6 +285,16 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 [CapabilityRouteNeed("release", CapabilityQuery(tool="bundle_verify"))],
             )
         self.assertEqual(result["echo"]["needs"][0]["tool"], "bundle_verify")
+
+    async def test_async_workspace_exposes_adapter_planning(self) -> None:
+        async with AsyncClient(command(), timeout=2) as client:
+            result = await AsyncWorkspace(client).adapter_plan(
+                "variants-1",
+                "bytes",
+                declared_format="text/vcf",
+                available_dependencies=["pysam"],
+            )
+        self.assertEqual(result["echo"]["declared_format"], "text/vcf")
 
 
 if __name__ == "__main__":

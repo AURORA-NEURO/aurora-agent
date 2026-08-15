@@ -36,7 +36,7 @@ fn main() {
                      prism_minimize, registry_gate, registry_lifecycle_simulate, cache_invalidation_simulate, storage_lifecycle_simulate, release_audit, operations_catalog, ops_acceptance, ops_capacity,\n\
                      research_ci_check, capability_rank, metrics_profile_audit, biocapability_evidence_audit,\n\
                      safety_release_gate, medical_boundary_check, hub_search, measurement_compare,\n\
-                     hub_resolve, hub_lock, tabular_ingest, observed_world_declare, world_claim_check,\n\
+                     hub_resolve, hub_lock, adapter_plan, tabular_ingest, observed_world_declare, world_claim_check,\n\
                     trace_analyze, trace_otel_ingest,\n\
                     lineage_audit, preanalytic_apply,\n\
                     contradiction_review,\n\

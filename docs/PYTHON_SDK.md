@@ -76,11 +76,18 @@ invent defaults:
   coverage gaps, and intentional multi-group membership.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates.
+- `AdapterRegistry` and `adapter_plan(...)` expose a dependency-free biological source planner.
+  It matches explicit formats and source shapes to native or Python-delegated routes, optionally
+  checks installed optional packages without importing them, and reports the adapter's declared
+  semantic-loss and scope surface. `Workspace.adapter_plan(...)`, `ApiClient.adapter_plan(...)`,
+  and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
+  fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
+  and OME-Zarr readers remain responsible for source-specific conformance in the Python layer.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP
-gateway: health/capability discovery, typed `capability_discover`, `capability_audit`, and
-`capability_route` helpers, REST tool calls, cursor-based event pages, and signed
+gateway: health/capability discovery, typed `capability_discover`, `capability_audit`,
+`capability_route`, and `adapter_plan` helpers, REST tool calls, cursor-based event pages, and signed
 webhook subscription/delivery acknowledgement. They preserve status and JSON error payloads in
 `ApiError` and do not recreate Rust domain semantics.
 

@@ -88,6 +88,7 @@ pub mod inventory;
 pub mod location;
 pub mod loss;
 pub mod probe;
+pub mod registry;
 pub mod source;
 pub mod tabular;
 
@@ -101,6 +102,10 @@ pub use inventory::{InventoryAdapter, InventoryProfile};
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
 pub use probe::{field_inventory, Inventory};
+pub use registry::{
+    AdapterDescriptor, AdapterExecution, AdapterPlan, AdapterPlanCandidate, AdapterPlanRequest,
+    AdapterRegistry, PlanStatus, RegistryError, SourceKind, ADAPTER_REGISTRY_SCHEMA_VERSION,
+};
 pub use source::{Locator, Source, SourceManifest, SourceProvenance};
 pub use tabular::{
     ColumnRole, FramePolicy, OntologyPolicy, TabularAdapter, TabularProfile, TypePolicy,

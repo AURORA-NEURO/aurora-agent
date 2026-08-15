@@ -192,6 +192,11 @@ required-field closure, and schema-size bounds across the full advertised tool s
 `capability_route` batches named cross-domain needs into a reproducible proposal with explicit
 versus ranked resolution status, bounded candidate unions, optional authoritative schemas, and an
 unambiguous no-execution boundary; the caller still reviews arguments before constructing a mission.
+The adapter registry now gives the same treatment to biological source boundaries: `adapter_plan`
+selects native or Python-delegated routes by explicit format and source shape, carries the closed
+semantic-loss vocabulary and scope dimensions, and reports dependency missingness versus dependency
+uncertainty. This is a planning and contract layer; heavyweight Python readers still need to emit
+source-specific conformance reports before their normalized worlds are publishable.
 
 
 ## §11 Developer Platform — 6 uncovered

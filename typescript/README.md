@@ -35,7 +35,7 @@ if (result.mcp.result?.isError) {
 - `callTool(name, arguments)` is the escape hatch for all current and future MCP tools. The typed
   helpers `traceOtelIngest`, `metricsProfileAudit`, `metricsAnalyticsAudit`, `bioCapabilityEvidenceAudit`,
   `bioAtlasPublicationAudit`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`, `capabilityDiscover`, and
-  `capabilityAudit`, `capabilityRoute`, `runtimeExecutionSimulate` cover the
+  `capabilityAudit`, `capabilityRoute`, `adapterPlan`, `runtimeExecutionSimulate` cover the
   highest-value cross-domain workflows without pretending to type every domain payload twice.
 - `eventStream` parses the gateway's bounded SSE snapshot and returns the `x-next-after` cursor;
   it is deliberately not a long-lived socket or an implicit reconnect loop.

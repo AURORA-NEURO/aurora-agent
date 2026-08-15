@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 120);
+    assert_eq!(tools.len(), 121);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3609,18 +3609,78 @@ fn capability_discovery_routes_across_domains_and_attaches_authoritative_schemas
 }
 
 #[test]
+fn adapter_plan_routes_biological_formats_without_sniffing_or_execution() {
+    let mut server = server();
+    let unknown = call(
+        &mut server,
+        "adapter_plan",
+        json!({
+            "source_id": "scan-1",
+            "source_kind": "bytes",
+            "declared_format": "application/dicom"
+        }),
+    );
+    assert_eq!(unknown["workflow"], json!("adapter_plan"));
+    assert_eq!(unknown["executable"], json!(false));
+    assert_eq!(unknown["execution"], json!("not_started"));
+    assert_eq!(unknown["plan_id"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        unknown["plan"]["candidates"][0]["status"],
+        json!("dependency_unknown")
+    );
+    assert_eq!(unknown["selected_adapter"], Value::Null);
+
+    let ready = call(
+        &mut server,
+        "adapter_plan",
+        json!({
+            "source_id": "scan-1",
+            "source_kind": "bytes",
+            "declared_format": "application/dicom",
+            "available_dependencies": ["pydicom"]
+        }),
+    );
+    assert_eq!(ready["executable"], json!(true));
+    assert_eq!(
+        ready["selected_adapter"]["id"],
+        json!("bioprism.python.dicom")
+    );
+    assert_eq!(
+        ready["selected_adapter"]["execution"],
+        json!("python_delegated")
+    );
+
+    let refused = call(
+        &mut server,
+        "adapter_plan",
+        json!({
+            "source_id": "opaque",
+            "source_kind": "bytes",
+            "declared_format": "application/octet-stream"
+        }),
+    );
+    assert_eq!(refused["executable"], json!(false));
+    assert_eq!(refused["selected_adapter"], Value::Null);
+    assert!(refused["guarantees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "format matching is explicit and content sniffing is refused"));
+}
+
+#[test]
 fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     let mut server = server();
     let result = call(&mut server, "capability_audit", json!({}));
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(28));
-    assert_eq!(result["unique_catalog_tools"], json!(120));
-    assert_eq!(result["advertised_tool_count"], json!(120));
+    assert_eq!(result["unique_catalog_tools"], json!(121));
+    assert_eq!(result["advertised_tool_count"], json!(121));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(120));
-    assert_eq!(result["schema_quality"]["valid"], json!(120));
+    assert_eq!(result["schema_quality"]["checked"], json!(121));
+    assert_eq!(result["schema_quality"]["valid"], json!(121));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
