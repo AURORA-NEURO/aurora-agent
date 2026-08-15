@@ -180,6 +180,10 @@ typed research or clinical output labels and returns `MedicalBoundaryResult`; re
 may be admitted, while clinical categories remain a structured refusal with an unconditional
 boundary. These result types preserve policy evidence and do not imply content classification,
 runtime security, medical advice, or deployment approval.
+`safetyPosture` returns `SafetyPostureResult` with count-reconciled threat populations and optional
+`SafetyThreatResult` details. Its `enforced`, `declared_only`, and `absent` mitigation states stay
+distinct, as do residual and unanalysed threat IDs; the explicit perimeter nonclaim remains part
+of the result rather than being inferred from a green transport response.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

@@ -1196,6 +1196,51 @@ export interface MedicalBoundaryResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface SafetyPostureArgs extends JsonObject {
+  include_threats?: boolean;
+}
+
+export interface SafetyCoverageResult extends JsonObject {
+  mitigated: number;
+  declared_only: number;
+  unmitigated: number;
+}
+
+export interface SafetyThreatMitigationResult extends JsonObject {
+  state: "enforced" | "declared_only" | "absent";
+  name: string;
+  role: string;
+  declared_in?: string;
+  reason?: JsonObject;
+  by?: JsonObject;
+}
+
+export interface SafetyThreatResult extends JsonObject {
+  id: string;
+  module: string;
+  asset: string;
+  class: string;
+  requires: string[];
+  surface: string;
+  narrative: string;
+  mitigations: SafetyThreatMitigationResult[];
+}
+
+export interface SafetyPostureResult extends JsonObject {
+  ok: boolean;
+  model: string;
+  adversaries: number;
+  threats: number;
+  coverage: SafetyCoverageResult;
+  coverage_summary: string;
+  residual_threat_ids: string[];
+  unanalysed_threat_ids: string[];
+  unreachable_threat_ids: string[];
+  audit_acceptances: boolean;
+  perimeter_controls_are_not_claimed_as_enforced: boolean;
+  threat_details?: SafetyThreatResult[];
+}
+
 export interface OpsAcceptanceArgs extends JsonObject {
   max_items?: number;
 }

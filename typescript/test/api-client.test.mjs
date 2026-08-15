@@ -253,6 +253,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         boundary_is_unconditional: true,
         clinical_output_is_never_admitted: true,
       } } } });
+      if (path === "/v1/tools/safety_posture") return jsonResponse({ ok: true, tool: "safety_posture", request_id: "r20", mcp: { result: { structuredContent: {
+        ok: true,
+        model: "section_13",
+        adversaries: 9,
+        threats: 25,
+        coverage: { mitigated: 6, declared_only: 15, unmitigated: 4 },
+        coverage_summary: "6 enforced, 15 declared-only, 4 unmitigated (of 25)",
+        residual_threat_ids: ["T-13.26-dual-use"],
+        unanalysed_threat_ids: [],
+        unreachable_threat_ids: [],
+        audit_acceptances: true,
+        perimeter_controls_are_not_claimed_as_enforced: true,
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -434,6 +447,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const acceptance = await client.opsAcceptance({ max_items: 3 });
   const safety = await client.safetyReleaseGate({ assessment: { subject: "pack/biological-design@1", category: "biological_design", ratings: { capability_uplift: "low" } } });
   const medical = await client.medicalBoundaryCheck({ output: { side: "clinical", category: "treatment_selection", label: "choose a treatment" } });
+  const posture = await client.safetyPosture({ include_threats: false });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -468,6 +482,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(acceptance.mcp.result.structuredContent.summary.is_decidable, false);
   assert.equal(safety.mcp.result.structuredContent.decision.decision, "cleared");
   assert.equal(medical.mcp.result.structuredContent.admitted, false);
+  assert.equal(posture.mcp.result.structuredContent.coverage.unmitigated, 4);
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

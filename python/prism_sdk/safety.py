@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
-from .capability import _route_mapping, _route_strings, _route_text
+from .capability import _route_count, _route_mapping, _route_strings, _route_text
 from .errors import ArgumentError
 
 
@@ -57,6 +57,7 @@ SAFETY_PROHIBITED_OUTPUTS = frozenset({
 SAFETY_GATE_DECISIONS = frozenset({"cleared", "conditioned", "blocked"})
 SAFETY_CONDITION_CONTROLS = ("gated reviewer access", "non-executable release form")
 SAFETY_GATE_RULE = "zero high non-mitigating dimensions clears; one conditions release; two or more block; any unrated dimension refuses the gate"
+SAFETY_POSTURE_MITIGATION_STATES = frozenset({"enforced", "declared_only", "absent"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -336,6 +337,195 @@ class MedicalBoundaryReport:
         return not self.admitted
 
 
+@dataclass(frozen=True)
+class SafetyPostureArgs:
+    include_threats: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.include_threats, bool):
+            raise ArgumentError("include_threats must be a boolean")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"include_threats": self.include_threats}
+
+
+@dataclass(frozen=True)
+class SafetyCoverageReport:
+    raw: dict[str, Any]
+    mitigated: int
+    declared_only: int
+    unmitigated: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "SafetyCoverageReport":
+        raw = _route_mapping("safety coverage", value)
+        return cls(
+            raw,
+            _route_count("safety coverage mitigated", raw.get("mitigated")),
+            _route_count("safety coverage declared_only", raw.get("declared_only")),
+            _route_count("safety coverage unmitigated", raw.get("unmitigated")),
+        )
+
+    @property
+    def total(self) -> int:
+        return self.mitigated + self.declared_only + self.unmitigated
+
+
+@dataclass(frozen=True)
+class SafetyThreatMitigationReport:
+    raw: dict[str, Any]
+    state: str
+    name: str
+    role: str
+    declared_in: str | None
+    reason: dict[str, Any] | None
+    by: dict[str, Any] | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "SafetyThreatMitigationReport":
+        raw = _route_mapping("safety threat mitigation", value)
+        state = _route_text("safety threat mitigation state", raw.get("state"))
+        if state not in SAFETY_POSTURE_MITIGATION_STATES:
+            raise ArgumentError(f"unknown safety threat mitigation state: {state!r}")
+        name = _route_text("safety threat mitigation name", raw.get("name"))
+        role = _route_text("safety threat mitigation role", raw.get("role"))
+        declared_in = _optional_text("safety threat mitigation declared_in", raw.get("declared_in"))
+        reason_value = raw.get("reason")
+        reason = _route_mapping("safety threat mitigation reason", reason_value) if reason_value is not None else None
+        if reason is not None:
+            _route_text("safety threat mitigation reason kind", reason.get("reason"))
+        by_value = raw.get("by")
+        by = _route_mapping("safety threat mitigation by", by_value) if by_value is not None else None
+        if by is not None and not by:
+            raise ArgumentError("safety threat mitigation by must not be empty")
+        if state == "declared_only" and declared_in is None:
+            raise ArgumentError("declared-only mitigation must name where it was declared")
+        if state == "absent" and reason is None:
+            raise ArgumentError("absent mitigation must name why it is absent")
+        if state == "enforced" and by is None:
+            raise ArgumentError("enforced mitigation must name its enforcement basis")
+        return cls(raw, state, name, role, declared_in, reason, by)
+
+
+@dataclass(frozen=True)
+class SafetyThreatReport:
+    raw: dict[str, Any]
+    threat_id: str
+    module: str
+    asset: str
+    threat_class: str
+    requires: tuple[str, ...]
+    surface: str
+    narrative: str
+    mitigations: tuple[SafetyThreatMitigationReport, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "SafetyThreatReport":
+        raw = _route_mapping("safety threat", value)
+        mitigations_value = raw.get("mitigations")
+        if not isinstance(mitigations_value, Sequence) or isinstance(mitigations_value, (str, bytes)):
+            raise ArgumentError("safety threat mitigations must be an array")
+        mitigations = tuple(
+            SafetyThreatMitigationReport.from_wire(item)
+            for item in mitigations_value
+            if isinstance(item, Mapping)
+        )
+        if len(mitigations) != len(mitigations_value):
+            raise ArgumentError("safety threat mitigations must contain only objects")
+        if not mitigations:
+            raise ArgumentError("safety threat must carry at least one mitigation")
+        return cls(
+            raw,
+            _route_text("safety threat id", raw.get("id")),
+            _route_text("safety threat module", raw.get("module")),
+            _route_text("safety threat asset", raw.get("asset")),
+            _route_text("safety threat class", raw.get("class")),
+            _route_strings("safety threat requires", raw.get("requires", [])),
+            _route_text("safety threat surface", raw.get("surface")),
+            _route_text("safety threat narrative", raw.get("narrative")),
+            mitigations,
+        )
+
+
+@dataclass(frozen=True)
+class SafetyPostureReport:
+    raw: dict[str, Any]
+    ok: bool
+    model: str
+    adversaries: int
+    threats: int
+    coverage: SafetyCoverageReport
+    coverage_summary: str
+    residual_threat_ids: tuple[str, ...]
+    unanalysed_threat_ids: tuple[str, ...]
+    unreachable_threat_ids: tuple[str, ...]
+    audit_acceptances: bool
+    perimeter_controls_are_not_claimed_as_enforced: bool
+    threat_details: tuple[SafetyThreatReport, ...] | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "SafetyPostureReport":
+        raw = _payload(
+            value,
+            ("ok", "model", "adversaries", "threats", "coverage", "coverage_summary", "residual_threat_ids", "unanalysed_threat_ids", "unreachable_threat_ids", "audit_acceptances", "perimeter_controls_are_not_claimed_as_enforced"),
+            "safety posture",
+        )
+        if not _bool("safety posture ok", raw.get("ok")):
+            raise ArgumentError("safety posture report is not successful")
+        model = _route_text("safety posture model", raw.get("model"))
+        coverage = SafetyCoverageReport.from_wire(raw.get("coverage"))
+        threats = _route_count("safety posture threats", raw.get("threats"))
+        if coverage.total != threats:
+            raise ArgumentError("safety posture coverage does not reconcile with threat count")
+        residual = _route_strings("safety posture residual_threat_ids", raw.get("residual_threat_ids"))
+        unanalysed = _route_strings("safety posture unanalysed_threat_ids", raw.get("unanalysed_threat_ids"))
+        unreachable = _route_strings("safety posture unreachable_threat_ids", raw.get("unreachable_threat_ids"))
+        if not set(unanalysed).issubset(residual):
+            raise ArgumentError("unanalysed safety threats must be a residual subset")
+        threat_details_value = raw.get("threat_details")
+        threat_details: tuple[SafetyThreatReport, ...] | None = None
+        if threat_details_value is not None:
+            if not isinstance(threat_details_value, Sequence) or isinstance(threat_details_value, (str, bytes)):
+                raise ArgumentError("safety posture threat_details must be an array")
+            threat_details = tuple(
+                SafetyThreatReport.from_wire(item)
+                for item in threat_details_value
+                if isinstance(item, Mapping)
+            )
+            if len(threat_details) != len(threat_details_value):
+                raise ArgumentError("safety posture threat_details must contain only objects")
+            if len(threat_details) != threats:
+                raise ArgumentError("safety posture threat_details count does not match threats")
+            detail_ids = tuple(item.threat_id for item in threat_details)
+            if len(detail_ids) != len(set(detail_ids)):
+                raise ArgumentError("safety posture threat_details must have unique ids")
+            if not set(residual).issubset(detail_ids) or not set(unanalysed).issubset(detail_ids) or not set(unreachable).issubset(detail_ids):
+                raise ArgumentError("safety posture population ids must exist in threat_details")
+        return cls(
+            raw,
+            True,
+            model,
+            _route_count("safety posture adversaries", raw.get("adversaries")),
+            threats,
+            coverage,
+            _route_text("safety posture coverage_summary", raw.get("coverage_summary")),
+            residual,
+            unanalysed,
+            unreachable,
+            _bool("safety posture audit_acceptances", raw.get("audit_acceptances")),
+            _bool("safety posture perimeter control claim", raw.get("perimeter_controls_are_not_claimed_as_enforced")),
+            threat_details,
+        )
+
+    @property
+    def details_included(self) -> bool:
+        return self.threat_details is not None
+
+    @property
+    def has_unmitigated_threats(self) -> bool:
+        return self.coverage.unmitigated > 0
+
+
 def safety_release_gate_report(value: Mapping[str, Any]) -> SafetyReleaseGateReport:
     """Parse direct MCP or HTTP safety-release output."""
 
@@ -348,12 +538,19 @@ def medical_boundary_report(value: Mapping[str, Any]) -> MedicalBoundaryReport:
     return MedicalBoundaryReport.from_wire(value)
 
 
+def safety_posture_report(value: Mapping[str, Any]) -> SafetyPostureReport:
+    """Parse the bounded section-13 posture summary or its optional threat details."""
+
+    return SafetyPostureReport.from_wire(value)
+
+
 __all__ = [
     "SAFETY_CATEGORIES",
     "SAFETY_CONDITION_CONTROLS",
     "SAFETY_GATE_RULE",
     "SAFETY_GATE_DECISIONS",
     "SAFETY_MITIGATING_DIMENSIONS",
+    "SAFETY_POSTURE_MITIGATION_STATES",
     "SAFETY_PROHIBITED_OUTPUTS",
     "SAFETY_RATINGS",
     "SAFETY_RESEARCH_USES",
@@ -361,9 +558,15 @@ __all__ = [
     "MedicalBoundaryReport",
     "MedicalBoundaryRequest",
     "RiskAssessmentRequest",
+    "SafetyCoverageReport",
     "SafetyGateDecisionReport",
+    "SafetyPostureArgs",
+    "SafetyPostureReport",
     "SafetyReleaseGateArgs",
     "SafetyReleaseGateReport",
+    "SafetyThreatMitigationReport",
+    "SafetyThreatReport",
     "medical_boundary_report",
+    "safety_posture_report",
     "safety_release_gate_report",
 ]

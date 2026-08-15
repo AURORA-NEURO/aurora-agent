@@ -90,9 +90,12 @@ from .safety import (
     MedicalBoundaryReport,
     MedicalBoundaryRequest,
     RiskAssessmentRequest,
+    SafetyPostureArgs,
+    SafetyPostureReport,
     SafetyReleaseGateArgs,
     SafetyReleaseGateReport,
     medical_boundary_report,
+    safety_posture_report,
     safety_release_gate_report,
 )
 from .workbench import WorkbenchRequest
@@ -642,6 +645,17 @@ class Workspace:
         """Return typed research admission or unconditional clinical refusal evidence."""
 
         return medical_boundary_report(self.medical_boundary_check(request))
+
+    def safety_posture(self, *, include_threats: bool = False) -> dict[str, Any]:
+        """Summarize section-13 threat populations without claiming runtime enforcement."""
+
+        request = SafetyPostureArgs(include_threats)
+        return self.tool("safety_posture", request.to_mcp_arguments())
+
+    def safety_posture_report(self, *, include_threats: bool = False) -> SafetyPostureReport:
+        """Return typed mitigated/declared-only/unmitigated and residual threat evidence."""
+
+        return safety_posture_report(self.safety_posture(include_threats=include_threats))
 
     def oracle_combine(
         self,
@@ -1558,6 +1572,17 @@ class AsyncWorkspace:
         """Return typed async medical research admission/refusal evidence."""
 
         return medical_boundary_report(await self.medical_boundary_check(request))
+
+    async def safety_posture(self, *, include_threats: bool = False) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.safety_posture`."""
+
+        request = SafetyPostureArgs(include_threats)
+        return await self.tool("safety_posture", request.to_mcp_arguments())
+
+    async def safety_posture_report(self, *, include_threats: bool = False) -> SafetyPostureReport:
+        """Return typed async section-13 threat posture evidence."""
+
+        return safety_posture_report(await self.safety_posture(include_threats=include_threats))
 
     async def oracle_combine(
         self,

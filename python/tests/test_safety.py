@@ -8,9 +8,12 @@ from prism_sdk import (
     MedicalBoundaryReport,
     MedicalBoundaryRequest,
     RiskAssessmentRequest,
+    SafetyPostureArgs,
+    SafetyPostureReport,
     SafetyReleaseGateArgs,
     SafetyReleaseGateReport,
     medical_boundary_report,
+    safety_posture_report,
     safety_release_gate_report,
 )
 
@@ -79,6 +82,56 @@ def medical_refusal_payload() -> dict:
         "boundary_is_unconditional": True,
         "clinical_output_is_never_admitted": True,
     }
+
+
+def posture_payload(*, include_details: bool = False) -> dict:
+    payload = {
+        "ok": True,
+        "model": "section_13",
+        "adversaries": 2,
+        "threats": 3,
+        "coverage": {"mitigated": 1, "declared_only": 1, "unmitigated": 1},
+        "coverage_summary": "1 enforced, 1 declared-only, 1 unmitigated (of 3)",
+        "residual_threat_ids": ["T-1", "T-2"],
+        "unanalysed_threat_ids": ["T-2"],
+        "unreachable_threat_ids": [],
+        "audit_acceptances": True,
+        "perimeter_controls_are_not_claimed_as_enforced": True,
+    }
+    if include_details:
+        payload["threat_details"] = [
+            {
+                "id": "T-1",
+                "module": "13.01",
+                "asset": "result_integrity",
+                "class": "evaluator_tampering",
+                "requires": ["observes_public_surface"],
+                "surface": "catalog",
+                "narrative": "a threat",
+                "mitigations": [{"state": "enforced", "name": "sealed record", "role": "preventative", "by": {"unrepresentable": "typed"}}],
+            },
+            {
+                "id": "T-2",
+                "module": "13.02",
+                "asset": "hidden_oracle",
+                "class": "holdout_read",
+                "requires": ["executes_in_agent_sandbox"],
+                "surface": "agent_sandbox",
+                "narrative": "a declared threat",
+                "mitigations": [{"state": "declared_only", "name": "sandbox separation", "role": "preventative", "declared_in": "13.02"}],
+            },
+            {
+                "id": "T-3",
+                "module": "13.03",
+                "asset": "provider_credential",
+                "class": "secret_exfiltration",
+                "requires": ["holds_credential"],
+                "surface": "control_plane",
+                "narrative": "an unmitigated threat",
+                "mitigations": [{"state": "absent", "name": "credential broker", "role": "preventative", "reason": {"reason": "requires_absent_infrastructure"}}],
+            },
+        ]
+    return payload
 
 
 class SafetyTests(unittest.TestCase):
@@ -162,6 +215,31 @@ class SafetyTests(unittest.TestCase):
         payload["use_case"] = "evidence_synthesis"
         with self.assertRaises(ArgumentError):
             medical_boundary_report(payload)
+
+    def test_safety_posture_reconciles_populations_and_optional_threat_details(self) -> None:
+        self.assertEqual(SafetyPostureArgs(True).to_mcp_arguments(), {"include_threats": True})
+        summary = safety_posture_report(posture_payload())
+        detailed = safety_posture_report({"ok": True, "mcp": {"result": {"structuredContent": posture_payload(include_details=True)}}})
+        self.assertIsInstance(summary, SafetyPostureReport)
+        self.assertFalse(summary.details_included)
+        self.assertTrue(summary.has_unmitigated_threats)
+        self.assertTrue(detailed.details_included)
+        self.assertEqual(len(detailed.threat_details), 3)
+        self.assertEqual(detailed.threat_details[1].mitigations[0].state, "declared_only")
+
+    def test_safety_posture_rejects_population_or_mitigation_forgery(self) -> None:
+        forged = posture_payload()
+        forged["coverage"]["unmitigated"] = 2
+        with self.assertRaises(ArgumentError):
+            safety_posture_report(forged)
+        forged = posture_payload(include_details=True)
+        forged["unanalysed_threat_ids"] = ["T-unknown"]
+        with self.assertRaises(ArgumentError):
+            safety_posture_report(forged)
+        forged = posture_payload(include_details=True)
+        forged["threat_details"][2]["mitigations"][0].pop("reason")
+        with self.assertRaises(ArgumentError):
+            safety_posture_report(forged)
 
 
 if __name__ == "__main__":

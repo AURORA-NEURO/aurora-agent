@@ -30,6 +30,8 @@ import type {
   SafetyReleaseGateResult,
   MedicalBoundaryArgs,
   MedicalBoundaryResult,
+  SafetyPostureArgs,
+  SafetyPostureResult,
   OpsAcceptanceArgs,
   OpsAcceptanceResult,
   BioAtlasPublicationAuditArgs,
@@ -317,6 +319,10 @@ export class ApiClient {
 
   async medicalBoundaryCheck(args: MedicalBoundaryArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MedicalBoundaryResult>> {
     return this.callTool<MedicalBoundaryResult>("medical_boundary_check", args, options);
+  }
+
+  async safetyPosture(args: SafetyPostureArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<SafetyPostureResult>> {
+    return this.callTool<SafetyPostureResult>("safety_posture", args, options);
   }
 
   async opsAcceptance(args: OpsAcceptanceArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OpsAcceptanceResult>> {

@@ -359,7 +359,8 @@ partial unknown regions, fail-closed lookup misses and explicit re-proving, whil
 `storage_lifecycle_simulate` plans pin-aware hot/warm/cold tiering and non-copyable quota
 delegation with reserve-protected accounting,
 `policy_screen` enforces caller-supplied policy rules before selection and preserves typed
-refusals, `safety_release_gate` applies the complete dual-use risk gate with unrated dimensions
+refusals, `safety_posture` reports section-13 threat populations without claiming runtime
+enforcement, and `safety_release_gate` applies the complete dual-use risk gate with unrated dimensions
 still blocking, `hub_search` performs bounded federated exact-facet discovery with authority and
 freshness provenance, `measurement_compare` checks standards declarations without silent unit or
 ontology coercion, `governance_schema_check` checks the shipped schema contracts,

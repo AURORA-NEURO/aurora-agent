@@ -58,13 +58,15 @@ top-level readiness state.
 storage promises are compared independently of provider technology, service-contract divergence and
 undefined metric debt remain counted, and alpha acceptance keeps refuted and unverifiable criteria
 separate. Neither typed projection fabricates live deployment, CI, or external-service evidence.
-The safety SDK surface now covers `safety_release_gate` and `medical_boundary_check` across Python
+The safety SDK surface now covers `safety_posture`, `safety_release_gate`, and `medical_boundary_check` across Python
 and TypeScript. The release gate keeps the nine risk dimensions, mitigating-dimension distinction,
 exact conditioned controls, driver parity, and unrated refusal visible; its parser rejects forged
 clearance and never treats missing ratings as low risk. The medical boundary keeps enumerated
 research admission separate from enumerated clinical refusal and requires the unconditional
-research-only marker. These additions are policy contracts and structured evidence, not runtime
-sandboxing, content moderation, clinical decision support, or medical-device authorization.
+research-only marker. The posture projection reconciles mitigated/declared-only/unmitigated counts,
+residual subsets, and optional state-specific threat evidence without collapsing declarations into
+enforcement. These additions are policy contracts and structured evidence, not runtime sandboxing,
+content moderation, clinical decision support, or medical-device authorization.
 `agent_mission` now connects those domain surfaces into an explicit mission DAG: agents can preview
 deterministic dependency waves or execute an allow-listed sequence while preserving raw refusals,
 blocking dependent work, bounding output, and refusing side-effect confirmations by default. Serial

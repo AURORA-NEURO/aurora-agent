@@ -257,6 +257,12 @@ invent defaults:
   `MedicalBoundaryReport` preserves either admitted research use or structured clinical refusal,
   requires an unconditional boundary flag, and never turns a clinical refusal into a successful
   recommendation. Both safety workflows are available on sync/async MCP and HTTP facades.
+- `SafetyPostureArgs` and `safety_posture(...)` expose the section-13 threat-model posture with
+  separate mitigated, declared-only, unmitigated, residual, unanalysed, and unreachable
+  populations. `SafetyPostureReport` reconciles coverage counts, population subsets, and optional
+  full threat details; each mitigation keeps its state-specific declaration, absence reason, or
+  enforcement basis. The report explicitly retains that this is a model projection, not runtime
+  sandboxing or perimeter enforcement.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and
