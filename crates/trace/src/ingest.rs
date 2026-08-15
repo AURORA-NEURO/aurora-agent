@@ -1,7 +1,7 @@
 //! Trajectory ingestion.
 //!
 //! Blueprint 06 and the MVP cut line: "Native JSONL plus one OpenTelemetry adapter; **loss report
-//! included**." The loss report is the same requirement the data adapters carry — an importer that
+//! included**." Native JSONL and [`crate::otel`] share the same requirement — an importer that
 //! silently drops a field it did not understand produces a trace that looks complete and replays
 //! wrong.
 //!

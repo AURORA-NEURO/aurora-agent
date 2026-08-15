@@ -37,7 +37,7 @@ fn main() {
                      research_ci_check, capability_rank, metrics_profile_audit, biocapability_evidence_audit,\n\
                      safety_release_gate, medical_boundary_check, hub_search, measurement_compare,\n\
                      hub_resolve, hub_lock, tabular_ingest, observed_world_declare, world_claim_check,\n\
-                    trace_analyze,\n\
+                    trace_analyze, trace_otel_ingest,\n\
                     lineage_audit, preanalytic_apply,\n\
                     contradiction_review,\n\
                      lab_plan, lens_catalogue, lens_leakage_check, scale_family_split_verify, megafactory_twin_audit,\n\

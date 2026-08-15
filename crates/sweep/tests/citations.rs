@@ -11,10 +11,9 @@
 //! fails in both directions: an id here with no implementation, and an id in the source that is not
 //! here.
 //!
-//! Two ids are deliberately absent and must stay absent: §04's OpenTelemetry adapter (an
-//! integration surface that cannot be written offline) and §10's registry overview (already
-//! discharged by `bioprism-registry`, `bioprism-hubapi` and `bioprism-hub`). `lib.rs` names both in
-//! prose, by title, with the reason.
+//! One id is deliberately absent and must stay absent: §10's registry overview (already discharged
+//! by `bioprism-registry`, `bioprism-hubapi` and `bioprism-hub`). `lib.rs` names it in prose, by
+//! title, with the reason. The OpenTelemetry adapter is owned by `bioprism-trace::otel`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -34,14 +33,14 @@ const CROSS_REFERENCES: [&str; 12] = [
     "39.19", "43.33",
 ];
 
-/// The two declined modules, as `(section, index)` pairs rather than as strings.
+/// The declined registry overview, as a `(section, index)` pair rather than as a string.
 ///
 /// This looks like an affectation and is not. `tools/coverage.sh` greps for the literal token, so a
 /// test written as `const MUST_NOT_APPEAR: [&str; 2] = ["…", "…"]` would put those exact ids into
 /// `crates/` and mark both modules covered — the test asserting they are uncited would be the thing
 /// that cited them. The first version of this file did precisely that, and the check below caught
 /// it. Building the ids from digits keeps the token out of the source.
-const DECLINED: [(u8, u8); 2] = [(4, 2), (10, 1)];
+const DECLINED: [(u8, u8); 1] = [(10, 1)];
 
 fn declined_ids() -> Vec<String> {
     DECLINED
@@ -142,7 +141,7 @@ fn every_module_this_crate_claims_to_implement_is_actually_cited_in_its_source()
 }
 
 #[test]
-fn the_two_declined_modules_are_named_in_prose_and_never_by_id() {
+fn the_declined_registry_overview_is_named_in_prose_and_never_by_id() {
     let cited = cited_ids();
     for id in declined_ids() {
         assert!(
@@ -151,16 +150,15 @@ fn the_two_declined_modules_are_named_in_prose_and_never_by_id() {
         );
     }
     let lib = fs::read_to_string("src/lib.rs").expect("lib.rs should be readable");
-    assert!(lib.contains("OpenTelemetry adapter"));
     assert!(lib.contains("registry overview"));
 }
 
 #[test]
-fn the_implemented_set_is_the_fourteen_backlog_modules_minus_the_two_declined() {
+fn the_implemented_set_is_unique_and_the_declined_set_is_explicit() {
     assert_eq!(IMPLEMENTED.len(), 12);
     let unique: BTreeSet<&str> = IMPLEMENTED.iter().copied().collect();
     assert_eq!(unique.len(), 12);
-    assert_eq!(IMPLEMENTED.len() + DECLINED.len(), 14);
+    assert_eq!(DECLINED.len(), 1);
 }
 
 #[test]

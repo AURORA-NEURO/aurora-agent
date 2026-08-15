@@ -1,4 +1,4 @@
-//! What the eighty-four add up to, and the shape of the argument they make.
+//! What the residue adds up to, and the shape of the argument it makes.
 //!
 //! These tests are the crate's findings written as assertions. Each one states a claim about the
 //! residue that would be wrong if somebody quietly reclassified a module — which is the specific
@@ -14,8 +14,8 @@ use bioprism_residue::{
 #[test]
 fn the_register_explains_the_whole_backlog_and_nothing_else() {
     let register = residue().expect("well formed");
-    assert_eq!(register.len(), 56);
-    assert_eq!(register.sections().len(), 10);
+    assert_eq!(register.len(), 55);
+    assert_eq!(register.sections().len(), 9);
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn every_module_carries_at_least_one_verdict_and_every_verdict_carries_a_source(
 }
 
 #[test]
-fn exactly_one_of_the_fifty_six_still_carries_work_on_any_reading() {
+fn exactly_one_of_the_fifty_five_still_carries_work_on_any_reading() {
     // This fell from twenty-six to one when four crates landed, and the fall is the register doing
     // its job rather than an embarrassment to it: twenty-five of the twenty-six left the backlog
     // outright. The survivor is the sandbox, which no crate can build and every crate says so. If a
@@ -41,7 +41,7 @@ fn exactly_one_of_the_fifty_six_still_carries_work_on_any_reading() {
     let register = residue().expect("well formed");
     let distribution = Distribution::of(&register);
     assert_eq!(distribution.work_remaining, 1);
-    assert_eq!(distribution.modules.total(), 56);
+    assert_eq!(distribution.modules.total(), 55);
     // Zero by *primary* verdict: no module's first-listed reading is that work remains. The one
     // survivor is a second reading beside a discharge, which is exactly the case a register holding
     // one verdict per module would have lost.
@@ -54,14 +54,14 @@ fn the_verdict_distribution_over_modules_is_the_one_reported() {
     let register = residue().expect("well formed");
     let counts = Distribution::of(&register).modules;
     assert_eq!(counts.process, 37);
-    assert_eq!(counts.foreign_artifact, 10);
+    assert_eq!(counts.foreign_artifact, 9);
     assert_eq!(counts.discharged_elsewhere, 9);
     assert_eq!(counts.genuinely_uncovered, 0);
     assert_eq!(
         counts.block_level_split, 0,
         "no module's primary verdict is a split"
     );
-    assert_eq!(counts.total(), 56);
+    assert_eq!(counts.total(), 55);
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn a_foreign_artifact_verdict_never_says_the_work_is_done_here() {
             )
         })
         .collect();
-    assert_eq!(foreign.len(), 10);
+    assert_eq!(foreign.len(), 9);
     for entry in foreign {
         assert!(!entry.primary().classification().is_work_remaining());
     }
@@ -399,7 +399,7 @@ fn a_module_leaving_the_backlog_is_a_deletion_and_touches_nothing_else() {
     let key = ModuleKey::new(11, 4).expect("in range");
     assert!(register.get(key).is_some());
     assert!(register.without(key));
-    assert_eq!(register.len(), 55);
+    assert_eq!(register.len(), 54);
     assert!(register.get(key).is_none());
     assert!(!register.without(key), "removing it twice is a no-op");
     // Nothing else moved: the remaining entries hold no cross-references to each other.
@@ -411,7 +411,7 @@ fn a_module_leaving_the_backlog_is_a_deletion_and_touches_nothing_else() {
 fn a_module_can_be_found_by_the_title_the_backlog_gives_it_without_anyone_writing_an_id() {
     let register = residue().expect("well formed");
     assert!(register.find("registry overview").is_some());
-    assert!(register.find("  Opentelemetry Adapter  ").is_some());
+    assert!(register.find("  Opentelemetry Adapter  ").is_none());
     assert!(register.find("a module that does not exist").is_none());
 }
 

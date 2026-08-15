@@ -200,9 +200,9 @@ use bioprism_tokens::{
     compare as compare_token_plans, plan as plan_token_context, ContextRequest, PlanCandidate,
 };
 use bioprism_trace::{
-    excluded as excluded_trace, first_divergence, from_jsonl as trace_from_jsonl,
+    excluded as excluded_trace, first_divergence, from_jsonl as trace_from_jsonl, from_otlp_json,
     is_actionable as divergence_is_actionable, review_reduction, segment as segment_trace,
-    validate as validate_trace, CellProposal, Trace as TraceIr,
+    validate as validate_trace, CellProposal, Trace as TraceIr, MAX_SPANS as MAX_OTEL_SPANS,
 };
 use bioprism_weave::ActKind;
 use bioprism_weavelang::{compile as compile_weave, ExecutionMode, Machine};
@@ -532,6 +532,7 @@ impl Server {
             "observed_world_declare" => self.observed_world_declare(&arguments),
             "world_claim_check" => self.world_claim_check(&arguments),
             "trace_analyze" => self.trace_analyze(&arguments),
+            "trace_otel_ingest" => self.trace_otel_ingest(&arguments),
             "lineage_audit" => self.lineage_audit(&arguments),
             "preanalytic_apply" => self.preanalytic_apply(&arguments),
             "contradiction_review" => self.contradiction_review(&arguments),
@@ -4622,6 +4623,139 @@ impl Server {
         }
     }
 
+    fn trace_otel_ingest(&self, arguments: &Value) -> Result<Value, String> {
+        let trace_id = arguments
+            .get("trace_id")
+            .and_then(Value::as_str)
+            .ok_or("trace_id is required")?;
+        if trace_id.trim().is_empty() {
+            return Err("trace_id must not be empty".into());
+        }
+
+        let max_bytes = arguments
+            .get("max_bytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(10_000_000);
+        if max_bytes == 0 || max_bytes > 10_000_000 {
+            return Err("max_bytes must be between 1 and 10000000".into());
+        }
+        let max_spans = arguments
+            .get("max_spans")
+            .and_then(Value::as_u64)
+            .unwrap_or(MAX_OTEL_SPANS as u64);
+        if max_spans == 0 || max_spans > MAX_OTEL_SPANS as u64 {
+            return Err(format!("max_spans must be between 1 and {MAX_OTEL_SPANS}"));
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+
+        let inline = arguments.get("otlp_json").and_then(Value::as_str);
+        let document = arguments.get("document").and_then(Value::as_str);
+        if inline.is_some() && document.is_some() {
+            return Err("provide either otlp_json or document, not both".into());
+        }
+        let text = match (inline, document) {
+            (Some(text), None) => {
+                if text.len() as u64 > max_bytes {
+                    return Err(format!(
+                        "otlp_json is {} bytes, above max_bytes {}",
+                        text.len(),
+                        max_bytes
+                    ));
+                }
+                text.to_owned()
+            }
+            (None, Some(relative)) => {
+                let path = self.resolve(relative)?;
+                if path.is_dir() {
+                    return Err("document requires an OTLP JSON file, not a directory".into());
+                }
+                let metadata = std::fs::metadata(&path).map_err(|error| {
+                    format!("cannot inspect OTLP document {}: {error}", path.display())
+                })?;
+                if metadata.len() > max_bytes {
+                    return Err(format!(
+                        "OTLP document is {} bytes, above max_bytes {}",
+                        metadata.len(),
+                        max_bytes
+                    ));
+                }
+                std::fs::read_to_string(&path).map_err(|error| {
+                    format!("cannot read OTLP document {}: {error}", path.display())
+                })?
+            }
+            (None, None) => return Err("trace_otel_ingest requires otlp_json or document".into()),
+            (Some(_), Some(_)) => unreachable!("OTLP inputs were checked as exclusive"),
+        };
+
+        let ingestion = from_otlp_json(
+            trace_id,
+            &text,
+            arguments
+                .get("succeeded")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            max_spans as usize,
+        )
+        .map_err(|error| format!("OTLP import refused: {error}"))?;
+        let validation_error = validate_trace(ingestion.trace())
+            .err()
+            .map(|error| error.to_string());
+        let valid = validation_error.is_none();
+        let event_count = ingestion.trace().len();
+        let event_preview = arguments
+            .get("include_events")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            .then(|| {
+                ingestion
+                    .trace()
+                    .events
+                    .iter()
+                    .take(max_items as usize)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            });
+
+        Ok(json!({
+            "ok": true,
+            "trace_id": ingestion.trace().trace_id,
+            "event_count": event_count,
+            "succeeded": ingestion.trace().succeeded,
+            "trace_sha256": ingestion.trace().digest().as_str(),
+            "valid": valid,
+            "validation_error": validation_error,
+            "mapping": ingestion.mapping(),
+            "loss": ingestion.loss(),
+            "lossless": ingestion.loss().is_lossless(),
+            "dropped_events": ingestion.loss().dropped_events(),
+            "compilable": valid && ingestion.is_compilable(),
+            "events_included": event_preview.is_some(),
+            "events": event_preview,
+            "omitted_events": event_preview
+                .as_ref()
+                .map(|events| event_count.saturating_sub(events.len()))
+                .unwrap_or(0),
+            "guarantees": [
+                "OTLP JSON is bounded by both input bytes and source span count before unbounded work",
+                "source spans are retained inside normalized Event payloads, while unsupported fields remain explicit in the loss report",
+                "parentSpanId becomes caused_by only when the parent is present and earlier after timestamp ordering",
+                "event kinds inferred from names, missing timestamps, duplicate attributes, and multi-trace exports are not called lossless or compilable",
+                "the caller supplies trajectory success; the adapter never infers benchmark outcome from span status",
+            ],
+            "limitations": [
+                "this is a deterministic OTLP JSON importer, not an OTLP exporter, collector client, network publisher, or clock reader",
+                "vendor-specific conventions are preserved as source data but are not interpreted unless they use prism.event.kind or aurora.event.kind",
+                "span links are retained but are not converted into Event IR causal parents",
+            ],
+        }))
+    }
+
     fn trace_analyze(&self, arguments: &Value) -> Result<Value, String> {
         let trace_id = arguments
             .get("trace_id")
@@ -4800,7 +4934,7 @@ impl Server {
                 "cell proposals retain trace digest and review context but cannot become Decision Cells without a named reviewer",
             ],
             "limitations": [
-                "this accepts native JSONL only; the blueprint's OpenTelemetry adapter is not implemented in this offline workspace",
+                "this tool accepts native JSONL only; trace_otel_ingest handles bounded OTLP JSON imports",
                 "segmentation is a transparent arithmetic heuristic, not a validated model or claim that the top candidate is correct",
                 "this tool does not minimize state, replay tools, run a benchmark, or publish a Decision Cell",
             ],
@@ -13255,9 +13389,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "trajectory_and_decision_cells",
-            "domains": ["JSONL trajectory ingestion", "divergence localization", "decision segmentation", "review-gated cell proposals"],
+            "domains": ["JSONL trajectory ingestion", "OTLP JSON span ingestion", "semantic-loss accounting", "divergence localization", "decision segmentation", "review-gated cell proposals"],
             "crates": ["bioprism-trace", "bioprism-prism", "bioprism-benchcompiler"],
-            "mcp_tools": ["trace_analyze", "benchmark_trace_analyze"],
+            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -14059,6 +14193,28 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["trace_id"],
                 "anyOf": [
                     { "required": ["jsonl"] },
+                    { "required": ["document"] }
+                ]
+            }
+        }),
+        json!({
+            "name": "trace_otel_ingest",
+            "description": "Import a bounded OTLP JSON resourceSpans export into the trajectory Event IR. Preserves source spans, normalizes attributes and span events, resolves earlier parentSpanId links, and returns a structured semantic-loss ledger. Inferred kinds, missing timestamps, unresolved parents, duplicate attributes, links, unknown fields, and multi-trace exports remain non-lossless and non-compilable; no network export or collector connection occurs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "trace_id": { "type": "string", "description": "Logical trajectory identifier assigned by the caller." },
+                    "otlp_json": { "type": "string", "description": "Inline OTLP JSON export; mutually exclusive with document." },
+                    "document": { "type": "string", "description": "Root-confined OTLP JSON file; mutually exclusive with otlp_json." },
+                    "succeeded": { "type": "boolean", "description": "Caller-supplied trajectory outcome; defaults to false and is never inferred from span status." },
+                    "include_events": { "type": "boolean", "description": "Include a bounded Event IR preview; defaults to false." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum event preview rows; defaults to 100." },
+                    "max_spans": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Hard source-span ceiling; defaults to 100000." },
+                    "max_bytes": { "type": "integer", "minimum": 1, "maximum": 10000000, "description": "Hard input byte ceiling; defaults to 10000000." }
+                },
+                "required": ["trace_id"],
+                "anyOf": [
+                    { "required": ["otlp_json"] },
                     { "required": ["document"] }
                 ]
             }

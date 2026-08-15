@@ -21,7 +21,7 @@
 //! | 03.03 World State IR | code-bearing | [`state`] |
 //! | 03.11 Provenance, Identifiers and Versioning | code-bearing | [`provenance`] |
 //! | 04.01 Ingestion Pipeline | code-bearing | [`ingest`] |
-//! | *OpenTelemetry Adapter* (§04) | integration surface | **not implemented** — see below |
+//! | *OpenTelemetry Adapter* (§04) | integration surface | [`bioprism_trace::otel`] |
 //! | 04.03 Runner and Benchmark Adapters | code-bearing | [`interop`] |
 //! | 04.04 Environment and Artifact Capture | code-bearing | [`capture`] |
 //! | 04.05 Redaction, Privacy and Data Minimization | code-bearing | [`redact`] |
@@ -33,19 +33,16 @@
 //! | 10.14 Trace and Fork Explorer | part rendering, part predicate | [`explorer`], in part |
 //! | 13.11 Effects, Permissions and Human Approval | code-bearing | [`effects`] |
 //!
-//! The two that are not implemented are named in prose rather than by id, deliberately.
-//! `tools/coverage.sh` counts any `NN.MM` token under `crates/` or `docs/`, so writing their ids
-//! here would move the coverage number without moving capability — which is the one thing this
+//! The remaining registry overview is named in prose rather than by id, deliberately.
+//! `tools/coverage.sh` counts any `NN.MM` token under `crates/` or `docs/`, so writing its id here
+//! would move the coverage number without moving capability — which is the one thing this
 //! workspace must not do.
 //!
-//! **The OpenTelemetry adapter** is an integration surface: the third bucket `crates/ops` had to
-//! add for §40 — code-bearing, but not code that can be written here. Its content is a mapping from
-//! OTLP and Jaeger exports and the GenAI semantic conventions onto Event IR. The workspace is
-//! offline against pinned dependencies and carries no OTel crate, and `bioprism-trace` already
-//! records the same refusal for the same reason. Hand-rolling a second reading of another
-//! organisation's evolving semantic conventions would put its disagreements into the evidence
-//! record as though they were properties of the run. The blueprint's own caution — do not assume
-//! all providers emit stable or complete conventions — is the argument for waiting.
+//! **The OpenTelemetry adapter** is now owned by `bioprism-trace::otel`: it accepts recorded OTLP
+//! JSON, maps spans into Event IR, preserves source payloads, and exposes a semantic-loss report.
+//! It intentionally does not become a network exporter or claim ownership of every provider's
+//! evolving semantic conventions. Unknown fields, inferred kinds, missing timestamps, unresolved
+//! parents, and unsupported links remain visible and block a lossless compilation claim.
 //!
 //! **The registry overview** is an architecture statement whose every predicate is discharged
 //! elsewhere. Immutable resolution, signed manifests, digest and revocation verification before

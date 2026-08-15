@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 113);
+    assert_eq!(tools.len(), 114);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -2743,6 +2743,103 @@ not-json
     );
     assert_eq!(bounded["__isError"], json!(true));
     assert!(bounded["error"].as_str().unwrap().contains("max_bytes"));
+}
+
+#[test]
+fn trace_otel_ingest_maps_spans_and_reports_compilation_readiness() {
+    let mut server = server();
+    let otlp = json!({
+        "resourceSpans": [{
+            "resource": {"attributes": [
+                {"key": "service.name", "value": {"stringValue": "agent"}}
+            ]},
+            "scopeSpans": [{
+                "scope": {"name": "fixture", "version": "1"},
+                "spans": [
+                    {
+                        "traceId": "trace-a",
+                        "spanId": "root",
+                        "name": "agent.goal",
+                        "startTimeUnixNano": "10",
+                        "attributes": [{"key": "prism.event.kind", "value": {"stringValue": "goal"}}]
+                    },
+                    {
+                        "traceId": "trace-a",
+                        "spanId": "child",
+                        "parentSpanId": "root",
+                        "name": "agent.tool.call",
+                        "startTimeUnixNano": "20",
+                        "attributes": [{"key": "prism.event.kind", "value": {"stringValue": "action"}}],
+                        "events": [{
+                            "name": "tool.input",
+                            "timeUnixNano": "21",
+                            "attributes": [{"key": "arg.count", "value": {"intValue": "2"}}]
+                        }]
+                    }
+                ]
+            }]
+        }]
+    });
+    let payload = call(
+        &mut server,
+        "trace_otel_ingest",
+        json!({
+            "trace_id": "otel-run",
+            "otlp_json": otlp.to_string(),
+            "include_events": true,
+            "succeeded": false
+        }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["mapping"]["format"], json!("otlp_json"));
+    assert_eq!(payload["mapping"]["accepted_span_count"], json!(2));
+    assert_eq!(payload["mapping"]["span_event_count"], json!(1));
+    assert_eq!(payload["lossless"], json!(true));
+    assert_eq!(payload["compilable"], json!(true));
+    assert_eq!(payload["events"][1]["caused_by"], json!(0));
+    assert_eq!(payload["events"][1]["kind"], json!("action"));
+    assert_eq!(
+        payload["events"][1]["payload"]["events"][0]["name"],
+        json!("tool.input")
+    );
+}
+
+#[test]
+fn trace_otel_ingest_keeps_ambiguous_exports_non_compilable_and_bounded() {
+    let mut server = server();
+    let otlp = json!({
+        "resourceSpans": [{
+            "scopeSpans": [{
+                "spans": [{
+                    "traceId": "trace-a",
+                    "spanId": "span-a",
+                    "name": "tool.call"
+                }]
+            }]
+        }]
+    })
+    .to_string();
+    let payload = call(
+        &mut server,
+        "trace_otel_ingest",
+        json!({"trace_id": "ambiguous", "otlp_json": otlp}),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["lossless"], json!(false));
+    assert_eq!(payload["compilable"], json!(false));
+    assert_eq!(payload["events_included"], json!(false));
+
+    let bounded = call(
+        &mut server,
+        "trace_otel_ingest",
+        json!({
+            "trace_id": "bounded",
+            "otlp_json": otlp,
+            "max_spans": 0
+        }),
+    );
+    assert_eq!(bounded["__isError"], json!(true));
+    assert!(bounded["error"].as_str().unwrap().contains("max_spans"));
 }
 
 #[test]

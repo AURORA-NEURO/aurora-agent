@@ -390,10 +390,12 @@ instability; `megafactory_placement_audit` checks worker capability, attestation
 independence, locality transfer, fencing, and duplicate-effect classes. These remain local
 contract workflows: they do not provide containers, restoration of external state, real workers,
 durable fencing, biological calibration, or distributed scheduling.
-`trace_analyze` ingests native JSONL trajectories with explicit import loss, validates causal
-ordering, ranks decision-bearing review candidates, and compares lossless passing traces for first
-divergence. It returns review-gated `CellProposal` previews; it does not replay tools, minimize
-state, use an unimplemented OpenTelemetry adapter, or publish a Decision Cell.
+`trace_analyze` ingests native JSONL trajectories with explicit import loss, while
+`trace_otel_ingest` maps bounded OTLP JSON spans into the same Event IR with source preservation,
+parent resolution, and semantic-loss accounting. The trajectory tools validate causal ordering,
+rank decision-bearing review candidates, and compare lossless passing traces for first divergence.
+They return review-gated `CellProposal` previews; they do not replay tools, minimize state, export
+OTLP, or publish a Decision Cell.
 `lineage_audit` checks specimen ancestry, mass, time, material, artifacts, and identity evidence;
 `preanalytic_apply` runs the real pre-measurement mutation postconditions, family null control,
 response availability, and optional caller-threshold detectability.

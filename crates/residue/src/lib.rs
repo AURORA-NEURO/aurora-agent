@@ -9,7 +9,7 @@
 //! That sentence has been true and unenforceable. The explanations existed — ten crates had read
 //! their section's remainder and written down what they found — but they lived in ten `lib.rs` doc
 //! comments, in prose, in whichever crate happened to be built next to them. Nothing could ask *how
-//! many of the fifty-six are process*, nothing noticed when two crates disagreed, and nothing
+//! many of the fifty-five are process*, nothing noticed when two crates disagreed, and nothing
 //! failed when a module left the backlog and its explanation did not. That last one is no longer
 //! hypothetical: twenty-seven modules left in a single pass, and the register said so before anybody
 //! read it.
@@ -50,13 +50,13 @@
 //! # The trap this crate is shaped around
 //!
 //! `tools/coverage.sh` counts a blueprint module as covered when its `NN.MM` token appears anywhere
-//! under `crates/` or `docs/`. A register listing fifty-six uncovered ids would mark all
-//! fifty-six covered and take the headline to 100% — a number produced entirely by the document
+//! under `crates/` or `docs/`. A register listing fifty-five uncovered ids would mark all
+//! fifty-five covered and take the headline to 100% — a number produced entirely by the document
 //! complaining that the number is produced that way.
 //!
 //! Two crates have already been bitten. `docs/BACKLOG.md` emptied itself on its second run, because
 //! the run that generated it counted the file it had just written. `crates/sweep`'s citation test
-//! cited the two ids it existed to assert were uncited.
+//! once cited an id it existed to assert was uncited.
 //!
 //! So [`ModuleKey`] holds a section and an index as integers, has no constructor taking a string,
 //! and renders an id only at run time; and [`citations::audit`] reproduces the coverage script's

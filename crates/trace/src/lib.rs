@@ -25,20 +25,26 @@
 //!
 //! ## What is deliberately not here
 //!
-//! No OpenTelemetry adapter — the MVP cut line asks for one, and it needs an OTel dependency this
-//! offline workspace does not carry. No model-assisted segmentation: Gate 2 permits it but requires
-//! human approval regardless, and a transparent arithmetic ranker is auditable in a way a model is
-//! not. No state minimization; that already exists in `bioprism_prism::minimize`.
+//! The OpenTelemetry adapter is JSON-only and deterministic: it maps recorded OTLP spans into this
+//! Event IR and carries a semantic-loss report, but it does not export, contact a collector, or
+//! claim support for every vendor convention. No model-assisted segmentation: Gate 2 permits it
+//! but requires human approval regardless, and a transparent arithmetic ranker is auditable in a
+//! way a model is not. No state minimization; that already exists in `bioprism_prism::minimize`.
 //!
 //! The ranking heuristic is *not* validated. Gate 0 asks whether experts agree with the located
 //! decision on real trajectories, and no such study has been run here. The scores order candidates
 //! for review; they do not establish that the top candidate is the right one.
+//!
+//! Blueprint module 04.02 is discharged here by [`otel`]: a bounded OTLP JSON importer with
+//! explicit semantic-loss accounting. It is an importer only; export, collector transport, and
+//! vendor-specific convention ownership remain outside this crate.
 
 pub mod compile;
 pub mod divergence;
 pub mod error;
 pub mod event;
 pub mod ingest;
+pub mod otel;
 pub mod segment;
 
 pub use compile::{Approved, CellProposal};
@@ -46,4 +52,5 @@ pub use divergence::{first_divergence, is_actionable, Divergence};
 pub use error::TraceError;
 pub use event::{Event, EventKind, Trace};
 pub use ingest::{from_jsonl, validate, ImportLoss, Ingestion};
+pub use otel::{from_otlp_json, OtelError, OtelIngestion, OtelLoss, OtelMapping, MAX_SPANS};
 pub use segment::{excluded, review_reduction, segment, Candidate, CandidateScore};

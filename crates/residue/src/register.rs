@@ -1,4 +1,4 @@
-//! The fifty-six, transcribed.
+//! The fifty-five, transcribed.
 //!
 //! Every module `docs/BACKLOG.md` lists, with the verdict a classifying crate reached about it and
 //! the file that verdict was written in. Nothing here is a new judgement about a module a crate
@@ -66,7 +66,6 @@ const METRICS: &str = "crates/metrics/src/lib.rs";
 const DEVPLAT: &str = "crates/devplat/src/classify.rs";
 const OPS: &str = "crates/ops/src/lib.rs";
 const SWEEP: &str = "crates/sweep/src/lib.rs";
-const TRACE: &str = "crates/trace/src/lib.rs";
 const BIOEVALX: &str = "crates/bioevalx/src/lib.rs";
 const BIOETHICS: &str = "crates/bioethics/src/lib.rs";
 
@@ -982,34 +981,6 @@ fn biology_governance() -> Result<Vec<Entry>, RegisterError> {
 /// One module each from §04, §10 and §26 — the tails of sections that are otherwise complete.
 fn small_remainders() -> Result<Vec<Entry>, RegisterError> {
     Ok(vec![
-        entry(
-            4,
-            2,
-            "Opentelemetry Adapter",
-            vec![
-                transcribed(
-                    "bioprism-sweep",
-                    SWEEP,
-                    "**The OpenTelemetry adapter** is an integration surface",
-                    "An integration surface: a mapping from OTLP and Jaeger exports and the GenAI \
-                     semantic conventions onto the event IR. The workspace is offline against \
-                     pinned dependencies and carries no OTel crate, and hand-rolling a second \
-                     reading of another organisation's evolving conventions would put its \
-                     disagreements into the evidence record as properties of the run.",
-                    foreign(ForeignSurface::ForeignSpecification),
-                )?,
-                transcribed(
-                    "bioprism-trace",
-                    TRACE,
-                    "No OpenTelemetry adapter — the MVP cut line asks for one",
-                    "`bioprism-trace` records the same refusal independently and for the same \
-                     reason: the adapter needs a dependency the offline build cannot take. Two \
-                     crates reaching one verdict is worth recording, because it is the only module \
-                     in the register where that happened without one crate citing the other.",
-                    foreign(ForeignSurface::ForeignSpecification),
-                )?,
-            ],
-        )?,
         entry(
             10,
             1,

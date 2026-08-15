@@ -106,6 +106,30 @@ class Workspace:
             arguments["include_views"] = include_views
         return self.tool("fiber_compile", arguments)
 
+    def trace_otel_ingest(
+        self,
+        trace_id: str,
+        *,
+        otlp_json: str | None = None,
+        document: str | None = None,
+        succeeded: bool | None = None,
+        include_events: bool | None = None,
+        max_items: int | None = None,
+        max_spans: int | None = None,
+        max_bytes: int | None = None,
+    ) -> dict[str, Any]:
+        arguments = _otel_arguments(
+            trace_id,
+            otlp_json=otlp_json,
+            document=document,
+            succeeded=succeeded,
+            include_events=include_events,
+            max_items=max_items,
+            max_spans=max_spans,
+            max_bytes=max_bytes,
+        )
+        return self.tool("trace_otel_ingest", arguments)
+
 
 class AsyncWorkspace:
     """Async convenience facade mirroring :class:`Workspace`."""
@@ -176,6 +200,30 @@ class AsyncWorkspace:
             arguments["include_views"] = include_views
         return (await self.client.call_tool("fiber_compile", arguments)).require_ok()
 
+    async def trace_otel_ingest(
+        self,
+        trace_id: str,
+        *,
+        otlp_json: str | None = None,
+        document: str | None = None,
+        succeeded: bool | None = None,
+        include_events: bool | None = None,
+        max_items: int | None = None,
+        max_spans: int | None = None,
+        max_bytes: int | None = None,
+    ) -> dict[str, Any]:
+        arguments = _otel_arguments(
+            trace_id,
+            otlp_json=otlp_json,
+            document=document,
+            succeeded=succeeded,
+            include_events=include_events,
+            max_items=max_items,
+            max_spans=max_spans,
+            max_bytes=max_bytes,
+        )
+        return (await self.client.call_tool("trace_otel_ingest", arguments)).require_ok()
+
 
 def _developer_delivery_arguments(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     arguments: dict[str, Any] = {}
@@ -194,4 +242,40 @@ def _developer_delivery_arguments(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     release_request = _targets(kwargs.get("request_id"), kwargs.get("targets"))
     if release_request is not None:
         arguments["release_request"] = release_request
+    return arguments
+
+
+def _otel_arguments(
+    trace_id: str,
+    *,
+    otlp_json: str | None,
+    document: str | None,
+    succeeded: bool | None,
+    include_events: bool | None,
+    max_items: int | None,
+    max_spans: int | None,
+    max_bytes: int | None,
+) -> dict[str, Any]:
+    if not isinstance(trace_id, str) or not trace_id.strip():
+        raise ArgumentError("trace_id must be a non-empty string")
+    if (otlp_json is None) == (document is None):
+        raise ArgumentError("provide exactly one of otlp_json or document")
+    arguments: dict[str, Any] = {"trace_id": trace_id}
+    if otlp_json is not None:
+        if not isinstance(otlp_json, str):
+            raise ArgumentError("otlp_json must be a string")
+        arguments["otlp_json"] = otlp_json
+    if document is not None:
+        if not isinstance(document, str) or not document:
+            raise ArgumentError("document must be a non-empty string")
+        arguments["document"] = document
+    for key, value in (
+        ("succeeded", succeeded),
+        ("include_events", include_events),
+        ("max_items", max_items),
+        ("max_spans", max_spans),
+        ("max_bytes", max_bytes),
+    ):
+        if value is not None:
+            arguments[key] = value
     return arguments

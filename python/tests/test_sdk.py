@@ -42,6 +42,12 @@ class SyncClientTests(unittest.TestCase):
                 targets=["developer_platform"],
             )
             self.assertEqual(report["echo"]["release_request"]["id"], "sdk-test")
+            otel = Workspace(client).trace_otel_ingest(
+                "otel-test",
+                otlp_json='{"resourceSpans":[]}',
+                include_events=True,
+            )
+            self.assertEqual(otel["echo"]["trace_id"], "otel-test")
 
         self.assertFalse(client.running)
 
@@ -80,6 +86,11 @@ class AsyncClientTests(unittest.IsolatedAsyncioTestCase):
                 include_views=True,
             )
             self.assertTrue(context["echo"]["include_views"])
+            otel = await AsyncWorkspace(client).trace_otel_ingest(
+                "async-otel-test",
+                document="fixtures/trace.json",
+            )
+            self.assertEqual(otel["echo"]["document"], "fixtures/trace.json")
 
 
 if __name__ == "__main__":

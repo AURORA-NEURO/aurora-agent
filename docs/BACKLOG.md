@@ -1,7 +1,7 @@
 # Remaining backlog
 
-56 code-bearing blueprint modules are not yet cited by any crate or design note,
-across 10 sections. This is the enumerated form of `docs/COVERAGE.md`'s
+55 code-bearing blueprint modules are not yet cited by any crate or design note,
+across 9 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.
 
 Regenerate with `tools/backlog.sh`. Programme sections are excluded for the same reason they
@@ -15,15 +15,15 @@ observed-world declaration, provenance-bounded claim checking, federated resolut
 locking, trajectory ingestion and divergence review, specimen-lineage auditing, pre-analytic
 mutation checks, and multimodal contradiction programs. Those callable surfaces are intentionally
 not removed from this list: this backlog measures blueprint citation/ownership coverage, while
-transport exposure is a separate integration layer and does not turn external SDK, CI, UI, OTLP,
-or service prose into implemented code. The transport also exposes the in-tree operational acceptance,
+transport exposure is a separate integration layer and does not turn external SDK, CI, UI, OTLP
+export, or service prose into implemented code. The transport also exposes the in-tree operational acceptance,
 capacity projection, result-bundle verification, adaptive evaluation,
 posterior release-gate, oracle reference-standard, oracle mesh, and atlas contracts; these remain separately tracked here when
 their blueprint ownership is not yet cited by a crate or design note. It now also exposes
 bioevalx worldline/reproduction/trajectory checks, runtime effect authorization and tape
 verification, research-only oncology boundary and criteria-aware response checks, and stress
 family/report sweeps; these are transport integrations of existing in-tree contracts, not claims
-that the remaining SDK, UI, CI, OTLP, or service gaps are complete.
+that the remaining SDK, UI, CI, OTLP export, or service gaps are complete.
 The runtime transport now also runs bounded deterministic effect programs through record/replay,
 budget, fault, and fork checks. The million-scale transport exposes mechanistic twin discrepancy
 qualification plus distributed placement, attestation, locality, fencing, and duplicate-effect
@@ -146,6 +146,11 @@ unproven entries, while `storage_lifecycle_simulate` makes tiering, pin protecti
 quota accounting, and non-copyable delegation/absorption replayable. They remain deterministic
 in-memory contract projections: no durable cache, invalidation feed, byte mover, quota-enforcing
 backend, tenant boundary, encryption, replication, or OTLP exporter is implied.
+The trace layer now also owns the OpenTelemetry adapter: `trace_otel_ingest` imports bounded OTLP
+JSON exports into the existing Event IR, preserves raw spans, resolves earlier parent links, and
+returns explicit loss for inferred kinds, missing timestamps, unsupported fields, duplicate
+attributes, unresolved parents, and multi-trace exports. It is a deterministic importer rather
+than a collector client or OTLP exporter, so those external transport surfaces remain absent.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full
@@ -227,10 +232,6 @@ unimplemented rather than being inferred from the transport client.
 
 - `36.07` Sandboxing Untrusted Code And Research Artifacts
 - `36.19` Security Privacy Safety Red Team Program
-
-## §04 Ingestion And Interop — 1 uncovered
-
-- `04.02` Opentelemetry Adapter
 
 ## §10 Registry And Hub — 1 uncovered
 

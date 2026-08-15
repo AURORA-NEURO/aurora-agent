@@ -52,6 +52,8 @@ invent defaults:
   weighting contracts and never implies publication without explicit targets.
 - `compile_context(world, query, ...)` invokes `fiber_compile` while leaving policy/profile choices
   caller-controlled.
+- `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON
+  importer and preserves its semantic-loss/readiness report.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData/VCF readers, benchmark
