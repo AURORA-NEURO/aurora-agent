@@ -82,7 +82,7 @@ invent defaults:
   semantic-loss and scope surface. `Workspace.adapter_plan(...)`, `ApiClient.adapter_plan(...)`,
   and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
   fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
-  OME-Zarr, FASTA, FASTQ, mzML, and FHIR readers remain responsible for source-specific conformance in the Python layer.
+  OME-Zarr, FASTA, FASTQ, GFF3, mzML, and FHIR readers remain responsible for source-specific conformance in the Python layer.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and
@@ -153,6 +153,10 @@ invent defaults:
   assembly boundary. They validate multiline record framing, duplicate identifiers, optional
   nucleotide/protein alphabet claims, lengths, symbol counts, and nucleotide GC totals without
   disclosing sequence strings or headers.
+- `Gff3Adapter`, `parse_gff3(...)`, and `read_gff3(...)` provide a dependency-free GFF3/GTF-style
+  annotation boundary. They validate coordinates, scores, strands, phases, URL-encoded attributes,
+  duplicate feature IDs, Parent references and cycles, directives, and embedded FASTA boundaries
+  without disclosing attribute values or feature identifiers.
 - `MzmlAdapter`, `parse_mzml(...)`, and `read_mzml(...)` provide a dependency-free mass-spectrometry
   metadata boundary. They validate bounded XML, spectrum IDs and counts, MS levels, binary-array
   declarations, compression, precision, and encoded lengths without decoding binary arrays or

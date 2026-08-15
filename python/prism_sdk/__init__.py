@@ -87,6 +87,7 @@ from .errors import (
 from .fasta import FastaAdapter, FastaFinding, FastaParseError, FastaParseResult, parse_fasta
 from .fastq import FastqAdapter, FastqFinding, FastqParseError, FastqParseResult, parse_fastq
 from .fhir import FhirAdapter, FhirAuditResult, FhirFinding, audit_fhir, parse_fhir_json, parse_fhir_ndjson
+from .gff3 import Gff3Adapter, Gff3Finding, Gff3ParseError, Gff3ParseResult, parse_gff3
 from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
 from .mzml import MzmlAdapter, MzmlFinding, MzmlParseError, MzmlParseResult, parse_mzml
@@ -123,6 +124,7 @@ from .optional_readers import (
     read_fastq,
     read_fhir_json,
     read_fhir_ndjson,
+    read_gff3,
     read_indexed_vcf,
     read_mzml,
     read_nifti_header,
@@ -182,6 +184,10 @@ __all__ = [
     "FhirAdapter",
     "FhirAuditResult",
     "FhirFinding",
+    "Gff3Adapter",
+    "Gff3Finding",
+    "Gff3ParseError",
+    "Gff3ParseResult",
     "FastqAdapter",
     "FastqFinding",
     "FastqParseError",
@@ -277,6 +283,7 @@ __all__ = [
     "parse_fastq",
     "parse_fasta",
     "parse_mzml",
+    "parse_gff3",
     "parse_fhir_json",
     "parse_fhir_ndjson",
     "read_anndata_projection",
@@ -285,6 +292,7 @@ __all__ = [
     "read_fasta",
     "read_fhir_json",
     "read_fhir_ndjson",
+    "read_gff3",
     "read_mzml",
     "read_indexed_vcf",
     "read_nifti_header",

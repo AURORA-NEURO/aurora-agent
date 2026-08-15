@@ -220,7 +220,7 @@ The alignment projection route now covers reference dictionaries, CIGAR accounti
 bounds, flags, pairing, sorting, and coverage without decoding BAM/CRAM payloads, indexes, or
 reference bases.
 The typed Python adapter runtime now closes the concrete execution handoff across the parsed VCF,
-BIDS, DICOM, NIfTI, AnnData, alignment, FASTA, FASTQ, mzML, OME-Zarr, and FHIR routes, normalizes outcome states and
+BIDS, DICOM, NIfTI, AnnData, alignment, FASTA, FASTQ, GFF3, mzML, OME-Zarr, and FHIR routes, normalizes outcome states and
 document digests, and refuses raw-byte routes explicitly when their optional binary-reader binding
 is absent.
 The verified optional-reader layer now binds installed nibabel and anndata environments for raw
@@ -242,6 +242,9 @@ binary-array type/compression/precision declarations, and encoded lengths withou
 emitting m/z, intensity, or time arrays.
 The FASTA route now audits multiline reference records, duplicate identifiers, optional nucleotide or
 protein alphabet claims, lengths, symbol counts, and GC totals without disclosing sequence strings.
+The GFF3 route now audits bounded feature rows, coordinates, scores, strands, phases, URL-encoded
+attributes, duplicate IDs, Parent resolution/cycles, directives, and embedded FASTA boundaries
+without disclosing annotation values or feature identifiers.
 
 
 ## §11 Developer Platform — 6 uncovered

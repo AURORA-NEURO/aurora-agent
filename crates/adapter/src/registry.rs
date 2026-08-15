@@ -466,6 +466,24 @@ impl AdapterRegistry {
                 "Dependency-free bounded FASTA reader validating complete records, optional nucleotide/protein alphabets, and duplicate identifiers without disclosing sequence content.",
             ),
             descriptor(
+                "bioprism.python.gff3_text",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/gff3", "text/gff3", "application/gtf", "text/x-gtf"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ContentUninterpreted,
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::ProvenanceUnavailable,
+                ],
+                &["subject", "sample", "reference", "feature", "interval"],
+                None,
+                "Dependency-free bounded GFF3/GTF reader validating coordinates, attributes, parent references, and feature hierarchy without disclosing attribute values.",
+            ),
+            descriptor(
                 "bioprism.python.fhir_ndjson",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -966,6 +984,26 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.fasta_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_gff3_selects_the_dependency_free_python_reader() {
+        let plan = AdapterRegistry::default()
+            .plan(request(Some("text/gff3"), SourceKind::Bytes))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.gff3_text")
         );
         assert_eq!(
             plan.selected_adapter

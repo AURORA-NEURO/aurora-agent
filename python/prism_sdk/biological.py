@@ -395,6 +395,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free bounded FASTA reader validating complete records, optional nucleotide/protein alphabets, and duplicate identifiers without disclosing sequence content.",
         ),
         _descriptor(
+            "bioprism.python.gff3_text",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/gff3", "text/gff3", "application/gtf", "text/x-gtf"),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("content_uninterpreted", "coordinate_frame_not_carried", "ontology_term_unmapped", "provenance_unavailable"),
+            ("subject", "sample", "reference", "feature", "interval"),
+            "Dependency-free bounded GFF3/GTF reader validating coordinates, attributes, parent references, and feature hierarchy without disclosing attribute values.",
+        ),
+        _descriptor(
             "bioprism.python.fhir_ndjson",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/fhir+ndjson",),

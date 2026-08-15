@@ -25,6 +25,7 @@ from .mzml import MAX_MZML_BYTES, parse_mzml
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
 from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
+from .gff3 import MAX_GFF3_BYTES, parse_gff3
 
 
 MAX_READER_FILE_BYTES = 4_000_000_000
@@ -678,6 +679,35 @@ def read_fasta(
         raise ArgumentError(f"FASTA read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_gff3(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    annotation_format: str = "gff3",
+    max_features: int = 500_000,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded GFF3/GTF text and return the dependency-free hierarchy audit."""
+
+    candidate = _path(path, field="GFF3 path")
+    if candidate.stat().st_size > MAX_GFF3_BYTES:
+        raise ArgumentError(f"GFF3 path exceeds the {MAX_GFF3_BYTES}-byte reader limit")
+    try:
+        return parse_gff3(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            annotation_format=annotation_format,
+            max_features=max_features,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"GFF3 read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_mzml(
     path: str,
     *,
@@ -766,6 +796,7 @@ __all__ = [
     "read_fastq",
     "read_fhir_json",
     "read_fhir_ndjson",
+    "read_gff3",
     "read_mzml",
     "read_indexed_vcf",
     "read_nifti_header",
