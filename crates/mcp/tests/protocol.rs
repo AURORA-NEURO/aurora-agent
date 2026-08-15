@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 109);
+    assert_eq!(tools.len(), 110);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1095,6 +1095,219 @@ fn safety_posture_keeps_residual_and_unanalysed_threats_separate() {
     assert!(payload["unanalysed_threat_ids"].is_array());
     assert_eq!(
         payload["perimeter_controls_are_not_claimed_as_enforced"],
+        json!(true)
+    );
+}
+
+#[test]
+fn security_redteam_simulation_keeps_the_full_safety_loop_typed_and_honest() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "security_redteam_simulate",
+        json!({
+            "findings": [
+                {
+                    "id": "F-confirmed",
+                    "campaign": "sandbox-escape",
+                    "boundary": "agent_sandbox",
+                    "class": "sandbox_bypass",
+                    "status": "confirmed",
+                    "reproduction": "probe-17",
+                    "embargoed": true,
+                    "minimised": true
+                },
+                {
+                    "id": "F-reported",
+                    "campaign": "privacy",
+                    "boundary": "public_api",
+                    "class": "privacy_leakage",
+                    "status": "reported"
+                }
+            ],
+            "vulnerabilities": [{
+                "id": "V-holdout",
+                "class": "hidden_test_exposure",
+                "severity": "high",
+                "epoch": 1,
+                "impact": { "infrastructure": false, "data": true, "result_integrity": true },
+                "advisory": {
+                    "affected_versions": "0.1.0",
+                    "impact": "holdout labels were exposed",
+                    "mitigation": "rotate the holdout",
+                    "fixed_versions": "0.1.1",
+                    "result_implications": "runs before rotation require review",
+                    "timeline": "reported e1; fixed e3",
+                    "credit": "red-team",
+                    "residual_risk": "old mirrors may retain copies"
+                },
+                "transitions": [
+                    { "to": "triaged", "epoch": 2, "note": "reproduced" },
+                    { "to": "fixed", "epoch": 3, "note": "holdout rotated" },
+                    { "to": "disclosed", "epoch": 4, "note": "advisory published" }
+                ]
+            }],
+            "deliveries": [
+                {
+                    "id": "sealed-output",
+                    "kind": "agent_output",
+                    "origin": "agent_sandbox",
+                    "to": "artifact_service",
+                    "via": "sealed_output_bundle"
+                },
+                {
+                    "id": "artifact-fetch",
+                    "kind": "agent_output",
+                    "origin": "artifact_service",
+                    "to": "evaluator_sandbox",
+                    "via": "artifact_fetch"
+                },
+                {
+                    "id": "hidden-oracle",
+                    "kind": "hidden_oracle_asset",
+                    "origin": "artifact_service",
+                    "to": "agent_sandbox",
+                    "via": "hidden_oracle_mount"
+                }
+            ],
+            "incidents": [{
+                "id": "I-holdout",
+                "class": "hidden_holdout_leak",
+                "opened_at": 5,
+                "requests": [{
+                    "action": "freeze_publication",
+                    "requested_by": "operator:red-team",
+                    "requested_at": 6
+                }],
+                "blast_radius": {
+                    "completeness": "complete",
+                    "dispositions": {
+                        "run-1": "invalidated",
+                        "run-2": "cleared"
+                    }
+                },
+                "timeline": [
+                    { "epoch": 5, "actor": "operator:red-team", "event": "incident opened" },
+                    { "epoch": 6, "actor": "operator:red-team", "event": "publication freeze requested" }
+                ]
+            }],
+            "audit_records": [
+                {
+                    "event": "security_quarantine",
+                    "actor": "operator:red-team",
+                    "subject": "hidden-oracle",
+                    "epoch": 6,
+                    "statement": {
+                        "kind": "observed",
+                        "observation": {
+                            "kind": "boundary_crossing_refused",
+                            "artifact": "hidden-oracle",
+                            "from": "artifact_service",
+                            "to": "agent_sandbox"
+                        }
+                    }
+                },
+                {
+                    "event": "reviewer_decision",
+                    "actor": "operator:red-team",
+                    "subject": "V-holdout",
+                    "epoch": 7,
+                    "statement": {
+                        "kind": "asserted",
+                        "by": "operator:red-team",
+                        "claim": "advisory reviewed"
+                    }
+                }
+            ],
+            "attestations": [
+                { "kind": "digests_compared", "component": "holdout", "observed": true },
+                { "kind": "built_from_manifest", "manifest": "m1", "runner": "builder", "observed": true }
+            ],
+            "boundary_universe": ["agent_sandbox", "evaluator_sandbox", "public_api"],
+            "include_details": true
+        }),
+    );
+    if payload["ok"] != json!(true) {
+        panic!("security redteam response: {}", payload);
+    }
+    assert_eq!(payload["regression_corpus"]["sentinel_count"], json!(1));
+    assert_eq!(
+        payload["findings"][1]["regression_gate"]["eligible"],
+        json!(false)
+    );
+    if payload["vulnerabilities"][0]["disclosed"] != json!(true) {
+        panic!("security redteam response: {}", payload);
+    }
+    assert_eq!(payload["boundary"]["delivery_rows"][0]["ok"], json!(true));
+    assert_eq!(
+        payload["boundary"]["delivery_rows"][2]["fail_closed"],
+        json!(true)
+    );
+    assert_eq!(
+        payload["boundary"]["within_trial_evaluator_to_agent"],
+        json!([])
+    );
+    assert!(!payload["boundary"]["feedback_loops"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        payload["incidents"][0]["containment_claim"]["allowed"],
+        json!(true)
+    );
+    assert_eq!(payload["audit"]["verified"], json!(true));
+    assert_eq!(payload["audit"]["assertion_count"], json!(1));
+    assert_eq!(payload["attestations"][0]["observed"], json!(true));
+    assert_eq!(payload["attestations"][1]["ok"], json!(false));
+}
+
+#[test]
+fn security_redteam_simulation_refuses_missing_advisories_and_partial_lineage() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "security_redteam_simulate",
+        json!({
+            "vulnerabilities": [{
+                "id": "V-skip",
+                "class": "sandbox_bypass",
+                "severity": "critical",
+                "epoch": 10,
+                "transitions": [
+                    { "to": "triaged", "epoch": 11 },
+                    { "to": "fixed", "epoch": 12 },
+                    { "to": "disclosed", "epoch": 13 }
+                ]
+            }],
+            "incidents": [{
+                "id": "I-partial",
+                "class": "compromised_key",
+                "opened_at": 1,
+                "blast_radius": {
+                    "completeness": "partial",
+                    "unreachable_edges": 2,
+                    "dispositions": { "run-1": "cleared" }
+                }
+            }],
+            "max_items": 10
+        }),
+    );
+    if payload["ok"] != json!(true) {
+        panic!("security redteam response: {}", payload);
+    }
+    if payload["vulnerabilities"][0]["disclosed"] != json!(false) {
+        panic!("security redteam response: {}", payload);
+    }
+    assert_eq!(
+        payload["vulnerabilities"][0]["transitions"][2]["fail_closed"],
+        json!(true)
+    );
+    assert_eq!(
+        payload["incidents"][0]["containment_claim"]["allowed"],
+        json!(false)
+    );
+    assert_eq!(
+        payload["incidents"][0]["containment_claim"]["fail_closed"],
         json!(true)
     );
 }
@@ -2803,7 +3016,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 12000
+                "budget": 13000
             },
             "policy": "normative",
             "include_markdown": true,

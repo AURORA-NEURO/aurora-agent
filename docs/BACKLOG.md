@@ -48,6 +48,14 @@ numeric influence analyzer over caller-declared factor regions. These calls keep
 decisions, external execution, and unknown influence preconditions explicit; they do not create
 an IRB, biosafety review board, runtime sandbox, clinical decision support system, or a biological
 truth oracle.
+The transport now also exposes `security_redteam_simulate`, which composes the deeper in-tree
+section-13 disclosure, regression-corpus, trust-boundary/influence, incident-blast-radius,
+forensic-timeline, audit-chain, and attestation contracts. It makes containment and disclosure
+claims fail closed on partial lineage, unresolved results, skipped lifecycle rungs, forbidden
+artifact destinations, and unwitnessable claims. This is still a contract replay: it does not
+execute a fuzzer, sandbox, detector, credential revocation, quarantine, notification, incident
+workflow, external checkpoint, or durable audit store, so the remaining `36.07` and `36.19`
+blueprint entries stay in the attention list below.
 The transport also exposes evidence-backed routing, token-context planning, and deterministic
 WeaveLang compilation/replay inspection. These calls remain bounded library integrations: routing
 cannot synthesize an architecture, token planning does not render or retrieve payloads, and

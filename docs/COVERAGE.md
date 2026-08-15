@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 109 callable tools. That count is intentionally
+The MCP integration layer currently exposes 110 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -30,7 +30,13 @@ key completeness, dependency-graph invalidation, partial unknown-region handling
 misses, and explicit re-proving; `storage_lifecycle_simulate` adds deterministic tiering, pin
 protection, quota reserves, raw class attribution, and non-copyable delegation/absorption. These
 are still local projections: they do not create durable cache indexes, external invalidation
-feeds, storage movers, quota enforcement, or tenant isolation.
+feeds, storage movers, quota enforcement, or tenant isolation. `security_redteam_simulate` now
+composes the in-tree section-13 red-team, disclosure, trust-boundary, incident-containment, and
+audit/attestation contracts into one bounded replay surface. It keeps confirmed-only regression
+cells, advisory-gated disclosure, deny-by-default crossings, across-trial evaluator feedback,
+complete-lineage containment, and observed-versus-asserted evidence explicit; it does not create
+fuzzers, runtime sandboxes, detectors, containment execution, notifications, signing, external
+checkpoints, or durable security infrastructure.
 
 The table below is a snapshot; the script is the live source.
 

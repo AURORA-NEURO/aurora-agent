@@ -160,6 +160,19 @@ use bioprism_runtime::{
     EffectRequest, Fault, Host, InProcessWorld, RecordingHost, ReplayHost, RuntimeResource,
     WorldTape,
 };
+use bioprism_safety::attest::{
+    Attestation, AttestationClaim, AuditEvent, AuditLog, AuditRecord,
+    Observation as SafetyObservation, Statement as SafetyStatement,
+};
+use bioprism_safety::boundary::{ArtifactKind, BoundaryModel, Channel, MovingArtifact, TrustZone};
+use bioprism_safety::disclosure::{
+    Advisory, Corpus as DisclosureCorpus, Finding, FindingStatus, ImpactAxes,
+    Severity as SafetySeverity, Stage, Transition as DisclosureTransition, Vulnerability,
+    VulnerabilityClass,
+};
+use bioprism_safety::incident::{
+    BlastRadius, ContainmentAction, ContainmentRequest, Incident, IncidentClass, ResultDisposition,
+};
 use bioprism_safety::model::section_13;
 use bioprism_safety::release::{MedicalBoundary, ReleaseGate, RequestedOutput, RiskAssessment};
 use bioprism_scale::corpus::{Corpus, GeneratedItem};
@@ -608,6 +621,7 @@ impl Server {
             "governance_schema_check" => self.governance_schema_check(&arguments),
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
+            "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
             "workspace_capabilities" => Ok(workspace_capabilities()),
             "repository_catalog" => self.repository_catalog(&arguments),
@@ -10525,6 +10539,601 @@ impl Server {
         Ok(result)
     }
 
+    /// Replay the executable parts of the section-13 red-team and incident-response contracts.
+    ///
+    /// This endpoint intentionally combines adjacent safety workflows because a useful security
+    /// review follows a finding from discovery through regression protection, disclosure, boundary
+    /// analysis, incident containment, and evidence. Each sub-workflow is still independently
+    /// typed and fail-closed: a malformed row does not become a green result, and a refusal is
+    /// returned beside the other rows rather than being erased by a best-effort summary.
+    fn security_redteam_simulate(&self, arguments: &Value) -> Result<Value, String> {
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let include_details = arguments
+            .get("include_details")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let finding_inputs = input_array(arguments, "findings", 256)?;
+        let vulnerability_inputs = input_array(arguments, "vulnerabilities", 256)?;
+        let delivery_inputs = input_array(arguments, "deliveries", 256)?;
+        let incident_inputs = input_array(arguments, "incidents", 256)?;
+        let audit_inputs = input_array(arguments, "audit_records", 512)?;
+        let attestation_inputs = input_array(arguments, "attestations", 256)?;
+
+        let mut corpus = DisclosureCorpus::default();
+        let mut finding_rows = Vec::with_capacity(finding_inputs.len());
+        for (index, raw) in finding_inputs.iter().enumerate() {
+            let row = match raw.as_object() {
+                Some(object) => {
+                    let parsed = (|| -> Result<Value, String> {
+                        let id = required_string(object, "id")?;
+                        let campaign = required_string(object, "campaign")?;
+                        let boundary = required_string(object, "boundary")?;
+                        let class: VulnerabilityClass = parse_field(object, "class")?;
+                        let status: FindingStatus = object
+                            .get("status")
+                            .cloned()
+                            .map(|value| parse_value(value, "status"))
+                            .transpose()?
+                            .unwrap_or(FindingStatus::Reported);
+                        let finding =
+                            Finding::new(id, campaign, boundary, class).with_status(status);
+                        let finding = object
+                            .get("reproduction")
+                            .and_then(Value::as_str)
+                            .map(|reproduction| finding.clone().reproducing(reproduction))
+                            .unwrap_or(finding);
+                        let finding_view = serde_json::to_value(&finding)
+                            .map_err(|error| format!("finding serialization failed: {error}"))?;
+                        let embargoed = object
+                            .get("embargoed")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true);
+                        let minimise = object
+                            .get("minimised")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        let regression = match finding.clone().into_regression_cell(embargoed) {
+                            Ok(cell) => {
+                                let cell = if minimise { cell.minimised() } else { cell };
+                                corpus.push(cell.clone());
+                                json!({
+                                    "eligible": true,
+                                    "cell": cell,
+                                    "public_summary": cell.public_summary(),
+                                })
+                            }
+                            Err(error) => json!({
+                                "eligible": false,
+                                "refusal": error.to_string(),
+                                "fail_closed": true,
+                            }),
+                        };
+                        Ok(json!({
+                            "index": index,
+                            "ok": true,
+                            "finding": finding_view,
+                            "regression_gate": regression,
+                        }))
+                    })();
+                    parsed.unwrap_or_else(|error| {
+                        json!({
+                            "index": index,
+                            "ok": false,
+                            "refusal": error,
+                            "fail_closed": true,
+                        })
+                    })
+                }
+                None => json!({
+                    "index": index,
+                    "ok": false,
+                    "refusal": "each finding must be an object",
+                    "fail_closed": true,
+                }),
+            };
+            finding_rows.push(row);
+        }
+
+        let boundary_universe = arguments
+            .get("boundary_universe")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let universe_refs = boundary_universe
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let corpus_rows = json!({
+            "sentinel_count": corpus.sentinel_count(),
+            "covered_boundaries": corpus.covered_boundaries(),
+            "unminimised_count": corpus.unminimised().len(),
+            "uncovered_boundaries": corpus.uncovered(&universe_refs),
+            "cells": if include_details {
+                json!(corpus.cells.iter().take(max_items).collect::<Vec<_>>())
+            } else {
+                json!([])
+            },
+            "omitted_cells": corpus.cells.len().saturating_sub(max_items),
+        });
+
+        let mut vulnerability_rows = Vec::with_capacity(vulnerability_inputs.len());
+        for (index, raw) in vulnerability_inputs.iter().enumerate() {
+            let row = match raw.as_object() {
+                Some(object) => {
+                    let parsed = (|| -> Result<Value, String> {
+                        let id = required_string(object, "id")?;
+                        let class: VulnerabilityClass = parse_field(object, "class")?;
+                        let severity: SafetySeverity = parse_field(object, "severity")?;
+                        let epoch = required_u64(object, "epoch")?;
+                        let impact: ImpactAxes = object
+                            .get("impact")
+                            .cloned()
+                            .map(parse_impact_axes)
+                            .transpose()?
+                            .unwrap_or_default();
+                        let mut vulnerability =
+                            Vulnerability::reported(id, class, severity, epoch).impacting(impact);
+                        let advisory: Option<Advisory> = object
+                            .get("advisory")
+                            .cloned()
+                            .map(|value| parse_value(value, "advisory"))
+                            .transpose()?;
+                        let transition_inputs = object_array(object, "transitions", 64)?;
+                        let mut transition_rows = Vec::with_capacity(transition_inputs.len());
+                        let mut stopped = false;
+                        for (transition_index, transition) in transition_inputs.iter().enumerate() {
+                            if stopped {
+                                break;
+                            }
+                            let Some(transition) = transition.as_object() else {
+                                transition_rows.push(json!({
+                                    "index": transition_index,
+                                    "ok": false,
+                                    "refusal": "each transition must be an object",
+                                    "fail_closed": true,
+                                }));
+                                stopped = true;
+                                continue;
+                            };
+                            let attempted = (|| -> Result<Value, String> {
+                                let to: Stage = parse_field(transition, "to")?;
+                                let epoch = required_u64(transition, "epoch")?;
+                                let note =
+                                    transition.get("note").and_then(Value::as_str).unwrap_or("");
+                                if to == Stage::Disclosed {
+                                    let gate = advisory.clone().unwrap_or_default();
+                                    gate.audit_for(&vulnerability)
+                                        .map_err(|error| error.to_string())?;
+                                }
+                                vulnerability
+                                    .advance(DisclosureTransition::to(to, epoch).noting(note))
+                                    .map_err(|error| error.to_string())?;
+                                Ok(json!({
+                                    "index": transition_index,
+                                    "ok": true,
+                                    "to": to,
+                                    "epoch": epoch,
+                                    "stage_after": vulnerability.stage,
+                                }))
+                            })();
+                            match attempted {
+                                Ok(value) => transition_rows.push(value),
+                                Err(error) => {
+                                    transition_rows.push(json!({
+                                        "index": transition_index,
+                                        "ok": false,
+                                        "refusal": error,
+                                        "fail_closed": true,
+                                        "stage_after": vulnerability.stage,
+                                    }));
+                                    stopped = true;
+                                }
+                            }
+                        }
+                        let missing_advisory_fields = advisory
+                            .as_ref()
+                            .map(Advisory::missing_fields)
+                            .unwrap_or_else(|| Advisory::default().missing_fields());
+                        Ok(json!({
+                            "index": index,
+                            "ok": true,
+                            "vulnerability": vulnerability,
+                            "transitions": transition_rows,
+                            "transition_count": transition_inputs.len(),
+                            "stopped_after_refusal": stopped,
+                            "advisory_present": advisory.is_some(),
+                            "advisory_missing_fields": missing_advisory_fields,
+                            "independent_verification_required": severity.requires_independent_verification(),
+                            "disclosed": vulnerability.stage == Stage::Disclosed,
+                        }))
+                    })();
+                    parsed.unwrap_or_else(|error| {
+                        json!({
+                            "index": index,
+                            "ok": false,
+                            "refusal": error,
+                            "fail_closed": true,
+                        })
+                    })
+                }
+                None => json!({
+                    "index": index,
+                    "ok": false,
+                    "refusal": "each vulnerability must be an object",
+                    "fail_closed": true,
+                }),
+            };
+            vulnerability_rows.push(row);
+        }
+
+        let boundary_model = BoundaryModel::evaluation_model();
+        let within_trial_agent_to_evaluator = boundary_model
+            .influence_paths_within_trial(TrustZone::AgentSandbox, TrustZone::EvaluatorSandbox);
+        let within_trial_evaluator_to_agent = boundary_model
+            .influence_paths_within_trial(TrustZone::EvaluatorSandbox, TrustZone::AgentSandbox);
+        let all_scope_agent_to_evaluator =
+            boundary_model.influence_paths(TrustZone::AgentSandbox, TrustZone::EvaluatorSandbox);
+        let feedback_loops = boundary_model.feedback_loops();
+        let mut delivery_rows = Vec::with_capacity(delivery_inputs.len());
+        for (index, raw) in delivery_inputs.iter().enumerate() {
+            let row = match raw.as_object() {
+                Some(object) => {
+                    let parsed = (|| -> Result<Value, String> {
+                        let id = required_string(object, "id")?;
+                        let kind: ArtifactKind = parse_field(object, "kind")?;
+                        let origin: TrustZone = parse_field(object, "origin")?;
+                        let to: TrustZone = parse_field(object, "to")?;
+                        let via: Channel = parse_field(object, "via")?;
+                        let artifact = MovingArtifact::new(id, kind, origin);
+                        match boundary_model.deliver(&artifact, to, via) {
+                            Ok(crossing) => Ok(json!({
+                                "index": index,
+                                "ok": true,
+                                "crossing": crossing,
+                                "honest_label": crossing.honest_label(),
+                                "scope": boundary_model.scope_of(origin, to, via),
+                            })),
+                            Err(error) => Ok(json!({
+                                "index": index,
+                                "ok": false,
+                                "refusal": error.to_string(),
+                                "fail_closed": true,
+                                "requested": {
+                                    "artifact": artifact,
+                                    "to": to,
+                                    "via": via,
+                                },
+                            })),
+                        }
+                    })();
+                    parsed.unwrap_or_else(|error| {
+                        json!({
+                            "index": index,
+                            "ok": false,
+                            "refusal": error,
+                            "fail_closed": true,
+                        })
+                    })
+                }
+                None => json!({
+                    "index": index,
+                    "ok": false,
+                    "refusal": "each delivery must be an object",
+                    "fail_closed": true,
+                }),
+            };
+            delivery_rows.push(row);
+        }
+        let delivery_allowed = delivery_rows
+            .iter()
+            .filter(|row| row.get("ok") == Some(&json!(true)))
+            .count();
+        let delivery_refused = delivery_rows.len().saturating_sub(delivery_allowed);
+
+        let mut incident_rows = Vec::with_capacity(incident_inputs.len());
+        for (index, raw) in incident_inputs.iter().enumerate() {
+            let row = match raw.as_object() {
+                Some(object) => {
+                    let parsed = (|| -> Result<Value, String> {
+                        let id = required_string(object, "id")?;
+                        let class: IncidentClass = parse_field(object, "class")?;
+                        let opened_at = required_u64(object, "opened_at")?;
+                        let mut incident = Incident::open(id, class, opened_at);
+                        let request_inputs = object_array(object, "requests", 64)?;
+                        let mut request_rows = Vec::with_capacity(request_inputs.len());
+                        for (request_index, raw_request) in request_inputs.iter().enumerate() {
+                            let parsed_request = (|| -> Result<Value, String> {
+                                let request = raw_request
+                                    .as_object()
+                                    .ok_or("each containment request must be an object")?;
+                                let action: ContainmentAction = parse_field(request, "action")?;
+                                let requested_by = required_string(request, "requested_by")?;
+                                let requested_at = required_u64(request, "requested_at")?;
+                                let request =
+                                    ContainmentRequest::new(action, requested_by, requested_at);
+                                let label = request.honest_label();
+                                incident.requests.push(request.clone());
+                                Ok(json!({
+                                    "index": request_index,
+                                    "ok": true,
+                                    "request": request,
+                                    "honest_label": label,
+                                }))
+                            })();
+                            request_rows.push(parsed_request.unwrap_or_else(|error| {
+                                json!({
+                                    "index": request_index,
+                                    "ok": false,
+                                    "refusal": error,
+                                    "fail_closed": true,
+                                })
+                            }));
+                        }
+
+                        if let Some(radius) = object.get("blast_radius") {
+                            incident = incident.with_blast_radius(parse_blast_radius(radius)?);
+                        }
+                        let timeline_inputs = object_array(object, "timeline", 256)?;
+                        let mut timeline_rows = Vec::with_capacity(timeline_inputs.len());
+                        for (timeline_index, raw_entry) in timeline_inputs.iter().enumerate() {
+                            let result = (|| -> Result<Value, String> {
+                                let entry = raw_entry
+                                    .as_object()
+                                    .ok_or("each timeline entry must be an object")?;
+                                let epoch = required_u64(entry, "epoch")?;
+                                let actor = required_string(entry, "actor")?;
+                                let event = required_string(entry, "event")?;
+                                incident
+                                    .timeline
+                                    .push(epoch, actor, event)
+                                    .map_err(|error| error.to_string())?;
+                                Ok(json!({
+                                    "index": timeline_index,
+                                    "ok": true,
+                                    "epoch": epoch,
+                                }))
+                            })();
+                            timeline_rows.push(result.unwrap_or_else(|error| {
+                                json!({
+                                    "index": timeline_index,
+                                    "ok": false,
+                                    "refusal": error,
+                                    "fail_closed": true,
+                                })
+                            }));
+                        }
+
+                        let expected = if let Some(raw_expected) = object.get("expected_actions") {
+                            input_enum_array::<ContainmentAction>(
+                                raw_expected,
+                                "expected_actions",
+                                32,
+                            )?
+                        } else {
+                            vec![
+                                ContainmentAction::StopExecutionPool,
+                                ContainmentAction::RevokeLeases,
+                                ContainmentAction::RevokeCredentials,
+                                ContainmentAction::QuarantineArtifacts,
+                                ContainmentAction::FreezePublication,
+                                ContainmentAction::PreserveLogs,
+                                ContainmentAction::RotateKeys,
+                                ContainmentAction::NotifyFederationPeers,
+                            ]
+                        };
+                        let report = incident.report_contained();
+                        let unrequested = incident.unrequested_actions(&expected);
+                        let report_value = match report {
+                            Ok(report) => json!({
+                                "allowed": true,
+                                "report": report,
+                                "caveat": "requested actions are not observed executions",
+                            }),
+                            Err(error) => json!({
+                                "allowed": false,
+                                "refusal": error.to_string(),
+                                "fail_closed": true,
+                            }),
+                        };
+                        Ok(json!({
+                            "index": index,
+                            "ok": true,
+                            "incident": incident,
+                            "requests": request_rows,
+                            "timeline": timeline_rows,
+                            "containment_claim": report_value,
+                            "unrequested_actions": unrequested,
+                            "result_tainting_class": class.taints_results(),
+                        }))
+                    })();
+                    parsed.unwrap_or_else(|error| {
+                        json!({
+                            "index": index,
+                            "ok": false,
+                            "refusal": error,
+                            "fail_closed": true,
+                        })
+                    })
+                }
+                None => json!({
+                    "index": index,
+                    "ok": false,
+                    "refusal": "each incident must be an object",
+                    "fail_closed": true,
+                }),
+            };
+            incident_rows.push(row);
+        }
+
+        let mut audit_log = AuditLog::new();
+        let mut audit_rows = Vec::with_capacity(audit_inputs.len());
+        for (index, raw) in audit_inputs.iter().enumerate() {
+            let result = (|| -> Result<Value, String> {
+                let object = raw
+                    .as_object()
+                    .ok_or("each audit record must be an object")?;
+                let event: AuditEvent = parse_field(object, "event")?;
+                let actor = required_string(object, "actor")?;
+                let subject = required_string(object, "subject")?;
+                let epoch = required_u64(object, "epoch")?;
+                let statement = parse_safety_statement(
+                    object
+                        .get("statement")
+                        .ok_or("audit record requires statement")?,
+                )?;
+                let record = AuditRecord::new(event, actor, subject, statement, epoch);
+                match audit_log.append(record) {
+                    Ok(linked) => Ok(json!({
+                        "index": index,
+                        "ok": true,
+                        "linked": linked,
+                    })),
+                    Err(error) => Ok(json!({
+                        "index": index,
+                        "ok": false,
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                    })),
+                }
+            })();
+            audit_rows.push(result.unwrap_or_else(|error| {
+                json!({
+                    "index": index,
+                    "ok": false,
+                    "refusal": error,
+                    "fail_closed": true,
+                })
+            }));
+        }
+        let audit_verification = audit_log.verify();
+
+        let mut attestation_rows = Vec::with_capacity(attestation_inputs.len());
+        for (index, raw) in attestation_inputs.iter().enumerate() {
+            let result = (|| -> Result<Value, String> {
+                let object = raw
+                    .as_object()
+                    .ok_or("each attestation must be an object")?;
+                let claim = parse_attestation_claim(object)?;
+                let observed = object
+                    .get("observed")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let by = object.get("by").and_then(Value::as_str).unwrap_or("caller");
+                let attestation = if observed {
+                    let component = object
+                        .get("component")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unspecified")
+                        .to_string();
+                    Attestation::observed(
+                        claim,
+                        SafetyObservation::DigestsCompared {
+                            component,
+                            equal: object.get("equal").and_then(Value::as_bool).unwrap_or(true),
+                        },
+                    )
+                    .map_err(|error| error.to_string())?
+                } else {
+                    Attestation::asserted(claim, by)
+                };
+                Ok(json!({
+                    "index": index,
+                    "ok": true,
+                    "observed": attestation.is_observed(),
+                    "attestation": attestation,
+                }))
+            })();
+            attestation_rows.push(result.unwrap_or_else(|error| {
+                json!({
+                    "index": index,
+                    "ok": false,
+                    "refusal": error,
+                    "fail_closed": true,
+                })
+            }));
+        }
+
+        let bounded = |rows: &[Value]| rows.iter().take(max_items).cloned().collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "workflow": "section_13_redteam_incident_evidence",
+            "input_counts": {
+                "findings": finding_inputs.len(),
+                "vulnerabilities": vulnerability_inputs.len(),
+                "deliveries": delivery_inputs.len(),
+                "incidents": incident_inputs.len(),
+                "audit_records": audit_inputs.len(),
+                "attestations": attestation_inputs.len(),
+            },
+            "findings": bounded(&finding_rows),
+            "findings_omitted": finding_rows.len().saturating_sub(max_items),
+            "regression_corpus": corpus_rows,
+            "vulnerabilities": bounded(&vulnerability_rows),
+            "vulnerabilities_omitted": vulnerability_rows.len().saturating_sub(max_items),
+            "boundary": {
+                "model": "evaluation_model",
+                "within_trial_agent_to_evaluator": within_trial_agent_to_evaluator,
+                "within_trial_evaluator_to_agent": within_trial_evaluator_to_agent,
+                "all_scope_agent_to_evaluator": all_scope_agent_to_evaluator,
+                "feedback_loops": feedback_loops,
+                "delivery_rows": bounded(&delivery_rows),
+                "delivery_rows_omitted": delivery_rows.len().saturating_sub(max_items),
+                "allowed_delivery_count": delivery_allowed,
+                "refused_delivery_count": delivery_refused,
+            },
+            "incidents": bounded(&incident_rows),
+            "incidents_omitted": incident_rows.len().saturating_sub(max_items),
+            "audit": {
+                "rows": bounded(&audit_rows),
+                "rows_omitted": audit_rows.len().saturating_sub(max_items),
+                "chain_length": audit_log.len(),
+                "head": audit_log.head(),
+                "verified": audit_verification.is_ok(),
+                "verification_refusal": audit_verification.err().map(|error| error.to_string()),
+                "assertion_count": audit_log.assertions().len(),
+                "public_view_count": audit_log.public_view().len(),
+                "records": if include_details {
+                    json!(audit_log.records().iter().take(max_items).collect::<Vec<_>>())
+                } else {
+                    json!([])
+                },
+            },
+            "attestations": bounded(&attestation_rows),
+            "attestations_omitted": attestation_rows.len().saturating_sub(max_items),
+            "guarantees": [
+                "only confirmed findings can become regression cells",
+                "embargo hides reproduction detail but never hides sentinel existence",
+                "vulnerability disclosure advances one lifecycle rung at a time and requires a complete advisory",
+                "unmodelled or forbidden artifact edges fail closed",
+                "within-trial evaluator-to-agent influence is absent while across-trial feedback is reported explicitly",
+                "partial or unresolved blast radius cannot produce a containment report",
+                "audit records distinguish observations from assertions and verify a hash-linked chain",
+                "unwitnessable attestations remain assertions rather than being minted as observations",
+            ],
+            "limitations": [
+                "this endpoint replays typed contracts; it does not run fuzzers, detectors, sandboxes, processes, containers, network controls, credential revocation, quarantine, or publication freezes",
+                "epochs, findings, lineage, and requested containment actions are caller-supplied inputs",
+                "the audit chain is in-memory and has no external checkpoint, signature, independent witness, or durable storage",
+                "a permitted boundary crossing is evidence that the model allowed an intent, not evidence that a transfer was observed",
+                "there is no intake queue, notification service, bounty/CVE workflow, triage operator, or incident commander",
+            ],
+        }))
+    }
+
     fn scan_repository(&self) -> Result<bioprism_docgraph::ScanReport, String> {
         let options = ScanOptions::default()
             .with_status("docs/", NodeStatus::Specification)
@@ -10997,6 +11606,214 @@ fn content_hash_argument(
         .map_err(|error| format!("invalid {field} content hash: {error}"))
 }
 
+fn input_array(arguments: &Value, field: &str, maximum: usize) -> Result<Vec<Value>, String> {
+    let Some(raw) = arguments.get(field) else {
+        return Ok(Vec::new());
+    };
+    let values = raw
+        .as_array()
+        .ok_or_else(|| format!("{field} must be an array when supplied"))?;
+    if values.len() > maximum {
+        return Err(format!("{field} must contain at most {maximum} items"));
+    }
+    Ok(values.clone())
+}
+
+fn object_array(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+    maximum: usize,
+) -> Result<Vec<Value>, String> {
+    let Some(raw) = object.get(field) else {
+        return Ok(Vec::new());
+    };
+    let values = raw
+        .as_array()
+        .ok_or_else(|| format!("{field} must be an array when supplied"))?;
+    if values.len() > maximum {
+        return Err(format!("{field} must contain at most {maximum} items"));
+    }
+    Ok(values.clone())
+}
+
+fn input_enum_array<T: serde::de::DeserializeOwned>(
+    raw: &Value,
+    field: &str,
+    maximum: usize,
+) -> Result<Vec<T>, String> {
+    let values = raw
+        .as_array()
+        .ok_or_else(|| format!("{field} must be an array"))?;
+    if values.len() > maximum {
+        return Err(format!("{field} must contain at most {maximum} items"));
+    }
+    values
+        .iter()
+        .cloned()
+        .map(|value| {
+            serde_json::from_value(value).map_err(|error| format!("invalid {field} value: {error}"))
+        })
+        .collect()
+}
+
+fn required_string(object: &serde_json::Map<String, Value>, field: &str) -> Result<String, String> {
+    let value = object
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("{field} is required and must be a non-empty string"))?;
+    Ok(value.to_string())
+}
+
+fn required_u64(object: &serde_json::Map<String, Value>, field: &str) -> Result<u64, String> {
+    object
+        .get(field)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("{field} is required and must be a non-negative integer"))
+}
+
+fn parse_value<T: serde::de::DeserializeOwned>(value: Value, field: &str) -> Result<T, String> {
+    serde_json::from_value(value).map_err(|error| format!("invalid {field}: {error}"))
+}
+
+fn parse_field<T: serde::de::DeserializeOwned>(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<T, String> {
+    let value = object
+        .get(field)
+        .cloned()
+        .ok_or_else(|| format!("{field} is required"))?;
+    parse_value(value, field)
+}
+
+fn parse_impact_axes(raw: Value) -> Result<ImpactAxes, String> {
+    let object = raw
+        .as_object()
+        .ok_or("impact must be an object with boolean axes")?;
+    let axis = |field: &str| {
+        object
+            .get(field)
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| format!("impact.{field} must be boolean"))
+            })
+            .transpose()
+            .map(|value| value.unwrap_or(false))
+    };
+    Ok(ImpactAxes {
+        infrastructure: axis("infrastructure")?,
+        data: axis("data")?,
+        result_integrity: axis("result_integrity")?,
+    })
+}
+
+fn parse_blast_radius(raw: &Value) -> Result<BlastRadius, String> {
+    let object = raw.as_object().ok_or("blast_radius must be an object")?;
+    let completeness = required_string(object, "completeness")?;
+    let mut radius = match completeness.as_str() {
+        "complete" => BlastRadius::complete(),
+        "unknown" => BlastRadius::unknown(),
+        "partial" => BlastRadius::partial(required_u64(object, "unreachable_edges")? as usize),
+        other => return Err(format!("unknown blast_radius completeness {other:?}")),
+    };
+    if let Some(raw_dispositions) = object.get("dispositions") {
+        let dispositions = raw_dispositions
+            .as_object()
+            .ok_or("blast_radius.dispositions must be an object")?;
+        if dispositions.len() > 1_000 {
+            return Err("blast_radius.dispositions must contain at most 1000 results".into());
+        }
+        for (result, raw_disposition) in dispositions {
+            let disposition: ResultDisposition =
+                parse_value(raw_disposition.clone(), "disposition")?;
+            radius.dispose(result, disposition);
+        }
+    }
+    Ok(radius)
+}
+
+fn parse_safety_statement(raw: &Value) -> Result<SafetyStatement, String> {
+    let object = raw
+        .as_object()
+        .ok_or("audit record statement must be an object")?;
+    let kind = required_string(object, "kind")?;
+    match kind.as_str() {
+        "asserted" => Ok(SafetyStatement::asserted(
+            required_string(object, "by")?,
+            required_string(object, "claim")?,
+        )),
+        "observed" => {
+            let observation = object
+                .get("observation")
+                .ok_or("observed statement requires observation")?;
+            Ok(SafetyStatement::observed(parse_safety_observation(
+                observation,
+            )?))
+        }
+        other => Err(format!("unknown audit statement kind {other:?}")),
+    }
+}
+
+fn parse_safety_observation(raw: &Value) -> Result<SafetyObservation, String> {
+    let object = raw
+        .as_object()
+        .ok_or("audit observation must be an object")?;
+    let kind = required_string(object, "kind")?;
+    match kind.as_str() {
+        "digests_compared" => Ok(SafetyObservation::DigestsCompared {
+            component: required_string(object, "component")?,
+            equal: object
+                .get("equal")
+                .and_then(Value::as_bool)
+                .ok_or("digests_compared requires boolean equal")?,
+        }),
+        "boundary_crossing_refused" => Ok(SafetyObservation::BoundaryCrossingRefused {
+            artifact: required_string(object, "artifact")?,
+            from: required_string(object, "from")?,
+            to: required_string(object, "to")?,
+        }),
+        "witness_produced" => Ok(SafetyObservation::WitnessProduced {
+            check: required_string(object, "check")?,
+            kind: required_string(object, "witness_kind")?,
+        }),
+        "injection_path_found" => Ok(SafetyObservation::InjectionPathFound {
+            origin: required_string(object, "origin")?,
+            sink: required_string(object, "sink")?,
+        }),
+        "chain_link_recomputed" => {
+            let index = required_u64(object, "index")?;
+            let index = usize::try_from(index).map_err(|_| "observation index is too large")?;
+            Ok(SafetyObservation::ChainLinkRecomputed { index })
+        }
+        other => Err(format!("unknown audit observation kind {other:?}")),
+    }
+}
+
+fn parse_attestation_claim(
+    object: &serde_json::Map<String, Value>,
+) -> Result<AttestationClaim, String> {
+    let kind = required_string(object, "kind")?;
+    match kind.as_str() {
+        "built_from_manifest" => Ok(AttestationClaim::BuiltFromManifest {
+            manifest: required_string(object, "manifest")?,
+            runner: required_string(object, "runner")?,
+        }),
+        "bundle_closure_verified" => Ok(AttestationClaim::BundleClosureVerified {
+            bundle: required_string(object, "bundle")?,
+        }),
+        "independently_reproduced" => Ok(AttestationClaim::IndependentlyReproduced {
+            run: required_string(object, "run")?,
+            by: required_string(object, "reproduced_by")?,
+        }),
+        "digests_compared" => Ok(AttestationClaim::DigestsCompared {
+            component: required_string(object, "component")?,
+        }),
+        other => Err(format!("unknown attestation claim kind {other:?}")),
+    }
+}
+
 fn documentation_policy(arguments: &Value) -> Result<TraversalPolicy, String> {
     let mode = arguments
         .get("policy")
@@ -11255,7 +12072,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "safety_privacy_and_policy",
             "domains": ["consent", "privacy", "information flow", "threat modeling", "sandbox posture"],
             "crates": ["bioprism-policy", "bioprism-safety", "bioprism-bioethics", "bioprism-governance"],
-            "mcp_tools": ["policy_screen", "safety_posture", "safety_release_gate", "medical_boundary_check", "bioethics_action_review", "bioethics_human_subject_screen", "bioethics_dual_use_review", "bioethics_validation_check", "bioethics_representation_audit"],
+            "mcp_tools": ["policy_screen", "safety_posture", "security_redteam_simulate", "safety_release_gate", "medical_boundary_check", "bioethics_action_review", "bioethics_human_subject_screen", "bioethics_dual_use_review", "bioethics_validation_check", "bioethics_representation_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -12781,6 +13598,25 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "include_threats": { "type": "boolean", "description": "Include full threat records in addition to the bounded posture summary." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "security_redteam_simulate",
+            "description": "Replay the typed section-13 red-team, disclosure, trust-boundary, incident-response, and audit-evidence contracts as one bounded workflow. Confirmed findings alone become regression cells; vulnerability disclosure is sequential and advisory-gated; forbidden or unmodelled crossings refuse; evaluator feedback loops distinguish within-trial isolation from across-trial influence; containment requires complete, resolved lineage; audit chains distinguish observations from assertions. This models and audits contracts only: it does not execute fuzzers, sandboxes, containment, notification, or durable security infrastructure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "findings": { "type": "array", "maxItems": 256, "description": "Finding rows with id, campaign, boundary, class, optional status/reproduction, embargoed, and minimised. Confirmed rows can become regression cells." },
+                    "vulnerabilities": { "type": "array", "maxItems": 256, "description": "Vulnerability rows with id, class, severity, epoch, optional impact, advisory, and sequential transitions [{to, epoch, note}]. Disclosure requires all advisory fields." },
+                    "deliveries": { "type": "array", "maxItems": 256, "description": "Boundary intents [{id, kind, origin, to, via}] checked against the shipped two-sandbox evaluation model." },
+                    "incidents": { "type": "array", "maxItems": 256, "description": "Incident rows with id, class, opened_at, optional blast_radius {completeness, unreachable_edges, dispositions}, requests, timeline, and expected_actions." },
+                    "audit_records": { "type": "array", "maxItems": 512, "description": "Audit rows with event, actor, subject, epoch, and statement {kind: asserted|observed, ...}; observed statements use closed observation kinds." },
+                    "attestations": { "type": "array", "maxItems": 256, "description": "Narrow claims such as digests_compared, built_from_manifest, bundle_closure_verified, or independently_reproduced. observed=true is refused unless this process can witness the claim." },
+                    "boundary_universe": { "type": "array", "maxItems": 256, "items": { "type": "string" }, "description": "Optional boundary universe used to report uncovered regression-cell boundaries." },
+                    "include_details": { "type": "boolean", "description": "Include bounded regression cells and audit records in addition to summaries; defaults false." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Bound returned rows in every repeated section; defaults to 100." }
                 },
                 "required": []
             }

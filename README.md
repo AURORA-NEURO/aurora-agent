@@ -287,8 +287,14 @@ ontology coercion, `governance_schema_check` checks the shipped schema contracts
 `observed_world_declare` seals pinned observed-world declarations, `world_claim_check` enforces
 the provenance claim ladder, `hub_resolve` resolves a federated pack request with digest and
 freshness provenance, `hub_lock` builds a transitive provenance-preserving dependency lock,
-`safety_posture` reports residual threat populations, and `weave_protocol_catalog` exposes typed
-agent-act antecedents.
+`safety_posture` reports residual threat populations, and `security_redteam_simulate` replays the
+section-13 safety loop across confirmed-finding regression cells, sequential vulnerability
+disclosure, evaluator/artifact trust boundaries, across-trial feedback paths, incident blast-radius
+containment gates, forensic timelines, hash-linked audit records, and observed-versus-asserted
+attestations. It keeps the crucial nonclaims beside every result: this is a bounded contract
+simulation, not a fuzzer, runtime sandbox, detector, credential revoker, incident channel,
+containment executor, notification service, or durable audit store. `weave_protocol_catalog`
+exposes typed agent-act antecedents.
 `bioethics_action_review` partitions research plans from physical actions and only produces an
 external referral after both required human approvals are present; `bioethics_human_subject_screen`
 keeps institutional review, consent, and return-of-results checks separate; `bioethics_dual_use_review`
