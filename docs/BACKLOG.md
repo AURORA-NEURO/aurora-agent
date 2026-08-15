@@ -113,6 +113,12 @@ supersession, withdrawal, lookup, revision history, and index integrity, while
 per-system holes, and optional weighting sensitivity. They make existing local contracts
 continuation-safe and public-card-ready; they do not add network registry transport, signing,
 estimators, statistical inference, or a rendered UI.
+The infrastructure lifecycle surfaces are now callable as well: `cache_invalidation_simulate`
+rebuilds complete keys and turns partial dependency knowledge into explicit unknown regions and
+unproven entries, while `storage_lifecycle_simulate` makes tiering, pin protection, reserve-aware
+quota accounting, and non-copyable delegation/absorption replayable. They remain deterministic
+in-memory contract projections: no durable cache, invalidation feed, byte mover, quota-enforcing
+backend, tenant boundary, encryption, replication, or OTLP exporter is implied.
 
 
 ## §11 Developer Platform — 12 uncovered

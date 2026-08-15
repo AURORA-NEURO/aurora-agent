@@ -273,6 +273,10 @@ can apply a declared weighting with sensitivity evidence, while `research_ci_che
 claim, split, figure, regression, environment, egress, non-claim and provenance predicates,
 `metrics_profile_audit` emits per-capability leaders, measured populations, missing systems and
 uncontested-lead warnings for public-card construction without inventing a scalar score,
+`cache_invalidation_simulate` rebuilds typed cache keys and replays dependency-aware invalidation,
+partial unknown regions, fail-closed lookup misses and explicit re-proving, while
+`storage_lifecycle_simulate` plans pin-aware hot/warm/cold tiering and non-copyable quota
+delegation with reserve-protected accounting,
 `policy_screen` enforces caller-supplied policy rules before selection and preserves typed
 refusals, `safety_release_gate` applies the complete dual-use risk gate with unrated dimensions
 still blocking, `hub_search` performs bounded federated exact-facet discovery with authority and

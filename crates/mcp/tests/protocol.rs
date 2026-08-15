@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 107);
+    assert_eq!(tools.len(), 109);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1190,6 +1190,149 @@ fn registry_lifecycle_returns_continuation_state_and_preserves_withdrawal_histor
     assert_eq!(resumed["actions"][3]["result"]["clean"], json!(true));
     assert_eq!(resumed["final"]["artifact_count"], json!(1));
     assert_eq!(resumed["final"]["log_count"], json!(2));
+}
+
+#[test]
+fn cache_invalidation_simulation_keeps_partial_unknowns_and_replayable_misses_visible() {
+    let mut server = server();
+    let arguments = json!({
+        "schema": {
+            "name": "decision-cache",
+            "components": ["input", "code"],
+            "reuse": "same_build_only"
+        },
+        "entries": [
+            {
+                "components": { "input": "world@1", "code": "build-a" },
+                "value": { "answer": "derived" },
+                "produced_by": "build-a",
+                "written_at": 1,
+                "dependencies": { "kind": "declared", "resources": ["derived"] }
+            },
+            {
+                "components": { "input": "world@2", "code": "build-a" },
+                "value": { "answer": "legacy" },
+                "produced_by": "build-a",
+                "written_at": 1,
+                "dependencies": "undeclared"
+            }
+        ],
+        "graph": {
+            "declared": [{ "resource": "derived", "depends_on": ["input"] }],
+            "opaque": ["input"]
+        },
+        "changed": "input",
+        "apply": true,
+        "apply_at": 2,
+        "lookups": [
+            { "components": { "input": "world@2", "code": "build-a" }, "requested_by": "build-a" }
+        ]
+    });
+    let payload = call(
+        &mut server,
+        "cache_invalidation_simulate",
+        arguments.clone(),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert!(payload["invalidation"]["plan"]["completeness"]["Partial"].is_object());
+    assert_eq!(
+        payload["invalidation"]["apply_report"]["invalidation_was_complete"],
+        json!(false)
+    );
+    assert_eq!(
+        payload["invalidation"]["apply_report"]["removed"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        payload["invalidation"]["apply_report"]["marked_unproven"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(payload["graph"]["opaque_resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "input"));
+    assert_eq!(payload["lookups"]["pre_apply"][0]["hit"], json!(true));
+    assert_eq!(payload["lookups"]["post_apply"][0]["hit"], json!(false));
+    assert_eq!(payload["cache"]["unproven"].as_array().unwrap().len(), 1);
+
+    let digest = payload["cache"]["unproven"][0]
+        .as_str()
+        .expect("unproven entry has a digest")
+        .to_string();
+    let resumed = call(
+        &mut server,
+        "cache_invalidation_simulate",
+        json!({
+            "schema": arguments["schema"].clone(),
+            "entries": [arguments["entries"][1].clone()],
+            "graph": { "declared": [], "opaque": [] },
+            "reprove": [{ "digest": digest, "by": "build-b" }]
+        }),
+    );
+    assert_eq!(resumed["reprove"][0]["ok"], json!(true));
+    assert_eq!(resumed["cache"]["unproven"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn storage_lifecycle_simulation_plans_pins_reserve_and_non_copyable_allowance() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "storage_lifecycle_simulate",
+        json!({
+            "now": 20,
+            "tiering_policy": {
+                "demote_to_warm_after": 5,
+                "demote_to_cold_after": 12,
+                "promote_after_accesses": 3,
+                "promote_within": 2
+            },
+            "records": [
+                { "object": "stale-hot", "tier": "hot", "last_access": 0, "bytes": 100 },
+                { "object": "pinned-hot", "tier": "hot", "last_access": 0, "bytes": 200, "pinned": true },
+                { "object": "recent-cold", "tier": "cold", "last_access": 19, "recent_accesses": 3, "bytes": 50 }
+            ],
+            "apply_tiering": true,
+            "quota": { "limit": 1000, "reserve": 100 },
+            "charges": [
+                { "class": "objects", "purpose": "ingest", "bytes": 850 },
+                { "class": "events", "purpose": "ingest", "bytes": 100 },
+                { "class": "events", "purpose": "cleanup", "bytes": 100 }
+            ],
+            "releases": [{ "class": "objects", "bytes": 50 }],
+            "delegations": [{
+                "bytes": 50,
+                "charges": [{ "class": "cache", "purpose": "cleanup", "bytes": 30 }]
+            }],
+            "absorb_delegated": [0]
+        }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["tiering"]["transition_count"], json!(3));
+    assert_eq!(payload["tiering"]["apply_report"]["applied"], json!(3));
+    let records = payload["tiering"]["records"].as_array().unwrap();
+    assert_eq!(records[1]["tier"], json!("Warm"));
+    assert_eq!(records[2]["tier"], json!("Hot"));
+    assert!(payload["quota"]["charges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["ok"] == json!(false) && row["fail_closed"] == json!(true)));
+    assert_eq!(payload["quota"]["remaining"], json!(70));
+    assert_eq!(payload["quota"]["reserve"], json!(100));
+    assert_eq!(payload["quota"]["absorptions"][0]["ok"], json!(true));
+    assert!(payload["guarantees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("allowance is not copied")));
 }
 
 #[test]
