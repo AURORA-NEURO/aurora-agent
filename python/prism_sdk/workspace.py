@@ -396,20 +396,26 @@ class Workspace:
         self,
         route: Mapping[str, Any],
         selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
     ) -> dict[str, Any]:
         """Review explicit route selections and return a non-executing mission handoff."""
 
-        request = CapabilityRouteReviewRequest(route, selections)
+        request = CapabilityRouteReviewRequest(route, selections, validate_schemas)
         return self.tool("capability_route_review", request.to_mcp_arguments())
 
     def capability_route_review_report(
         self,
         route: Mapping[str, Any],
         selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
     ) -> CapabilityRouteReviewReport:
         """Return typed diagnostics for a route-to-mission handoff review."""
 
-        return capability_route_review_report(self.capability_route_review(route, selections))
+        return capability_route_review_report(
+            self.capability_route_review(route, selections, validate_schemas=validate_schemas)
+        )
 
     def adapter_plan(
         self,
@@ -1084,20 +1090,26 @@ class AsyncWorkspace:
         self,
         route: Mapping[str, Any],
         selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
     ) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.capability_route_review`."""
 
-        request = CapabilityRouteReviewRequest(route, selections)
+        request = CapabilityRouteReviewRequest(route, selections, validate_schemas)
         return await self.tool("capability_route_review", request.to_mcp_arguments())
 
     async def capability_route_review_report(
         self,
         route: Mapping[str, Any],
         selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
     ) -> CapabilityRouteReviewReport:
         """Async typed diagnostics for a route-to-mission handoff review."""
 
-        return capability_route_review_report(await self.capability_route_review(route, selections))
+        return capability_route_review_report(
+            await self.capability_route_review(route, selections, validate_schemas=validate_schemas)
+        )
 
     async def adapter_plan(
         self,

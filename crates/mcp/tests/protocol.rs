@@ -4102,6 +4102,32 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         .unwrap()
         .iter()
         .any(|finding| finding["code"] == "candidate_mismatch"));
+
+    let route = call(
+        &mut server,
+        "capability_route",
+        json!({"goal": "validate schemas", "needs": [{"id": "catalog", "tool": "workspace_capabilities"}]}),
+    );
+    let schema_review = call(
+        &mut server,
+        "capability_route_review",
+        json!({
+            "route": route,
+            "validate_schemas": true,
+            "selections": [{
+                "need_id": "catalog",
+                "tool": "workspace_capabilities",
+                "domain": "workspace",
+                "capability": "discovery",
+                "objective": "validate the catalogue schema",
+                "arguments": {}
+            }]
+        }),
+    );
+    assert_eq!(schema_review["review_status"], json!("ready"));
+    assert_eq!(schema_review["schema_review"]["requested"], json!(true));
+    assert_eq!(schema_review["schema_review"]["valid"], json!(true));
+    assert_eq!(schema_review["schema_review"]["checked"], json!(1));
 }
 
 #[test]

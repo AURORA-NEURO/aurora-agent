@@ -245,6 +245,7 @@ class CapabilityRouteReviewRequest:
 
     route: Mapping[str, Any]
     selections: Sequence[Mapping[str, Any]]
+    validate_schemas: bool = False
 
     def __post_init__(self) -> None:
         route = _route_mapping("review route", self.route)
@@ -254,12 +255,18 @@ class CapabilityRouteReviewRequest:
             raise ArgumentError("review selections must be an array")
         if not 1 <= len(self.selections) <= 32:
             raise ArgumentError("review selections must contain between 1 and 32 choices")
+        if not isinstance(self.validate_schemas, bool):
+            raise ArgumentError("validate_schemas must be a boolean")
         normalized = tuple(_review_selection(value) for value in self.selections)
         object.__setattr__(self, "route", route)
         object.__setattr__(self, "selections", normalized)
 
     def to_mcp_arguments(self) -> dict[str, Any]:
-        return {"route": dict(self.route), "selections": [dict(value) for value in self.selections]}
+        return {
+            "route": dict(self.route),
+            "selections": [dict(value) for value in self.selections],
+            "validate_schemas": self.validate_schemas,
+        }
 
 
 @dataclass(frozen=True)
@@ -280,6 +287,7 @@ class CapabilityRouteReviewReport:
     dependency_waves: tuple[tuple[str, ...], ...]
     findings: tuple[dict[str, Any], ...]
     route_coverage: dict[str, Any]
+    schema_review: dict[str, Any]
     mission_draft: dict[str, Any] | None
     execution: str
 
@@ -332,6 +340,7 @@ class CapabilityRouteReviewReport:
             dependency_waves=dependency_waves,
             findings=findings,
             route_coverage=_route_mapping("review route_coverage", raw.get("route_coverage", {})),
+            schema_review=_route_mapping("review schema_review", raw.get("schema_review", {})),
             mission_draft=mission_draft,
             execution=_route_text("review execution", raw.get("execution")),
         )

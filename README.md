@@ -539,7 +539,9 @@ through `CapabilityRouteReport.from_wire(...)` and sync/async `capability_route_
 they reconcile the per-need counts, candidate ledgers, and bounded recommendation overflow while
 preserving the raw route for audit. `capability_route_review` then provides a cross-domain handoff
 checkpoint: it checks caller-selected candidates and dependency waves, emits blocked or ready
-diagnostics, and keeps mission preflight and execution explicitly separate.
+diagnostics, and keeps mission preflight and execution explicitly separate. Its optional
+`validate_schemas` mode reports authoritative selected-tool schema digests and issue paths without
+turning schema conformance into domain readiness.
 
 ## Evaluating a context policy
 

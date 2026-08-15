@@ -145,7 +145,9 @@ dependency and semantic-loss boundaries.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;
-blocked results preserve structured findings without executing anything.
+blocked results preserve structured findings without executing anything. Set `validate_schemas: true`
+to receive bounded authoritative schema reports for the selected arguments; this remains review
+evidence and does not authorize execution.
 
 ## Events and webhooks
 

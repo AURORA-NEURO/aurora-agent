@@ -129,6 +129,13 @@ def route_review_payload() -> dict:
         },
         "execution": "not_started",
         "route_coverage": {"needs_total": 1, "needs_resolved": 1},
+        "schema_review": {
+            "requested": True,
+            "checked": 1,
+            "valid": True,
+            "fully_checked": True,
+            "reports": [],
+        },
     }
 
 
@@ -412,11 +419,14 @@ class AnalyticsModelTests(unittest.TestCase):
                     "arguments": {},
                 }
             ],
+            validate_schemas=True,
         )
         self.assertEqual(request.to_mcp_arguments()["selections"][0]["need_id"], "oncology")
+        self.assertTrue(request.to_mcp_arguments()["validate_schemas"])
         report = CapabilityRouteReviewReport.from_wire(route_review_payload())
         self.assertTrue(report.ready)
         self.assertEqual(report.dependency_waves, (("oncology",),))
+        self.assertTrue(report.schema_review["valid"])
 
     def test_capability_route_review_report_extracts_http_structured_projection(self) -> None:
         envelope = {

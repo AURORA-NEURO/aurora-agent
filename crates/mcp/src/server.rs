@@ -12596,6 +12596,11 @@ impl Server {
             .get("selections")
             .and_then(Value::as_array)
             .ok_or("capability route review requires a selections array")?;
+        let validate_schemas = match arguments.get("validate_schemas") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err("validate_schemas must be a boolean".into()),
+        };
         if raw_selections.len() > 32 {
             return Err("selections must contain at most 32 choices".into());
         }
@@ -12874,7 +12879,72 @@ impl Server {
             .iter()
             .filter_map(|need_id| selected_steps.get(need_id).cloned())
             .collect::<Vec<_>>();
-        let ready_for_handoff = findings.is_empty();
+        let mut schema_reports = Vec::<Value>::new();
+        let mut schema_valid = true;
+        if validate_schemas {
+            for step in &ordered_steps {
+                let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
+                let arguments = step.get("arguments").unwrap_or(&Value::Null);
+                match validate_mission_tool_arguments(tool, arguments)? {
+                    Some(report) => {
+                        let issues = report
+                            .issues
+                            .iter()
+                            .map(|issue| {
+                                json!({
+                                    "path": issue.path,
+                                    "code": issue.code,
+                                    "message": issue.message,
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        let ok = issues.is_empty();
+                        schema_valid &= ok;
+                        schema_reports.push(json!({
+                            "need_id": step.get("id"),
+                            "tool": tool,
+                            "schema_digest": report.digest,
+                            "ok": ok,
+                            "fully_checked": true,
+                            "issue_count": issues.len(),
+                            "issues": issues,
+                        }));
+                    }
+                    None => {
+                        schema_valid = false;
+                        schema_reports.push(json!({
+                            "need_id": step.get("id"),
+                            "tool": tool,
+                            "schema_digest": Value::Null,
+                            "ok": false,
+                            "fully_checked": false,
+                            "issue_count": 1,
+                            "issues": [{
+                                "path": "",
+                                "code": "schema_missing",
+                                "message": "selected tool has no authoritative tools/list schema"
+                            }],
+                        }));
+                    }
+                }
+            }
+            for report in &schema_reports {
+                if report.get("ok") == Some(&Value::Bool(false)) {
+                    add_finding(
+                        "schema_mismatch",
+                        format!(
+                            "selected tool {:?} failed authoritative schema validation",
+                            report
+                                .get("tool")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown")
+                        ),
+                        report.get("need_id").and_then(Value::as_str),
+                    );
+                }
+            }
+        }
+        let ready_for_handoff = findings.is_empty() && (!validate_schemas || schema_valid);
         let mission_draft = ready_for_handoff.then(|| {
             json!({
                 "goal": goal,
@@ -12898,6 +12968,15 @@ impl Server {
             "review_status": if ready_for_handoff { "ready" } else { "blocked" },
             "handoff_status": if ready_for_handoff { "mission_preflight_required" } else { "requires_caller_correction" },
             "mission_draft": mission_draft,
+            "schema_review": {
+                "requested": validate_schemas,
+                "checked": schema_reports.len(),
+                "valid": validate_schemas.then_some(schema_valid),
+                "fully_checked": validate_schemas && schema_reports.iter().all(|report| report["fully_checked"] == json!(true)),
+                "reports": schema_reports,
+                "authoritative_source": "tools/list definition set",
+                "posture": "schema shape evidence only; domain semantics and authorization remain caller-owned",
+            },
             "execution": "not_started",
             "guarantees": [
                 "route candidates were reviewed without executing any tool",
@@ -17821,7 +17900,8 @@ pub fn tool_definitions() -> Vec<Value> {
                             },
                             "required": ["need_id", "tool", "domain", "capability", "objective", "arguments"]
                         }
-                    }
+                    },
+                    "validate_schemas": { "type": "boolean", "default": false, "description": "Optionally validate each selected argument object against the authoritative tools/list schema set; this remains review evidence and does not authorize execution." }
                 },
                 "required": ["route", "selections"]
             }

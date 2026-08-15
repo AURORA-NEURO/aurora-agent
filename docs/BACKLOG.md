@@ -255,7 +255,8 @@ unambiguous no-execution boundary; the caller still reviews arguments before con
 `capability_route_review` now provides that review as a reusable native handoff checkpoint: it
 checks exactly-once selections, candidate membership, explicit argument objects, dependency
 references/cycles, and deterministic waves, returning a blocked diagnostic or a mission draft that
-still requires mission preflight. It does not grant execution permission or validate domain meaning.
+still requires mission preflight. Optional authoritative schema validation adds per-tool digests and
+bounded issue paths without granting execution permission or validating domain meaning.
 The adapter registry now gives the same treatment to biological source boundaries: `adapter_plan`
 selects native or Python-delegated routes by explicit format and source shape, carries the closed
 semantic-loss vocabulary and scope dimensions, and reports dependency missingness versus dependency

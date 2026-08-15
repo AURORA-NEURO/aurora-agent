@@ -442,6 +442,7 @@ export interface CapabilityRouteResult extends JsonObject {
 export interface CapabilityRouteReviewArgs extends JsonObject {
   route: JsonObject;
   selections: MissionRouteSelection[];
+  validate_schemas?: boolean;
 }
 
 export interface CapabilityRouteReviewFinding extends JsonObject {
@@ -468,6 +469,7 @@ export interface CapabilityRouteReviewResult extends JsonObject {
   handoff_status: "mission_preflight_required" | "requires_caller_correction";
   mission_draft: JsonObject | null;
   route_coverage: JsonObject;
+  schema_review: JsonObject;
   execution: "not_started";
 }
 

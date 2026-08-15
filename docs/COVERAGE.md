@@ -111,7 +111,9 @@ candidates; this is routing evidence, not authorization, scientific readiness, o
 caller-selected candidates, refuses malformed route envelopes, and returns structured blocked or
 ready diagnostics for candidate membership, exactly-once need selection, explicit JSON arguments,
 dependency references, and deterministic dependency waves. A ready result contains a mission draft
-but remains `mission_preflight_required`; it never grants permission or executes a tool.
+but remains `mission_preflight_required`; it never grants permission or executes a tool. Callers may
+set `validate_schemas` to receive per-selected-tool authoritative schema digests and bounded issue
+paths; a schema-clean result is still shape evidence, not domain validation or authorization.
 The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
 async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table
