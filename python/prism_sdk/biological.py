@@ -373,6 +373,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free audit of parsed BAM/CRAM records, CIGAR accounting, coordinates, flags, pairing, sort order, and coverage; read payloads remain uninterpreted.",
         ),
         _descriptor(
+            "bioprism.python.fastq_text",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/fastq", "text/fastq", "text/x-fastq"),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("provenance_unavailable", "content_uninterpreted", "type_undetermined"),
+            ("subject", "sample", "read", "sequence", "quality"),
+            "Dependency-free bounded FASTQ reader validating complete records, quality lengths, and paired-read evidence without disclosing read content.",
+        ),
+        _descriptor(
             "bioprism.python.fhir_ndjson",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/fhir+ndjson",),

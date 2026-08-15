@@ -137,6 +137,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(fhir_ndjson.executable)
         self.assertEqual(fhir_ndjson.selected_adapter.id, "bioprism.python.fhir_ndjson")
 
+        fastq = AdapterRegistry().plan(
+            AdapterPlanRequest("sequencing", SourceKind.BYTES, declared_format="text/fastq"),
+            check_environment=False,
+        )
+        self.assertTrue(fastq.executable)
+        self.assertEqual(fastq.selected_adapter.id, "bioprism.python.fastq_text")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)

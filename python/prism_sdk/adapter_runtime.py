@@ -20,6 +20,7 @@ from .bids import audit_bids
 from .biological import AdapterDescriptor, AdapterRegistry
 from .dicom import audit_dicom
 from .errors import ArgumentError
+from .fastq import parse_fastq
 from .fhir import audit_fhir
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
@@ -28,6 +29,7 @@ from .optional_readers import (
     read_alignment_file,
     read_anndata_projection,
     read_dicom_projection,
+    read_fastq,
     read_fhir_json,
     read_fhir_ndjson,
     read_indexed_vcf,
@@ -257,6 +259,7 @@ class AdapterRuntime:
             "bioprism.python.nifti_bids",
             "bioprism.python.anndata",
             "bioprism.python.dicom",
+            "bioprism.python.fastq_text",
             "bioprism.python.fhir_manifest",
             "bioprism.python.fhir_json",
             "bioprism.python.fhir_ndjson",
@@ -399,6 +402,28 @@ class AdapterRuntime:
             if not isinstance(path, str):
                 raise ArgumentError("dicom payload requires a string 'path'")
             return read_dicom_projection(path, source_id=request.source_id, provenance=request.provenance, max_items=request.max_items)
+        if adapter_id == "bioprism.python.fastq_text":
+            if "text" in payload:
+                text = payload.get("text")
+                if not isinstance(text, (str, bytes)):
+                    raise ArgumentError("fastq_text payload requires text or bytes under 'text'")
+                return parse_fastq(
+                    text,
+                    source_id=request.source_id,
+                    provenance=request.provenance,
+                    max_records=payload.get("max_records", 100_000),
+                    max_items=request.max_items,
+                ).to_wire()
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("fastq_text payload requires 'text' or a string 'path'")
+            return read_fastq(
+                path,
+                source_id=request.source_id,
+                provenance=request.provenance,
+                max_records=payload.get("max_records", 100_000),
+                max_items=request.max_items,
+            )
         if adapter_id == "bioprism.python.fhir_manifest":
             document = payload.get("document")
             if not isinstance(document, Mapping):

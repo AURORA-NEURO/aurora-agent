@@ -4,7 +4,7 @@ These bindings are intentionally thin: they inspect bounded headers/metadata and
 the result into the dependency-free projection auditors. They never call ``get_fdata`` or materialize
 matrix values, and a missing optional dependency becomes a typed runtime refusal rather than an
 implicit fallback. FHIR JSON is dependency-free but follows the same raw-file boundary and duplicate-
-key protections.
+key protections. FASTQ is also dependency-free and follows the same bounded raw-file boundary.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from .anndata import audit_anndata
 from .authoring import content_digest
 from .dicom import audit_dicom
 from .errors import ArgumentError
+from .fastq import MAX_FASTQ_BYTES, parse_fastq
 from .fhir import MAX_FHIR_BYTES, parse_fhir_json, parse_fhir_ndjson
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
@@ -619,6 +620,33 @@ def read_fhir_ndjson(
         raise ArgumentError(f"FHIR NDJSON read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_fastq(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_records: int = 100_000,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded UTF-8 FASTQ and return the dependency-free sequencing audit."""
+
+    candidate = _path(path, field="FASTQ path")
+    if candidate.stat().st_size > MAX_FASTQ_BYTES:
+        raise ArgumentError(f"FASTQ path exceeds the {MAX_FASTQ_BYTES}-byte reader limit")
+    try:
+        return parse_fastq(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            max_records=max_records,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"FASTQ read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_ome_zarr(
     path: str,
     *,
@@ -676,6 +704,7 @@ __all__ = [
     "read_alignment_file",
     "read_anndata_projection",
     "read_dicom_projection",
+    "read_fastq",
     "read_fhir_json",
     "read_fhir_ndjson",
     "read_indexed_vcf",

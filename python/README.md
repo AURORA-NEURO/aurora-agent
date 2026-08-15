@@ -63,7 +63,7 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
 `AdapterRegistry` and `adapter_plan()` add a dependency-free format boundary for tabular and
-biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM, OME-Zarr, and FHIR routes
+biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, FASTQ, BAM/CRAM, OME-Zarr, and FHIR routes
 are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and
 semantic-loss declarations remain visible before parsing. The planners never sniff or fetch bytes.
 `BidsAdapter` and `audit_bids()` add a dependency-free BIDS manifest path: they validate bounded
@@ -112,6 +112,9 @@ image chunks and pixel values are not loaded.
 The FHIR JSON and Bulk Data NDJSON readers are dependency-free and use the same auditor for raw
 files and parsed documents; every NDJSON record is validated, and no patient identifiers are
 echoed in the projection.
+`parse_fastq()` and `read_fastq()` add a dependency-free sequencing-read boundary: multiline records,
+quality lengths, printable quality ranges, duplicate identifiers, and paired-read completeness are
+validated while read identifiers, bases, and qualities remain source-bound digests or aggregates.
 `parse_vcf()` provides the first concrete Python biological reader: it performs bounded structural
 and typed VCF validation, preserves raw values, hashes source and disclosed records, and reports
 reference-build, provenance, type, and precision limitations with source locations. It validates

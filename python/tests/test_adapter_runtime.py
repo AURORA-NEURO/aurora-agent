@@ -24,6 +24,8 @@ VCF = """##fileformat=VCFv4.3
 chr1\t10\t.\tA\tG\t50\tPASS\tDP=4
 """
 
+FASTQ = "@read/1\nACGT\n+\nIIII\n"
+
 
 HAS_PYSAM = importlib.util.find_spec("pysam") is not None
 
@@ -114,6 +116,7 @@ class AdapterRuntimeTests(unittest.TestCase):
                     }
                 },
             ),
+            ("bioprism.python.fastq_text", {"text": FASTQ}),
         ]
 
         for adapter_id, payload in requests:

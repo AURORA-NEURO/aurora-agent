@@ -82,7 +82,7 @@ invent defaults:
   semantic-loss and scope surface. `Workspace.adapter_plan(...)`, `ApiClient.adapter_plan(...)`,
   and their async counterparts forward the same request over MCP or HTTP. Planning never sniffs,
   fetches, parses, executes, or grants credentials; DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, BAM/CRAM,
-  OME-Zarr, and FHIR readers remain responsible for source-specific conformance in the Python layer.
+  OME-Zarr, FASTQ, and FHIR readers remain responsible for source-specific conformance in the Python layer.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and
@@ -144,6 +144,10 @@ invent defaults:
   JSON and Bulk Data NDJSON. They reject duplicate object keys and non-standard JSON numbers,
   validate every NDJSON record, and delegate to the same FHIR auditor, so a raw clinical document
   cannot silently take a different validation path than a parsed manifest.
+- `FastqAdapter`, `parse_fastq(...)`, and `read_fastq(...)` provide a dependency-free sequencing
+  boundary. Multiline records, sequence/quality length equality, printable quality bounds, duplicate
+  read identifiers, paired-read completeness, and source-bound read/sequence/quality digests are
+  retained without disclosing base or quality strings.
 - `parse_vcf(...)` is a bounded dependency-free text VCF reader for the first concrete biological
   adapter. It validates headers, INFO/FORMAT declarations, sample cardinality, allele indexes, and
   finite numeric values; preserves raw spellings beside typed projections; hashes the source and

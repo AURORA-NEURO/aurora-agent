@@ -220,7 +220,7 @@ The alignment projection route now covers reference dictionaries, CIGAR accounti
 bounds, flags, pairing, sorting, and coverage without decoding BAM/CRAM payloads, indexes, or
 reference bases.
 The typed Python adapter runtime now closes the concrete execution handoff across the parsed VCF,
-BIDS, DICOM, NIfTI, AnnData, alignment, OME-Zarr, and FHIR routes, normalizes outcome states and
+BIDS, DICOM, NIfTI, AnnData, alignment, FASTQ, OME-Zarr, and FHIR routes, normalizes outcome states and
 document digests, and refuses raw-byte routes explicitly when their optional binary-reader binding
 is absent.
 The verified optional-reader layer now binds installed nibabel and anndata environments for raw
@@ -234,6 +234,9 @@ The FHIR route now reads dependency-free JSON resources, Bundles, and Bulk Data 
 bounded resource and reference structure across every record, protects identifiers with
 source-bound digests, and keeps profile validation, terminology expansion, clinical interpretation,
 and external reference resolution explicitly outside its conformance claim.
+The FASTQ route now validates complete multiline records, sequence/quality lengths, printable
+quality ranges, duplicate read identifiers, and paired-read completeness; read identifiers, bases,
+and quality strings remain source-bound digests or aggregate summaries rather than disclosed content.
 
 
 ## §11 Developer Platform — 6 uncovered

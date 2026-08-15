@@ -61,7 +61,7 @@ bounded search result, distinguishes explicit tool filters from ranked candidate
 executes the proposed tools.
 `adapter_plan` makes the biological-format boundary callable: it matches explicit source formats
 and source shapes against native CSV/inventory adapters and Python-delegated DICOM, NIfTI/BIDS,
-AnnData/Zarr, VCF, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
+AnnData/Zarr, VCF, FASTQ, BAM/CRAM, OME-Zarr, and FHIR routes. It reports declared semantic-loss surfaces and
 distinguishes missing from unchecked optional dependencies before execution; it never sniffs
 content, fetches sources, imports packages, or claims that heavyweight parsing has occurred.
 The Python adapter layer now also contains a bounded text VCF reader: it validates the complete
@@ -102,6 +102,9 @@ route covers JSON resources, Bundles, and Bulk Data NDJSON: it audits every reso
 identity, bounded structure, profile declarations, privacy-safe references, duplicate keys, and
 provenance without claiming profile or terminology conformance. NDJSON is normalized through the
 same cross-record reference auditor, with record counts and byte bounds retained in the manifest.
+The dependency-free FASTQ route validates complete multiline records, sequence/quality lengths,
+printable quality ranges, duplicate read identifiers, and paired-read completeness; read identifiers,
+bases, and qualities are source-bound digests or aggregate summaries rather than disclosed content.
 The OME-Zarr route now inspects Zarr metadata directly and audits multiscale axes, level shapes,
 chunk bounds, spatial transforms, channel/label metadata, and provenance without reading image
 chunks or pixel values.

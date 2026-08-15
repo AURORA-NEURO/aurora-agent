@@ -84,6 +84,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
+from .fastq import FastqAdapter, FastqFinding, FastqParseError, FastqParseResult, parse_fastq
 from .fhir import FhirAdapter, FhirAuditResult, FhirFinding, audit_fhir, parse_fhir_json, parse_fhir_ndjson
 from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
@@ -116,6 +117,7 @@ from .optional_readers import (
     read_alignment_file,
     read_anndata_projection,
     read_dicom_projection,
+    read_fastq,
     read_fhir_json,
     read_fhir_ndjson,
     read_indexed_vcf,
@@ -172,6 +174,10 @@ __all__ = [
     "FhirAdapter",
     "FhirAuditResult",
     "FhirFinding",
+    "FastqAdapter",
+    "FastqFinding",
+    "FastqParseError",
+    "FastqParseResult",
     "Independence",
     "Judgement",
     "JudgementBuilder",
@@ -256,6 +262,7 @@ __all__ = [
     "RuntimeStatus",
     "bootstrap_mean",
     "parse_vcf",
+    "parse_fastq",
     "parse_fhir_json",
     "parse_fhir_ndjson",
     "read_anndata_projection",
