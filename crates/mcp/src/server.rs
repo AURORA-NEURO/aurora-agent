@@ -11114,7 +11114,7 @@ impl Server {
                 "omitted_divergences": exit_audit.divergences.len().saturating_sub(max_items),
             },
             "limitations": [
-                "Python SDK, TypeScript SDK, REST/gRPC clients and GitHub Actions are foreign artifacts and are reported as such rather than implied by Rust checks",
+                "the full Python SDK, TypeScript SDK, REST/gRPC clients and GitHub Actions are foreign artifacts; python/prism_sdk supplies a local MCP transport foundation but is not executed by this Rust check",
                 "cookbook verification resolves names and tests textually; it does not execute every recipe",
                 "developer contracts describe declared blast radius; they do not watch files or run a live debugger",
             ],
@@ -11559,8 +11559,17 @@ impl Server {
                 "foreign_subject_count": foreign_subject_count,
                 "foreign_artifacts_present": foreign_subject_count > 0,
                 "foreign_artifacts_are_not_inferred": true,
+                "local_integration_foundations": [
+                    {
+                        "artifact": "python/prism_sdk",
+                        "kind": "dependency_free_mcp_stdio_client",
+                        "scope": "transport_lifecycle_result_and_workflow_facade",
+                        "full_blueprint_sdk_verified": false
+                    }
+                ],
                 "unverified_surface_families": [
-                    "python_sdk",
+                    "python_biological_adapters_and_statistics",
+                    "python_benchmark_authoring_and_notebook_ergonomics",
                     "typescript_sdk",
                     "rest_grpc_clients",
                     "event_streams_and_webhooks",
@@ -11577,7 +11586,7 @@ impl Server {
                 "all delegated checks remain bounded and side-effect free; no package is published, signed, deployed, fetched, or executed by this workflow",
             ],
             "limitations": [
-                "the workflow does not implement foreign Python/TypeScript SDKs, REST/gRPC/event clients, GitHub Actions, CI runners, or authoring UIs",
+                "the workflow does not implement the full Python/TypeScript SDKs, biological Python adapters, REST/gRPC/event clients, GitHub Actions, CI runners, or authoring UIs",
                 "repository readiness is graph and lint health, not proof that every prose requirement is implemented",
                 "SDK registry admission validates serialized declarations but does not dynamically load or sandbox plugins",
                 "conformance and provider outputs are evidence for delivery review, not clinical, scientific, security, or production approval",
@@ -13440,6 +13449,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "developer_and_release_contracts",
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
+            "python_artifacts": ["python/prism_sdk"],
             "mcp_tools": ["governance_schema_check", "developer_platform_status", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"

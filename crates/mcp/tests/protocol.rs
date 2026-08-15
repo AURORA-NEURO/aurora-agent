@@ -3124,6 +3124,10 @@ fn developer_delivery_audit_composes_local_health_and_blocks_missing_evidence() 
         payload["external_surface_posture"]["foreign_artifacts_present"],
         json!(true)
     );
+    assert_eq!(
+        payload["external_surface_posture"]["local_integration_foundations"][0]["artifact"],
+        json!("python/prism_sdk")
+    );
     assert_eq!(payload["release_request"]["ready"], json!(false));
     let targets = payload["release_request"]["targets"].as_array().unwrap();
     let sdk = targets

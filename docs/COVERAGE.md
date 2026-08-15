@@ -18,8 +18,9 @@ contract, and observability projection workflows. `factory_lifecycle_simulate`,
 `hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, `release_audit`, and
 `developer_delivery_audit` now
 compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
-durable queues, identity, signing, CI execution, UI, OTLP, and network publication explicit as
-unimplemented. `runtime_execution_simulate` adds deterministic record/replay, budget, fault, and
+durable queues, identity, signing, UI, OTLP, and network publication explicit as unimplemented;
+the Python MCP transport foundation is documented separately and does not imply the full SDK.
+`runtime_execution_simulate` adds deterministic record/replay, budget, fault, and
 fork evidence; `megafactory_twin_audit` and `megafactory_placement_audit` expose model-discrepancy,
 oracle-eligibility, placement, attestation, fencing, and duplicate-effect predicates. None of
 these turns foreign Python, TypeScript, REST/gRPC, CI, UI, OTLP, or network-publication artifacts

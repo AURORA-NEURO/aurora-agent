@@ -258,6 +258,13 @@ The three shipped JSON schemas and the capability catalog are available through 
 resources, so a client can build valid documents and route work without reading arbitrary files.
 `world_index` previews its write unless called with `confirm: true`.
 
+The repository also ships a dependency-free Python client in [`python/`](python/README.md). It
+supports synchronous and asyncio MCP sessions, enforces the initialize/initialized lifecycle,
+keeps transport/protocol/remote-refusal errors distinct, bounds JSON-RPC frames, and provides thin
+helpers for `developer_delivery_audit`, `bioatlas_publication_audit`, and `fiber_compile`. It is an
+integration foundation above the Rust kernel, not a claim that the full Python data-adapter,
+benchmark-authoring, or statistics ecosystem is complete.
+
 The same server exposes the broader workspace: `world_validate` checks a world before compilation,
 `context_compare` runs the equal-engineering baseline panel, `bioworlds_catalog` runs the reference
 vertical slices, `modality_catalog` exposes assay resolution and failure-mode contracts,

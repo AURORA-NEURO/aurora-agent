@@ -43,3 +43,18 @@ jobs:
         run: git diff --exit-code fixtures/
       - name: rust must reproduce them byte for byte
         run: cargo test -p bioprism-ids -p bioprism-fiber -p bioprism-store
+
+  python-sdk:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: compile SDK and tests
+        working-directory: python
+        run: python -m compileall -q prism_sdk tests
+      - name: run stdio client contract tests
+        working-directory: python
+        run: python -W error::ResourceWarning -m unittest discover -s tests -v

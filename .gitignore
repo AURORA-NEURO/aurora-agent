@@ -1,6 +1,9 @@
 /target
 **/__pycache__/
 *.pyc
+/python/build/
+/python/dist/
+/python/*.egg-info/
 
 /.eval-snapshot
 /.eval-work

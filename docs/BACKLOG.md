@@ -146,6 +146,12 @@ unproven entries, while `storage_lifecycle_simulate` makes tiering, pin protecti
 quota accounting, and non-copyable delegation/absorption replayable. They remain deterministic
 in-memory contract projections: no durable cache, invalidation feed, byte mover, quota-enforcing
 backend, tenant boundary, encryption, replication, or OTLP exporter is implied.
+The first Python integration layer now exists under `python/`: a standard-library MCP client with
+sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
+helpers for the shipped cross-domain workflows. This is intentionally narrower than the full
+Python SDK backlog: biological format adapters, benchmark-authoring decorators, statistical
+packages, and the remaining nine-distribution ergonomics are still absent and remain foreign or
+unimplemented rather than being inferred from the transport client.
 
 
 ## §11 Developer Platform — 12 uncovered
