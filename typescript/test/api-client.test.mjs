@@ -32,6 +32,31 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools") return jsonResponse({ tools: [{ name: "echo", description: "test", inputSchema: { type: "object", required: ["value"], properties: { value: { type: "integer" }, mode: { type: "string", enum: ["safe", "fast"] } } } }] });
       if (path === "/v1/tools/echo") return jsonResponse({ ok: true, tool: "echo", request_id: "r1", mcp: { result: { structuredContent: { value: 3 } } }, guarantee: "shared" });
       if (path === "/v1/tools/metrics_analytics_audit") return jsonResponse({ ok: true, tool: "metrics_analytics_audit", request_id: "r3", mcp: { result: { structuredContent: { workflow: "metrics_descriptive_analytics" } } } });
+      if (path === "/v1/tools/biocapability_evidence_audit") return jsonResponse({ ok: true, tool: "biocapability_evidence_audit", request_id: "r16", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "biocapability_evidence_conditioned_profile",
+        metrics: { ok: true, coverage: { measured: 1 } },
+        metrics_ok: true,
+        evidence: {
+          items: [{ index: 0, ok: true, id: "evidence-1", dimension: "evidence_grounding", domain: "oncology", declared_status: "observed", effective_status: "observed", issues: [], support: { source: "ledger" }, fail_closed: false }],
+          omitted_items: 0,
+          item_count: 1,
+          invalid_item_count: 0,
+          dimensions: [{ dimension: "evidence_grounding", state: "observed", evidence_count: 1, measured_count: 1, declared_count: 0, blocked_count: 0, missing: false, measured: true }],
+          domains: { oncology: 1 },
+        },
+        claim_requests: {
+          rows: [{ index: 0, ok: true, id: "claim-1", claim: "grounded profile", requires: ["temporal_validity"], allow_declared: false, eligible: false, blockers: [{ dimension: "temporal_validity", state: "missing" }], explicit_assumptions: [], fail_closed: true }],
+          omitted_rows: 0,
+          requested: 1,
+          eligible: 0,
+          all_requested_claims_eligible: false,
+        },
+        subaudits: { information_value: null, reference_quality: null, temporal_validity: null, reproducibility: null },
+        release_posture: { ready_for_requested_claims: false, requires_explicit_claim_request: false, numeric_scores_are_not_claims_without_evidence: true, declared_evidence_is_visible_but_not_measured_support: true },
+        guarantees: ["declared evidence is not measured support"],
+        limitations: ["no external dataset was inspected"],
+      } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
@@ -272,6 +297,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "local_delivery");
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });
+  const evidenceAudit = await client.bioCapabilityEvidenceAudit({ evidence: [], claim_requests: [], metrics: {} });
   const capabilityAudit = await client.capabilityAudit({ include_groups: false });
   const route = await client.capabilityRoute({ goal: "compose evidence", needs: [{ id: "oncology", query: "oncology" }] });
   const routeReview = await client.capabilityRouteReview({
@@ -283,6 +309,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
+  assert.equal(evidenceAudit.mcp.result.structuredContent.workflow, "biocapability_evidence_conditioned_profile");
+  assert.equal(evidenceAudit.mcp.result.structuredContent.release_posture.ready_for_requested_claims, false);
+  assert.equal(evidenceAudit.mcp.result.structuredContent.claim_requests.rows[0].fail_closed, true);
   assert.equal(capabilityAudit.mcp.result.structuredContent.workflow, "capability_audit");
   assert.equal(capabilityAudit.mcp.result.structuredContent.healthy, true);
   assert.equal(capabilityAudit.mcp.result.structuredContent.catalog_digest.length, 64);

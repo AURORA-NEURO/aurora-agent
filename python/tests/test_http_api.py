@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
 
 
 def developer_delivery_audit_payload() -> dict:
@@ -50,6 +50,44 @@ def developer_delivery_audit_payload() -> dict:
             "fail_closed": False,
             "no_implicit_release": True,
             "available_target_count": 10,
+        },
+        "guarantees": [],
+        "limitations": [],
+    }
+
+
+def biocapability_evidence_audit_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "biocapability_evidence_conditioned_profile",
+        "metrics": {"ok": True},
+        "metrics_ok": True,
+        "evidence": {
+            "items": [],
+            "omitted_items": 0,
+            "item_count": 0,
+            "invalid_item_count": 0,
+            "dimensions": [],
+            "domains": {},
+        },
+        "claim_requests": {
+            "rows": [],
+            "omitted_rows": 0,
+            "requested": 0,
+            "eligible": 0,
+            "all_requested_claims_eligible": False,
+        },
+        "subaudits": {
+            "information_value": None,
+            "reference_quality": None,
+            "temporal_validity": None,
+            "reproducibility": None,
+        },
+        "release_posture": {
+            "ready_for_requested_claims": False,
+            "requires_explicit_claim_request": True,
+            "numeric_scores_are_not_claims_without_evidence": True,
+            "declared_evidence_is_visible_but_not_measured_support": True,
         },
         "guarantees": [],
         "limitations": [],
@@ -401,6 +439,22 @@ class HttpApiClientTests(unittest.TestCase):
             release=None,
         )
 
+    def test_http_typed_biocapability_evidence_report_delegates_to_raw_helper(self) -> None:
+        request = BioCapabilityEvidenceAuditRequest(
+            evidence=[EvidenceItem("evidence-1", "evidence_grounding", "observed")],
+            claim_requests=[ClaimRequest("claim-1", "profile", ["evidence_grounding"])],
+            metrics={"observations": []},
+        )
+        with patch.object(
+            ApiClient,
+            "biocapability_evidence_audit",
+            return_value=biocapability_evidence_audit_payload(),
+        ) as audit:
+            report = ApiClient(self.base_url).biocapability_evidence_audit_report(request)
+        self.assertIsInstance(report, BioCapabilityEvidenceAuditReport)
+        self.assertTrue(report.release_posture.requires_explicit_claim_request)
+        audit.assert_called_once_with(request)
+
     def test_http_typed_capability_audit_report_delegates_to_raw_helper(self) -> None:
         with patch.object(ApiClient, "capability_audit", return_value=capability_audit_payload()) as audit:
             report = ApiClient(self.base_url).capability_audit_report(include_groups=False)
@@ -538,6 +592,20 @@ class HttpApiClientTests(unittest.TestCase):
                 governance=None,
                 release=None,
             )
+            request = BioCapabilityEvidenceAuditRequest(
+                evidence=[EvidenceItem("evidence-1", "evidence_grounding", "observed")],
+                claim_requests=[ClaimRequest("claim-1", "profile", ["evidence_grounding"])],
+                metrics={"observations": []},
+            )
+            with patch.object(
+                AsyncApiClient,
+                "biocapability_evidence_audit",
+                new_callable=AsyncMock,
+                return_value=biocapability_evidence_audit_payload(),
+            ) as evidence_audit:
+                report = await client.biocapability_evidence_audit_report(request)
+            self.assertFalse(report.ready_for_requested_claims)
+            evidence_audit.assert_awaited_once_with(request)
             with patch.object(
                 AsyncApiClient,
                 "capability_audit",

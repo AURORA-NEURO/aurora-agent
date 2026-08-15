@@ -53,7 +53,11 @@ from .events import (
     validate_review_id,
 )
 from .bioql import BioQlCompileRequest
-from .evidence import BioCapabilityEvidenceAuditRequest
+from .evidence import (
+    BioCapabilityEvidenceAuditReport,
+    BioCapabilityEvidenceAuditRequest,
+    biocapability_evidence_audit_report,
+)
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
 from .mission import (
     MissionAssembly,
@@ -672,6 +676,13 @@ class ApiClient:
         if not isinstance(request, BioCapabilityEvidenceAuditRequest):
             raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
         return self.call_tool("biocapability_evidence_audit", request.to_mcp_arguments())
+
+    def biocapability_evidence_audit_report(
+        self, request: BioCapabilityEvidenceAuditRequest
+    ) -> BioCapabilityEvidenceAuditReport:
+        """Return typed evidence states, claim blockers, and release posture over HTTP."""
+
+        return biocapability_evidence_audit_report(self.biocapability_evidence_audit(request))
 
     def bioql_compile(
         self,
@@ -1466,6 +1477,15 @@ class AsyncApiClient:
         if not isinstance(request, BioCapabilityEvidenceAuditRequest):
             raise ArgumentError("request must be a BioCapabilityEvidenceAuditRequest")
         return await self.call_tool("biocapability_evidence_audit", request.to_mcp_arguments())
+
+    async def biocapability_evidence_audit_report(
+        self, request: BioCapabilityEvidenceAuditRequest
+    ) -> BioCapabilityEvidenceAuditReport:
+        """Async typed evidence states, claim blockers, and release posture over HTTP."""
+
+        return biocapability_evidence_audit_report(
+            await self.biocapability_evidence_audit(request)
+        )
 
     async def bioql_compile(
         self,

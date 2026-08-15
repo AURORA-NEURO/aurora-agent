@@ -29,6 +29,12 @@ from prism_sdk import (
     DeliveryReadinessReport,
     DeveloperDeliveryAuditReport,
     developer_delivery_audit_report,
+    BioCapabilityEvidenceAuditReport,
+    BioCapabilityEvidenceAuditRequest,
+    ClaimRequest,
+    EvidenceItem,
+    EvidenceDimensionReport,
+    biocapability_evidence_audit_report,
     capability_audit_report,
     capability_discover_report,
     capability_route_report,
@@ -284,6 +290,95 @@ def developer_delivery_audit_payload() -> dict:
         "guarantees": ["no implicit release"],
         "limitations": ["external execution remains outside the workflow"],
     }
+
+
+def biocapability_evidence_audit_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "biocapability_evidence_conditioned_profile",
+        "metrics": {"ok": True, "coverage": {"measured": 1}},
+        "metrics_ok": True,
+        "evidence": {
+            "items": [
+                {
+                    "index": 0,
+                    "ok": True,
+                    "id": "evidence-1",
+                    "dimension": "evidence_grounding",
+                    "domain": "oncology",
+                    "declared_status": "observed",
+                    "effective_status": "observed",
+                    "issues": [],
+                    "support": {"source": "ledger", "scope": "pack/1"},
+                    "fail_closed": False,
+                }
+            ],
+            "omitted_items": 0,
+            "item_count": 1,
+            "invalid_item_count": 0,
+            "dimensions": [
+                {
+                    "dimension": "evidence_grounding",
+                    "state": "observed",
+                    "evidence_count": 1,
+                    "measured_count": 1,
+                    "declared_count": 0,
+                    "blocked_count": 0,
+                    "missing": False,
+                    "measured": True,
+                }
+            ],
+            "domains": {"oncology": 1},
+        },
+        "claim_requests": {
+            "rows": [
+                {
+                    "index": 0,
+                    "ok": True,
+                    "id": "claim-1",
+                    "claim": "grounded profile",
+                    "requires": ["temporal_validity"],
+                    "allow_declared": False,
+                    "eligible": False,
+                    "blockers": [
+                        {
+                            "dimension": "temporal_validity",
+                            "state": "missing",
+                            "reason": "missing, blocked, or non-applicable evidence",
+                        }
+                    ],
+                    "explicit_assumptions": [],
+                    "fail_closed": True,
+                }
+            ],
+            "omitted_rows": 0,
+            "requested": 1,
+            "eligible": 0,
+            "all_requested_claims_eligible": False,
+        },
+        "subaudits": {
+            "information_value": None,
+            "reference_quality": None,
+            "temporal_validity": None,
+            "reproducibility": None,
+        },
+        "release_posture": {
+            "ready_for_requested_claims": False,
+            "requires_explicit_claim_request": False,
+            "numeric_scores_are_not_claims_without_evidence": True,
+            "declared_evidence_is_visible_but_not_measured_support": True,
+        },
+        "guarantees": ["declared evidence is not measured support"],
+        "limitations": ["no external dataset was inspected"],
+    }
+
+
+def biocapability_request() -> BioCapabilityEvidenceAuditRequest:
+    return BioCapabilityEvidenceAuditRequest(
+        evidence=[EvidenceItem("evidence-1", "evidence_grounding", "observed", support={"source": "ledger"})],
+        claim_requests=[ClaimRequest("claim-1", "grounded profile", ["evidence_grounding"])],
+        metrics={"observations": []},
+    )
 
 
 class AnalyticsModelTests(unittest.TestCase):
@@ -585,6 +680,29 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             DeveloperDeliveryAuditReport.from_wire(payload)
 
+    def test_biocapability_evidence_audit_report_preserves_claim_blockers(self) -> None:
+        report = BioCapabilityEvidenceAuditReport.from_wire(
+            biocapability_evidence_audit_payload()
+        )
+        self.assertFalse(report.ready_for_requested_claims)
+        self.assertEqual(report.domains, ("oncology",))
+        self.assertIsInstance(report.evidence.dimensions[0], EvidenceDimensionReport)
+        self.assertEqual(report.claim_requests.rows[0].blockers[0]["dimension"], "temporal_validity")
+        self.assertTrue(report.claim_requests.rows[0].fail_closed)
+
+    def test_biocapability_evidence_audit_report_extracts_http_projection(self) -> None:
+        report = biocapability_evidence_audit_report(
+            {
+                "ok": True,
+                "mcp": {
+                    "result": {
+                        "structuredContent": biocapability_evidence_audit_payload()
+                    }
+                },
+            }
+        )
+        self.assertEqual(report.evidence.item_count, 1)
+
     def test_capability_route_report_extracts_http_json_text_projection(self) -> None:
         envelope = {
             "ok": True,
@@ -656,6 +774,17 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             )
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-1")
         self.assertEqual(result["echo"]["ci"]["offline"], True)
+
+    def test_sync_workspace_typed_biocapability_evidence_report(self) -> None:
+        request = biocapability_request()
+        with patch.object(
+            Workspace,
+            "biocapability_evidence_audit",
+            return_value=biocapability_evidence_audit_payload(),
+        ) as audit:
+            report = Workspace(None).biocapability_evidence_audit_report(request)  # type: ignore[arg-type]
+        self.assertFalse(report.ready_for_requested_claims)
+        audit.assert_called_once_with(request)
 
     def test_sync_workspace_typed_delivery_audit_report(self) -> None:
         with patch.object(
@@ -774,6 +903,20 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 {"session_id": "studio-async", "artifacts": [], "cells": [], "changes": []}
             )
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-async")
+
+    async def test_async_workspace_typed_biocapability_evidence_report(self) -> None:
+        request = biocapability_request()
+        with patch.object(
+            AsyncWorkspace,
+            "biocapability_evidence_audit",
+            new_callable=AsyncMock,
+            return_value=biocapability_evidence_audit_payload(),
+        ) as audit:
+            report = await AsyncWorkspace(None).biocapability_evidence_audit_report(  # type: ignore[arg-type]
+                request
+            )
+        self.assertEqual(report.claim_requests.requested, 1)
+        audit.assert_awaited_once_with(request)
 
     async def test_async_workspace_typed_delivery_audit_report(self) -> None:
         with patch.object(

@@ -252,8 +252,10 @@ bounded in-memory composition and does not create a web publisher, identity serv
 leakage detector, or clinical approval path.
 The Python SDK now exposes the same evidence-conditioned profile as a typed workflow: nine named
 evidence dimensions, explicit observed/reproduced/declared/missing states, support-field validation,
-claim prerequisite validation, duplicate-ID rejection, and sync/async/HTTP transport helpers. Rust
-remains authoritative for metric comparability, release posture, and nested scientific audits.
+claim prerequisite validation, duplicate-ID rejection, omission accounting, claim blockers, optional
+subaudits, and sync/async/HTTP transport helpers. TypeScript exposes the same top-level result
+projection. Rust remains authoritative for metric comparability, release posture, and nested
+scientific audits.
 It also exposes `BioQlCompileRequest` with bounded query and schema transport across sync MCP,
 async MCP, and HTTP; the compiler remains fail-closed and non-executing, with Rust retaining
 authority over schema, units, frames, temporal semantics, provenance, access labels, and cost.

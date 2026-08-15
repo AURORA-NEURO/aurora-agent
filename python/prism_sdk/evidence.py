@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
+from .capability import _route_count, _route_mapping, _route_strings, _route_text, _tool_payload
 from .errors import ArgumentError
 
 
@@ -268,11 +269,389 @@ class BioCapabilityEvidenceAuditRequest:
         return arguments
 
 
+def _report_bool(name: str, value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise ArgumentError(f"{name} must be a boolean")
+    return value
+
+
+def _report_optional_text(name: str, value: Any) -> str | None:
+    if value is None:
+        return None
+    return _route_text(name, value)
+
+
+def _report_status(name: str, value: Any) -> str | None:
+    status = _report_optional_text(name, value)
+    if status is not None and status not in EVIDENCE_STATUSES:
+        raise ArgumentError(f"{name} must be one of {EVIDENCE_STATUSES!r}")
+    return status
+
+
+def _report_mappings(name: str, value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ArgumentError(f"{name} must be an array")
+    return tuple(_route_mapping(f"{name}[{index}]", item) for index, item in enumerate(value))
+
+
+@dataclass(frozen=True)
+class EvidenceAuditItemReport:
+    """One bounded evidence outcome, including fail-closed support diagnostics."""
+
+    raw: dict[str, Any]
+    index: int
+    ok: bool
+    id: str | None
+    dimension: str | None
+    domain: str | None
+    declared_status: str | None
+    effective_status: str | None
+    issues: tuple[dict[str, Any], ...]
+    support: dict[str, Any] | None
+    fail_closed: bool
+    refusal: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvidenceAuditItemReport":
+        raw = _route_mapping("evidence audit item", value)
+        return cls(
+            raw=raw,
+            index=_route_count("evidence audit item index", raw.get("index")),
+            ok=_report_bool("evidence audit item ok", raw.get("ok")),
+            id=_report_optional_text("evidence audit item id", raw.get("id")),
+            dimension=_report_optional_text("evidence audit item dimension", raw.get("dimension")),
+            domain=_report_optional_text("evidence audit item domain", raw.get("domain")),
+            declared_status=_report_status(
+                "evidence audit item declared_status", raw.get("declared_status")
+            ),
+            effective_status=_report_status(
+                "evidence audit item effective_status", raw.get("effective_status")
+            ),
+            issues=_report_mappings("evidence audit item issues", raw.get("issues", [])),
+            support=(
+                None
+                if raw.get("support") is None
+                else _route_mapping("evidence audit item support", raw.get("support"))
+            ),
+            fail_closed=_report_bool("evidence audit item fail_closed", raw.get("fail_closed")),
+            refusal=_report_optional_text("evidence audit item refusal", raw.get("refusal")),
+        )
+
+    @property
+    def measured(self) -> bool:
+        return self.effective_status in {"observed", "reproduced"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class EvidenceDimensionReport:
+    """Rollup state for one of the nine explicit evidence dimensions."""
+
+    raw: dict[str, Any]
+    dimension: str
+    state: str
+    evidence_count: int
+    measured_count: int
+    declared_count: int
+    blocked_count: int
+    missing: bool
+    measured: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvidenceDimensionReport":
+        raw = _route_mapping("evidence dimension", value)
+        state = _route_text("evidence dimension state", raw.get("state"))
+        if state not in EVIDENCE_STATUSES:
+            raise ArgumentError(f"evidence dimension state must be one of {EVIDENCE_STATUSES!r}")
+        evidence_count = _route_count("evidence dimension evidence_count", raw.get("evidence_count"))
+        measured_count = _route_count("evidence dimension measured_count", raw.get("measured_count"))
+        declared_count = _route_count("evidence dimension declared_count", raw.get("declared_count"))
+        blocked_count = _route_count("evidence dimension blocked_count", raw.get("blocked_count"))
+        if measured_count + declared_count + blocked_count > evidence_count:
+            raise ArgumentError("evidence dimension counts do not reconcile")
+        return cls(
+            raw=raw,
+            dimension=_route_text("evidence dimension name", raw.get("dimension")),
+            state=state,
+            evidence_count=evidence_count,
+            measured_count=measured_count,
+            declared_count=declared_count,
+            blocked_count=blocked_count,
+            missing=_report_bool("evidence dimension missing", raw.get("missing")),
+            measured=_report_bool("evidence dimension measured", raw.get("measured")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class EvidenceInventoryReport:
+    """Bounded evidence rows, dimension rollups, domain counts, and omission accounting."""
+
+    raw: dict[str, Any]
+    items: tuple[EvidenceAuditItemReport, ...]
+    omitted_items: int
+    item_count: int
+    invalid_item_count: int
+    dimensions: tuple[EvidenceDimensionReport, ...]
+    domains: dict[str, int]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvidenceInventoryReport":
+        raw = _route_mapping("evidence inventory", value)
+        items = tuple(EvidenceAuditItemReport.from_wire(item) for item in _report_mappings("evidence items", raw.get("items", [])))
+        omitted_items = _route_count("evidence omitted_items", raw.get("omitted_items"))
+        item_count = _route_count("evidence item_count", raw.get("item_count"))
+        invalid_item_count = _route_count("evidence invalid_item_count", raw.get("invalid_item_count"))
+        if len(items) + omitted_items != item_count or invalid_item_count > item_count:
+            raise ArgumentError("evidence inventory counts do not reconcile")
+        dimensions = tuple(
+            EvidenceDimensionReport.from_wire(item)
+            for item in _report_mappings("evidence dimensions", raw.get("dimensions", []))
+        )
+        raw_domains = _route_mapping("evidence domains", raw.get("domains", {}))
+        domains: dict[str, int] = {}
+        for domain, count in raw_domains.items():
+            domains[_route_text("evidence domain", domain)] = _route_count(
+                f"evidence domain count for {domain}", count
+            )
+        return cls(
+            raw=raw,
+            items=items,
+            omitted_items=omitted_items,
+            item_count=item_count,
+            invalid_item_count=invalid_item_count,
+            dimensions=dimensions,
+            domains=domains,
+        )
+
+    @property
+    def complete(self) -> bool:
+        return self.omitted_items == 0
+
+    @property
+    def measured_dimensions(self) -> tuple[str, ...]:
+        return tuple(sorted(dimension.dimension for dimension in self.dimensions if dimension.measured))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class ClaimAuditRowReport:
+    """One explicit claim prerequisite result and its blockers or assumptions."""
+
+    raw: dict[str, Any]
+    index: int
+    ok: bool
+    id: str | None
+    claim: str | None
+    requires: tuple[str, ...]
+    allow_declared: bool | None
+    eligible: bool | None
+    blockers: tuple[dict[str, Any], ...]
+    explicit_assumptions: tuple[dict[str, Any], ...]
+    fail_closed: bool
+    refusal: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "ClaimAuditRowReport":
+        raw = _route_mapping("claim audit row", value)
+        raw_allow_declared = raw.get("allow_declared")
+        allow_declared = None if raw_allow_declared is None else _report_bool(
+            "claim audit allow_declared", raw_allow_declared
+        )
+        raw_eligible = raw.get("eligible")
+        eligible = None if raw_eligible is None else _report_bool("claim audit eligible", raw_eligible)
+        return cls(
+            raw=raw,
+            index=_route_count("claim audit row index", raw.get("index")),
+            ok=_report_bool("claim audit row ok", raw.get("ok")),
+            id=_report_optional_text("claim audit row id", raw.get("id")),
+            claim=_report_optional_text("claim audit row claim", raw.get("claim")),
+            requires=_route_strings("claim audit row requires", raw.get("requires", [])),
+            allow_declared=allow_declared,
+            eligible=eligible,
+            blockers=_report_mappings("claim audit row blockers", raw.get("blockers", [])),
+            explicit_assumptions=_report_mappings(
+                "claim audit row explicit_assumptions", raw.get("explicit_assumptions", [])
+            ),
+            fail_closed=_report_bool("claim audit row fail_closed", raw.get("fail_closed")),
+            refusal=_report_optional_text("claim audit row refusal", raw.get("refusal")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class ClaimInventoryReport:
+    """Bounded claim rows and explicit eligibility totals."""
+
+    raw: dict[str, Any]
+    rows: tuple[ClaimAuditRowReport, ...]
+    omitted_rows: int
+    requested: int
+    eligible: int
+    all_requested_claims_eligible: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "ClaimInventoryReport":
+        raw = _route_mapping("claim inventory", value)
+        rows = tuple(
+            ClaimAuditRowReport.from_wire(row)
+            for row in _report_mappings("claim rows", raw.get("rows", []))
+        )
+        omitted_rows = _route_count("claim omitted_rows", raw.get("omitted_rows"))
+        requested = _route_count("claim requested", raw.get("requested"))
+        eligible = _route_count("claim eligible", raw.get("eligible"))
+        if len(rows) + omitted_rows != requested or eligible > requested:
+            raise ArgumentError("claim inventory counts do not reconcile")
+        return cls(
+            raw=raw,
+            rows=rows,
+            omitted_rows=omitted_rows,
+            requested=requested,
+            eligible=eligible,
+            all_requested_claims_eligible=_report_bool(
+                "claim all_requested_claims_eligible", raw.get("all_requested_claims_eligible")
+            ),
+        )
+
+    @property
+    def complete(self) -> bool:
+        return self.omitted_rows == 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class EvidenceReleasePostureReport:
+    """Fail-closed claim-readiness posture emitted by the authoritative kernel."""
+
+    raw: dict[str, Any]
+    ready_for_requested_claims: bool
+    requires_explicit_claim_request: bool
+    numeric_scores_are_not_claims_without_evidence: bool
+    declared_evidence_is_visible_but_not_measured_support: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvidenceReleasePostureReport":
+        raw = _route_mapping("evidence release posture", value)
+        return cls(
+            raw=raw,
+            ready_for_requested_claims=_report_bool(
+                "evidence ready_for_requested_claims", raw.get("ready_for_requested_claims")
+            ),
+            requires_explicit_claim_request=_report_bool(
+                "evidence requires_explicit_claim_request",
+                raw.get("requires_explicit_claim_request"),
+            ),
+            numeric_scores_are_not_claims_without_evidence=_report_bool(
+                "evidence numeric_scores_are_not_claims_without_evidence",
+                raw.get("numeric_scores_are_not_claims_without_evidence"),
+            ),
+            declared_evidence_is_visible_but_not_measured_support=_report_bool(
+                "evidence declared_evidence_is_visible_but_not_measured_support",
+                raw.get("declared_evidence_is_visible_but_not_measured_support"),
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class BioCapabilityEvidenceAuditReport:
+    """Typed cross-domain evidence inventory, claim gating, and optional subaudits."""
+
+    raw: dict[str, Any]
+    workflow: str
+    metrics: dict[str, Any]
+    metrics_ok: bool
+    evidence: EvidenceInventoryReport
+    claim_requests: ClaimInventoryReport
+    subaudits: dict[str, dict[str, Any] | None]
+    release_posture: EvidenceReleasePostureReport
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "BioCapabilityEvidenceAuditReport":
+        raw = _route_mapping("biocapability evidence audit report", value)
+        if raw.get("ok") is False:
+            raise ArgumentError("biocapability evidence audit report is not successful")
+        if raw.get("workflow") != "biocapability_evidence_conditioned_profile":
+            raise ArgumentError("biocapability evidence audit workflow is invalid")
+        raw_subaudits = _route_mapping("evidence subaudits", raw.get("subaudits", {}))
+        return cls(
+            raw=raw,
+            workflow=_route_text("biocapability evidence workflow", raw.get("workflow")),
+            metrics=_route_mapping("biocapability evidence metrics", raw.get("metrics", {})),
+            metrics_ok=_report_bool("biocapability evidence metrics_ok", raw.get("metrics_ok")),
+            evidence=EvidenceInventoryReport.from_wire(raw.get("evidence", {})),
+            claim_requests=ClaimInventoryReport.from_wire(raw.get("claim_requests", {})),
+            subaudits={
+                name: None if raw_subaudits.get(name) is None else _route_mapping(
+                    f"evidence subaudit {name}", raw_subaudits.get(name)
+                )
+                for name in (
+                    "information_value",
+                    "reference_quality",
+                    "temporal_validity",
+                    "reproducibility",
+                )
+            },
+            release_posture=EvidenceReleasePostureReport.from_wire(
+                raw.get("release_posture", {})
+            ),
+            guarantees=_route_strings("biocapability evidence guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("biocapability evidence limitations", raw.get("limitations", [])),
+        )
+
+    @property
+    def ready_for_requested_claims(self) -> bool:
+        return self.release_posture.ready_for_requested_claims
+
+    @property
+    def domains(self) -> tuple[str, ...]:
+        return tuple(sorted(self.evidence.domains))
+
+    @property
+    def has_explicit_claim_request(self) -> bool:
+        return self.claim_requests.requested > 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def biocapability_evidence_audit_report(
+    value: Mapping[str, Any],
+) -> BioCapabilityEvidenceAuditReport:
+    """Parse a direct evidence audit result or an HTTP tool envelope."""
+
+    return BioCapabilityEvidenceAuditReport.from_wire(
+        _tool_payload(value, "biocapability_evidence_conditioned_profile")
+    )
+
+
 __all__ = [
     "BioCapabilityEvidenceAuditRequest",
+    "BioCapabilityEvidenceAuditReport",
+    "ClaimAuditRowReport",
+    "ClaimInventoryReport",
     "ClaimRequest",
+    "EvidenceAuditItemReport",
+    "EvidenceDimensionReport",
     "EVIDENCE_DIMENSIONS",
     "EVIDENCE_STATUSES",
+    "EvidenceInventoryReport",
     "EvidenceItem",
+    "EvidenceReleasePostureReport",
     "EvidenceStatus",
+    "biocapability_evidence_audit_report",
 ]

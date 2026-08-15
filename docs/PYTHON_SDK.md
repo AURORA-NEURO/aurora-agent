@@ -62,6 +62,11 @@ invent defaults:
   enumerate the nine evidence dimensions, keep observed/reproduced support distinct from declared
   status, validate claim prerequisites and duplicate IDs, and preserve optional information-value,
   reference, temporal, and reproducibility subaudits without deciding scientific truth locally.
+- `BioCapabilityEvidenceAuditReport.from_wire(...)` plus the sync, async, and HTTP
+  `biocapability_evidence_audit_report(...)` helpers type the returned evidence inventory, dimension
+  rollups, domain counts, claim blockers/assumptions, omission bounds, optional subaudits, and
+  fail-closed release posture. `report.ready_for_requested_claims` remains evidence of an internally
+  complete contract, never a scientific or clinical truth claim.
 - `BioQlCompileRequest` and `Workspace.bioql_compile(...)` provide the same bounded entry point
   over sync MCP, async MCP, and HTTP. Query text and explicit schema JSON are size-checked locally;
   lexical, unit/frame, temporal, provenance, access-label, and cost semantics remain authoritative

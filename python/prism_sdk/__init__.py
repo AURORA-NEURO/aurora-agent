@@ -140,12 +140,20 @@ from .errors import (
 )
 from .events import ApiEvent, DeliveryPage, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_review_id
 from .evidence import (
+    BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
+    ClaimAuditRowReport,
     ClaimRequest,
+    ClaimInventoryReport,
     EVIDENCE_DIMENSIONS,
     EVIDENCE_STATUSES,
+    EvidenceAuditItemReport,
+    EvidenceDimensionReport,
+    EvidenceInventoryReport,
     EvidenceItem,
+    EvidenceReleasePostureReport,
     EvidenceStatus,
+    biocapability_evidence_audit_report,
 )
 from .fasta import FastaAdapter, FastaFinding, FastaParseError, FastaParseResult, parse_fasta
 from .fastq import FastqAdapter, FastqFinding, FastqParseError, FastqParseResult, parse_fastq
@@ -273,6 +281,9 @@ __all__ = [
     "ArgumentError",
     "ApiEvent",
     "BioCapabilityEvidenceAuditRequest",
+    "BioCapabilityEvidenceAuditReport",
+    "ClaimAuditRowReport",
+    "ClaimInventoryReport",
     "BioQlCompileRequest",
     "ApiClient",
     "ApiError",
@@ -372,7 +383,12 @@ __all__ = [
     "EVIDENCE_DIMENSIONS",
     "EVIDENCE_STATUSES",
     "EvidenceItem",
+    "EvidenceAuditItemReport",
+    "EvidenceDimensionReport",
+    "EvidenceInventoryReport",
+    "EvidenceReleasePostureReport",
     "EvidenceStatus",
+    "biocapability_evidence_audit_report",
     "EventPage",
     "EventPersistenceStatus",
     "RouteReviewEvidence",

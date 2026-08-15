@@ -352,6 +352,87 @@ export interface BioCapabilityEvidenceAuditArgs extends JsonObject {
   max_items?: number;
 }
 
+export interface EvidenceAuditItemResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  id?: string;
+  dimension?: string;
+  domain?: string;
+  declared_status?: string;
+  effective_status?: string;
+  issues: JsonObject[];
+  support?: JsonObject;
+  fail_closed: boolean;
+  refusal?: string;
+}
+
+export interface EvidenceDimensionResult extends JsonObject {
+  dimension: string;
+  state: string;
+  evidence_count: number;
+  measured_count: number;
+  declared_count: number;
+  blocked_count: number;
+  missing: boolean;
+  measured: boolean;
+}
+
+export interface EvidenceInventoryResult extends JsonObject {
+  items: EvidenceAuditItemResult[];
+  omitted_items: number;
+  item_count: number;
+  invalid_item_count: number;
+  dimensions: EvidenceDimensionResult[];
+  domains: JsonObject;
+}
+
+export interface ClaimAuditRowResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  id?: string;
+  claim?: string;
+  requires: string[];
+  allow_declared?: boolean;
+  eligible?: boolean;
+  blockers: JsonObject[];
+  explicit_assumptions: JsonObject[];
+  fail_closed: boolean;
+  refusal?: string;
+}
+
+export interface ClaimInventoryResult extends JsonObject {
+  rows: ClaimAuditRowResult[];
+  omitted_rows: number;
+  requested: number;
+  eligible: number;
+  all_requested_claims_eligible: boolean;
+}
+
+export interface EvidenceReleasePostureResult extends JsonObject {
+  ready_for_requested_claims: boolean;
+  requires_explicit_claim_request: boolean;
+  numeric_scores_are_not_claims_without_evidence: boolean;
+  declared_evidence_is_visible_but_not_measured_support: boolean;
+}
+
+export interface BioCapabilityEvidenceAuditResult extends JsonObject {
+  ok: boolean;
+  workflow: "biocapability_evidence_conditioned_profile";
+  metrics: JsonObject;
+  metrics_ok: boolean;
+  evidence: EvidenceInventoryResult;
+  claim_requests: ClaimInventoryResult;
+  subaudits: {
+    information_value: JsonObject | null;
+    reference_quality: JsonObject | null;
+    temporal_validity: JsonObject | null;
+    reproducibility: JsonObject | null;
+  };
+  release_posture: EvidenceReleasePostureResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface BioAtlasPublicationAuditArgs extends JsonObject {
   atlas: JsonObject;
   weighting?: JsonObject;

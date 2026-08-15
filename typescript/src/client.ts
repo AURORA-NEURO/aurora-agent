@@ -19,6 +19,7 @@ import type {
   AdapterPlanArgs,
   BioAtlasPublicationAuditArgs,
   BioCapabilityEvidenceAuditArgs,
+  BioCapabilityEvidenceAuditResult,
   CapabilitiesResponse,
   ClientRequestOptions,
   DeliveryMutationResponse,
@@ -222,8 +223,8 @@ export class ApiClient {
     return this.callTool("metrics_analytics_audit", args, options);
   }
 
-  async bioCapabilityEvidenceAudit(args: BioCapabilityEvidenceAuditArgs, options?: ClientRequestOptions) {
-    return this.callTool("biocapability_evidence_audit", args, options);
+  async bioCapabilityEvidenceAudit(args: BioCapabilityEvidenceAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioCapabilityEvidenceAuditResult>> {
+    return this.callTool<BioCapabilityEvidenceAuditResult>("biocapability_evidence_audit", args, options);
   }
 
   async bioAtlasPublicationAudit(args: BioAtlasPublicationAuditArgs, options?: ClientRequestOptions) {
