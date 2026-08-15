@@ -165,6 +165,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(gff3.executable)
         self.assertEqual(gff3.selected_adapter.id, "bioprism.python.gff3_text")
 
+        pdb = AdapterRegistry().plan(
+            AdapterPlanRequest("structure", SourceKind.BYTES, declared_format="chemical/x-pdb"),
+            check_environment=False,
+        )
+        self.assertTrue(pdb.executable)
+        self.assertEqual(pdb.selected_adapter.id, "bioprism.python.pdb_text")
+
     def test_biological_adapter_request_refuses_implicit_format_sniffing(self) -> None:
         with self.assertRaises(ArgumentError):
             AdapterPlanRequest("", SourceKind.BYTES)

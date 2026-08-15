@@ -484,6 +484,24 @@ impl AdapterRegistry {
                 "Dependency-free bounded GFF3/GTF reader validating coordinates, attributes, parent references, and feature hierarchy without disclosing attribute values.",
             ),
             descriptor(
+                "bioprism.python.pdb_text",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/pdb", "chemical/x-pdb", "text/pdb"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ContentUninterpreted,
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::ProvenanceUnavailable,
+                ],
+                &["subject", "sample", "structure", "chain", "residue", "atom"],
+                None,
+                "Dependency-free bounded PDB fixed-column reader validating models, coordinates, chains, residues, and connectivity without disclosing raw structure records.",
+            ),
+            descriptor(
                 "bioprism.python.fhir_ndjson",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -1004,6 +1022,26 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.gff3_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_pdb_selects_the_dependency_free_python_reader() {
+        let plan = AdapterRegistry::default()
+            .plan(request(Some("chemical/x-pdb"), SourceKind::Bytes))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.pdb_text")
         );
         assert_eq!(
             plan.selected_adapter

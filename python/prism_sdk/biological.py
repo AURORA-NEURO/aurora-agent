@@ -406,6 +406,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free bounded GFF3/GTF reader validating coordinates, attributes, parent references, and feature hierarchy without disclosing attribute values.",
         ),
         _descriptor(
+            "bioprism.python.pdb_text",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/pdb", "chemical/x-pdb", "text/pdb"),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("content_uninterpreted", "coordinate_frame_not_carried", "ontology_term_unmapped", "provenance_unavailable"),
+            ("subject", "sample", "structure", "chain", "residue", "atom"),
+            "Dependency-free bounded PDB fixed-column reader validating models, coordinates, chains, residues, and connectivity without disclosing raw structure records.",
+        ),
+        _descriptor(
             "bioprism.python.fhir_ndjson",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/fhir+ndjson",),

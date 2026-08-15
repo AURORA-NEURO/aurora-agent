@@ -24,6 +24,7 @@ from .fhir import MAX_FHIR_BYTES, parse_fhir_json, parse_fhir_ndjson
 from .mzml import MAX_MZML_BYTES, parse_mzml
 from .nifti import audit_nifti
 from .ome_zarr import audit_ome_zarr
+from .pdb import MAX_PDB_BYTES, parse_pdb
 from .vcf import MAX_VCF_ITEMS, MAX_VCF_RECORDS, parse_vcf
 from .gff3 import MAX_GFF3_BYTES, parse_gff3
 
@@ -735,6 +736,33 @@ def read_mzml(
         raise ArgumentError(f"mzML read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_pdb(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_atoms: int = 1_000_000,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded ASCII PDB records and return the dependency-free structure audit."""
+
+    candidate = _path(path, field="PDB path")
+    if candidate.stat().st_size > MAX_PDB_BYTES:
+        raise ArgumentError(f"PDB path exceeds the {MAX_PDB_BYTES}-byte reader limit")
+    try:
+        return parse_pdb(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            max_atoms=max_atoms,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"PDB read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_ome_zarr(
     path: str,
     *,
@@ -798,6 +826,7 @@ __all__ = [
     "read_fhir_ndjson",
     "read_gff3",
     "read_mzml",
+    "read_pdb",
     "read_indexed_vcf",
     "read_nifti_header",
     "read_ome_zarr",

@@ -63,7 +63,7 @@ and `CapabilityQuery` routes across the complete domain catalogue with optional 
 `capability_audit()` verifies the catalogue against the authoritative MCP schema set, and
 `capability_route()` batches named needs without executing the returned candidates.
 `AdapterRegistry` and `adapter_plan()` add a dependency-free format boundary for tabular and
-biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, FASTA, FASTQ, GFF3, mzML, BAM/CRAM, OME-Zarr, and FHIR routes
+biological sources: explicit DICOM, NIfTI/BIDS, AnnData/Zarr, VCF, FASTA, FASTQ, GFF3, PDB, mzML, BAM/CRAM, OME-Zarr, and FHIR routes
 are delegated to the mature Python ecosystem, while dependency missingness, scope dimensions, and
 semantic-loss declarations remain visible before parsing. The planners never sniff or fetch bytes.
 `BidsAdapter` and `audit_bids()` add a dependency-free BIDS manifest path: they validate bounded
@@ -122,6 +122,9 @@ counts, and GC bases are audited while sequence strings and headers remain sourc
 `parse_gff3()` and `read_gff3()` add a dependency-free annotation boundary for GFF3/GTF-style rows:
 coordinates, scores, strands, phases, URL-encoded attributes, duplicate IDs, Parent resolution,
 cycles, directives, and embedded FASTA boundaries are audited without disclosing attribute values.
+`parse_pdb()` and `read_pdb()` add a dependency-free structural-biology boundary: fixed-column atom
+fields, models, chains, residues, coordinates, alternate locations, crystallographic cells, resolution,
+CONECT edges, and geometry summaries are audited without emitting raw structure records.
 `parse_mzml()` and `read_mzml()` add a dependency-free mass-spectrometry boundary: bounded XML,
 spectrum identity, declared counts, MS levels, scan-time summaries, binary-array types, compression,
 precision, and encoded-length evidence are retained while binary m/z/intensity/time arrays are never
