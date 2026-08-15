@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 
-from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EventPage, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, WorldClaimCheckRequest
+from prism_sdk import ApiClient, ApiError, ArgumentError, AsyncApiClient, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, ClaimRequest, EventPage, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionRequest, MissionStep, MissionWaitTimeout, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
 
 
 class FakeApiHandler(BaseHTTPRequestHandler):
@@ -41,6 +41,14 @@ class FakeApiHandler(BaseHTTPRequestHandler):
                     ]
                 },
             )
+        elif self.path.startswith("/v1/events/stream"):
+            body = b'id: 1\nevent: mission.trace\ndata: {"mission_id":"async-1"}\n\n'
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("X-Next-After", "1")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path.startswith("/v1/events"):
             self._send(200, {"ok": True, "page": {"events": [], "after": 0, "next_after": 0, "oldest": None, "newest": None, "gap": False, "dropped_events": 0}})
         elif self.path.startswith("/v1/missions?"):
@@ -224,6 +232,10 @@ class HttpApiClientTests(unittest.TestCase):
         event_page = client.event_page()
         self.assertIsInstance(event_page, EventPage)
         self.assertFalse(event_page.gap)
+        stream = client.event_stream()
+        self.assertIsInstance(stream, SseSnapshot)
+        self.assertEqual(stream.next_after, 1)
+        self.assertEqual(stream.events[0].event, "mission.trace")
         with self.assertRaises(ArgumentError):
             client.event_page(after=True)
         with self.assertRaises(ApiError) as error:
@@ -335,6 +347,7 @@ class HttpApiClientTests(unittest.TestCase):
                 "trace-async",
             )
             self.assertFalse((await client.event_page()).gap)
+            self.assertEqual((await client.event_stream()).events[0].data, '{"mission_id":"async-1"}')
 
         asyncio.run(run())
 

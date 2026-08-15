@@ -28,7 +28,7 @@ from .context_requests import (
     ProjectionBundleRequest,
 )
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
-from .events import MAX_EVENT_PAGE, DeliveryPage, EventPage
+from .events import MAX_EVENT_PAGE, DeliveryPage, EventPage, SseSnapshot, parse_sse
 from .bioql import BioQlCompileRequest
 from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
@@ -182,6 +182,68 @@ class ApiClient:
 
     def health(self) -> dict[str, Any]:
         return self.request("GET", "/healthz")
+
+    def request_text(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> tuple[str, dict[str, str]]:
+        """Issue a bounded text request for protocol surfaces such as SSE snapshots."""
+
+        if method not in {"GET", "OPTIONS"}:
+            raise ArgumentError("text requests support only GET or OPTIONS")
+        if not path.startswith("/") or "\r" in path or "\n" in path:
+            raise ArgumentError("path must be an origin-form path")
+        request_headers = {"Accept": "text/event-stream"}
+        if self.bearer_token is not None:
+            request_headers["Authorization"] = f"Bearer {self.bearer_token}"
+        if headers is not None:
+            for name, value in headers.items():
+                if not name or "\r" in name or "\n" in name or "\r" in value or "\n" in value:
+                    raise ArgumentError("HTTP headers must not contain control-line breaks")
+                request_headers[name] = value
+        connection: http.client.HTTPConnection | http.client.HTTPSConnection
+        try:
+            if self.base_url.scheme == "https":
+                connection = http.client.HTTPSConnection(
+                    self.base_url.hostname,
+                    self.base_url.port,
+                    timeout=self.timeout,
+                    context=self.ssl_context,
+                )
+            else:
+                connection = http.client.HTTPConnection(
+                    self.base_url.hostname,
+                    self.base_url.port,
+                    timeout=self.timeout,
+                )
+            connection.request(method, path, headers=request_headers)
+            response = connection.getresponse()
+            raw = response.read(self.max_response_bytes + 1)
+            status = response.status
+            response_headers = {name.lower(): value for name, value in response.getheaders()}
+        except (OSError, http.client.HTTPException) as error:
+            raise TransportError(f"HTTP API request failed: {error}") from error
+        finally:
+            try:
+                connection.close()
+            except UnboundLocalError:
+                pass
+        if len(raw) > self.max_response_bytes:
+            raise TransportError("HTTP API response exceeded max_response_bytes")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise TransportError(f"HTTP API returned invalid UTF-8 text: {error}") from error
+        if status >= 400:
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = {"error": text}
+            raise ApiError(status, payload)
+        return text, response_headers
 
     def capabilities(self) -> dict[str, Any]:
         return self.request("GET", "/v1/capabilities")
@@ -672,6 +734,23 @@ class ApiClient:
             raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
         return EventPage.from_wire(self.request("GET", f"/v1/events?after={after}&limit={limit}"))
 
+    def event_stream(self, *, after: int = 0, limit: int = 100) -> SseSnapshot:
+        """Fetch and parse the bounded SSE snapshot without requiring an EventSource runtime."""
+
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_EVENT_PAGE:
+            raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
+        raw, headers = self.request_text("GET", f"/v1/events/stream?after={after}&limit={limit}")
+        next_after_value = headers.get("x-next-after")
+        if next_after_value is None:
+            next_after = None
+        elif next_after_value.isdigit():
+            next_after = int(next_after_value)
+        else:
+            raise TransportError("HTTP API x-next-after header is not an unsigned integer")
+        return SseSnapshot(headers.get("content-type", ""), next_after, parse_sse(raw), raw)
+
     def subscribe(
         self,
         endpoint: str,
@@ -858,6 +937,11 @@ class AsyncApiClient:
         """Async typed cursor page over retained tool and mission events."""
 
         return await asyncio.to_thread(self.client.event_page, after=after, limit=limit)
+
+    async def event_stream(self, *, after: int = 0, limit: int = 100) -> SseSnapshot:
+        """Async bounded SSE snapshot with the same cursor contract as the sync client."""
+
+        return await asyncio.to_thread(self.client.event_stream, after=after, limit=limit)
 
     async def mission_inventory(self, *, status: str | None = None, limit: int = 100) -> MissionInventoryPage:
         """Async typed bounded mission inventory."""

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from .errors import ArgumentError
+from .errors import ArgumentError, ProtocolError
 
 
 MAX_EVENT_PAGE = 1000
@@ -174,4 +174,83 @@ class DeliveryPage:
         return dict(self.raw)
 
 
-__all__ = ["MAX_EVENT_PAGE", "ApiEvent", "EventPage", "DeliveryView", "DeliveryPage"]
+@dataclass(frozen=True)
+class SseEvent:
+    """One parsed Server-Sent Events record from a bounded gateway snapshot."""
+
+    data: str
+    id: str | None = None
+    event: str | None = None
+    retry: int | None = None
+
+
+@dataclass(frozen=True)
+class SseSnapshot:
+    """Parsed SSE snapshot plus the cursor header needed for the next request."""
+
+    content_type: str
+    next_after: int | None
+    events: tuple[SseEvent, ...]
+    raw: str
+
+
+def parse_sse(value: str) -> tuple[SseEvent, ...]:
+    """Parse one bounded SSE snapshot using EventSource field and dispatch rules."""
+
+    if not isinstance(value, str):
+        raise ProtocolError("SSE response must be text")
+    events: list[SseEvent] = []
+    data_lines: list[str] = []
+    event_id: str | None = None
+    event_name: str | None = None
+    retry: int | None = None
+
+    def dispatch() -> None:
+        nonlocal data_lines, event_id, event_name, retry
+        if data_lines:
+            events.append(SseEvent("\n".join(data_lines), event_id, event_name, retry))
+        data_lines = []
+        event_id = None
+        event_name = None
+        retry = None
+
+    for line in value.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if line == "":
+            dispatch()
+            continue
+        if line.startswith(":"):
+            continue
+        if ":" in line:
+            field, field_value = line.split(":", 1)
+            if field_value.startswith(" "):
+                field_value = field_value[1:]
+        else:
+            field, field_value = line, ""
+        if field == "id":
+            if "\x00" in field_value:
+                raise ProtocolError("SSE id contains a NUL character")
+            event_id = field_value
+        elif field == "event":
+            event_name = field_value
+        elif field == "data":
+            data_lines.append(field_value)
+        elif field == "retry":
+            if not field_value.isdigit():
+                raise ProtocolError("SSE retry is not an unsigned integer")
+            retry = int(field_value)
+            if retry > 9_007_199_254_740_991:
+                raise ProtocolError("SSE retry exceeds safe integer range")
+    dispatch()
+    return tuple(events)
+
+
+__all__ = [
+    "MAX_EVENT_PAGE",
+    "ApiEvent",
+    "EventPage",
+    "DeliveryView",
+    "DeliveryPage",
+    "SseEvent",
+    "SseSnapshot",
+    "parse_sse",
+]

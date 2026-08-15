@@ -180,6 +180,8 @@ last live job on timeout; this is an orchestration convenience, not a durable qu
 Python now also types the shared event cursor and webhook delivery pages, including retention gaps,
 ordered event IDs, retry attempts, signatures, and pending counts. This keeps mission monitoring and
 ordinary domain-tool observability on one contract in both SDK families.
+The Python client also parses the bounded SSE snapshot with the same extension-field tolerance and
+cursor-header semantics as TypeScript, keeping streaming-compatible monitoring dependency-free.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full

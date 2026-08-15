@@ -276,7 +276,9 @@ webhook subscription/delivery acknowledgement. They preserve status and JSON err
 `ApiError` and do not recreate Rust domain semantics. `event_page()` and `delivery_page()` add
 typed `EventPage`, `ApiEvent`, and `DeliveryPage` projections with ordered cursors, retention-gap
 signals, retry attempts, signatures, and pending counts; the original raw `events()` and
-`deliveries()` methods remain available for forward-compatible payload inspection.
+`deliveries()` methods remain available for forward-compatible payload inspection. `event_stream()`
+parses the bounded SSE snapshot into `SseSnapshot`/`SseEvent` records and preserves `x-next-after`;
+the parser rejects malformed retry fields and NUL-containing IDs before application code sees them.
 
 ## Metrics analytics across domains
 

@@ -68,6 +68,8 @@ job on timeout; TypeScript exposes the same wait contract with abortable polling
 error. These helpers coordinate every domain mission without claiming durable scheduling.
 The Python HTTP SDK also exposes typed event and signed-delivery pages with the same cursor ordering,
 retention-gap, retry-attempt, signature, and pending-count fields already present in TypeScript.
+Its dependency-free `event_stream()` parser now mirrors the TypeScript SSE field rules and preserves
+the gateway's `x-next-after` cursor for resumable monitoring.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 The authoritative executor validates every known tool's materialized arguments against its
