@@ -301,7 +301,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 118);
+    assert_eq!(tools.len(), 119);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3606,6 +3606,44 @@ fn capability_discovery_routes_across_domains_and_attaches_authoritative_schemas
         filtered["matches"][0]["matched_tools"],
         json!(["bundle_verify"])
     );
+}
+
+#[test]
+fn capability_audit_proves_catalogue_and_transport_schema_parity() {
+    let mut server = server();
+    let result = call(&mut server, "capability_audit", json!({}));
+    assert_eq!(result["workflow"], json!("capability_audit"));
+    assert_eq!(result["healthy"], json!(true));
+    assert_eq!(result["total_groups"], json!(28));
+    assert_eq!(result["unique_catalog_tools"], json!(119));
+    assert_eq!(result["advertised_tool_count"], json!(119));
+    assert_eq!(result["catalog_only_tools"], json!([]));
+    assert_eq!(result["advertised_only_tools"], json!([]));
+    assert!(!result["duplicate_group_memberships"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        result["invariants"]["multi_group_membership_is_allowed"],
+        json!(true)
+    );
+    assert_eq!(result["groups"].as_array().unwrap().len(), 28);
+
+    let compact = call(
+        &mut server,
+        "capability_audit",
+        json!({"include_groups": false}),
+    );
+    assert!(compact.get("groups").is_none());
+    assert_eq!(compact["healthy"], json!(true));
+
+    let refused = call(
+        &mut server,
+        "capability_audit",
+        json!({"include_groups": "yes"}),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert_eq!(refused["ok"], json!(false));
 }
 
 #[test]

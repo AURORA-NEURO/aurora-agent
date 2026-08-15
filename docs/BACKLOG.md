@@ -185,6 +185,9 @@ that distributed scheduling, durable queues, sandboxed arbitrary code, or extern
 The capability-discovery layer now makes that catalogue searchable by explicit intent, domain, group,
 and tool, with digest-bound results and optional authoritative MCP input schemas; its scores are
 routing evidence only and do not grant permission or assert readiness.
+The companion `capability_audit` verifies that every catalogued callable has an authoritative
+transport schema and that every advertised schema is catalogued, while preserving intentional
+multi-group membership and per-domain coverage rows.
 
 
 ## §11 Developer Platform — 6 uncovered

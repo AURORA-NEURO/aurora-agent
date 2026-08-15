@@ -167,6 +167,11 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(result["echo"]["query"], "oncology")
         self.assertEqual(result["echo"]["include_tools"], False)
 
+    def test_sync_workspace_exposes_capability_audit(self) -> None:
+        with Client(command(), timeout=2) as client:
+            result = Workspace(client).capability_audit(include_groups=False)
+        self.assertEqual(result["echo"], {"include_groups": False})
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -197,6 +202,11 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             result = await AsyncWorkspace(client).capability_discover(domain="release", max_items=2)
         self.assertEqual(result["echo"]["domain"], "release")
         self.assertEqual(result["echo"]["max_items"], 2)
+
+    async def test_async_workspace_exposes_capability_audit(self) -> None:
+        async with AsyncClient(command(), timeout=2) as client:
+            result = await AsyncWorkspace(client).capability_audit()
+        self.assertEqual(result["echo"], {"include_groups": True})
 
 
 if __name__ == "__main__":

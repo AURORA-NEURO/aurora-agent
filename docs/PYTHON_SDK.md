@@ -72,6 +72,8 @@ invent defaults:
   successful direct prerequisite into an existing argument slot.
 - `capability_discover(...)` searches the complete domain catalogue by intent, domain, group, or
   tool and can attach authoritative MCP schemas for the returned routing matches.
+- `capability_audit(include_groups=...)` verifies catalogue/schema parity and reports coverage
+  gaps and intentional multi-group membership.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP

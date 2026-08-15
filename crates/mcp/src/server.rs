@@ -631,6 +631,7 @@ impl Server {
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
+            "capability_audit" => self.capability_audit(&arguments),
             "capability_discover" => self.capability_discover(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
@@ -11385,6 +11386,120 @@ impl Server {
         Ok(output)
     }
 
+    /// Verify that the explicit cross-domain catalogue and authoritative MCP tool definitions
+    /// describe the same callable surface.
+    ///
+    /// A catalogue can be useful for routing while still drifting from the transport. This audit
+    /// makes that failure visible without treating intentional multi-group membership as a
+    /// defect. `healthy` is therefore about schema/name coverage and duplicate definitions; the
+    /// returned membership report remains useful even when the invariant is broken.
+    fn capability_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let include_groups = arguments
+            .get("include_groups")
+            .map(|value| value.as_bool().ok_or("include_groups must be a boolean"))
+            .transpose()?
+            .unwrap_or(true);
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("capability catalogue refused: {error}"))?;
+        let definitions = tool_definitions();
+        let mut definition_names = BTreeMap::new();
+        let mut duplicate_schema_names = BTreeSet::new();
+        for definition in definitions {
+            let name = definition
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("tool definition has no string name")?
+                .to_string();
+            if definition_names.insert(name.clone(), definition).is_some() {
+                duplicate_schema_names.insert(name);
+            }
+        }
+
+        let mut memberships: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut group_reports = Vec::new();
+        for group in catalogue.groups() {
+            let mut unique_tools = BTreeSet::new();
+            for tool in &group.mcp_tools {
+                unique_tools.insert(tool.clone());
+                memberships
+                    .entry(tool.clone())
+                    .or_default()
+                    .push(group.id.clone());
+            }
+            let missing_tools = unique_tools
+                .iter()
+                .filter(|tool| !definition_names.contains_key(*tool))
+                .cloned()
+                .collect::<Vec<_>>();
+            group_reports.push(json!({
+                "id": group.id,
+                "domains": group.domains,
+                "status": group.status,
+                "declared_tool_memberships": group.mcp_tools.len(),
+                "unique_tools": unique_tools.len(),
+                "schemas_found": unique_tools.len() - missing_tools.len(),
+                "missing_schemas": missing_tools,
+            }));
+        }
+
+        let catalog_tools = memberships.keys().cloned().collect::<BTreeSet<_>>();
+        let advertised_tools = definition_names.keys().cloned().collect::<BTreeSet<_>>();
+        let catalog_only_tools = catalog_tools
+            .difference(&advertised_tools)
+            .cloned()
+            .collect::<Vec<_>>();
+        let advertised_only_tools = advertised_tools
+            .difference(&catalog_tools)
+            .cloned()
+            .collect::<Vec<_>>();
+        let every_catalog_tool_has_schema = catalog_only_tools.is_empty();
+        let every_advertised_tool_is_catalogued = advertised_only_tools.is_empty();
+        let duplicate_memberships = memberships
+            .into_iter()
+            .filter_map(|(tool, groups)| {
+                (groups.len() > 1).then_some(json!({
+                    "tool": tool,
+                    "group_count": groups.len(),
+                    "groups": groups,
+                }))
+            })
+            .collect::<Vec<_>>();
+        let healthy = every_catalog_tool_has_schema
+            && every_advertised_tool_is_catalogued
+            && duplicate_schema_names.is_empty();
+        let schema_names_are_unique = duplicate_schema_names.is_empty();
+        let mut output = json!({
+            "ok": true,
+            "workflow": "capability_audit",
+            "capability_schema_version": CAPABILITY_SCHEMA_VERSION,
+            "catalog_digest": catalogue.digest().to_string(),
+            "healthy": healthy,
+            "total_groups": catalogue.groups().len(),
+            "catalog_tool_memberships": catalogue.groups().iter().map(|group| group.mcp_tools.len()).sum::<usize>(),
+            "unique_catalog_tools": catalog_tools.len(),
+            "advertised_tool_count": advertised_tools.len(),
+            "catalog_only_tools": catalog_only_tools,
+            "advertised_only_tools": advertised_only_tools,
+            "duplicate_schema_names": duplicate_schema_names.into_iter().collect::<Vec<_>>(),
+            "duplicate_group_memberships": duplicate_memberships,
+            "invariants": {
+                "every_catalog_tool_has_authoritative_schema": every_catalog_tool_has_schema,
+                "every_advertised_tool_is_catalogued": every_advertised_tool_is_catalogued,
+                "schema_names_are_unique": schema_names_are_unique,
+                "multi_group_membership_is_allowed": true,
+            },
+        });
+        if include_groups {
+            output["groups"] = Value::Array(group_reports);
+        }
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure capability audit result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err("capability audit result exceeds the 20000000-byte safety bound".into());
+        }
+        Ok(output)
+    }
+
     /// Plan or execute an explicit, bounded DAG of existing domain tools.
     ///
     /// Planning is the default. Execution invokes the same internal tool dispatcher used by the
@@ -13971,7 +14086,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_discover", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_discover", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -15499,6 +15614,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "governance": { "type": "object", "description": "Optional exact arguments for governance_schema_check. A document-mode conforming result is required for governance_schema readiness; a catalog result is not enough." },
                     "release": { "type": "object", "description": "Optional exact arguments for release_audit. Required for release readiness." },
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release. Omit it to receive no readiness claim." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "capability_audit",
+            "description": "Audit the complete cross-domain capability catalogue against the authoritative tools/list schema set. Returns the catalogue digest, group coverage, catalog-only and uncatalogued tools, duplicate schema names, intentional multi-group memberships, and a healthy invariant. This is a deterministic local contract audit, not a permission grant, readiness claim, or scientific validation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include_groups": { "type": "boolean", "default": true, "description": "Include per-domain group coverage rows; set false for a compact invariant report." }
                 },
                 "required": []
             }

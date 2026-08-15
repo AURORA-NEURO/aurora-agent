@@ -314,6 +314,10 @@ export interface CapabilityDiscoverArgs extends JsonObject {
   include_tools?: boolean;
 }
 
+export interface CapabilityAuditArgs extends JsonObject {
+  include_groups?: boolean;
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;

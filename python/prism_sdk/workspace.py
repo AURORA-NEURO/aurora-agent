@@ -159,6 +159,13 @@ class Workspace:
             request = CapabilityQuery(text, group_id, domain, tool, max_items, include_tools)
         return self.tool("capability_discover", request.to_mcp_arguments())
 
+    def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
+        """Verify catalogue membership against the authoritative MCP schema set."""
+
+        if not isinstance(include_groups, bool):
+            raise ArgumentError("include_groups must be a boolean")
+        return self.tool("capability_audit", {"include_groups": include_groups})
+
     def oracle_combine(
         self,
         subject: str,
@@ -448,6 +455,13 @@ class AsyncWorkspace:
         else:
             request = CapabilityQuery(text, group_id, domain, tool, max_items, include_tools)
         return await self.tool("capability_discover", request.to_mcp_arguments())
+
+    async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.capability_audit`."""
+
+        if not isinstance(include_groups, bool):
+            raise ArgumentError("include_groups must be a boolean")
+        return await self.tool("capability_audit", {"include_groups": include_groups})
 
     async def oracle_combine(
         self,
