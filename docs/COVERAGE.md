@@ -153,6 +153,10 @@ selected descriptor, candidate statuses and refusal reasons, accepted formats, s
 conformance level, dependency posture, scope dimensions, semantic-loss vocabulary, and nested
 non-executing limitations across MCP and HTTP. This makes biological and clinical route selection
 auditable even when no adapter is executable.
+The transport SDKs also expose `tabular_ingest` as a typed execution boundary. Its report retains
+source/profile digests, conformance check statuses, loss variants (`lossless`, `lossy`, and
+`unaudited`), bounded facts, and explicit omitted-fact counts; a successful transport call never
+silently upgrades a mapping-accounting result into scientific validity.
 The Python adapter layer now also contains a bounded text VCF reader: it validates the complete
 record stream, preserves raw INFO/FORMAT spellings beside typed projections, retains source and
 line hashes, and reports reference-build, provenance, type, and precision limitations without

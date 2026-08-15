@@ -784,6 +784,70 @@ export interface AdapterPlanResult extends JsonObject {
   limitations: string[];
 }
 
+export interface TabularIngestArgs extends JsonObject {
+  source_id: string;
+  profile: JsonObject;
+  csv?: string;
+  document?: string;
+  format?: string;
+  provenance?: JsonObject;
+  include_facts?: boolean;
+  max_items?: number;
+  max_bytes?: number;
+}
+
+export interface TabularCheckResult extends JsonObject {
+  check: string;
+  status: "pass" | "fail" | "not_applicable";
+  detail: string;
+}
+
+export interface TabularConformanceDetails extends JsonObject {
+  adapter: string;
+  adapter_version: string;
+  source_id: string;
+  checks: TabularCheckResult[];
+}
+
+export interface TabularConformanceResult extends JsonObject {
+  report: TabularConformanceDetails;
+  passed: boolean;
+  verified: boolean;
+  summary: string;
+}
+
+export interface TabularSemanticLossResult extends JsonObject {
+  audit: "unaudited" | "lossless" | "lossy";
+  mapped?: JsonValue[];
+  lost?: JsonObject[];
+  reason?: string;
+}
+
+export interface TabularManifestResult extends JsonObject {
+  source_id: string;
+  declared_format?: string;
+  source_digest: string;
+  byte_length?: number;
+  adapter: string;
+  adapter_version: string;
+  profile_digest?: string;
+  provenance?: JsonObject;
+}
+
+export interface TabularIngestResult extends JsonObject {
+  ok: boolean;
+  source_id: string;
+  fact_count: number;
+  ingestion_sha256: string;
+  manifest: TabularManifestResult;
+  semantic_loss: TabularSemanticLossResult;
+  conformance: TabularConformanceResult;
+  max_items: number;
+  facts?: JsonObject[];
+  omitted_facts?: number;
+  limitations: string[];
+}
+
 export interface AgentMissionBinding extends JsonObject {
   from_step: string;
   source_pointer: string;

@@ -57,7 +57,14 @@ from prism_sdk import (
     Workspace,
     PlanStatus,
     SourceKind,
+    TabularCheckReport,
+    TabularConformanceReport,
+    TabularIngestReport,
+    TabularIngestRequest,
+    TabularManifestReport,
+    TabularSemanticLossReport,
     analytics_request,
+    tabular_ingest_report,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -471,6 +478,56 @@ def adapter_plan_payload() -> dict:
     }
 
 
+def tabular_ingest_payload() -> dict:
+    return {
+        "ok": True,
+        "source_id": "cohort.csv",
+        "fact_count": 2,
+        "ingestion_sha256": "sha256:ingestion",
+        "manifest": {
+            "source_id": "cohort.csv",
+            "declared_format": "text/csv",
+            "source_digest": "sha256:source",
+            "byte_length": 42,
+            "adapter": "bioprism.tabular",
+            "adapter_version": "0.1.0",
+            "profile_digest": "sha256:profile",
+            "provenance": {"accession": "RG-DEMO-001", "version": "v1"},
+        },
+        "semantic_loss": {
+            "audit": "lossy",
+            "mapped": [{"source_id": "cohort.csv", "column": "subject"}],
+            "lost": [
+                {
+                    "kind": "unmapped_column",
+                    "severity": "degrading",
+                    "location": {"source_id": "cohort.csv", "column": "comment"},
+                    "detail": "comment was not mapped",
+                }
+            ],
+        },
+        "conformance": {
+            "report": {
+                "adapter": "bioprism.tabular",
+                "adapter_version": "0.1.0",
+                "source_id": "cohort.csv",
+                "checks": [
+                    {"check": "determinism", "status": "pass", "detail": "three trials matched"},
+                    {"check": "loss_completeness", "status": "pass", "detail": "all fields accounted for"},
+                    {"check": "fact_integrity", "status": "not_applicable", "detail": "no independent fact verifier"},
+                ],
+            },
+            "passed": True,
+            "verified": True,
+            "summary": "bioprism.tabular 0.1.0 on cohort.csv: 3 checks, 0 failed",
+        },
+        "max_items": 1,
+        "facts": [{"id": "fact-1", "provides": "age", "value": 41}],
+        "omitted_facts": 1,
+        "limitations": ["conformance verifies mapping accounting, not source truth"],
+    }
+
+
 class AnalyticsModelTests(unittest.TestCase):
     def test_biological_adapter_registry_distinguishes_dependency_states(self) -> None:
         request = AdapterPlanRequest(
@@ -639,6 +696,40 @@ class AnalyticsModelTests(unittest.TestCase):
         payload["selected_adapter"]["id"] = "bioprism.other"
         with self.assertRaises(ArgumentError):
             AdapterPlanReport.from_wire(payload)
+
+    def test_tabular_request_and_report_preserve_conformance_loss_and_omissions(self) -> None:
+        request = TabularIngestRequest(
+            "cohort.csv",
+            {"profile_id": "RG-DEMO-001", "columns": {"age": {"type": "integer"}}},
+            csv="subject,age,comment\nS1,41,ok\n",
+            format="text/csv",
+            provenance={"accession": "RG-DEMO-001"},
+            include_facts=True,
+            max_items=1,
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["source_id"], "cohort.csv")
+        self.assertNotIn("document", arguments)
+        self.assertEqual(arguments["profile"]["profile_id"], "RG-DEMO-001")
+
+        report = TabularIngestReport.from_wire(tabular_ingest_payload())
+        self.assertIsInstance(report.manifest, TabularManifestReport)
+        self.assertIsInstance(report.semantic_loss, TabularSemanticLossReport)
+        self.assertIsInstance(report.conformance, TabularConformanceReport)
+        self.assertIsInstance(report.conformance.checks[0], TabularCheckReport)
+        self.assertTrue(report.conformance_verified)
+        self.assertFalse(report.publishable_candidate)
+        self.assertEqual(report.fact_count, len(report.facts) + report.omitted_facts)
+        self.assertEqual(report.conformance.failed_checks, ())
+
+    def test_tabular_report_extracts_http_projection_and_preserves_unverified_conformance(self) -> None:
+        report = tabular_ingest_report({"ok": True, "mcp": {"result": {"structuredContent": tabular_ingest_payload()}}})
+        self.assertEqual(report.manifest.provenance["accession"], "RG-DEMO-001")
+        self.assertEqual(report.semantic_loss.lost[0]["kind"], "unmapped_column")
+        payload = tabular_ingest_payload()
+        payload["conformance"] = dict(payload["conformance"])
+        payload["conformance"]["verified"] = False
+        self.assertFalse(TabularIngestReport.from_wire(payload).conformance_verified)
 
     def test_models_emit_the_exact_rust_wire_shape(self) -> None:
         request = analytics_request(
@@ -1046,6 +1137,13 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             available_dependencies=["pandas"],
         )
 
+    def test_sync_workspace_typed_tabular_ingest_report_delegates_to_raw_ingest(self) -> None:
+        request = TabularIngestRequest("cohort.csv", {"profile_id": "RG-DEMO-001"}, csv="subject\nS1\n")
+        with patch.object(Workspace, "tabular_ingest", return_value=tabular_ingest_payload()) as ingest:
+            report = Workspace(None).tabular_ingest_report(request)  # type: ignore[arg-type]
+        self.assertEqual(report.source_id, "cohort.csv")
+        ingest.assert_called_once_with(request)
+
 
 class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_workspace_matches_sync_surface(self) -> None:
@@ -1228,6 +1326,18 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             required_conformance=None,
             available_dependencies=["pandas"],
         )
+
+    async def test_async_workspace_typed_tabular_ingest_report_delegates_to_raw_ingest(self) -> None:
+        request = TabularIngestRequest("cohort.csv", {"profile_id": "RG-DEMO-001"}, csv="subject\nS1\n")
+        with patch.object(
+            AsyncWorkspace,
+            "tabular_ingest",
+            new_callable=AsyncMock,
+            return_value=tabular_ingest_payload(),
+        ) as ingest:
+            report = await AsyncWorkspace(None).tabular_ingest_report(request)  # type: ignore[arg-type]
+        self.assertEqual(report.omitted_facts, 1)
+        ingest.assert_awaited_once_with(request)
 
 
 if __name__ == "__main__":

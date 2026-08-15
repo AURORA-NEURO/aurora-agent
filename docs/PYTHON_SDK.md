@@ -215,6 +215,13 @@ invent defaults:
   scope dimensions, declared semantic-loss kinds, and non-executing limitations. The projection
   reconciles top-level and nested `executable` state and keeps a dependency-blocked candidate
   distinguishable from an unsupported format or source shape.
+- `TabularIngestRequest` and `tabular_ingest(...)` execute the Rust CSV/TSV adapter only after an
+  explicit profile and exactly one inline string or root-confined document are supplied. The
+  typed `TabularIngestReport` returned by `tabular_ingest_report(...)` preserves the source and
+  profile manifest digests, bounded facts and omissions, semantic-loss variant, and every
+  independent conformance check. `Workspace`, `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`
+  expose the same request/result boundary; a passed report is still mapping/accounting evidence,
+  not proof that the source declarations are scientifically true.
 - `BidsAdapter` and `audit_bids(...)` provide a bounded, dependency-free audit of a caller-supplied
   BIDS manifest: relative paths, entity syntax, directory/entity agreement, JSON sidecar
   inheritance, equal-specificity metadata conflicts, task metadata, participant coverage, and

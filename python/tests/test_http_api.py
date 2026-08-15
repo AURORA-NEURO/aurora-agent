@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, LabPlanRequest, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, RouteReviewEvidence, RoutingDecisionRequest, SseSnapshot, TabularIngestReport, TabularIngestRequest, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -42,6 +42,22 @@ def adapter_plan_payload() -> dict:
         "execution": "not_started",
         "guarantees": ["format matching is explicit"],
         "limitations": ["does not execute adapters"],
+    }
+
+
+def tabular_ingest_payload() -> dict:
+    return {
+        "ok": True,
+        "source_id": "cohort.csv",
+        "fact_count": 1,
+        "ingestion_sha256": "sha256:ingestion",
+        "manifest": {"source_id": "cohort.csv", "declared_format": "text/csv", "source_digest": "sha256:source", "byte_length": 20, "adapter": "bioprism.tabular", "adapter_version": "0.1.0", "profile_digest": "sha256:profile", "provenance": {"accession": "RG-DEMO-001"}},
+        "semantic_loss": {"audit": "lossless", "mapped": [{"source_id": "cohort.csv", "column": "subject"}]},
+        "conformance": {"report": {"adapter": "bioprism.tabular", "adapter_version": "0.1.0", "source_id": "cohort.csv", "checks": [{"check": "determinism", "status": "pass", "detail": "stable"}]}, "passed": True, "verified": True, "summary": "verified"},
+        "max_items": 100,
+        "facts": [{"id": "fact-1", "provides": "subject", "value": "S1"}],
+        "omitted_facts": 0,
+        "limitations": ["source truth remains caller-owned"],
     }
 
 
@@ -265,7 +281,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -397,6 +413,11 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(
             client.adapter_plan("scan-1", "bytes", declared_format="application/dicom")["mcp"]["result"]["source_id"],
             "scan-1",
+        )
+        tabular_request = TabularIngestRequest("cohort.csv", {"profile_id": "RG-DEMO-001"}, csv="subject\nS1\n")
+        self.assertEqual(
+            client.tabular_ingest(tabular_request)["mcp"]["result"]["source_id"],
+            "cohort.csv",
         )
         evidence_request = BioCapabilityEvidenceAuditRequest(
             [EvidenceItem("grounding", "evidence_grounding", "observed", support={"source": "ledger", "scope": "pack/1"})],
@@ -559,6 +580,14 @@ class HttpApiClientTests(unittest.TestCase):
             available_dependencies=None,
         )
 
+    def test_http_typed_tabular_ingest_report_delegates_to_raw_helper(self) -> None:
+        request = TabularIngestRequest("cohort.csv", {"profile_id": "RG-DEMO-001"}, csv="subject\nS1\n")
+        with patch.object(ApiClient, "tabular_ingest", return_value=tabular_ingest_payload()) as ingest:
+            report = ApiClient(self.base_url).tabular_ingest_report(request)
+        self.assertIsInstance(report, TabularIngestReport)
+        self.assertTrue(report.conformance_verified)
+        ingest.assert_called_once_with(request)
+
     def test_http_arguments_and_async_facade(self) -> None:
         with self.assertRaises(ArgumentError):
             ApiClient(self.base_url, bearer_token="short")
@@ -628,6 +657,17 @@ class HttpApiClientTests(unittest.TestCase):
                 required_conformance=None,
                 available_dependencies=None,
             )
+            request = TabularIngestRequest("cohort.csv", {"profile_id": "RG-DEMO-001"}, csv="subject\nS1\n")
+            with patch.object(
+                AsyncApiClient,
+                "tabular_ingest",
+                new_callable=AsyncMock,
+                return_value=tabular_ingest_payload(),
+            ) as ingest:
+                report = await client.tabular_ingest_report(request)
+            self.assertIsInstance(report, TabularIngestReport)
+            self.assertEqual(report.facts[0]["value"], "S1")
+            ingest.assert_awaited_once_with(request)
             evidence_request = BioCapabilityEvidenceAuditRequest(
                 [EvidenceItem("grounding", "evidence_grounding", "observed", support={"source": "ledger", "scope": "pack/1"})],
                 [ClaimRequest("claim", "grounded profile", ("evidence_grounding",))],

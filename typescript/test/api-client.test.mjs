@@ -178,6 +178,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["format matching is explicit"],
         limitations: ["does not execute adapters"],
       } } } });
+      if (path === "/v1/tools/tabular_ingest") return jsonResponse({ ok: true, tool: "tabular_ingest", request_id: "r11", mcp: { result: { structuredContent: {
+        ok: true,
+        source_id: "cohort.csv",
+        fact_count: 1,
+        ingestion_sha256: "sha256:ingestion",
+        manifest: { source_id: "cohort.csv", declared_format: "text/csv", source_digest: "sha256:source", byte_length: 20, adapter: "bioprism.tabular", adapter_version: "0.1.0", profile_digest: "sha256:profile", provenance: { accession: "RG-DEMO-001" } },
+        semantic_loss: { audit: "lossless", mapped: [{ source_id: "cohort.csv", column: "subject" }] },
+        conformance: { report: { adapter: "bioprism.tabular", adapter_version: "0.1.0", source_id: "cohort.csv", checks: [{ check: "determinism", status: "pass", detail: "stable" }] }, passed: true, verified: true, summary: "verified" },
+        max_items: 100,
+        facts: [{ id: "fact-1", provides: "subject", value: "S1" }],
+        omitted_facts: 0,
+        limitations: ["source truth remains caller-owned"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -352,6 +365,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     validate_schemas: true,
   });
   const adapter = await client.adapterPlan({ source_id: "scan-1", source_kind: "bytes", declared_format: "application/dicom", available_dependencies: ["pydicom"] });
+  const tabular = await client.tabularIngest({ source_id: "cohort.csv", profile: { profile_id: "RG-DEMO-001" }, csv: "subject\nS1\n", format: "text/csv", include_facts: true });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -375,6 +389,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(adapter.mcp.result.structuredContent.workflow, "adapter_plan");
   assert.equal(adapter.mcp.result.structuredContent.plan.candidates[0].status, "ready");
   assert.equal(adapter.mcp.result.structuredContent.selected_adapter.id, "bioprism.tabular");
+  assert.equal(tabular.mcp.result.structuredContent.conformance.verified, true);
+  assert.equal(tabular.mcp.result.structuredContent.facts[0].value, "S1");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

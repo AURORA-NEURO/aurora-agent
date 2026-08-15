@@ -170,6 +170,15 @@ from .mzml import MzmlAdapter, MzmlFinding, MzmlParseError, MzmlParseResult, par
 from .pdb import PdbAdapter, PdbFinding, PdbParseError, PdbParseResult, parse_pdb
 from .sam import SamAdapter, SamFinding, SamParseError, SamParseResult, parse_sam
 from .sdf import SdfAdapter, SdfFinding, SdfParseError, SdfParseResult, parse_sdf
+from .tabular import (
+    TabularCheckReport,
+    TabularConformanceReport,
+    TabularIngestReport,
+    TabularIngestRequest,
+    TabularManifestReport,
+    TabularSemanticLossReport,
+    tabular_ingest_report,
+)
 from .mission import (
     MAX_ALLOWED_TOOLS,
     MAX_MISSION_STEPS,
@@ -384,6 +393,12 @@ __all__ = [
     "SdfFinding",
     "SdfParseError",
     "SdfParseResult",
+    "TabularCheckReport",
+    "TabularConformanceReport",
+    "TabularIngestReport",
+    "TabularIngestRequest",
+    "TabularManifestReport",
+    "TabularSemanticLossReport",
     "Independence",
     "Judgement",
     "JudgementBuilder",
@@ -564,6 +579,7 @@ __all__ = [
     "analytics_request",
     "adapter_plan",
     "adapter_plan_report",
+    "tabular_ingest_report",
     "audit_bids",
     "audit_dicom",
     "audit_nifti",

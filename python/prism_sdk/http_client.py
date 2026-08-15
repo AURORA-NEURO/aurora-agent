@@ -77,6 +77,7 @@ from .mission import (
     preflight_mission,
 )
 from .publication import BioAtlasPublicationAuditReport, bioatlas_publication_audit_report
+from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
     RepositoryBundleRequest,
     RepositoryCatalogRequest,
@@ -688,6 +689,18 @@ class ApiClient:
                 available_dependencies=available_dependencies,
             )
         )
+
+    def tabular_ingest(self, request: TabularIngestRequest) -> dict[str, Any]:
+        """Execute the Rust CSV/TSV adapter through the HTTP gateway."""
+
+        if not isinstance(request, TabularIngestRequest):
+            raise ArgumentError("request must be a TabularIngestRequest")
+        return self.call_tool("tabular_ingest", request.to_mcp_arguments())
+
+    def tabular_ingest_report(self, request: TabularIngestRequest) -> TabularIngestReport:
+        """Return typed HTTP manifest, conformance, loss, and fact evidence."""
+
+        return tabular_ingest_report(self.tabular_ingest(request))
 
     def biocapability_evidence_audit(
         self,
@@ -1530,6 +1543,18 @@ class AsyncApiClient:
                 available_dependencies=available_dependencies,
             )
         )
+
+    async def tabular_ingest(self, request: TabularIngestRequest) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.tabular_ingest`."""
+
+        if not isinstance(request, TabularIngestRequest):
+            raise ArgumentError("request must be a TabularIngestRequest")
+        return await self.call_tool("tabular_ingest", request.to_mcp_arguments())
+
+    async def tabular_ingest_report(self, request: TabularIngestRequest) -> TabularIngestReport:
+        """Return typed async HTTP tabular conformance and loss evidence."""
+
+        return tabular_ingest_report(await self.tabular_ingest(request))
 
     async def biocapability_evidence_audit(
         self,

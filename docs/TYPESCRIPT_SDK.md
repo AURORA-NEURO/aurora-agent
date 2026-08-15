@@ -153,6 +153,9 @@ preserving the complete candidate list, refusal reasons, dependency posture, con
 accepted formats, scope dimensions, and semantic-loss boundaries. Its nested `plan` remains
 planning evidence with `execution: "not_started"`; a selected route is not authorization or
 source-specific conformance.
+`tabularIngest` returns typed `TabularIngestResult` evidence for the real CSV/TSV adapter: explicit
+manifest identity, conformance check outcomes, semantic-loss variant, bounded facts, and omitted
+fact counts. It does not infer a format or turn adapter conformance into source truth.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;
