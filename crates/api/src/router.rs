@@ -21,6 +21,7 @@ pub const DEFAULT_MAX_HEADER_BYTES: usize = 32 * 1024;
 pub const DEFAULT_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const DEFAULT_EVENT_CAPACITY: usize = 4096;
 pub const MAX_MISSION_JOBS: usize = 4096;
+pub const MAX_MISSION_LIST_LIMIT: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -77,6 +78,7 @@ struct MissionJob {
 
 #[derive(Clone)]
 struct MissionJobState {
+    total_steps: usize,
     status: String,
     cancel_requested: bool,
     cancel_reason: Option<String>,
@@ -169,6 +171,7 @@ impl ApiRouter {
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
+            ("GET", "/v1/missions") => self.mission_inventory(&request, &request_id),
             ("POST", "/v1/missions/preflight") => self.preflight_mission(&request, &request_id),
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
             ("GET", path) if path.starts_with("/v1/missions/") => {
@@ -296,6 +299,7 @@ impl ApiRouter {
                     "server_sent_events_snapshot": true,
                     "async_missions": true,
                     "mission_preflight": true,
+                    "mission_inventory": true,
                     "cooperative_mission_cancellation": true,
                     "signed_webhook_outbox": true,
                     "grpc": false,
@@ -502,9 +506,14 @@ impl ApiRouter {
         if let Err(error) = self.mission_executor.validate_agent_mission(&arguments) {
             return self.error(422, "invalid_mission", &error, request_id);
         }
+        let total_steps = arguments
+            .get("steps")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
 
         let cancellation = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(MissionJobState {
+            total_steps,
             status: "queued".into(),
             cancel_requested: false,
             cancel_reason: None,
@@ -600,6 +609,105 @@ impl ApiRouter {
                     "execution is cooperative and preserves the authoritative mission report",
                     "in-flight nested tool calls are allowed to return before future dispatch stops",
                 ],
+            }),
+        )
+    }
+
+    fn mission_inventory(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if key != "limit" && key != "status" {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "mission inventory accepts only limit and status",
+                    request_id,
+                );
+            }
+        }
+        let limit = match query.get("limit") {
+            None => 100,
+            Some(value) => match value.parse::<usize>() {
+                Ok(value) if (1..=MAX_MISSION_LIST_LIMIT).contains(&value) => value,
+                _ => {
+                    return self.error(
+                        422,
+                        "invalid_query",
+                        &format!("limit must be between 1 and {MAX_MISSION_LIST_LIMIT}"),
+                        request_id,
+                    )
+                }
+            },
+        };
+        let status_filter = match query.get("status") {
+            None => None,
+            Some(status) if is_known_mission_status(status) => Some(status.as_str()),
+            Some(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "status is not a recognized mission status",
+                    request_id,
+                )
+            }
+        };
+        let jobs = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let mut entries = Vec::new();
+        for (mission_id, job) in jobs.iter() {
+            let state = match job_state(job) {
+                Ok(state) => state,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "mission_state_unavailable",
+                        "mission state is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            if status_filter.is_some_and(|status| status != state.status) {
+                continue;
+            }
+            entries.push(json!({
+                "mission_id": mission_id,
+                "status": state.status,
+                "cancel_requested": state.cancel_requested,
+                "cancel_reason": state.cancel_reason,
+                "summary": mission_summary(&state),
+                "poll": format!("/v1/missions/{mission_id}"),
+                "cancel": format!("/v1/missions/{mission_id}/cancel"),
+            }));
+        }
+        let total = entries.len();
+        let missions = entries.into_iter().take(limit).collect::<Vec<_>>();
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "missions": missions,
+                "returned": total.min(limit),
+                "total_matching": total,
+                "limit": limit,
+                "truncated": total > limit,
+                "status_filter": status_filter,
+                "guarantees": [
+                    "inventory order is deterministic by mission_id",
+                    "inventory entries expose summaries and links, not unbounded terminal reports",
+                    "status filters are evaluated against the process-local authoritative registry"
+                ]
             }),
         )
     }
@@ -1078,7 +1186,7 @@ impl ApiRouter {
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
-                    "/v1/missions": { "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
+                    "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
@@ -1098,6 +1206,42 @@ impl ApiRouter {
 
 fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
     job.state.lock().map(|state| state.clone()).map_err(|_| ())
+}
+
+fn mission_summary(state: &MissionJobState) -> Value {
+    let report = state.result.as_ref();
+    let completed_steps = report
+        .and_then(|report| report.get("results"))
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let total_steps = report
+        .and_then(|report| report.pointer("/plan/ordered_steps"))
+        .and_then(Value::as_array)
+        .map_or(state.total_steps, Vec::len);
+    let count = |key: &str| {
+        report
+            .and_then(|report| report.get(key))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
+    json!({
+        "total_steps": total_steps,
+        "completed_steps": completed_steps,
+        "succeeded": count("succeeded"),
+        "refused": count("refused"),
+        "blocked": count("blocked"),
+        "cancelled": count("cancelled"),
+        "required_failures": count("required_failures"),
+        "returned_bytes": count("returned_bytes"),
+        "result_available": report.is_some(),
+    })
+}
+
+fn is_known_mission_status(status: &str) -> bool {
+    matches!(
+        status,
+        "queued" | "running" | "planned" | "succeeded" | "partial" | "failed" | "cancelled"
+    )
 }
 
 fn is_terminal_mission_status(status: &str) -> bool {
@@ -1346,6 +1490,24 @@ mod tests {
         }
         assert_eq!(status["status"], "planned");
         assert_eq!(status["result"]["mission_status"], "planned");
+        let inventory = router.handle(request(
+            "GET",
+            "/v1/missions?status=planned&limit=1",
+            json!({}),
+        ));
+        assert_eq!(inventory.status, 200);
+        let inventory: Value = serde_json::from_slice(&inventory.body).unwrap();
+        assert_eq!(inventory["returned"], 1);
+        assert_eq!(inventory["total_matching"], 1);
+        assert_eq!(inventory["missions"][0]["mission_id"], "api-async-1");
+        assert_eq!(inventory["missions"][0]["summary"]["total_steps"], 1);
+        assert_eq!(
+            inventory["missions"][0]["summary"]["result_available"],
+            true
+        );
+        let invalid_query =
+            router.handle(request("GET", "/v1/missions?unexpected=value", json!({})));
+        assert_eq!(invalid_query.status, 400);
         let cancel = router.handle(request(
             "POST",
             "/v1/missions/api-async-1/cancel",

@@ -13,7 +13,7 @@ import http.client
 import json
 import ssl
 from typing import Any, Mapping, Sequence
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from .biological import AdapterPlanRequest
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
@@ -31,6 +31,7 @@ from .evidence import BioCapabilityEvidenceAuditRequest
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
 from .mission import (
     MissionAssembly,
+    MAX_MISSION_LIST_LIMIT,
     MissionJob,
     MissionPolicy,
     MissionPreflight,
@@ -265,6 +266,18 @@ class ApiClient:
             raise ArgumentError("mission request must be a MissionRequest or mapping")
         arguments = request.to_mcp_arguments() if isinstance(request, MissionRequest) else dict(request)
         return self.request("POST", "/v1/missions/preflight", arguments)
+
+    def missions(self, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
+        """List bounded mission summaries from the authoritative process-local registry."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_MISSION_LIST_LIMIT:
+            raise ArgumentError(f"limit must be between 1 and {MAX_MISSION_LIST_LIMIT}")
+        if status is not None and (not isinstance(status, str) or not status.strip()):
+            raise ArgumentError("status must be a non-empty string when supplied")
+        query: dict[str, str] = {"limit": str(limit)}
+        if status is not None:
+            query["status"] = status
+        return self.request("GET", f"/v1/missions?{urlencode(query)}")
 
     def mission_from_route(
         self,
@@ -730,6 +743,11 @@ class AsyncApiClient:
         """Async request for the Rust-owned no-dispatch mission plan."""
 
         return await asyncio.to_thread(self.client.preflight_mission, request)
+
+    async def missions(self, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
+        """Async bounded mission inventory."""
+
+        return await asyncio.to_thread(self.client.missions, status=status, limit=limit)
 
     async def mission_from_route(
         self,

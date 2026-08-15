@@ -249,6 +249,9 @@ test("client exposes asynchronous mission submission, status, and cancellation",
       if (path === "/v1/missions/async-1/cancel" && init.method === "POST") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "running", cancel_requested: true, cancel_reason: "operator stop" }, 202);
       }
+      if (path === "/v1/missions" && init.method === "GET") {
+        return jsonResponse({ ok: true, missions: [{ mission_id: "async-1", status: "succeeded", cancel_requested: false, summary: { total_steps: 0, completed_steps: 0, succeeded: 0, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 0, result_available: true }, poll: "/v1/missions/async-1", cancel: "/v1/missions/async-1/cancel" }], returned: 1, total_matching: 1, limit: 5, truncated: false, status_filter: "succeeded" });
+      }
       return jsonResponse({ ok: false, error: { code: "not_found", message: path } }, 404);
     },
   });
@@ -260,6 +263,8 @@ test("client exposes asynchronous mission submission, status, and cancellation",
   const status = await client.missionStatus("async-1");
   assert.equal(status.status, "succeeded");
   assert.equal(status.result.mission_status, "succeeded");
+  const inventory = await client.missions("succeeded", 5);
+  assert.equal(inventory.missions[0].mission_id, "async-1");
   const cancelled = await client.cancelMission("async-1", "operator stop");
   assert.equal(cancelled.cancel_requested, true);
   assert.equal(cancelled.cancel_reason, "operator stop");

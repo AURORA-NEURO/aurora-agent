@@ -90,6 +90,8 @@ from the bounded process-local registry.
 `preflight_mission()` calls the synchronous Rust-owned `/v1/missions/preflight` route; it validates
 the original execution policy and returns a planned report without creating a job or dispatching
 any domain tool. The existing `mission_preflight()` method remains the local catalogue review.
+`missions(status=..., limit=...)` lists bounded lifecycle summaries for operator dashboards without
+materializing unbounded terminal reports.
 For any current or future domain without a handwritten wrapper, `tool_catalogue()` snapshots the
 live `tools/list` or `/v1/tools` definitions, `plan_tool()` performs conservative shape-only
 preflight, and `tool_checked()` executes the reviewed call. Plans are digest-bound and carry no

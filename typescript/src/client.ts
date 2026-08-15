@@ -31,6 +31,8 @@ import type {
   MetricsProfileAuditArgs,
   MissionAssembly,
   MissionJob,
+  MissionJobStatus,
+  MissionInventoryResponse,
   MissionPreflightResult,
   MissionRouteSelection,
   RepositoryBundleArgs,
@@ -263,6 +265,19 @@ export class ApiClient {
   async preflightMission(args: AgentMissionArgs, options?: ClientRequestOptions): Promise<AgentMissionReport> {
     if (!isObject(args)) throw new ArgumentError("mission arguments must be a JSON object");
     return this.request<AgentMissionReport>("POST", "/v1/missions/preflight", args, options);
+  }
+
+  /** List bounded mission summaries without returning unbounded terminal reports. */
+  async missions(
+    status?: MissionJobStatus,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<MissionInventoryResponse> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) throw new ArgumentError("limit must be 1..=256");
+    if (status !== undefined) visible(status, "status", 32);
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (status !== undefined) query.set("status", status);
+    return this.request<MissionInventoryResponse>("GET", `/v1/missions?${query.toString()}`, undefined, options);
   }
 
   /** Read the current asynchronous mission status and, once terminal, its authoritative report. */

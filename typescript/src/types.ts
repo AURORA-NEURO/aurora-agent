@@ -494,6 +494,38 @@ export interface MissionJob extends JsonObject {
   cancel?: string;
 }
 
+export interface MissionInventorySummary extends JsonObject {
+  total_steps: number;
+  completed_steps: number;
+  succeeded: number;
+  refused: number;
+  blocked: number;
+  cancelled: number;
+  required_failures: number;
+  returned_bytes: number;
+  result_available: boolean;
+}
+
+export interface MissionInventoryItem extends JsonObject {
+  mission_id: string;
+  status: MissionJobStatus;
+  cancel_requested: boolean;
+  cancel_reason?: string | null;
+  summary: MissionInventorySummary;
+  poll: string;
+  cancel: string;
+}
+
+export interface MissionInventoryResponse extends JsonObject {
+  ok: boolean;
+  missions: MissionInventoryItem[];
+  returned: number;
+  total_matching: number;
+  limit: number;
+  truncated: boolean;
+  status_filter: MissionJobStatus | null;
+}
+
 export interface MissionStepPreflight extends JsonObject {
   id: string;
   tool: string;

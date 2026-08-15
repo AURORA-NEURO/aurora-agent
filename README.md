@@ -291,6 +291,8 @@ and what was never dispatched rather than implying force-kill or rollback.
 `POST /v1/missions/preflight` provides the matching synchronous handoff: it validates the original
 execution policy and static schemas, returns the authoritative digest-bound plan, and forcibly
 marks dispatch as `not_started`. It never creates a job or invokes a domain tool.
+`GET /v1/missions` provides a bounded deterministic inventory with status filtering, lifecycle
+links, and step/refusal/byte summaries without returning unbounded terminal reports.
 
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,

@@ -51,6 +51,12 @@ job, records an execution event, or invokes a nested domain tool. Binding-depend
 are represented in the plan and are validated again only when an execution request materializes
 them.
 
+`GET /v1/missions?status=<status>&limit=<n>` lists at most 256 process-local jobs in deterministic
+mission-id order. It returns lifecycle links and bounded summaries (`total_steps`, completed and
+refused counts, cancellation counts, required failures, and returned bytes), never the full raw
+terminal report. Unknown query keys and statuses are refused so an operator cannot mistake a
+partial inventory request for a complete one.
+
 `POST /v1/missions` accepts the same JSON object as the `agent_mission` tool and returns `202`
 after the complete mission graph, policy, allow-list, and safety bounds have passed validation.
 Validation includes bounded authoritative JSON Schema preflight against the live `tools/list`

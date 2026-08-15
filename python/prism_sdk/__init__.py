@@ -131,6 +131,7 @@ from .sdf import SdfAdapter, SdfFinding, SdfParseError, SdfParseResult, parse_sd
 from .mission import (
     MAX_ALLOWED_TOOLS,
     MAX_MISSION_STEPS,
+    MAX_MISSION_LIST_LIMIT,
     MAX_STEP_OUTPUT_BYTES,
     MAX_TOTAL_OUTPUT_BYTES,
     MAX_PARALLEL_WAVE_WIDTH,
@@ -355,6 +356,7 @@ __all__ = [
     "MissionBinding",
     "MAX_ALLOWED_TOOLS",
     "MAX_MISSION_STEPS",
+    "MAX_MISSION_LIST_LIMIT",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
     "MISSION_TRACE_SCHEMA_VERSION",

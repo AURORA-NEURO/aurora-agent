@@ -43,6 +43,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             )
         elif self.path.startswith("/v1/events"):
             self._send(200, {"ok": True, "page": {"events": [], "next_after": 0}})
+        elif self.path.startswith("/v1/missions?"):
+            self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
         elif self.path == "/v1/missions/async-1":
             self._send(200, {"ok": True, "mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "result": {"mission_status": "succeeded"}})
         else:
@@ -113,6 +115,8 @@ class HttpApiClientTests(unittest.TestCase):
         submitted = client.submit_mission(MissionRequest("async-1", "run", [MissionStep("one", "data", "read", "run", "echo", {"value": 1})]))
         self.assertEqual(submitted.status, "queued")
         self.assertEqual(client.mission_status("async-1").result["mission_status"], "succeeded")
+        inventory = client.missions(status="succeeded", limit=5)
+        self.assertEqual(inventory["missions"][0]["mission_id"], "async-1")
         self.assertTrue(client.cancel_mission("async-1", "operator stop").cancel_requested)
         self.assertEqual(
             client.capability_discover(query="oncology")["mcp"]["result"]["query"],
@@ -226,6 +230,8 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual((await client.call_tool("echo", {"async": True}))["tool"], "echo")
             self.assertEqual((await client.submit_mission(MissionRequest("async-1", "run", [MissionStep("one", "data", "read", "run", "echo", {"value": 1})]))).status, "queued")
             self.assertEqual((await client.mission_status("async-1")).status, "succeeded")
+            inventory = await client.missions(status="succeeded", limit=5)
+            self.assertEqual(inventory["missions"][0]["mission_id"], "async-1")
             self.assertTrue((await client.cancel_mission("async-1", "operator stop")).cancel_requested)
             self.assertEqual(
                 (await client.capability_route("async route", [{"id": "release", "tool": "bundle_verify"}]))["mcp"]["result"]["goal"],
