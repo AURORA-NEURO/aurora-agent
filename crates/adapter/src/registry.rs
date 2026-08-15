@@ -502,6 +502,24 @@ impl AdapterRegistry {
                 "Dependency-free bounded GFF3/GTF reader validating coordinates, attributes, parent references, and feature hierarchy without disclosing attribute values.",
             ),
             descriptor(
+                "bioprism.python.bed_text",
+                "0.1.0",
+                AdapterExecution::PythonDelegated,
+                &["application/bed", "text/bed", "text/x-bed"],
+                false,
+                &[SourceKind::Bytes],
+                ConformanceLevel::Normalize,
+                &[
+                    LossKind::ContentUninterpreted,
+                    LossKind::CoordinateFrameNotCarried,
+                    LossKind::OntologyTermUnmapped,
+                    LossKind::ProvenanceUnavailable,
+                ],
+                &["subject", "sample", "reference", "feature", "interval", "transcript"],
+                None,
+                "Dependency-free bounded BED3-BED12 reader validating zero-based intervals, thick bounds, RGB fields, block geometry, and ordering without disclosing chromosome or item labels.",
+            ),
+            descriptor(
                 "bioprism.python.pdb_text",
                 "0.1.0",
                 AdapterExecution::PythonDelegated,
@@ -1078,6 +1096,26 @@ mod tests {
                 .as_ref()
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.python.gff3_text")
+        );
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .and_then(|adapter| adapter.optional_dependency.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_bed_selects_the_dependency_free_python_reader() {
+        let plan = AdapterRegistry::default()
+            .plan(request(Some("text/bed"), SourceKind::Bytes))
+            .unwrap();
+        assert!(plan.executable);
+        assert_eq!(
+            plan.selected_adapter
+                .as_ref()
+                .map(|adapter| adapter.id.as_str()),
+            Some("bioprism.python.bed_text")
         );
         assert_eq!(
             plan.selected_adapter

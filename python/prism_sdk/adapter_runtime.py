@@ -17,6 +17,7 @@ from typing import Any, Mapping, Sequence
 from .alignment import audit_alignments
 from .anndata import audit_anndata
 from .authoring import content_digest
+from .bed import parse_bed
 from .bids import audit_bids
 from .biological import AdapterDescriptor, AdapterRegistry
 from .dicom import audit_dicom
@@ -35,6 +36,7 @@ from .optional_readers import (
     OptionalDependencyUnavailable,
     read_alignment_file,
     read_anndata_projection,
+    read_bed,
     read_dicom_projection,
     read_fasta,
     read_fastq,
@@ -361,6 +363,7 @@ class AdapterRuntime:
             "bioprism.python.fasta_text",
             "bioprism.python.fastq_text",
             "bioprism.python.sam_text",
+            "bioprism.python.bed_text",
             "bioprism.python.fhir_manifest",
             "bioprism.python.fhir_json",
             "bioprism.python.fhir_ndjson",
@@ -597,6 +600,28 @@ class AdapterRuntime:
                 source_id=request.source_id,
                 provenance=request.provenance,
                 annotation_format=annotation_format,
+                max_features=payload.get("max_features", 500_000),
+                max_items=request.max_items,
+            )
+        if adapter_id == "bioprism.python.bed_text":
+            if "text" in payload:
+                text = payload.get("text")
+                if not isinstance(text, (str, bytes)):
+                    raise ArgumentError("bed_text payload requires text or bytes under 'text'")
+                return parse_bed(
+                    text,
+                    source_id=request.source_id,
+                    provenance=request.provenance,
+                    max_features=payload.get("max_features", 500_000),
+                    max_items=request.max_items,
+                ).to_wire()
+            path = payload.get("path")
+            if not isinstance(path, str):
+                raise ArgumentError("bed_text payload requires 'text' or a string 'path'")
+            return read_bed(
+                path,
+                source_id=request.source_id,
+                provenance=request.provenance,
                 max_features=payload.get("max_features", 500_000),
                 max_items=request.max_items,
             )

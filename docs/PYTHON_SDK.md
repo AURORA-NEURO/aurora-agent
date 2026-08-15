@@ -176,6 +176,11 @@ invent defaults:
   annotation boundary. They validate coordinates, scores, strands, phases, URL-encoded attributes,
   duplicate feature IDs, Parent references and cycles, directives, and embedded FASTA boundaries
   without disclosing attribute values or feature identifiers.
+- `BedAdapter`, `parse_bed(...)`, and `read_bed(...)` provide a dependency-free BED3--BED12 interval
+  boundary. They validate zero-based half-open coordinates, optional score/strand/thick/RGB fields,
+  block counts and non-overlap, duplicate intervals and names, and coordinate ordering while
+  retaining source-bound chromosome/name digests rather than labels. BED track metadata is counted
+  but never emitted, and assembly/reference-build identity remains an explicit caller responsibility.
 - `PdbAdapter`, `parse_pdb(...)`, and `read_pdb(...)` provide a dependency-free structural-biology
   boundary. They validate fixed-column atoms, models, chains, residues, coordinates, alternate
   locations, crystallographic metadata, resolution, and CONECT references while retaining only

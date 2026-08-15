@@ -417,6 +417,17 @@ def _builtin_descriptors() -> tuple[AdapterDescriptor, ...]:
             "Dependency-free bounded GFF3/GTF reader validating coordinates, attributes, parent references, and feature hierarchy without disclosing attribute values.",
         ),
         _descriptor(
+            "bioprism.python.bed_text",
+            AdapterExecution.PYTHON_DELEGATED,
+            ("application/bed", "text/bed", "text/x-bed"),
+            False,
+            (SourceKind.BYTES,),
+            None,
+            ("content_uninterpreted", "coordinate_frame_not_carried", "ontology_term_unmapped", "provenance_unavailable"),
+            ("subject", "sample", "reference", "feature", "interval", "transcript"),
+            "Dependency-free bounded BED3-BED12 reader validating zero-based intervals, thick bounds, RGB fields, block geometry, and ordering without disclosing chromosome or item labels.",
+        ),
+        _descriptor(
             "bioprism.python.pdb_text",
             AdapterExecution.PYTHON_DELEGATED,
             ("application/pdb", "chemical/x-pdb", "text/pdb"),

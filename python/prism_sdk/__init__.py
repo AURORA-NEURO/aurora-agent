@@ -70,6 +70,7 @@ from .authoring import (
     content_digest,
     validate_pack,
 )
+from .bed import BedAdapter, BedFinding, BedParseError, BedParseResult, parse_bed
 from .client import Client, ClientConfig
 from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .dicom import DicomAdapter, DicomAuditResult, DicomFinding, audit_dicom
@@ -140,6 +141,7 @@ from .optional_readers import (
     OptionalDependencyUnavailable,
     read_alignment_file,
     read_anndata_projection,
+    read_bed,
     read_dicom_projection,
     read_fasta,
     read_fastq,
@@ -177,6 +179,10 @@ __all__ = [
     "BidsAdapter",
     "BidsAuditResult",
     "BidsFinding",
+    "BedAdapter",
+    "BedFinding",
+    "BedParseError",
+    "BedParseResult",
     "BIOQL_SCHEMA",
     "MAX_BIOQL_QUERY_BYTES",
     "MAX_BIOQL_SCHEMA_BYTES",
@@ -333,6 +339,7 @@ __all__ = [
     "RuntimeStatus",
     "bootstrap_mean",
     "parse_vcf",
+    "parse_bed",
     "parse_fastq",
     "parse_fasta",
     "parse_mzml",
@@ -343,6 +350,7 @@ __all__ = [
     "parse_fhir_json",
     "parse_fhir_ndjson",
     "read_anndata_projection",
+    "read_bed",
     "read_alignment_file",
     "read_dicom_projection",
     "read_fasta",

@@ -25,6 +25,7 @@ chr1\t10\t.\tA\tG\t50\tPASS\tDP=4
 """
 
 FASTQ = "@read/1\nACGT\n+\nIIII\n"
+BED = "chr1\t0\t10\tinterval\n"
 
 
 HAS_PYSAM = importlib.util.find_spec("pysam") is not None
@@ -117,6 +118,7 @@ class AdapterRuntimeTests(unittest.TestCase):
                 },
             ),
             ("bioprism.python.fastq_text", {"text": FASTQ}),
+            ("bioprism.python.bed_text", {"text": BED}),
         ]
 
         for adapter_id, payload in requests:

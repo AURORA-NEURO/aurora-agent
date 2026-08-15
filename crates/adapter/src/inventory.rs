@@ -46,7 +46,7 @@ pub const INVENTORY_ADAPTER_VERSION: &str = "0.1.0";
 /// The list exists so that the loss entry for `scan.nii.gz` can say *which* reader is missing
 /// rather than the generic "not interpreted" every other file gets. A file not on this list is
 /// still uninterpreted; the difference is only in how specific the diagnostic can be.
-const MODALITY_EXTENSIONS: [(&str, &str); 12] = [
+const MODALITY_EXTENSIONS: [(&str, &str); 13] = [
     ("dcm", "DICOM"),
     ("nii", "NIfTI"),
     ("gz", "possibly gzip-compressed NIfTI or FASTQ"),
@@ -59,6 +59,7 @@ const MODALITY_EXTENSIONS: [(&str, &str); 12] = [
     ("vcf", "VCF variants"),
     ("fastq", "FASTQ reads"),
     ("mzml", "mzML spectra"),
+    ("bed", "BED intervals"),
 ];
 
 /// Policy for an inventory walk.
@@ -292,6 +293,19 @@ mod tests {
             is_symlink: false,
         };
         assert!(uninterpreted_detail(&entry).contains("NIfTI"));
+    }
+
+    #[test]
+    fn a_bed_file_names_the_dependency_free_interval_reader() {
+        let entry = FileEntry {
+            relative: "regions.bed".into(),
+            absolute: "regions.bed".into(),
+            length: Some(10),
+            is_symlink: false,
+        };
+        let detail = uninterpreted_detail(&entry);
+        assert!(detail.contains("BED intervals"));
+        assert!(detail.contains("Python"));
     }
 
     #[test]

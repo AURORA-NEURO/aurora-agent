@@ -127,6 +127,10 @@ counts, and GC bases are audited while sequence strings and headers remain sourc
 `parse_gff3()` and `read_gff3()` add a dependency-free annotation boundary for GFF3/GTF-style rows:
 coordinates, scores, strands, phases, URL-encoded attributes, duplicate IDs, Parent resolution,
 cycles, directives, and embedded FASTA boundaries are audited without disclosing attribute values.
+`parse_bed()` and `read_bed()` add a dependency-free interval boundary for BED3--BED12 rows:
+zero-based half-open coordinates, optional score/strand/thick/RGB fields, transcript-style block
+geometry, duplicate intervals/names, coordinate ordering, and source-bound chromosome/name digests
+are audited without disclosing labels or track metadata. Assembly identity remains caller-supplied.
 `parse_pdb()` and `read_pdb()` add a dependency-free structural-biology boundary: fixed-column atom
 fields, models, chains, residues, coordinates, alternate locations, crystallographic cells, resolution,
 CONECT edges, and geometry summaries are audited without emitting raw structure records.

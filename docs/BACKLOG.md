@@ -258,6 +258,11 @@ protein alphabet claims, lengths, symbol counts, and GC totals without disclosin
 The GFF3 route now audits bounded feature rows, coordinates, scores, strands, phases, URL-encoded
 attributes, duplicate IDs, Parent resolution/cycles, directives, and embedded FASTA boundaries
 without disclosing annotation values or feature identifiers.
+The BED route now audits bounded BED3--BED12 interval rows, zero-based half-open coordinates,
+optional score/strand/thick/RGB fields, transcript-style block geometry, duplicate intervals and
+names, and coordinate ordering without disclosing chromosome labels, item names, or track metadata.
+It remains a structural interval boundary: assembly/reference-build identity, annotation ontology,
+and biological feature meaning are explicit caller-owned context rather than inferred from the file.
 The PDB route now audits fixed-column atoms, models, chains, residues, coordinates, alternate
 locations, crystallographic cells, resolution, CONECT edges, and bounded geometry without emitting
 raw structure records.

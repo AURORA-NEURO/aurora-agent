@@ -172,6 +172,13 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(gff3.executable)
         self.assertEqual(gff3.selected_adapter.id, "bioprism.python.gff3_text")
 
+        bed = AdapterRegistry().plan(
+            AdapterPlanRequest("intervals", SourceKind.BYTES, declared_format="text/bed"),
+            check_environment=False,
+        )
+        self.assertTrue(bed.executable)
+        self.assertEqual(bed.selected_adapter.id, "bioprism.python.bed_text")
+
         pdb = AdapterRegistry().plan(
             AdapterPlanRequest("structure", SourceKind.BYTES, declared_format="chemical/x-pdb"),
             check_environment=False,

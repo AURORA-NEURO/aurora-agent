@@ -16,6 +16,7 @@ from typing import Any, Mapping
 from .alignment import MAX_ALIGNMENT_ITEMS, audit_alignments
 from .anndata import audit_anndata
 from .authoring import content_digest
+from .bed import MAX_BED_BYTES, parse_bed
 from .dicom import audit_dicom
 from .errors import ArgumentError
 from .fasta import MAX_FASTA_BYTES, parse_fasta
@@ -711,6 +712,33 @@ def read_gff3(
         raise ArgumentError(f"GFF3 read failed for {str(candidate)!r}: {error}") from error
 
 
+def read_bed(
+    path: str,
+    *,
+    source_id: str,
+    provenance: Mapping[str, Any] | None = None,
+    max_features: int = 500_000,
+    max_items: int = 1_000,
+) -> Mapping[str, Any]:
+    """Read bounded BED3--BED12 text and return the dependency-free interval audit."""
+
+    candidate = _path(path, field="BED path")
+    if candidate.stat().st_size > MAX_BED_BYTES:
+        raise ArgumentError(f"BED path exceeds the {MAX_BED_BYTES}-byte reader limit")
+    try:
+        return parse_bed(
+            candidate.read_bytes(),
+            source_id=source_id,
+            provenance=provenance,
+            max_features=max_features,
+            max_items=max_items,
+        ).to_wire()
+    except ArgumentError:
+        raise
+    except OSError as error:
+        raise ArgumentError(f"BED read failed for {str(candidate)!r}: {error}") from error
+
+
 def read_mzml(
     path: str,
     *,
@@ -879,6 +907,7 @@ __all__ = [
     "OptionalDependencyUnavailable",
     "read_alignment_file",
     "read_anndata_projection",
+    "read_bed",
     "read_dicom_projection",
     "read_fasta",
     "read_fastq",
