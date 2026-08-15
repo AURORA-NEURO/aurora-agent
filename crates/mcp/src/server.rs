@@ -11248,7 +11248,7 @@ impl Server {
                 "omitted_divergences": exit_audit.divergences.len().saturating_sub(max_items),
             },
             "limitations": [
-                "the full Python SDK, TypeScript SDK, REST/gRPC clients and GitHub Actions are foreign artifacts; python/prism_sdk supplies a local MCP transport foundation but is not executed by this Rust check",
+                "the full Python/TypeScript SDKs, gRPC client, and GitHub Actions remain foreign artifacts; bioprism-api and python/prism_sdk now provide bounded REST/event and HTTP-client surfaces, but are not executed by this Rust check",
                 "cookbook verification resolves names and tests textually; it does not execute every recipe",
                 "developer contracts describe declared blast radius; they do not watch files or run a live debugger",
             ],
@@ -11501,7 +11501,7 @@ impl Server {
                             vec!["developer_platform_checks_not_clean".to_string()]
                         },
                         vec![
-                            "foreign SDK, CI, REST/gRPC, and UI artifacts remain explicit limitations"
+                            "foreign SDK, CI, gRPC, and UI artifacts remain explicit limitations; the bounded REST/event gateway is separately reported"
                                 .to_string(),
                         ],
                     ),
@@ -11720,7 +11720,7 @@ impl Server {
                 "all delegated checks remain bounded and side-effect free; no package is published, signed, deployed, fetched, or executed by this workflow",
             ],
             "limitations": [
-                "the workflow does not implement the full Python/TypeScript SDKs, biological Python adapters, REST/gRPC/event clients, GitHub Actions, CI runners, or authoring UIs",
+                "the workflow does not implement the full Python/TypeScript SDKs, biological Python adapters, gRPC clients, GitHub Actions, CI runners, or authoring UIs; REST/event access is provided by the bounded bioprism-api gateway",
                 "repository readiness is graph and lint health, not proof that every prose requirement is implemented",
                 "SDK registry admission validates serialized declarations but does not dynamically load or sandbox plugins",
                 "conformance and provider outputs are evidence for delivery review, not clinical, scientific, security, or production approval",

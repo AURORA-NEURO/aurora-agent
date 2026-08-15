@@ -24,8 +24,8 @@ fn twenty_modules_are_classified_and_each_title_appears_once() {
 }
 
 #[test]
-fn the_four_buckets_are_three_seven_six_and_four() {
-    assert_eq!(verdict_counts(), [3, 7, 6, 4]);
+fn the_four_buckets_are_three_five_eight_and_four() {
+    assert_eq!(verdict_counts(), [3, 5, 8, 4]);
     assert_eq!(verdict_counts().iter().sum::<usize>(), classification().len());
 }
 
@@ -103,7 +103,7 @@ fn the_citation_audit_refuses_something_that_is_not_a_directory() {
 }
 
 #[test]
-fn the_foreign_census_and_the_classification_name_the_same_seven_subjects() {
+fn the_foreign_census_and_the_classification_name_the_same_five_subjects() {
     let census: BTreeSet<&str> = foreign_subjects()
         .into_iter()
         .map(|subject| subject.title)
@@ -113,7 +113,7 @@ fn the_foreign_census_and_the_classification_name_the_same_seven_subjects() {
         .filter(|row| matches!(row.verdict, Verdict::ForeignArtifact { .. }))
         .map(|row| row.title)
         .collect();
-    assert_eq!(census.len(), 7);
+    assert_eq!(census.len(), 5);
     assert_eq!(census, classified);
 }
 
@@ -172,7 +172,7 @@ fn every_covered_elsewhere_verdict_names_at_least_one_crate() {
             }
         }
     }
-    assert_eq!(seen, 6);
+    assert_eq!(seen, 8);
 }
 
 #[test]

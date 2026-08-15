@@ -26,6 +26,16 @@ class TransportError(SdkError):
     """The child process or its stdio transport could not be used."""
 
 
+class ApiError(TransportError):
+    """The HTTP API returned a bounded error response."""
+
+    def __init__(self, status: int, payload: Any) -> None:
+        self.status = status
+        self.payload = payload
+        message = payload.get("error", payload) if isinstance(payload, dict) else payload
+        super().__init__(f"Prism HTTP API returned {status}: {message}")
+
+
 class ProcessExited(TransportError):
     """The MCP child process exited before answering a request."""
 

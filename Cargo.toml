@@ -10,6 +10,7 @@ members = [
     "crates/worldgen",
     "crates/store",
     "crates/mcp",
+    "crates/api",
     "crates/prism",
     "crates/weave",
     "crates/mutation",
@@ -102,6 +103,7 @@ bioprism-baseline = { path = "crates/baseline" }
 bioprism-worldgen = { path = "crates/worldgen" }
 bioprism-store = { path = "crates/store" }
 bioprism-mcp = { path = "crates/mcp" }
+bioprism-api = { path = "crates/api" }
 bioprism-prism = { path = "crates/prism" }
 bioprism-weave = { path = "crates/weave" }
 bioprism-mutation = { path = "crates/mutation" }

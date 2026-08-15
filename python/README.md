@@ -28,3 +28,20 @@ The SDK keeps JSON-RPC transport failures, protocol violations, server errors, a
 refusals distinct. It never invokes a shell, accepts unbounded frames, turns a refusal into a
 successful value, or recreates the Rust domain model. `Workspace` helpers are deliberately thin
 facades over exact MCP tools; `tool()` remains available for every current and future domain.
+
+For a running `bioprism-api` gateway, the same standard-library package provides bounded HTTP
+access:
+
+```python
+from prism_sdk import ApiClient
+
+api = ApiClient("http://127.0.0.1:8787", bearer_token="0123456789abcdef")
+print(api.capabilities()["tool_count"])
+result = api.call_tool("modality_catalog", {})
+page = api.events(after=0, limit=100)
+```
+
+`ApiClient` and `AsyncApiClient` cover health, capabilities, tools, REST calls, event cursors, and
+the signed webhook outbox. HTTP failures raise `ApiError` with the status and structured payload;
+the client does not retry domain refusals or treat a transport `2xx` as scientific acceptance.
+See [`docs/HTTP_API.md`](../docs/HTTP_API.md) for the route and delivery contract.

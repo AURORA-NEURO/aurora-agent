@@ -18,7 +18,7 @@ contract, and observability projection workflows. `factory_lifecycle_simulate`,
 `hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, `release_audit`, and
 `developer_delivery_audit` now
 compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
-durable queues, identity, signing, UI, OTLP export, and network publication explicit as unimplemented;
+durable queues, identity, public-key signing, UI, OTLP export, and network publication explicit as unimplemented;
 the Python MCP transport foundation is documented separately and does not imply the full SDK.
 `trace_otel_ingest` adds a bounded, dependency-free OTLP JSON span importer with source-preserving
 Event IR mapping and explicit semantic-loss accounting; it does not export to a collector or infer
@@ -26,8 +26,11 @@ vendor conventions into compilable evidence. `runtime_execution_simulate` adds d
 record/replay, budget, fault, and
 fork evidence; `megafactory_twin_audit` and `megafactory_placement_audit` expose model-discrepancy,
 oracle-eligibility, placement, attestation, fencing, and duplicate-effect predicates. None of
-these turn foreign Python, TypeScript, REST/gRPC, CI, UI, OTLP export, or network-publication artifacts
-into implemented workspace code. `registry_lifecycle_simulate` adds a continuation-safe local
+these turn foreign Python, TypeScript, gRPC, CI, UI, OTLP export, or network-publication artifacts
+into implemented workspace code. `bioprism-api` now supplies a bounded REST/JSON-RPC gateway,
+cursor-based event/SSE snapshots, and a signed retryable webhook outbox over the same MCP
+dispatcher; it does not supply gRPC, TLS termination, durable storage, or an external delivery
+worker. `registry_lifecycle_simulate` adds a continuation-safe local
 publication log and artifact-integrity projection, while `metrics_profile_audit` adds the
 per-capability coverage and uncontested-lead projection used by honest public cards. Both remain
 in-memory integrations of existing Rust contracts. `cache_invalidation_simulate` adds replayable
@@ -75,12 +78,12 @@ prose from the uncovered list before counting, which is why its figure was the c
 along. 702 + 57 = 759 now reconciles.
 
 
-Coverage is **92.8%** — 704 of 759 code-bearing modules. The remaining **55 are enumerated in
+Coverage is **93.0%** — 706 of 759 code-bearing modules. The remaining **53 are enumerated in
 `docs/BACKLOG.md` and explained in `crates/residue`**, which holds one typed verdict per module
 saying why no crate implements it, anchored to a sentence a classifying crate actually wrote. Its
 reconciliation against the backlog is a test, so the two cannot drift apart silently.
 
-The distribution over the 55: **37 process, 9 foreign artifact, 9 discharged elsewhere, and 1
+The distribution over the 53: **37 process, 7 foreign artifact, 9 discharged elsewhere, and 1
 genuinely uncovered.** That last one is deliberate. `crates/bioethics` discharges §36's sandboxing
 module and in the same paragraph records that all thirteen of its required controls need a process
 boundary, a network stack or a scanner, none of which exists here — so the register carries a second
@@ -133,13 +136,13 @@ state is a backlog whose residue is explained rather than empty.
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 704 |
-| **code-bearing coverage** | **92.8%** |
+| cited | 706 |
+| **code-bearing coverage** | **93.0%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 92.8% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 93.0% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 

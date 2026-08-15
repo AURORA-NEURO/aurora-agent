@@ -10,8 +10,8 @@
 //! | verdict | count |
 //! |---|---|
 //! | [`Verdict::Process`] — the design describes what a person does at an interface | 3 |
-//! | [`Verdict::ForeignArtifact`] — code-bearing, but not Rust and not in this repository | 7 |
-//! | [`Verdict::CoveredElsewhere`] — an existing crate already owns the substance | 6 |
+//! | [`Verdict::ForeignArtifact`] — code-bearing, but not Rust and not in this repository | 5 |
+//! | [`Verdict::CoveredElsewhere`] — an existing crate already owns the substance | 8 |
 //! | [`Verdict::ImplementedHere`] — predicates over an artifact this crate defines | 4 |
 //!
 //! # The citation rule, in the type system
@@ -116,7 +116,7 @@ const REFERENCE_EXAMPLES: u8 = 19;
 
 /// The twenty modules, classified.
 ///
-/// The order is section then blueprint order. The seven [`Verdict::ForeignArtifact`] rows take
+/// The order is section then blueprint order. The five [`Verdict::ForeignArtifact`] rows take
 /// their surfaces from [`foreign_subjects`], so the census and the classification cannot drift
 /// apart — a test asserts the two agree.
 pub fn classification() -> Vec<ModuleVerdict> {
@@ -151,12 +151,18 @@ pub fn classification() -> Vec<ModuleVerdict> {
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,
             title: "REST, gRPC and Event APIs",
-            verdict: foreign_row("REST, gRPC and Event APIs"),
+            verdict: Verdict::CoveredElsewhere {
+                crates: vec!["bioprism-api"],
+                because: "the workspace now owns the bounded REST, JSON-RPC, cursor event, and signed webhook outbox boundary. The gRPC half remains an explicit deployment gap rather than being inferred from an HTTP route.",
+            },
         },
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,
             title: "Event Stream and Webhooks",
-            verdict: foreign_row("Event Stream and Webhooks"),
+            verdict: Verdict::CoveredElsewhere {
+                crates: vec!["bioprism-api"],
+                because: "the API gateway owns event cursors, retention-gap reporting, signed outbox envelopes, bounded retry, and idempotent acknowledgement; an external delivery worker remains a deployment concern.",
+            },
         },
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,

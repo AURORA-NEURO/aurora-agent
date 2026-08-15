@@ -1,4 +1,4 @@
-//! The fifty-five, transcribed.
+//! The fifty-three, transcribed.
 //!
 //! Every module `docs/BACKLOG.md` lists, with the verdict a classifying crate reached about it and
 //! the file that verdict was written in. Nothing here is a new judgement about a module a crate
@@ -173,30 +173,6 @@ fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
                  artifact, so there is nothing for the generator to read and nothing for a \
                  generated client to be pinned to.",
                 ForeignSurface::TypeScriptPackage,
-            )?],
-        )?,
-        entry(
-            11,
-            8,
-            "Rest Grpc And Event Apis",
-            vec![foreign_row(
-                "title: \"REST, gRPC and Event APIs\",",
-                "A network surface for a server this workspace does not run. The service graph \
-                 requires the same services to run in-process, so the transport the module \
-                 specifies has no host here.",
-                ForeignSurface::NetworkApi,
-            )?],
-        )?,
-        entry(
-            11,
-            9,
-            "Event Stream And Webhooks",
-            vec![foreign_row(
-                "title: \"Event Stream and Webhooks\",",
-                "Delivery semantics for a stream nobody publishes. The event vocabulary exists in \
-                 Rust; the subscription, retry and signature machinery is a property of a running \
-                 endpoint.",
-                ForeignSurface::NetworkApi,
             )?],
         )?,
         entry(

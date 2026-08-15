@@ -1,0 +1,21 @@
+[package]
+name = "bioprism-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bounded HTTP API, event stream, and signed webhook outbox for the Prism MCP kernel"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "bioprism-api"
+path = "src/main.rs"
+
+[dependencies]
+bioprism-mcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

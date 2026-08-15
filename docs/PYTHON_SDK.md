@@ -36,6 +36,7 @@ The package distinguishes:
 | `ProtocolError` | peer violated JSON-RPC/MCP shape | do not interpret the result as evidence |
 | `RemoteError` | JSON-RPC method-level error | use `code`, `message`, and `data` |
 | `ToolRefusal` | valid tool payload with `ok: false` or `isError` | preserve the refusal; do not treat it as success |
+| `ApiError` | HTTP gateway returned a bounded structured error | inspect status/payload; do not retry a domain refusal blindly |
 
 `ToolResult` retains the raw MCP envelope, exposes all text blocks, decodes the server's JSON
 projection, and provides `require_ok()` for callers that explicitly want an exception on a refusal.
@@ -56,9 +57,15 @@ invent defaults:
   importer and preserves its semantic-loss/readiness report.
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
+`ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP
+gateway: health/capability discovery, REST tool calls, cursor-based event pages, and signed
+webhook subscription/delivery acknowledgement. They preserve status and JSON error payloads in
+`ApiError` and do not recreate Rust domain semantics.
+
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData/VCF readers, benchmark
-statistics, a REST server, OTLP export, a notebook UI, or CI deployment. Those require separate
-artifacts and contracts; the client transports them when and if the server exposes them.
+statistics, OTLP export, a notebook UI, or CI deployment. The repository now ships a bounded REST
+gateway, but gRPC, durable event storage, external webhook delivery, and those domain artifacts
+remain separate contracts.
 
 ## Verification
 

@@ -28,6 +28,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-api"
+version = "0.1.0"
+dependencies = [
+ "bioprism-mcp",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "bioprism-atlas"
 version = "0.1.0"
 dependencies = [

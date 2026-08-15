@@ -8,6 +8,7 @@ JSON without recreating domain semantics or silently converting refusals into or
 from .async_client import AsyncClient
 from .client import Client, ClientConfig
 from .errors import (
+    ApiError,
     ArgumentError,
     LifecycleError,
     ProcessExited,
@@ -18,6 +19,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
+from .http_client import ApiClient, AsyncApiClient
 from .models import Session, ToolResult
 from .workspace import AsyncWorkspace, Workspace
 
@@ -25,7 +27,10 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ArgumentError",
+    "ApiClient",
+    "ApiError",
     "AsyncClient",
+    "AsyncApiClient",
     "AsyncWorkspace",
     "Client",
     "ClientConfig",

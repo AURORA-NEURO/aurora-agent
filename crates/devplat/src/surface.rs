@@ -254,11 +254,11 @@ pub struct ForeignSubject {
 
 /// The developer-platform subjects that are code-bearing but not Rust and not in this repository.
 ///
-/// Seven of them. This is the largest single group in [`crate::classify::classification`] and the
+/// Five of them. This is the largest single group in [`crate::classify::classification`] and the
 /// reason this crate exists in the shape it does: a section can be two-thirds unimplemented in a
 /// Rust workspace without a single line of it being vague.
 pub fn foreign_subjects() -> Vec<ForeignSubject> {
-    let entries: [(&'static str, SurfaceKind, &'static str, &'static str); 7] = [
+    let entries: [(&'static str, SurfaceKind, &'static str, &'static str); 5] = [
         (
             "Python SDK",
             SurfaceKind::PythonPackage,
@@ -281,21 +281,6 @@ pub fn foreign_subjects() -> Vec<ForeignSubject> {
             "@prism/sdk",
             "browser and Node clients generated from OpenAPI and JSON Schema, with runtime \
              validators. The generator input could live here; the generated package cannot.",
-        ),
-        (
-            "REST, gRPC and Event APIs",
-            SurfaceKind::HttpApi,
-            "prism-api",
-            "resource paths, status codes, pagination and idempotency keys are properties of a \
-             served process. A crate can hold the schema; it cannot hold the endpoint.",
-        ),
-        (
-            "Event Stream and Webhooks",
-            SurfaceKind::EventStream,
-            "prism-events",
-            "at-least-once delivery, replay windows, signature verification and consumer offsets \
-             are properties of a delivery pipeline observed over time. Nothing here runs over \
-             time; this crate has no clock by design.",
         ),
         (
             "GitHub Action for Consumer Repositories",
