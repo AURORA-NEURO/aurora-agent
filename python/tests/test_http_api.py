@@ -38,6 +38,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(size) or b"{}")
         if self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
+        elif self.path.startswith("/v1/tools/capability_"):
+            self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         else:
             self._send(422, {"ok": False, "error": {"code": "refused"}})
 
@@ -62,6 +64,18 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertTrue(client.health()["ready"])
         self.assertEqual(client.tools()[0]["name"], "echo")
         self.assertEqual(client.call_tool("echo", {"value": 3})["mcp"]["result"]["value"], 3)
+        self.assertEqual(
+            client.capability_discover(query="oncology")["mcp"]["result"]["query"],
+            "oncology",
+        )
+        self.assertEqual(
+            client.capability_audit(include_groups=False)["mcp"]["result"]["include_groups"],
+            False,
+        )
+        self.assertEqual(
+            client.capability_route("compose evidence", [{"id": "oncology", "query": "oncology"}])["mcp"]["result"]["goal"],
+            "compose evidence",
+        )
         self.assertEqual(client.events()["page"]["events"], [])
         with self.assertRaises(ApiError) as error:
             client.request("POST", "/v1/tools/refuse", {})
@@ -75,6 +89,10 @@ class HttpApiClientTests(unittest.TestCase):
         async def run() -> None:
             self.assertTrue((await client.health())["ok"])
             self.assertEqual((await client.call_tool("echo", {"async": True}))["tool"], "echo")
+            self.assertEqual(
+                (await client.capability_route("async route", [{"id": "release", "tool": "bundle_verify"}]))["mcp"]["result"]["goal"],
+                "async route",
+            )
 
         asyncio.run(run())
 

@@ -79,7 +79,8 @@ invent defaults:
 - `tool(name, arguments)` remains available for every current and future MCP domain.
 
 `ApiClient` and `AsyncApiClient` provide the same standard-library SDK posture for the HTTP
-gateway: health/capability discovery, REST tool calls, cursor-based event pages, and signed
+gateway: health/capability discovery, typed `capability_discover`, `capability_audit`, and
+`capability_route` helpers, REST tool calls, cursor-based event pages, and signed
 webhook subscription/delivery acknowledgement. They preserve status and JSON error payloads in
 `ApiError` and do not recreate Rust domain semantics.
 

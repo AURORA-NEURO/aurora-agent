@@ -15,7 +15,35 @@ import ssl
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from .capability import CapabilityQuery, CapabilityRouteNeed, CapabilityRouteRequest
 from .errors import ApiError, ArgumentError, TransportError
+
+
+def _capability_query_arguments(
+    query: CapabilityQuery | str | None,
+    *,
+    text: str | None,
+    domain: str | None,
+    tool: str | None,
+    group_id: str | None,
+    max_items: int,
+    include_tools: bool,
+) -> dict[str, Any]:
+    if isinstance(query, CapabilityQuery):
+        if (
+            any(value is not None for value in (text, domain, tool, group_id))
+            or max_items != 50
+            or include_tools
+        ):
+            raise ArgumentError("query cannot be combined with individual capability filters")
+        return query.to_mcp_arguments()
+    if isinstance(query, str):
+        if text is not None:
+            raise ArgumentError("query cannot be combined with text")
+        return CapabilityQuery(query, group_id, domain, tool, max_items, include_tools).to_mcp_arguments()
+    if query is not None:
+        raise ArgumentError("query must be a CapabilityQuery or string")
+    return CapabilityQuery(text, group_id, domain, tool, max_items, include_tools).to_mcp_arguments()
 
 
 class ApiClient:
@@ -131,6 +159,53 @@ class ApiClient:
             raise ArgumentError("tool name must be a non-empty path-safe string")
         return self.request("POST", f"/v1/tools/{name}", dict(arguments or {}))
 
+    def capability_discover(
+        self,
+        *,
+        query: CapabilityQuery | str | None = None,
+        text: str | None = None,
+        domain: str | None = None,
+        tool: str | None = None,
+        group_id: str | None = None,
+        max_items: int = 50,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Search the complete cross-domain catalogue through the HTTP gateway."""
+
+        arguments = _capability_query_arguments(
+            query,
+            text=text,
+            domain=domain,
+            tool=tool,
+            group_id=group_id,
+            max_items=max_items,
+            include_tools=include_tools,
+        )
+        return self.call_tool("capability_discover", arguments)
+
+    def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
+        if not isinstance(include_groups, bool):
+            raise ArgumentError("include_groups must be a boolean")
+        return self.call_tool("capability_audit", {"include_groups": include_groups})
+
+    def capability_route(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        request = CapabilityRouteRequest(
+            goal,
+            needs,
+            max_candidates_per_need,
+            max_tools,
+            include_tools,
+        )
+        return self.call_tool("capability_route", request.to_mcp_arguments())
+
     def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         if after < 0 or not 1 <= limit <= 1000:
             raise ArgumentError("after must be non-negative and limit must be 1..=1000")
@@ -195,6 +270,51 @@ class AsyncApiClient:
 
     async def call_tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.call_tool, name, arguments)
+
+    async def capability_discover(
+        self,
+        *,
+        query: CapabilityQuery | str | None = None,
+        text: str | None = None,
+        domain: str | None = None,
+        tool: str | None = None,
+        group_id: str | None = None,
+        max_items: int = 50,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        arguments = _capability_query_arguments(
+            query,
+            text=text,
+            domain=domain,
+            tool=tool,
+            group_id=group_id,
+            max_items=max_items,
+            include_tools=include_tools,
+        )
+        return await self.call_tool("capability_discover", arguments)
+
+    async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
+        if not isinstance(include_groups, bool):
+            raise ArgumentError("include_groups must be a boolean")
+        return await self.call_tool("capability_audit", {"include_groups": include_groups})
+
+    async def capability_route(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        request = CapabilityRouteRequest(
+            goal,
+            needs,
+            max_candidates_per_need,
+            max_tools,
+            include_tools,
+        )
+        return await self.call_tool("capability_route", request.to_mcp_arguments())
 
     async def events(self, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.events, after=after, limit=limit)

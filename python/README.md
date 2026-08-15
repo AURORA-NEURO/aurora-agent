@@ -41,8 +41,9 @@ result = api.call_tool("modality_catalog", {})
 page = api.events(after=0, limit=100)
 ```
 
-`ApiClient` and `AsyncApiClient` cover health, capabilities, tools, REST calls, event cursors, and
-the signed webhook outbox. HTTP failures raise `ApiError` with the status and structured payload;
+`ApiClient` and `AsyncApiClient` cover health, capabilities, tools, typed capability discovery,
+parity audits, route proposals, REST calls, event cursors, and the signed webhook outbox. HTTP
+failures raise `ApiError` with the status and structured payload;
 the client does not retry domain refusals or treat a transport `2xx` as scientific acceptance.
 See [`docs/HTTP_API.md`](../docs/HTTP_API.md) for the route and delivery contract.
 
