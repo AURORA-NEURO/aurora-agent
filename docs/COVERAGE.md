@@ -57,6 +57,9 @@ The asynchronous HTTP boundary projects those authoritative trace events into a 
 snapshot while a job is live and reconciles the snapshot against the terminal report. Python and
 TypeScript clients type the same projection for operational dashboards, while replay, content
 identity, and domain interpretation remain owned by the final report and trace.
+The HTTP boundary also serves bounded cursor pages over retained mission trace events, with explicit
+`next_after`, retention-gap, and dropped-event fields; this gives every domain workflow the same
+replay/observability contract without inventing domain-specific event semantics.
 Validated RFC 6901 bindings can copy fields from successful direct prerequisites into existing
 argument slots, and each nested call records the content digest of its post-binding inputs.
 The authoritative executor validates every known tool's materialized arguments against its

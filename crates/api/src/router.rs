@@ -22,6 +22,7 @@ pub const DEFAULT_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const DEFAULT_EVENT_CAPACITY: usize = 4096;
 pub const MAX_MISSION_JOBS: usize = 4096;
 pub const MAX_MISSION_LIST_LIMIT: usize = 256;
+pub const MAX_MISSION_TRACE_EVENTS: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -79,6 +80,7 @@ struct MissionJob {
 #[derive(Clone)]
 struct MissionJobState {
     total_steps: usize,
+    trace: Vec<Value>,
     progress: MissionProgressState,
     status: String,
     cancel_requested: bool,
@@ -213,6 +215,16 @@ impl MissionProgressState {
     }
 }
 
+impl MissionJobState {
+    fn record_trace(&mut self, event: Value) {
+        self.progress.observe_trace(&event);
+        if self.trace.len() >= MAX_MISSION_TRACE_EVENTS {
+            self.trace.remove(0);
+        }
+        self.trace.push(event);
+    }
+}
+
 impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
         config.validate()?;
@@ -301,6 +313,9 @@ impl ApiRouter {
             ("GET", "/v1/missions") => self.mission_inventory(&request, &request_id),
             ("POST", "/v1/missions/preflight") => self.preflight_mission(&request, &request_id),
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
+            ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/trace") => {
+                self.mission_trace(&request, &request_id)
+            }
             ("GET", path) if path.starts_with("/v1/missions/") => {
                 self.mission_status(&request, &request_id)
             }
@@ -427,6 +442,8 @@ impl ApiRouter {
                     "async_missions": true,
                     "mission_preflight": true,
                     "mission_inventory": true,
+                    "mission_trace": true,
+                    "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "signed_webhook_outbox": true,
                     "grpc": false,
@@ -641,6 +658,7 @@ impl ApiRouter {
         let cancellation = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(MissionJobState {
             total_steps,
+            trace: Vec::new(),
             progress: MissionProgressState::new(total_steps),
             status: "queued".into(),
             cancel_requested: false,
@@ -686,7 +704,7 @@ impl ApiRouter {
         let progress_state = Arc::clone(&state);
         let observer = Arc::new(move |event: Value| {
             if let Ok(mut current) = progress_state.lock() {
-                current.progress.observe_trace(&event);
+                current.record_trace(event);
             }
         });
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
@@ -743,6 +761,7 @@ impl ApiRouter {
                 "progress": mission_progress_json(&MissionProgressState::new(total_steps)),
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
+                "trace": format!("/v1/missions/{mission_id}/trace"),
                 "guarantees": [
                     "mission validation completed before acceptance",
                     "execution is cooperative and preserves the authoritative mission report",
@@ -829,6 +848,7 @@ impl ApiRouter {
                 "summary": mission_summary(&state),
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
+                "trace": format!("/v1/missions/{mission_id}/trace"),
             }));
         }
         let total = entries.len();
@@ -894,6 +914,124 @@ impl ApiRouter {
                 "error": current.error,
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
+                "trace": format!("/v1/missions/{mission_id}/trace"),
+            }),
+        )
+    }
+
+    fn mission_trace(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), Some("trace")) else {
+            return self.error(
+                404,
+                "not_found",
+                "mission trace route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if key != "after" && key != "limit" {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "mission trace accepts only after and limit",
+                    request_id,
+                );
+            }
+        }
+        let after = match query_u64(&query, "after", 0) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let limit = match query_usize(&query, "limit", 100) {
+            Ok(value) if (1..=1000).contains(&value) => value,
+            Ok(_) => {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "limit must be between 1 and 1000",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let jobs = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = jobs.get(&mission_id).cloned() else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let oldest = state
+            .trace
+            .first()
+            .and_then(|event| event.get("sequence"))
+            .and_then(Value::as_u64);
+        let newest = state
+            .trace
+            .last()
+            .and_then(|event| event.get("sequence"))
+            .and_then(Value::as_u64);
+        let events = state
+            .trace
+            .iter()
+            .filter(|event| {
+                event
+                    .get("sequence")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|sequence| sequence >= after)
+            })
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_after = events
+            .last()
+            .and_then(|event| event.get("sequence"))
+            .and_then(Value::as_u64)
+            .map_or(after, |sequence| sequence.saturating_add(1));
+        let dropped_events = oldest.map_or(0, |sequence| sequence.saturating_sub(after));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "mission_id": mission_id,
+                "trace_schema_version": bioprism_mcp::MISSION_TRACE_SCHEMA_VERSION,
+                "events": events,
+                "after": after,
+                "next_after": next_after,
+                "oldest": oldest,
+                "newest": newest,
+                "gap": dropped_events > 0,
+                "dropped_events": dropped_events,
+                "terminal": is_terminal_mission_status(&state.status),
+                "limit": limit,
+                "truncated": next_after < newest.map_or(next_after, |sequence| sequence.saturating_add(1)),
+                "guarantees": [
+                    "events are ordered by the authoritative clock-free mission sequence",
+                    "after is an inclusive sequence cursor for the first page and next_after is exclusive",
+                    "retention gaps are reported instead of silently presented as complete history"
+                ]
             }),
         )
     }
@@ -994,6 +1132,7 @@ impl ApiRouter {
                 "progress": mission_progress_json(&current.progress),
                 "reason": reason,
                 "poll": format!("/v1/missions/{mission_id}"),
+                "trace": format!("/v1/missions/{mission_id}/trace"),
             }),
         )
     }
@@ -1332,6 +1471,7 @@ impl ApiRouter {
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
+                    "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
                     "/v1/events": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "cursor page" } } } },
@@ -1664,6 +1804,40 @@ mod tests {
         assert_eq!(status["progress"]["total_steps"], 1);
         assert_eq!(status["progress"]["completed_steps"], 0);
         assert_eq!(status["progress"]["last_event"], "mission.completed");
+        let trace = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/trace?after=0&limit=64",
+            json!({}),
+        ));
+        assert_eq!(trace.status, 200);
+        let trace: Value = serde_json::from_slice(&trace.body).unwrap();
+        assert_eq!(
+            trace["trace_schema_version"],
+            "bioprism-devplat-mission-trace/0.1"
+        );
+        assert_eq!(trace["events"][0]["event"], "mission.started");
+        assert_eq!(trace["events"][0]["sequence"], 0);
+        assert_eq!(
+            trace["events"].as_array().unwrap().last().unwrap()["event"],
+            "mission.completed"
+        );
+        assert_eq!(trace["gap"], false);
+        assert_eq!(trace["terminal"], true);
+        let next_after = trace["next_after"].as_u64().unwrap();
+        let empty_trace = router.handle(request(
+            "GET",
+            &format!("/v1/missions/api-async-1/trace?after={next_after}&limit=64"),
+            json!({}),
+        ));
+        assert_eq!(empty_trace.status, 200);
+        let empty_trace: Value = serde_json::from_slice(&empty_trace.body).unwrap();
+        assert_eq!(empty_trace["events"].as_array().unwrap().len(), 0);
+        let invalid_trace = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/trace?unexpected=value",
+            json!({}),
+        ));
+        assert_eq!(invalid_trace.status, 400);
         let inventory = router.handle(request(
             "GET",
             "/v1/missions?status=planned&limit=1",

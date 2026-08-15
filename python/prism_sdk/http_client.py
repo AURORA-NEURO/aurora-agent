@@ -32,11 +32,13 @@ from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimC
 from .mission import (
     MissionAssembly,
     MAX_MISSION_LIST_LIMIT,
+    MAX_MISSION_TRACE_PAGE,
     MissionJob,
     MissionPolicy,
     MissionPreflight,
     MissionRequest,
     MissionRouteSelection,
+    MissionTracePage,
     mission_from_route as assemble_mission_from_route,
     preflight_mission,
 )
@@ -201,6 +203,17 @@ class ApiClient:
     def mission_status(self, mission_id: str) -> MissionJob:
         self._mission_id(mission_id)
         return MissionJob.from_wire(self.request("GET", f"/v1/missions/{mission_id}"))
+
+    def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
+        """Read a bounded cursor page from the authoritative clock-free mission trace."""
+
+        self._mission_id(mission_id)
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_MISSION_TRACE_PAGE:
+            raise ArgumentError(f"limit must be between 1 and {MAX_MISSION_TRACE_PAGE}")
+        query = urlencode({"after": str(after), "limit": str(limit)})
+        return MissionTracePage.from_wire(self.request("GET", f"/v1/missions/{mission_id}/trace?{query}"))
 
     def cancel_mission(self, mission_id: str, reason: str | None = None) -> MissionJob:
         self._mission_id(mission_id)
@@ -688,6 +701,11 @@ class AsyncApiClient:
 
     async def mission_status(self, mission_id: str) -> MissionJob:
         return await asyncio.to_thread(self.client.mission_status, mission_id)
+
+    async def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
+        """Async bounded cursor page over the authoritative mission trace."""
+
+        return await asyncio.to_thread(self.client.mission_trace, mission_id, after=after, limit=limit)
 
     async def cancel_mission(self, mission_id: str, reason: str | None = None) -> MissionJob:
         return await asyncio.to_thread(self.client.cancel_mission, mission_id, reason)

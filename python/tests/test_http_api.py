@@ -45,6 +45,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "page": {"events": [], "next_after": 0}})
         elif self.path.startswith("/v1/missions?"):
             self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
+        elif self.path.startswith("/v1/missions/async-1/trace"):
+            self._send(200, {"ok": True, "mission_id": "async-1", "trace_schema_version": "bioprism-devplat-mission-trace/0.1", "events": [{"sequence": 0, "event": "mission.started", "wave": None, "step_id": None, "tool": None, "status": "running", "arguments_digest": None, "bytes": 0, "detail": None}, {"sequence": 1, "event": "mission.completed", "wave": None, "step_id": None, "tool": None, "status": "succeeded", "arguments_digest": None, "bytes": 14, "detail": None}], "after": 0, "next_after": 2, "oldest": 0, "newest": 1, "gap": False, "dropped_events": 0, "terminal": True, "limit": 100, "truncated": False})
         elif self.path == "/v1/missions/async-1":
             self._send(200, {"ok": True, "mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "progress": {"phase": "succeeded", "current_wave": 0, "total_steps": 1, "completed_steps": 1, "active_steps": 0, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "trace_sequence": 4, "last_event": "mission.completed"}, "result": {"mission_status": "succeeded"}})
         else:
@@ -120,6 +122,12 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(status.progress.phase, "succeeded")
         self.assertEqual(status.progress.completed_steps, 1)
         self.assertEqual(status.progress.last_event, "mission.completed")
+        trace = client.mission_trace("async-1")
+        self.assertEqual(trace.events[0].event, "mission.started")
+        self.assertEqual(trace.events[-1].event, "mission.completed")
+        self.assertEqual(trace.next_after, 2)
+        with self.assertRaises(ArgumentError):
+            client.mission_trace("async-1", after=-1)
         inventory = client.missions(status="succeeded", limit=5)
         self.assertEqual(inventory["missions"][0]["mission_id"], "async-1")
         self.assertTrue(client.cancel_mission("async-1", "operator stop").cancel_requested)
@@ -238,6 +246,8 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertEqual(status.status, "succeeded")
             self.assertIsNotNone(status.progress)
             self.assertEqual(status.progress.phase, "succeeded")
+            trace = await client.mission_trace("async-1")
+            self.assertEqual(trace.events[-1].event, "mission.completed")
             inventory = await client.missions(status="succeeded", limit=5)
             self.assertEqual(inventory["missions"][0]["mission_id"], "async-1")
             self.assertTrue((await client.cancel_mission("async-1", "operator stop")).cancel_requested)

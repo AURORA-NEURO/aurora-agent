@@ -246,6 +246,9 @@ test("client exposes asynchronous mission submission, status, and cancellation",
       if (path === "/v1/missions/async-1" && init.method === "GET") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "succeeded", cancel_requested: false, progress: { phase: "succeeded", current_wave: 0, total_steps: 1, completed_steps: 1, active_steps: 0, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, trace_sequence: 4, last_event: "mission.completed" }, result: { mission_status: "succeeded" } });
       }
+      if (path === "/v1/missions/async-1/trace" && init.method === "GET") {
+        return jsonResponse({ ok: true, mission_id: "async-1", trace_schema_version: "bioprism-devplat-mission-trace/0.1", events: [{ sequence: 0, event: "mission.started", wave: null, step_id: null, tool: null, status: "running", arguments_digest: null, bytes: 0, detail: null }, { sequence: 1, event: "mission.completed", wave: null, step_id: null, tool: null, status: "succeeded", arguments_digest: null, bytes: 14, detail: null }], after: 0, next_after: 2, oldest: 0, newest: 1, gap: false, dropped_events: 0, terminal: true, limit: 100, truncated: false });
+      }
       if (path === "/v1/missions/async-1/cancel" && init.method === "POST") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "running", cancel_requested: true, cancel_reason: "operator stop" }, 202);
       }
@@ -265,6 +268,10 @@ test("client exposes asynchronous mission submission, status, and cancellation",
   assert.equal(status.progress.phase, "succeeded");
   assert.equal(status.progress.completed_steps, 1);
   assert.equal(status.progress.last_event, "mission.completed");
+  const trace = await client.missionTrace("async-1");
+  assert.equal(trace.events[0].event, "mission.started");
+  assert.equal(trace.events[1].event, "mission.completed");
+  assert.equal(trace.next_after, 2);
   assert.equal(status.result.mission_status, "succeeded");
   const inventory = await client.missions("succeeded", 5);
   assert.equal(inventory.missions[0].mission_id, "async-1");

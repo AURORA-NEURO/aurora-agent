@@ -168,6 +168,9 @@ Queued, running, cancellation-requested, and terminal responses share phase, wav
 byte, and latest-event counters; terminal reconciliation prevents the operational projection from
 drifting away from the report. This still deliberately does not provide durable queue storage,
 distributed scheduling, force-kill semantics, or domain-level success claims.
+The gateway now also retains a bounded per-mission trace window and exposes cursor-based
+`GET /v1/missions/{mission_id}/trace` retrieval. SDKs type the event pages and make retention gaps
+explicit, so replay tooling can distinguish an empty page from history that was discarded.
 The first Python integration layer now exists under `python/`: a standard-library MCP client with
 sync/async lifecycle handling, bounded JSON-RPC framing, structured refusal preservation, and
 helpers for the shipped cross-domain workflows. This is intentionally narrower than the full

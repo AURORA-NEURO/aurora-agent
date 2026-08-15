@@ -96,6 +96,9 @@ Each `MissionJob` also exposes an optional typed `MissionProgress` projection fo
 and terminal views. It includes phase, wave, active/completed counts, outcome counters, returned
 bytes, and the latest trace sequence/event; the authoritative terminal report remains the source of
 truth for replay and domain interpretation.
+`mission_trace(mission_id, after=..., limit=...)` pages the retained authoritative trace through a
+typed `MissionTracePage`; `gap` and `dropped_events` remain visible when a cursor falls behind the
+bounded retention window.
 For any current or future domain without a handwritten wrapper, `tool_catalogue()` snapshots the
 live `tools/list` or `/v1/tools` definitions, `plan_tool()` performs conservative shape-only
 preflight, and `tool_checked()` executes the reviewed call. Plans are digest-bound and carry no

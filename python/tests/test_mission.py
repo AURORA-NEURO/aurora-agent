@@ -11,6 +11,7 @@ from prism_sdk import (
     MissionRequest,
     MissionStep,
     MissionTraceEvent,
+    MissionTracePage,
     ToolCatalogue,
     mission_from_route,
     preflight_mission,
@@ -43,6 +44,28 @@ def catalogue() -> ToolCatalogue:
 
 
 class MissionPreflightTests(unittest.TestCase):
+    def test_trace_page_validates_cursor_order_and_gap_metadata(self) -> None:
+        page = MissionTracePage.from_wire(
+            {
+                "mission_id": "mission-1",
+                "trace_schema_version": "bioprism-devplat-mission-trace/0.1",
+                "events": [],
+                "after": 4,
+                "next_after": 4,
+                "oldest": 8,
+                "newest": 9,
+                "gap": True,
+                "dropped_events": 4,
+                "terminal": False,
+                "limit": 100,
+                "truncated": False,
+            }
+        )
+        self.assertTrue(page.gap)
+        self.assertEqual(page.dropped_events, 4)
+        with self.assertRaises(ArgumentError):
+            MissionTracePage.from_wire({"mission_id": "mission-1", "events": [{"sequence": 2}, {"sequence": 1}]})
+
     def test_progress_validates_bounded_dashboard_projection(self) -> None:
         progress = MissionProgress.from_wire(
             {

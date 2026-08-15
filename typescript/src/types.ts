@@ -511,6 +511,23 @@ export interface MissionJob extends JsonObject {
   progress?: MissionProgress;
   poll?: string;
   cancel?: string;
+  trace?: string;
+}
+
+export interface MissionTracePage extends JsonObject {
+  ok: boolean;
+  mission_id: string;
+  trace_schema_version: string;
+  events: MissionTraceEvent[];
+  after: number;
+  next_after: number;
+  oldest: number | null;
+  newest: number | null;
+  gap: boolean;
+  dropped_events: number;
+  terminal: boolean;
+  limit: number;
+  truncated: boolean;
 }
 
 export interface MissionInventorySummary extends JsonObject {
@@ -534,6 +551,7 @@ export interface MissionInventoryItem extends JsonObject {
   summary: MissionInventorySummary;
   poll: string;
   cancel: string;
+  trace: string;
 }
 
 export interface MissionInventoryResponse extends JsonObject {

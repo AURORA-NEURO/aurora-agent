@@ -68,6 +68,8 @@ if (result.mcp.result?.isError) {
 - `MissionJob.progress` is a typed bounded live projection with phase, current wave,
   active/completed counts, outcome counters, returned bytes, and the latest trace cursor/event;
   terminal results and traces remain authoritative.
+- `missionTrace(missionId, after, limit)` pages the retained authoritative trace into a typed
+  `MissionTracePage`; the exclusive `next_after` cursor and any retention gap are explicit.
 - `missionFromRoute()` converts a completed `capabilityRoute()` response into a provenance-preserving
   mission assembly only after every need has one caller-selected candidate and explicit JSON
   arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is

@@ -11,8 +11,8 @@ pub mod server;
 pub use rpc::{Request, Response};
 pub use server::{
     resource_definitions, tool_definitions, workspace_capabilities, Lifecycle, Server,
-    CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI, PROTOCOL_VERSION, QUERY_SCHEMA_URI, SERVER_NAME,
-    WORLD_SCHEMA_URI,
+    CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI, MISSION_TRACE_SCHEMA_VERSION, PROTOCOL_VERSION,
+    QUERY_SCHEMA_URI, SERVER_NAME, WORLD_SCHEMA_URI,
 };
 
 use std::io::{BufRead, Write};

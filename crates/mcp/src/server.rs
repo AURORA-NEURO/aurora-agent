@@ -59,8 +59,7 @@ use bioprism_devplat::{
     apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
     CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
-    CAPABILITY_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
-    WORKBENCH_SCHEMA_VERSION,
+    CAPABILITY_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -240,6 +239,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+pub use bioprism_devplat::MISSION_TRACE_SCHEMA_VERSION;
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SERVER_NAME: &str = "bioprism";

@@ -65,6 +65,13 @@ report is returned, so dashboards can use one shape for queued, live, and termin
 operational view only: the terminal mission report and its trace remain authoritative for replay,
 content identity, and domain interpretation.
 
+`GET /v1/missions/{mission_id}/trace?after=<n>&limit=<n>` returns at most 1,000 retained
+clock-free trace events. The first request uses `after=0`; the response's `next_after` is the
+exclusive cursor for the next request. `gap` and `dropped_events` are explicit if the bounded trace
+retention window no longer contains the requested prefix. Trace retrieval is available while the
+mission is running and after it is terminal; it is a replay/observability surface, not a second
+execution result.
+
 `POST /v1/missions` accepts the same JSON object as the `agent_mission` tool and returns `202`
 after the complete mission graph, policy, allow-list, and safety bounds have passed validation.
 Validation includes bounded authoritative JSON Schema preflight against the live `tools/list`

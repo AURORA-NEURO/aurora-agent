@@ -117,6 +117,8 @@ Its optional `progress: MissionProgress` field provides one bounded shape for qu
 terminal dashboards: phase, current wave, active/completed steps, outcome counters, returned bytes,
 and the latest clock-free trace sequence/event. The terminal `result` and its execution trace remain
 authoritative for replay and domain interpretation.
+`missionTrace(missionId, after, limit)` provides a typed `MissionTracePage` with ordered events,
+an exclusive `next_after` cursor, and explicit retention-gap metadata.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain

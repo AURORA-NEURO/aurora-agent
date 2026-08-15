@@ -21,6 +21,7 @@ MAX_STEP_OUTPUT_BYTES = 20_000_000
 MAX_TOTAL_OUTPUT_BYTES = 20_000_000
 MAX_PARALLEL_WAVE_WIDTH = 16
 MAX_MISSION_LIST_LIMIT = 256
+MAX_MISSION_TRACE_PAGE = 1000
 MISSION_ASSEMBLY_SCHEMA = "bioprism-python-mission-assembly/0.1"
 MISSION_TRACE_SCHEMA_VERSION = "bioprism-devplat-mission-trace/0.1"
 MISSION_TRACE_EVENTS = frozenset(
@@ -645,6 +646,88 @@ class MissionTraceEvent:
             "bytes": self.bytes,
             "detail": self.detail,
         }
+
+
+@dataclass(frozen=True)
+class MissionTracePage:
+    """Typed cursor page over a bounded asynchronous mission trace."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    trace_schema_version: str
+    events: tuple[MissionTraceEvent, ...]
+    after: int
+    next_after: int
+    oldest: int | None
+    newest: int | None
+    gap: bool
+    dropped_events: int
+    terminal: bool
+    limit: int
+    truncated: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionTracePage":
+        raw = _mapping("mission trace page", value)
+        mission_id = raw.get("mission_id")
+        _text("mission trace mission_id", mission_id)
+        schema = raw.get("trace_schema_version")
+        _text("mission trace schema version", schema)
+        values = raw.get("events")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ArgumentError("mission trace events must be an array")
+        events = tuple(MissionTraceEvent.from_wire(item) for item in values)
+        sequences = tuple(event.sequence for event in events)
+        if sequences != tuple(sorted(set(sequences))):
+            raise ArgumentError("mission trace events must be sorted and unique")
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission trace {name} must be a non-negative integer")
+            return candidate
+
+        def optional_non_negative(name: str) -> int | None:
+            candidate = raw.get(name)
+            if candidate is not None and (not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0):
+                raise ArgumentError(f"mission trace {name} must be null or a non-negative integer")
+            return candidate
+
+        after = non_negative("after")
+        next_after = non_negative("next_after")
+        oldest = optional_non_negative("oldest")
+        newest = optional_non_negative("newest")
+        gap = raw.get("gap")
+        if not isinstance(gap, bool):
+            raise ArgumentError("mission trace gap must be a boolean")
+        dropped_events = non_negative("dropped_events")
+        terminal = raw.get("terminal")
+        if not isinstance(terminal, bool):
+            raise ArgumentError("mission trace terminal must be a boolean")
+        limit = non_negative("limit")
+        if not 1 <= limit <= MAX_MISSION_TRACE_PAGE:
+            raise ArgumentError(f"mission trace limit must be between 1 and {MAX_MISSION_TRACE_PAGE}")
+        truncated = raw.get("truncated")
+        if not isinstance(truncated, bool):
+            raise ArgumentError("mission trace truncated must be a boolean")
+        return cls(
+            raw,
+            mission_id,
+            schema,
+            events,
+            after,
+            next_after,
+            oldest,
+            newest,
+            gap,
+            dropped_events,
+            terminal,
+            limit,
+            truncated,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
 
 
 @dataclass(frozen=True)

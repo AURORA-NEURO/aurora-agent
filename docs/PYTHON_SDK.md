@@ -131,6 +131,8 @@ invent defaults:
   `MissionJob.progress` is a typed `MissionProgress` snapshot with phase, wave, active/completed
   counts, outcome counters, byte totals, and the latest trace cursor/event; it is safe for bounded
   dashboards but does not replace the terminal report or claim domain success.
+  `mission_trace(mission_id, after=..., limit=...)` returns a typed `MissionTracePage` with ordered
+  `MissionTraceEvent` rows, an exclusive `next_after` cursor, and explicit retention-gap metadata.
   `delete_mission(mission_id)` removes a terminal job when the caller has consumed its report;
   active jobs are refused so cleanup cannot discard in-flight work.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

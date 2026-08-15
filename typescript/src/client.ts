@@ -35,6 +35,7 @@ import type {
   MissionInventoryResponse,
   MissionPreflightResult,
   MissionRouteSelection,
+  MissionTracePage,
   RepositoryBundleArgs,
   RepositoryCatalogArgs,
   RepositoryImpactArgs,
@@ -284,6 +285,20 @@ export class ApiClient {
   async missionStatus(missionId: string, options?: ClientRequestOptions): Promise<MissionJob> {
     const id = pathSegment(missionId, "mission id");
     return this.request<MissionJob>("GET", `/v1/missions/${encodeURIComponent(id)}`, undefined, options);
+  }
+
+  /** Read a bounded cursor page from the authoritative clock-free mission trace. */
+  async missionTrace(
+    missionId: string,
+    after = 0,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<MissionTracePage> {
+    const id = pathSegment(missionId, "mission id");
+    if (!Number.isSafeInteger(after) || after < 0) throw new ArgumentError("after must be a non-negative integer");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_EVENT_PAGE) throw new ArgumentError("limit must be 1..=1000");
+    const query = new URLSearchParams({ after: String(after), limit: String(limit) });
+    return this.request<MissionTracePage>("GET", `/v1/missions/${encodeURIComponent(id)}/trace?${query.toString()}`, undefined, options);
   }
 
   /** Request cooperative cancellation; in-flight nested tools are allowed to return. */
