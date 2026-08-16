@@ -1422,6 +1422,68 @@ export interface WorldGenerateResult extends JsonObject {
   diagnostics?: WorldDiagnosticResult[];
 }
 
+export type FactoryActionKind = "enqueue" | "lease" | "heartbeat" | "stage" | "commit" | "fail" | "recover_expired" | "compensate" | "release_quarantine" | "cancel";
+export type FactoryResourceClass = "compile" | "ingest" | "sandbox" | "evaluate" | "mutate" | "index";
+export type FactoryIdempotencyClass = "idempotent" | "non_idempotent" | "compensable";
+export type FactoryJobState = "queued" | "leased" | "staged" | "succeeded" | "failed" | "quarantined" | "dead_lettered" | "cancelled";
+export type FactoryRecoveryOutcome = "requeued" | "quarantined" | "awaiting_compensation" | "dead_lettered";
+
+export interface FactoryLifecycleSimulateArgs extends JsonObject {
+  jobs: JsonObject[];
+  workers: JsonObject[];
+  actions: (JsonObject & { kind?: string })[];
+}
+
+export interface FactoryRecoveryResult extends JsonObject {
+  outcome: FactoryRecoveryOutcome;
+  job_id: string;
+  attempt?: number;
+  attempts?: number;
+  reason?: string;
+}
+
+export interface FactoryLeaseResult extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  attempt: number;
+  granted_at: JsonValue;
+  expires_at: JsonValue;
+  last_heartbeat: JsonValue;
+}
+
+export interface FactoryJobSnapshotResult extends JsonObject {
+  id: string;
+  job?: JsonObject & {
+    id: string;
+    resource_class: FactoryResourceClass;
+    idempotency: FactoryIdempotencyClass;
+    state: FactoryJobState;
+    attempts: number;
+  };
+  committed_result?: JsonValue | null;
+}
+
+export interface FactoryActionTraceResult extends JsonObject {
+  index: number;
+  kind: string;
+  ok: boolean;
+  result?: JsonValue;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface FactoryLifecycleResult extends JsonObject {
+  ok: boolean;
+  action_count: number;
+  action_failures: number;
+  trace: FactoryActionTraceResult[];
+  jobs: FactoryJobSnapshotResult[];
+  quarantined: (JsonObject & { id: string; state: "quarantined" })[];
+  dead_lettered: (JsonObject & { id: string; state: "dead_lettered" })[];
+  counts_by_class: Record<FactoryResourceClass, number>;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

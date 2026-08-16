@@ -400,6 +400,15 @@ invent defaults:
   content digests, optional documents, and fail-closed parse/validation stages distinct. The
   report exposes deterministic, digest-binding, and side-effect-free guarantees without treating
   generation as a clinical, network, model, or publication action.
+- `FactoryLifecycleSimulateArgs` and `factory_lifecycle_report(...)` type the bounded factory
+  replay across sync MCP, async MCP, and HTTP. `FactoryActionTraceReport` retains the ordered
+  action index, operation kind, success/refusal, and fail-closed marker; lease results, recovery
+  outcomes, staged-output invisibility, final job states, committed results, quarantine, dead
+  letters, resource-class counts, and invariant guarantees remain separate. The argument envelope
+  enforces the authority's 256-job, 256-worker, 2000-action, unique-worker, and 20 MB bounds while
+  preserving unknown operation kinds for the Rust authority to refuse explicitly. This is an
+  in-memory deterministic lifecycle projection: it does not create workers, queues, clocks,
+  durable leases, filesystem state, network effects, or external side effects.
 - `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
   across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit

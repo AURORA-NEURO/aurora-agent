@@ -469,6 +469,10 @@ registry, bundle, quality, conformance, research-CI, operations, and pack-health
 retaining repository impact and developer-platform diagnostics as advisory evidence. These
 surfaces remain bounded and local: they do not create durable queues, identity providers, web UI,
 public-key signing, CI execution, deployment, or network publication.
+The Python and TypeScript SDKs expose the factory result as an ordered, typed trace: successful
+leases, recovery variants, staged-output invisibility, committed-result snapshots, quarantined and
+dead-lettered jobs, and fail-closed action refusals remain independently inspectable across sync,
+async, MCP, and HTTP facades.
 `runtime_execution_simulate` runs bounded serialized effect programs against the deterministic
 in-process world, returns policy and budget evidence, proves complete replay, and can open a forked
 suffix with observable state and divergence comparison. The Python and TypeScript SDKs expose typed

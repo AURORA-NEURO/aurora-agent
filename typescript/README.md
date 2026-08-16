@@ -38,7 +38,7 @@ if (result.mcp.result?.isError) {
   `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`,
   `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
   `runtimeExecutionSimulate`, `packCatalogue`, `packHealthAssess`, `securityRedteamSimulate`, and
-  `worldGenerate`
+  `worldGenerate`, and `factoryLifecycleSimulate`
   cover the highest-value
   cross-domain workflows without pretending
   to type every domain payload twice. Repository helpers keep catalog, route traversal, and
@@ -55,6 +55,9 @@ if (result.mcp.result?.isError) {
 - `worldGenerate` keeps synthetic world/query documents, exact digests, structural counts, and
   validation diagnostics visible in one bounded response; it performs no file, network, model,
   clinical, or publication action.
+- `factoryLifecycleSimulate` keeps the ordered lifecycle trace, lease/recovery variants,
+  staged-versus-committed output boundary, final job snapshots, quarantine/dead-letter views, and
+  fail-closed refusals typed without pretending the Fetch client is a queue or worker runtime.
 - `toolCatalogue()` snapshots the live `/v1/tools` definitions into a bounded SHA-256 catalogue;
   `planTool()` performs conservative JSON-shape preflight without a POST; and `toolChecked()`
   executes the reviewed call while preserving the raw refusal envelope. This covers every current

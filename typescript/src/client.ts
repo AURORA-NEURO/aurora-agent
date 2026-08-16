@@ -128,6 +128,8 @@ import type {
   SecurityRedteamResult,
   WorldGenerateArgs,
   WorldGenerateResult,
+  FactoryLifecycleSimulateArgs,
+  FactoryLifecycleResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -414,6 +416,10 @@ export class ApiClient {
 
   async worldGenerate(args: WorldGenerateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorldGenerateResult>> {
     return this.callTool<WorldGenerateResult>("world_generate", args, options);
+  }
+
+  async factoryLifecycleSimulate(args: FactoryLifecycleSimulateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FactoryLifecycleResult>> {
+    return this.callTool<FactoryLifecycleResult>("factory_lifecycle_simulate", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

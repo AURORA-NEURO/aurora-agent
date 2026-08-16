@@ -222,6 +222,21 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["only confirmed findings can become regression cells"],
         limitations: ["this endpoint replays typed contracts; it does not run fuzzers"],
       } } } });
+      if (path === "/v1/tools/factory_lifecycle_simulate") return jsonResponse({ ok: true, tool: "factory_lifecycle_simulate", request_id: "r25", mcp: { result: { structuredContent: {
+        ok: true,
+        action_count: 3,
+        action_failures: 0,
+        trace: [
+          { index: 0, kind: "lease", ok: true, result: { job_id: "job-1", worker_id: "worker-1", attempt: 1, granted_at: { nanos: 0 }, expires_at: { nanos: 30 }, last_heartbeat: { nanos: 0 } } },
+          { index: 1, kind: "stage", ok: true, result: { job_id: "job-1", visible_before_commit: false } },
+          { index: 2, kind: "commit", ok: true, result: { job_id: "job-1", committed: true } },
+        ],
+        jobs: [{ id: "job-1", job: { id: "job-1", resource_class: "compile", idempotency: "idempotent", state: "succeeded", attempts: 1 }, committed_result: { digest: "out-1" } }],
+        quarantined: [],
+        dead_lettered: [],
+        counts_by_class: { compile: 1 },
+        guarantees: ["the simulation delegates every lifecycle transition to the typed in-memory JobStore"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -698,6 +713,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(redteam.mcp.result.structuredContent.workflow, "section_13_redteam_incident_evidence");
   assert.equal(redteam.mcp.result.structuredContent.regression_corpus.sentinel_count, 1);
   assert.equal(redteam.mcp.result.structuredContent.findings[0].regression_gate.eligible, true);
+  const factory = await client.factoryLifecycleSimulate({
+    jobs: [{ id: "job-1", resource_class: "compile", idempotency: "idempotent", priority: 5, max_attempts: 3, spec: { kind: "pure-build" }, state: "queued", attempts: 0 }],
+    workers: [{ worker_id: "worker-1", classes: ["compile"], lease_duration_nanos: 30 }],
+    actions: [{ kind: "lease", worker_id: "worker-1", now_nanos: 0 }],
+  });
+  assert.equal(factory.mcp.result.structuredContent.trace[0].kind, "lease");
+  assert.equal(factory.mcp.result.structuredContent.jobs[0].job.state, "succeeded");
+  assert.equal(factory.mcp.result.structuredContent.trace.every((row) => row.fail_closed !== true), true);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

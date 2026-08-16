@@ -187,6 +187,7 @@ from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalog
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
+from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateArgs, factory_lifecycle_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -848,6 +849,23 @@ class ApiClient:
         """Return typed world/query identity and validation evidence."""
 
         return world_generate_report(self.world_generate(request))
+
+    def factory_lifecycle_simulate(
+        self,
+        request: FactoryLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Replay the typed factory lifecycle through the HTTP gateway."""
+
+        normalized = request if isinstance(request, FactoryLifecycleSimulateArgs) else FactoryLifecycleSimulateArgs.from_wire(request)
+        return self.call_tool("factory_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    def factory_lifecycle_simulate_report(
+        self,
+        request: FactoryLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> FactoryLifecycleReport:
+        """Return typed factory traces and final visibility through the HTTP gateway."""
+
+        return factory_lifecycle_report(self.factory_lifecycle_simulate(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2623,6 +2641,23 @@ class AsyncApiClient:
         """Return async typed world-generation evidence."""
 
         return world_generate_report(await self.world_generate(request))
+
+    async def factory_lifecycle_simulate(
+        self,
+        request: FactoryLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async factory lifecycle replay through the HTTP gateway."""
+
+        normalized = request if isinstance(request, FactoryLifecycleSimulateArgs) else FactoryLifecycleSimulateArgs.from_wire(request)
+        return await self.call_tool("factory_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    async def factory_lifecycle_simulate_report(
+        self,
+        request: FactoryLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> FactoryLifecycleReport:
+        """Return async typed factory lifecycle evidence."""
+
+        return factory_lifecycle_report(await self.factory_lifecycle_simulate(request))
 
     async def developer_delivery_audit_report(
         self,

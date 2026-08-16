@@ -202,6 +202,12 @@ client preserves these nonclaims beside the typed evidence.
 world/query IDs, exact digests, structural counts, warning/error diagnostics, and optional bounded
 documents. Parse, query-parse, and world-validation refusals retain their stage and fail-closed
 state; a successful transport response is not treated as a side effect or a clinical assertion.
+`factoryLifecycleSimulate` accepts serialized jobs, worker capabilities, and ordered lifecycle
+actions, returning `FactoryLifecycleResult`. The nested interfaces preserve lease ownership,
+heartbeat/expiry recovery outcomes, stage-versus-commit visibility, compensation, quarantine,
+cancellation, final snapshots, and fail-closed trace rows without moving lifecycle semantics into
+TypeScript. Unknown action kinds remain representable so the Rust authority can return an explicit
+refusal; the SDK only types the bounded request shape and the evidence-bearing response.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

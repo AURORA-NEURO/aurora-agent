@@ -224,6 +224,7 @@ from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalog
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
+from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateArgs, factory_lifecycle_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -360,6 +361,25 @@ class Workspace:
         normalized = request if isinstance(request, WorldGenerateArgs) else WorldGenerateArgs.from_wire(request)
         result = self.client.call_tool("world_generate", normalized.to_mcp_arguments())
         return world_generate_report(result.require_object())
+
+    def factory_lifecycle_simulate(
+        self,
+        request: FactoryLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Replay the bounded typed factory lifecycle through the MCP authority."""
+
+        normalized = request if isinstance(request, FactoryLifecycleSimulateArgs) else FactoryLifecycleSimulateArgs.from_wire(request)
+        return self.tool("factory_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    def factory_lifecycle_simulate_report(
+        self,
+        request: FactoryLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> FactoryLifecycleReport:
+        """Return ordered action refusals, recovery branches, and final job visibility."""
+
+        normalized = request if isinstance(request, FactoryLifecycleSimulateArgs) else FactoryLifecycleSimulateArgs.from_wire(request)
+        result = self.client.call_tool("factory_lifecycle_simulate", normalized.to_mcp_arguments())
+        return factory_lifecycle_report(result.require_object())
 
     def pack_catalogue_report(
         self,
@@ -2127,6 +2147,25 @@ class AsyncWorkspace:
         normalized = request if isinstance(request, WorldGenerateArgs) else WorldGenerateArgs.from_wire(request)
         result = await self.client.call_tool("world_generate", normalized.to_mcp_arguments())
         return world_generate_report(result.require_object())
+
+    async def factory_lifecycle_simulate(
+        self,
+        request: FactoryLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.factory_lifecycle_simulate`."""
+
+        normalized = request if isinstance(request, FactoryLifecycleSimulateArgs) else FactoryLifecycleSimulateArgs.from_wire(request)
+        return await self.tool("factory_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    async def factory_lifecycle_simulate_report(
+        self,
+        request: FactoryLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> FactoryLifecycleReport:
+        """Async typed factory lifecycle evidence."""
+
+        normalized = request if isinstance(request, FactoryLifecycleSimulateArgs) else FactoryLifecycleSimulateArgs.from_wire(request)
+        result = await self.client.call_tool("factory_lifecycle_simulate", normalized.to_mcp_arguments())
+        return factory_lifecycle_report(result.require_object())
 
     async def pack_catalogue_report(
         self,
