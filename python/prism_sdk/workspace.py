@@ -82,6 +82,11 @@ from .atlas_surface import (
     AtlasSurfaceAuditReport,
     atlas_surface_audit_report,
 )
+from .engineering_manifest import (
+    EngineeringAuditReport,
+    EngineeringManifestArgs,
+    engineering_manifest_audit_report,
+)
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2976,6 +2981,17 @@ class Workspace:
         normalized = request if isinstance(request, AtlasSurfaceAuditArgs) else AtlasSurfaceAuditArgs.from_wire(request)
         return atlas_surface_audit_report(self.tool("atlas_surface_audit", normalized.to_mcp_arguments()))
 
+    def engineering_manifest_audit(self, request: EngineeringManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit package topology, tickets, ADR history, and ownership rows through MCP."""
+
+        normalized = request if isinstance(request, EngineeringManifestArgs) else EngineeringManifestArgs.from_wire(request)
+        return self.tool("engineering_manifest_audit", normalized.to_mcp_arguments())
+
+    def engineering_manifest_audit_report(self, request: EngineeringManifestArgs | Mapping[str, Any]) -> EngineeringAuditReport:
+        """Return typed engineering-manifest coherence and readiness evidence."""
+
+        return engineering_manifest_audit_report(self.engineering_manifest_audit(request))
+
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive evaluation panel through MCP."""
 
@@ -5630,6 +5646,17 @@ class AsyncWorkspace:
 
         normalized = request if isinstance(request, AtlasSurfaceAuditArgs) else AtlasSurfaceAuditArgs.from_wire(request)
         return atlas_surface_audit_report((await self.client.call_tool("atlas_surface_audit", normalized.to_mcp_arguments())).require_ok())
+
+    async def engineering_manifest_audit(self, request: EngineeringManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.engineering_manifest_audit."""
+
+        normalized = request if isinstance(request, EngineeringManifestArgs) else EngineeringManifestArgs.from_wire(request)
+        return (await self.client.call_tool("engineering_manifest_audit", normalized.to_mcp_arguments())).require_ok()
+
+    async def engineering_manifest_audit_report(self, request: EngineeringManifestArgs | Mapping[str, Any]) -> EngineeringAuditReport:
+        """Async counterpart to Workspace.engineering_manifest_audit_report."""
+
+        return engineering_manifest_audit_report(await self.engineering_manifest_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.adaptive_panel`."""

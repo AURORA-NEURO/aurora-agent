@@ -613,6 +613,27 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         surface_audits: { sound: true }, policies: { require_sound_surfaces: true },
         guarantees: ["holes are not zeroes"], limitations: ["caller-supplied records"],
       } } } });
+      if (path === "/v1/tools/engineering_manifest_audit") return jsonResponse({ ok: true, tool: "engineering_manifest_audit", request_id: "r15engineering", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-engineering-audit/0.1",
+        workflow: "engineering_manifest_audit",
+        manifest_digest: "a".repeat(64),
+        valid: true,
+        blocking_issue_count: 0,
+        warning_count: 0,
+        audit: {
+          schema: "bioprism-engineering-audit/0.1",
+          manifest_schema: "bioprism-engineering-manifest/0.1",
+          digest: "a".repeat(64),
+          valid: true,
+          counts: { packages: 2, public_packages: 1, tickets: 2, completed_tickets: 1, actionable_tickets: 1, adrs: 1, accepted_adrs: 1, ownership_rows: 1 },
+          package_order: ["core", "api"],
+          cyclic_packages: [],
+          ticket_readiness: [{ ticket_id: "T-002", status: "planned", state: "actionable", blocking_dependencies: [], dependency_ready: true }],
+          adr_supersession: [], ownership_surfaces: ["api"], issues: [], guarantees: ["edges checked"], limitations: ["artifact only"],
+        },
+        guarantees: ["edges checked"], limitations: ["artifact only"],
+      } } } });
       if (path === "/v1/tools/adaptive_panel") return jsonResponse({ ok: true, tool: "adaptive_panel", request_id: "r15d", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/adaptive-panel/0.1",
@@ -1448,6 +1469,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "local_delivery");
+  const engineering = await client.engineeringManifestAudit({
+    project: { id: "aurora-agent", version: "0.1.0", repository: "github.com/AURORA-NEURO/aurora-agent" },
+    baseline: { language: "Rust 2021", runtime: "cargo", api: "MCP JSON-RPC", storage: "in-memory", observability: "structured", deployment: "local" },
+    packages: [{ id: "core", path: "crates/core", language: "rust", kind: "library", owner: "platform" }],
+    tickets: [{ id: "T-001", title: "ship core", package: "core", contract: "core-contract", status: "done", acceptance: ["tests pass"] }],
+  });
+  assert.equal(engineering.mcp.result.structuredContent.schema, "bioprism-engineering-audit/0.1");
+  assert.equal(engineering.mcp.result.structuredContent.audit.package_order[1], "api");
+  assert.equal(engineering.mcp.result.structuredContent.audit.counts.actionable_tickets, 1);
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });
   const evidenceAudit = await client.bioCapabilityEvidenceAudit({ evidence: [], claim_requests: [], metrics: {} });
   const publicationAudit = await client.bioAtlasPublicationAudit({ atlas: { atlas_id: "atlas-1" }, release_request: { id: "publication-1", targets: ["atlas_profile"] } });

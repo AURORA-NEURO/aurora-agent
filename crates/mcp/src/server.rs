@@ -131,7 +131,8 @@ use bioprism_devplat::{
     apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
     CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
-    CAPABILITY_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    EngineeringManifest, CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
+    MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1463,6 +1464,7 @@ impl Server {
             "governance_schema_check" => self.governance_schema_check(&arguments),
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
+            "engineering_manifest_audit" => self.engineering_manifest_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
@@ -24072,6 +24074,52 @@ impl Server {
         Ok(output)
     }
 
+    fn engineering_manifest_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_manifest = arguments
+            .get("manifest")
+            .cloned()
+            .ok_or("manifest is required and must be a serialized EngineeringManifest")?;
+        let encoded = serde_json::to_vec(&raw_manifest)
+            .map_err(|error| format!("cannot measure engineering manifest: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("manifest exceeds the 20000000-byte safety bound".into());
+        }
+        let manifest: EngineeringManifest = serde_json::from_value(raw_manifest)
+            .map_err(|error| format!("invalid engineering manifest: {error}"))?;
+        let audit = manifest
+            .audit()
+            .map_err(|error| format!("cannot audit engineering manifest: {error}"))?;
+        let blocking_issue_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::IssueSeverity::Blocking)
+            .count();
+        let warning_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::IssueSeverity::Warning)
+            .count();
+        Ok(json!({
+            "ok": true,
+            "workflow": "engineering_manifest_audit",
+            "schema": ENGINEERING_AUDIT_SCHEMA,
+            "manifest_digest": audit.digest,
+            "valid": audit.valid,
+            "blocking_issue_count": blocking_issue_count,
+            "warning_count": warning_count,
+            "audit": audit,
+            "guarantees": [
+                "package topology, ticket references, ADR history, and ownership rows are audited independently",
+                "the manifest digest is derived from canonical manifest content and is stable across equivalent JSON formatting",
+                "dependency readiness is reported as a planning state and never as proof that work ran",
+            ],
+            "limitations": [
+                "the route does not read the repository, run tests, execute CI, contact ticket systems, or authenticate people",
+                "a valid manifest is an internally coherent engineering record, not a release approval or production readiness claim",
+            ],
+        }))
+    }
+
     fn developer_delivery_audit(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery input: {error}"))?;
@@ -26400,7 +26448,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -28545,6 +28593,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release. Omit it to receive no readiness claim." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "engineering_manifest_audit",
+            "description": "Validate a bounded machine-readable engineering manifest. It checks the technology baseline, package paths and dependency DAG, ticket-to-package and ticket-to-contract references, ADR supersession, and RACI independent-review boundaries; it returns deterministic readiness states and a canonical manifest digest without reading the repository or executing process work.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifest": { "type": "object", "description": "Serialized bioprism-devplat EngineeringManifest with project, baseline, packages, tickets, ADRs, ownership rows, and explicit policies." }
+                },
+                "required": ["manifest"]
             }
         }),
         json!({

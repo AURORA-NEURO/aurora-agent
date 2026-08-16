@@ -384,6 +384,12 @@ values. Binary BAM/CRAM remains an explicit dependency-gated route.
 - `40.43` Engineering Adr Register
 - `40.45` Ownership Raci And Maintainer Boundaries
 
+The engineering_manifest_audit route is the new artifact-level foundation for these entries: it
+validates baseline declarations, package topology, ticket contracts and readiness, ADR
+supersession, RACI rows, independent-review separation, canonical digest, and fail-closed issue
+severity. The backlog keeps the six blueprint entries because the route does not claim to replace
+the surrounding process, repository automation, external ticket authority, or release systems.
+
 ## §19 Reference Examples — 3 uncovered
 
 - `19.01` Decision Cell Example

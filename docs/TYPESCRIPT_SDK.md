@@ -637,3 +637,10 @@ The API's `capabilities` response is the runtime compatibility anchor. Clients s
 the same in-process dispatcher, but gRPC, TLS termination, durable event storage, and an external
 delivery worker remain deployment responsibilities. A client must not infer those features from
 the presence of an HTTP listener.
+
+## Engineering manifest audit
+
+engineeringManifestAudit provides typed engineering-manifest digest, package topology, ticket
+readiness, ADR supersession, ownership/RACI, and warning/blocking issue evidence. The result
+remains an artifact audit and does not imply checkout inspection, CI execution, GitHub state, or
+release authority. See ENGINEERING_MANIFEST_AUDIT.md.

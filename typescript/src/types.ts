@@ -1323,6 +1323,143 @@ export interface DeveloperDeliveryAuditResult extends JsonObject {
   limitations: string[];
 }
 
+export type EngineeringTicketStatus = "planned" | "in_progress" | "blocked" | "done";
+export type EngineeringAdrStatus = "proposed" | "accepted" | "superseded" | "rejected";
+export type EngineeringIssueSeverity = "warning" | "blocking";
+
+export interface EngineeringProjectIdentityArgs extends JsonObject {
+  id: string;
+  version: string;
+  repository: string;
+}
+
+export interface EngineeringTechnologyBaselineArgs extends JsonObject {
+  language: string;
+  runtime: string;
+  api: string;
+  storage: string;
+  observability: string;
+  deployment: string;
+  reasons?: Record<string, string>;
+}
+
+export interface EngineeringPackageSpecArgs extends JsonObject {
+  id: string;
+  path: string;
+  language: string;
+  kind: string;
+  owner: string;
+  depends_on?: string[];
+  public?: boolean;
+  test_command?: string;
+}
+
+export interface EngineeringTicketSpecArgs extends JsonObject {
+  id: string;
+  title: string;
+  package: string;
+  contract: string;
+  status: EngineeringTicketStatus;
+  depends_on?: string[];
+  acceptance: string[];
+  blocker?: string;
+}
+
+export interface EngineeringAdrSpecArgs extends JsonObject {
+  id: string;
+  title: string;
+  status: EngineeringAdrStatus;
+  decision: string;
+  affects: string[];
+  supersedes?: string;
+}
+
+export interface EngineeringOwnershipSpecArgs extends JsonObject {
+  surface: string;
+  accountable: string;
+  responsible: string[];
+  consulted?: string[];
+  informed?: string[];
+  independent_reviewer?: string;
+}
+
+export interface EngineeringPoliciesArgs extends JsonObject {
+  require_acyclic_packages?: boolean;
+  require_ticket_contracts?: boolean;
+  require_ownership?: boolean;
+  require_adr_targets?: boolean;
+}
+
+export interface EngineeringManifestArgs extends JsonObject {
+  schema?: "bioprism-engineering-manifest/0.1";
+  project: EngineeringProjectIdentityArgs;
+  baseline: EngineeringTechnologyBaselineArgs;
+  packages?: EngineeringPackageSpecArgs[];
+  tickets?: EngineeringTicketSpecArgs[];
+  adrs?: EngineeringAdrSpecArgs[];
+  ownership?: EngineeringOwnershipSpecArgs[];
+  policies?: EngineeringPoliciesArgs;
+}
+
+export interface EngineeringIssueResult extends JsonObject {
+  code: string;
+  severity: EngineeringIssueSeverity;
+  subject: string;
+  detail: string;
+  remediation: string;
+}
+
+export interface EngineeringTicketReadinessResult extends JsonObject {
+  ticket_id: string;
+  status: EngineeringTicketStatus;
+  state: "complete" | "blocked" | "waiting" | "actionable" | string;
+  blocking_dependencies: string[];
+  dependency_ready: boolean;
+}
+
+export interface EngineeringCountsResult extends JsonObject {
+  packages: number;
+  public_packages: number;
+  tickets: number;
+  completed_tickets: number;
+  actionable_tickets: number;
+  adrs: number;
+  accepted_adrs: number;
+  ownership_rows: number;
+}
+
+export interface EngineeringAuditResult extends JsonObject {
+  schema: "bioprism-engineering-audit/0.1";
+  manifest_schema: string;
+  digest: string;
+  valid: boolean;
+  counts: EngineeringCountsResult;
+  package_order: string[];
+  cyclic_packages: string[][];
+  ticket_readiness: EngineeringTicketReadinessResult[];
+  adr_supersession: Array<{ newer: string; older: string; valid: boolean }>;
+  ownership_surfaces: string[];
+  issues: EngineeringIssueResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface EngineeringManifestAuditResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-engineering-audit/0.1";
+  workflow: "engineering_manifest_audit";
+  manifest_digest: string;
+  valid: boolean;
+  blocking_issue_count: number;
+  warning_count: number;
+  audit: EngineeringAuditResult;
+  guarantees: string[];
+  limitations: string[];
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
 export interface DeveloperPlatformStatusArgs extends JsonObject {
   include_details?: boolean;
   max_items?: number;

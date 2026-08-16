@@ -208,6 +208,7 @@ pub mod claim;
 pub mod classify;
 pub mod error;
 pub mod exploit;
+pub mod engineering;
 pub mod mission;
 pub mod report;
 pub mod repro;
@@ -236,6 +237,12 @@ pub use exploit::{
     intent_verdict, release_gate, standard_remediations, task_verdict, CellScore, Containment,
     GateOutcome, IntentVerdict, Remediation, Reward, SecurityCell, ServiceState, TamperAttempt,
     TaskVerdict,
+};
+pub use engineering::{
+    AdrSpec, AdrStatus, EngineeringAudit, EngineeringCounts, EngineeringError,
+    EngineeringIssue, EngineeringManifest, EngineeringPolicies, IssueSeverity, OwnershipSpec,
+    PackageSpec, ProjectIdentity, TechnologyBaseline, TicketReadiness, TicketSpec, TicketStatus,
+    AdrSupersession, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_MANIFEST_SCHEMA,
 };
 pub use mission::{
     apply_binding, plan_mission, MissionBinding, MissionError, MissionPlan, MissionPolicy,

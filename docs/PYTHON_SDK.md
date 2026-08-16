@@ -1144,3 +1144,13 @@ python -m compileall -q prism_sdk tests
 The tests use a subprocess fake MCP peer so lifecycle, framing, protocol, remote errors, structured
 refusals, sync/async parity, and cleanup are exercised through actual pipes rather than direct
 function calls.
+
+## Engineering manifest audit
+
+EngineeringManifestArgs and engineering_manifest_audit_report expose the machine-readable
+engineering manifest across sync/async MCP and HTTP. Typed nested arguments cover the technology
+baseline, package graph, ticket contracts, ADR history, ownership/RACI rows, and explicit
+policies. The report preserves canonical digest, dependency-first package order, cyclic
+components, ticket readiness, warning/blocking issues, independent-review collisions, and
+non-claims about checkout state, CI, GitHub, and release authority. See
+ENGINEERING_MANIFEST_AUDIT.md.

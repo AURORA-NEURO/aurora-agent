@@ -891,6 +891,15 @@ Research and developer infrastructure. It does not diagnose an individual, recom
 triage care, autonomously enroll participants, or claim medical-device functionality. Compression
 or abstraction never authorizes crossing a data-use, consent, privacy, or clinical boundary.
 
+## Engineering manifest audit
+
+The engineering_manifest_audit route adds the build-ready engineering artifact surface:
+technology baseline, package dependency topology, ticket-to-package contracts and readiness, ADR
+supersession, RACI ownership, independent-review separation, canonical digest, and explicit
+warning/blocking issue semantics. It validates declared coherence only; it does not inspect a
+checkout, run CI, query GitHub, or grant release authority. See
+docs/ENGINEERING_MANIFEST_AUDIT.md.
+
 ## License
 
 Apache-2.0

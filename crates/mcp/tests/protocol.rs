@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 160);
+    assert_eq!(tools.len(), 161);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3615,6 +3615,45 @@ fn developer_delivery_audit_composes_local_health_and_blocks_missing_evidence() 
 }
 
 #[test]
+fn engineering_manifest_audit_keeps_topology_ticket_readiness_and_raci_separate() {
+    let mut server = server();
+    let manifest = json!({
+        "schema": "bioprism-engineering-manifest/0.1",
+        "project": { "id": "aurora-agent", "version": "0.1.0", "repository": "github.com/AURORA-NEURO/aurora-agent" },
+        "baseline": {
+            "language": "Rust 2021", "runtime": "cargo", "api": "MCP JSON-RPC",
+            "storage": "in-memory", "observability": "structured stderr audit", "deployment": "local process"
+        },
+        "packages": [
+            { "id": "core", "path": "crates/core", "language": "rust", "kind": "library", "owner": "platform", "depends_on": [], "public": true },
+            { "id": "api", "path": "crates/api", "language": "rust", "kind": "service", "owner": "platform", "depends_on": ["core"], "public": true }
+        ],
+        "tickets": [
+            { "id": "T-001", "title": "ship core", "package": "core", "contract": "core-contract", "status": "done", "depends_on": [], "acceptance": ["core tests pass"] },
+            { "id": "T-002", "title": "ship api", "package": "api", "contract": "api-contract", "status": "planned", "depends_on": ["T-001"], "acceptance": ["protocol tests pass"] }
+        ],
+        "adrs": [{ "id": "ADR-001", "title": "use rust", "status": "accepted", "decision": "Rust owns canonical semantics", "affects": ["core", "api"] }],
+        "ownership": [{ "surface": "api", "accountable": "platform-lead", "responsible": ["api-team"], "independent_reviewer": "review-board" }]
+    });
+    let result = call(&mut server, "engineering_manifest_audit", json!({ "manifest": manifest.clone() }));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["audit"]["package_order"], json!(["core", "api"]));
+    assert_eq!(result["audit"]["ticket_readiness"][1]["state"], json!("actionable"));
+    assert_eq!(result["blocking_issue_count"], json!(0));
+    assert_eq!(result["manifest_digest"].as_str().unwrap().len(), 64);
+
+    let mut cyclic = manifest;
+    cyclic["packages"][0]["depends_on"] = json!(["api", "missing"]);
+    cyclic["ownership"][0]["independent_reviewer"] = json!("platform-lead");
+    let refused = call(&mut server, "engineering_manifest_audit", json!({ "manifest": cyclic }));
+    assert_eq!(refused["ok"], json!(true));
+    assert_eq!(refused["valid"], json!(false));
+    assert!(refused["audit"]["issues"].as_array().unwrap().iter().any(|issue| issue["code"] == "package_cycle"));
+    assert!(refused["audit"]["issues"].as_array().unwrap().iter().any(|issue| issue["code"] == "reviewer_not_independent"));
+}
+
+#[test]
 fn developer_workbench_audits_notebook_digests_queries_dashboard_and_plans_ci() {
     let mut server = server();
     let digest = "a".repeat(64);
@@ -4151,12 +4190,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(160));
-    assert_eq!(result["advertised_tool_count"], json!(160));
+    assert_eq!(result["unique_catalog_tools"], json!(161));
+    assert_eq!(result["advertised_tool_count"], json!(161));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(160));
-    assert_eq!(result["schema_quality"]["valid"], json!(160));
+    assert_eq!(result["schema_quality"]["checked"], json!(161));
+    assert_eq!(result["schema_quality"]["valid"], json!(161));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

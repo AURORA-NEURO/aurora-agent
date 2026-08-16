@@ -306,6 +306,7 @@ from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_i
 from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
 from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
 from .atlas_surface import AtlasSurfaceAuditArgs, AtlasSurfaceAuditReport, atlas_surface_audit_report
+from .engineering_manifest import EngineeringAuditReport, EngineeringManifestArgs, engineering_manifest_audit_report
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2865,6 +2866,17 @@ class ApiClient:
         """Return typed atlasx debt, visibility, rate, and surface evidence through HTTP."""
 
         return atlas_surface_audit_report(self.atlas_surface_audit(request))
+
+    def engineering_manifest_audit(self, request: EngineeringManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit an engineering manifest through the HTTP gateway."""
+
+        normalized = request if isinstance(request, EngineeringManifestArgs) else EngineeringManifestArgs.from_wire(request)
+        return self.call_tool("engineering_manifest_audit", normalized.to_mcp_arguments())
+
+    def engineering_manifest_audit_report(self, request: EngineeringManifestArgs | Mapping[str, Any]) -> EngineeringAuditReport:
+        """Return typed engineering-manifest evidence through HTTP."""
+
+        return engineering_manifest_audit_report(self.engineering_manifest_audit(request))
 
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive panel through the HTTP gateway."""
@@ -5478,6 +5490,17 @@ class AsyncApiClient:
         """Return async typed atlasx surface evidence."""
 
         return atlas_surface_audit_report(await self.atlas_surface_audit(request))
+
+    async def engineering_manifest_audit(self, request: EngineeringManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async engineering-manifest audit through the HTTP gateway."""
+
+        normalized = request if isinstance(request, EngineeringManifestArgs) else EngineeringManifestArgs.from_wire(request)
+        return await self.call_tool("engineering_manifest_audit", normalized.to_mcp_arguments())
+
+    async def engineering_manifest_audit_report(self, request: EngineeringManifestArgs | Mapping[str, Any]) -> EngineeringAuditReport:
+        """Return async typed engineering-manifest evidence through HTTP."""
+
+        return engineering_manifest_audit_report(await self.engineering_manifest_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async adaptive panel audit through the HTTP gateway."""
