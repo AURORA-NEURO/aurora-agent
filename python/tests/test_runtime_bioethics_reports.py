@@ -116,23 +116,34 @@ class RuntimeBioethicsReportTests(unittest.TestCase):
         self.assertEqual(args.to_mcp_arguments()["requests"], [{"kind": "clock_now"}])
         simulation = runtime_execution_simulate_report({
             "ok": True,
+            "schema": "bioprism-mcp/runtime-execution-simulate/0.1",
             "run": "run-1",
             "request_count": 2,
             "recorded_requests": 1,
+            "recording_complete": False,
+            "partial_recording": True,
             "live_outcomes": [{"clock_millis": 0}],
+            "live_outcome_count": 1,
             "execution_error": "budget exhausted for tool_calls",
             "tape": {"entries": []},
-            "world": {"calls": 1, "file_changes": []},
+            "world": {"calls": 1, "task_millis": 0, "state_manifest": {}, "file_changes": []},
             "policy_journal": [],
-            "budget": {"aborted_on": "tool_calls", "accounting": {}},
-            "replay": {"verified": True, "matched": True, "outcomes": [], "error": None},
+            "policy_journal_count": 0,
+            "budget": {"aborted_on": "tool_calls", "accounting": {}, "warnings": [], "fully_consumed_effects": 1},
+            "replay": {"verified": True, "matched": True, "outcomes": [{"clock_millis": 0}], "outcome_count": 1, "complete": True, "error": None},
+            "replay_outcome_count": 1,
+            "replay_complete": True,
             "fork": None,
+            "fork_requested": False,
             "guarantees": ["no host effects"],
             "limitations": ["bounded"],
         })
         self.assertTrue(simulation.partial_recording)
         self.assertTrue(simulation.budget_exhausted)
         self.assertTrue(simulation.replay_verified)
+        self.assertEqual(simulation.replay_record.outcome_count, 1)
+        self.assertEqual(simulation.world_record.calls, 1)
+        self.assertEqual(simulation.budget_record.fully_consumed_effects, 1)
         self.assertFalse(simulation.live_effects_reachable)
 
     def test_bioethics_action_and_human_subject_reports_keep_gates_separate(self) -> None:

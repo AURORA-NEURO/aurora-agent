@@ -864,7 +864,9 @@ the exact safety boundary without accidentally turning an inspection result into
 - `RuntimeExecutionSimulateArgs` and `runtime_execution_simulate_report(...)` run bounded request
   programs only through the deterministic in-process world. The report separates complete versus
   partial recording, execution errors, budget exhaustion, replay verification/matching, and optional
-  fork evidence. `live_effects_reachable` is an explicit nonclaim, not an inferred green status.
+  fork evidence. It additionally types deterministic-world, replay, budget, and fork projections;
+  see [`docs/RUNTIME_EXECUTION_SIMULATE.md`](RUNTIME_EXECUTION_SIMULATE.md). `live_effects_reachable`
+  is an explicit nonclaim, not an inferred green status.
 
 Bioethics projections mirror the crate-level asymmetries rather than reducing them to booleans:
 

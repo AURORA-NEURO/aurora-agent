@@ -473,6 +473,123 @@ class RuntimeTapeVerifyReport:
 
 
 @dataclass(frozen=True)
+class RuntimeReplayProjection:
+    raw: dict[str, Any]
+    verified: bool
+    matched: bool
+    outcomes: tuple[Any, ...]
+    outcome_count: int
+    complete: bool
+    error: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RuntimeReplayProjection":
+        raw = _route_mapping("runtime replay", value)
+        verified = _bool("runtime replay verified", raw.get("verified"))
+        matched = _bool("runtime replay matched", raw.get("matched"))
+        if verified and not matched:
+            raise ArgumentError("verified runtime replay cannot be unmatched")
+        outcomes = _array("runtime replay outcomes", raw.get("outcomes"))
+        outcome_count = _route_count("runtime replay outcome_count", raw.get("outcome_count"))
+        if outcome_count != len(outcomes):
+            raise ArgumentError("runtime replay outcome count does not reconcile")
+        complete = _bool("runtime replay complete", raw.get("complete"))
+        error = _optional_text("runtime replay error", raw.get("error"))
+        if complete != (error is None):
+            raise ArgumentError("runtime replay completeness does not reconcile with its error")
+        return cls(raw, verified, matched, outcomes, outcome_count, complete, error)
+
+
+@dataclass(frozen=True)
+class RuntimeSimulationWorldProjection:
+    raw: dict[str, Any]
+    calls: int
+    task_millis: int
+    state_manifest: dict[str, str]
+    file_changes: tuple[dict[str, Any], ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RuntimeSimulationWorldProjection":
+        raw = _route_mapping("runtime simulation world", value)
+        manifest_raw = _route_mapping("runtime state manifest", raw.get("state_manifest"))
+        manifest = {key: _route_text(f"runtime state manifest {key}", item) for key, item in manifest_raw.items()}
+        changes = tuple(_route_mapping("runtime file change", item) for item in _array("runtime file_changes", raw.get("file_changes")))
+        return cls(
+            raw,
+            _route_count("runtime world calls", raw.get("calls")),
+            _route_count("runtime world task_millis", raw.get("task_millis")),
+            manifest,
+            changes,
+        )
+
+
+@dataclass(frozen=True)
+class RuntimeBudgetProjection:
+    raw: dict[str, Any]
+    accounting: dict[str, Any]
+    warnings: tuple[dict[str, Any], ...]
+    aborted_on: str | None
+    fully_consumed_effects: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RuntimeBudgetProjection":
+        raw = _route_mapping("runtime simulation budget", value)
+        accounting = _route_mapping("runtime budget accounting", raw.get("accounting"))
+        warnings = tuple(_route_mapping("runtime budget warning", item) for item in _array("runtime budget warnings", raw.get("warnings")))
+        return cls(
+            raw,
+            accounting,
+            warnings,
+            _optional_text("runtime budget aborted_on", raw.get("aborted_on")),
+            _route_count("runtime fully_consumed_effects", raw.get("fully_consumed_effects")),
+        )
+
+
+@dataclass(frozen=True)
+class RuntimeForkProjection:
+    raw: dict[str, Any]
+    ok: bool
+    step: int
+    inherited_steps: int | None
+    observed_state: dict[str, Any] | None
+    suffix_outcomes: tuple[Any, ...]
+    suffix_error: str | None
+    child_tape: dict[str, Any] | None
+    comparison: dict[str, Any] | None
+    stage: str | None
+    refusal: str | None
+    fail_closed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RuntimeForkProjection":
+        raw = _route_mapping("runtime fork", value)
+        ok = _bool("runtime fork ok", raw.get("ok"))
+        step = _route_count("runtime fork step", raw.get("step"))
+        if not ok:
+            fail_closed = _bool("runtime fork fail_closed", raw.get("fail_closed"))
+            if not fail_closed:
+                raise ArgumentError("refused runtime forks must be fail-closed")
+            return cls(raw, False, step, None, None, (), None, None, None, _optional_text("runtime fork stage", raw.get("stage")), _route_text("runtime fork refusal", raw.get("refusal")), fail_closed)
+        suffix_error = _optional_text("runtime fork suffix_error", raw.get("suffix_error"))
+        if ok and suffix_error is not None:
+            raise ArgumentError("successful runtime forks cannot carry suffix errors")
+        return cls(
+            raw,
+            True,
+            step,
+            _route_count("runtime fork inherited_steps", raw.get("inherited_steps")),
+            _route_mapping("runtime fork observed_state", raw.get("observed_state")),
+            _array("runtime fork suffix_outcomes", raw.get("suffix_outcomes")),
+            suffix_error,
+            _route_mapping("runtime fork child_tape", raw.get("child_tape")),
+            _route_mapping("runtime fork comparison", raw.get("comparison")),
+            None,
+            None,
+            False,
+        )
+
+
+@dataclass(frozen=True)
 class RuntimeExecutionSimulateReport:
     raw: dict[str, Any]
     ok: bool
@@ -489,6 +606,17 @@ class RuntimeExecutionSimulateReport:
     fork: dict[str, Any] | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    replay_record: RuntimeReplayProjection | None = None
+    world_record: RuntimeSimulationWorldProjection | None = None
+    budget_record: RuntimeBudgetProjection | None = None
+    fork_record: RuntimeForkProjection | None = None
+    live_outcome_count: int = 0
+    policy_journal_count: int = 0
+    replay_outcome_count: int = 0
+    recording_complete: bool = False
+    replay_complete: bool = False
+    fork_requested: bool = False
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "RuntimeExecutionSimulateReport":
@@ -496,31 +624,68 @@ class RuntimeExecutionSimulateReport:
         ok = _bool("runtime simulation ok", raw.get("ok"))
         if not ok:
             raise ArgumentError("runtime execution simulation transport projection is not successful")
-        replay = _route_mapping("runtime simulation replay", raw.get("replay"))
-        verified = _bool("runtime replay verified", replay.get("verified"))
-        matched = _bool("runtime replay matched", replay.get("matched"))
-        if verified and not matched:
-            raise ArgumentError("verified runtime replay cannot be unmatched")
+        schema = _optional_text("runtime simulation schema", raw.get("schema"))
+        if schema is not None and schema != "bioprism-mcp/runtime-execution-simulate/0.1":
+            raise ArgumentError(f"unknown runtime simulation schema: {schema!r}")
         request_count = _route_count("runtime simulation request_count", raw.get("request_count"))
         recorded_requests = _route_count("runtime simulation recorded_requests", raw.get("recorded_requests"))
         if recorded_requests > request_count:
             raise ArgumentError("runtime recorded_requests cannot exceed request_count")
+        execution_error = _optional_text("runtime execution_error", raw.get("execution_error"))
+        recording_complete = _bool("runtime recording_complete", raw.get("recording_complete"))
+        partial_recording = _bool("runtime partial_recording", raw.get("partial_recording"))
+        if recording_complete == partial_recording or recording_complete != (execution_error is None and recorded_requests == request_count):
+            raise ArgumentError("runtime recording completeness does not reconcile with the execution")
+        live_outcomes = _array("runtime live_outcomes", raw.get("live_outcomes"))
+        live_outcome_count = _route_count("runtime live_outcome_count", raw.get("live_outcome_count"))
+        if live_outcome_count != len(live_outcomes):
+            raise ArgumentError("runtime live outcome count does not reconcile")
+        journal = tuple(_route_mapping("runtime policy journal entry", item) for item in _array("runtime policy_journal", raw.get("policy_journal")))
+        policy_journal_count = _route_count("runtime policy_journal_count", raw.get("policy_journal_count"))
+        if policy_journal_count != len(journal):
+            raise ArgumentError("runtime policy journal count does not reconcile")
+        replay = _route_mapping("runtime simulation replay", raw.get("replay"))
+        replay_record = RuntimeReplayProjection.from_wire(replay)
+        replay_outcome_count = _route_count("runtime replay_outcome_count", raw.get("replay_outcome_count"))
+        replay_complete = _bool("runtime replay_complete", raw.get("replay_complete"))
+        if replay_outcome_count != replay_record.outcome_count or replay_complete != replay_record.complete or replay_complete != (replay_record.outcome_count == recorded_requests and replay_record.error is None):
+            raise ArgumentError("runtime replay completeness does not reconcile")
+        world = _route_mapping("runtime simulation world", raw.get("world"))
+        world_record = RuntimeSimulationWorldProjection.from_wire(world)
+        budget = _optional_mapping("runtime simulation budget", raw.get("budget"))
+        budget_record = None if budget is None else RuntimeBudgetProjection.from_wire(budget)
+        fork = _optional_mapping("runtime simulation fork", raw.get("fork"))
+        fork_requested = _bool("runtime fork_requested", raw.get("fork_requested"))
+        if fork_requested != (fork is not None):
+            raise ArgumentError("runtime fork_requested does not reconcile with fork evidence")
+        fork_record = None if fork is None else RuntimeForkProjection.from_wire(fork)
         return cls(
             raw,
             True,
             _route_text("runtime simulation run", raw.get("run")),
             request_count,
             recorded_requests,
-            _array("runtime live_outcomes", raw.get("live_outcomes")),
-            _optional_text("runtime execution_error", raw.get("execution_error")),
+            live_outcomes,
+            execution_error,
             _route_mapping("runtime simulation tape", raw.get("tape")),
-            _route_mapping("runtime simulation world", raw.get("world")),
-            _array("runtime policy_journal", raw.get("policy_journal")),
-            _optional_mapping("runtime simulation budget", raw.get("budget")),
+            world,
+            journal,
+            budget,
             replay,
-            _optional_mapping("runtime simulation fork", raw.get("fork")),
+            fork,
             _route_strings("runtime simulation guarantees", raw.get("guarantees")),
             _route_strings("runtime simulation limitations", raw.get("limitations")),
+            schema=schema,
+            replay_record=replay_record,
+            world_record=world_record,
+            budget_record=budget_record,
+            fork_record=fork_record,
+            live_outcome_count=live_outcome_count,
+            policy_journal_count=policy_journal_count,
+            replay_outcome_count=replay_outcome_count,
+            recording_complete=recording_complete,
+            replay_complete=replay_complete,
+            fork_requested=fork_requested,
         )
 
     @property
@@ -579,6 +744,10 @@ __all__ = [
     "RuntimeCheckpointProjection",
     "RuntimeTapeVerifyArgs",
     "RuntimeTapeVerifyReport",
+    "RuntimeBudgetProjection",
+    "RuntimeForkProjection",
+    "RuntimeReplayProjection",
+    "RuntimeSimulationWorldProjection",
     "runtime_effect_check_report",
     "runtime_execution_simulate_report",
     "runtime_tape_verify_report",

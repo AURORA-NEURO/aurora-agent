@@ -572,6 +572,9 @@ suffix completeness; see
 deny-by-default policy without executing them, while `runtime_tape_verify` verifies hash-chained
 world tapes, typed checkpoint restoration and artifact ledgers, simulated provenance, and first
 divergence. See [`docs/RUNTIME_TAPE_VERIFY.md`](docs/RUNTIME_TAPE_VERIFY.md).
+`runtime_execution_simulate` runs bounded programs in the deterministic in-process world and
+preserves typed recording/replay, policy-journal, budget, and fork evidence; see
+[`docs/RUNTIME_EXECUTION_SIMULATE.md`](docs/RUNTIME_EXECUTION_SIMULATE.md).
 `onco_boundary_check`
 keeps research output separate from individualized clinical use, and `onco_response_assess` keeps
 post-treatment progression, threshold sensitivity, and non-identifiable change states explicit.

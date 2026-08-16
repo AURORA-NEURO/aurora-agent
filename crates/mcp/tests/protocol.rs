@@ -5370,7 +5370,10 @@ fn runtime_tape_verify_accepts_only_verified_chain_state() {
         json!({ "tape": serde_json::to_value(tape).unwrap() }),
     );
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/runtime-tape-verify/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/runtime-tape-verify/0.1")
+    );
     assert_eq!(result["chain_verified"], json!(true));
     assert_eq!(result["entries"], json!(0));
     assert_eq!(result["checkpoint_count"], json!(0));
@@ -5419,9 +5422,18 @@ fn runtime_execution_simulate_records_replays_and_forks_without_live_effects() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/runtime-execution-simulate/0.1")
+    );
     assert_eq!(result["recorded_requests"], json!(4));
+    assert_eq!(result["recording_complete"], json!(true));
+    assert_eq!(result["partial_recording"], json!(false));
+    assert_eq!(result["live_outcome_count"], json!(4));
+    assert_eq!(result["policy_journal_count"].as_u64().unwrap() >= 4, true);
     assert_eq!(result["replay"]["verified"], json!(true));
     assert_eq!(result["replay"]["matched"], json!(true));
+    assert_eq!(result["replay_complete"], json!(true));
     assert_eq!(result["world"]["calls"], json!(4));
     assert_eq!(
         result["world"]["file_changes"][0]["path"],
@@ -5447,11 +5459,17 @@ fn runtime_execution_simulate_reports_budget_exhaustion_and_keeps_partial_replay
         }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/runtime-execution-simulate/0.1")
+    );
     assert!(result["execution_error"]
         .as_str()
         .unwrap()
         .contains("budget exhausted"));
     assert_eq!(result["recorded_requests"], json!(1));
+    assert_eq!(result["recording_complete"], json!(false));
+    assert_eq!(result["partial_recording"], json!(true));
     assert_eq!(result["replay"]["verified"], json!(true));
     assert_eq!(result["budget"]["aborted_on"], json!("tool_calls"));
 }

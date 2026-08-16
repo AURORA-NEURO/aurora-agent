@@ -9488,7 +9488,9 @@ impl Server {
             .iter()
             .filter(|checkpoint| checkpoint["ok"] == json!(true))
             .count();
-        let checkpoint_failure_count = checkpoint_results.len().saturating_sub(checkpoint_pass_count);
+        let checkpoint_failure_count = checkpoint_results
+            .len()
+            .saturating_sub(checkpoint_pass_count);
         let simulated_steps = tape.simulated_steps();
         Ok(json!({
             "ok": true,
@@ -9690,12 +9692,23 @@ impl Server {
             }
         };
 
+        let replay_complete = replay_error.is_none() && replay_outcomes.len() == recorded_requests;
+        let recording_complete = execution_error.is_none() && recorded_requests == requests.len();
+        let fork_requested = !fork.is_null();
+        let live_outcome_count = live_outcomes.len();
+        let policy_journal_count = journal.len();
+        let replay_outcome_count = replay_outcomes.len();
+
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/runtime-execution-simulate/0.1",
             "run": run,
             "request_count": requests.len(),
             "recorded_requests": recorded_requests,
+            "recording_complete": recording_complete,
+            "partial_recording": !recording_complete,
             "live_outcomes": live_outcomes,
+            "live_outcome_count": live_outcome_count,
             "execution_error": execution_error,
             "tape": tape,
             "world": {
@@ -9705,14 +9718,20 @@ impl Server {
                 "file_changes": world.journal()
             },
             "policy_journal": journal,
+            "policy_journal_count": policy_journal_count,
             "budget": budget_view,
             "replay": {
                 "verified": replay_error.is_none(),
                 "matched": replay_match,
                 "outcomes": replay_outcomes,
+                "outcome_count": replay_outcome_count,
+                "complete": replay_complete,
                 "error": replay_error
             },
+            "replay_outcome_count": replay_outcome_count,
+            "replay_complete": replay_complete,
             "fork": fork,
+            "fork_requested": fork_requested,
             "guarantees": [
                 "the supplied effect program runs only against the deterministic in-process world; no host filesystem, network, process, model, message, or payment endpoint is touched",
                 "every authorized effect is hash-chained with request, outcome, and performed-versus-simulated provenance",

@@ -4787,19 +4787,65 @@ export interface RuntimeExecutionSimulateArgs extends JsonObject {
   fork?: JsonObject;
 }
 
+export interface RuntimeReplayResult extends JsonObject {
+  verified: boolean;
+  matched: boolean;
+  outcomes: JsonValue[];
+  outcome_count: number;
+  complete: boolean;
+  error: string | null;
+}
+
+export interface RuntimeSimulationWorldResult extends JsonObject {
+  calls: number;
+  task_millis: number;
+  state_manifest: Record<string, string>;
+  file_changes: JsonObject[];
+}
+
+export interface RuntimeBudgetResult extends JsonObject {
+  accounting: Record<string, JsonObject>;
+  warnings: JsonObject[];
+  aborted_on: string | null;
+  fully_consumed_effects: number;
+}
+
+export interface RuntimeForkResult extends JsonObject {
+  ok: boolean;
+  step?: number;
+  inherited_steps?: number;
+  observed_state?: JsonObject;
+  suffix_outcomes?: JsonValue[];
+  suffix_error?: string | null;
+  child_tape?: JsonObject;
+  comparison?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+}
+
 export interface RuntimeExecutionSimulateResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/runtime-execution-simulate/0.1";
   run: string;
   request_count: number;
   recorded_requests: number;
+  recording_complete?: boolean;
+  partial_recording?: boolean;
   live_outcomes: JsonValue[];
+  live_outcome_count?: number;
   execution_error: string | null;
   tape: JsonObject;
-  world: JsonObject;
-  policy_journal: JsonValue[];
-  budget: JsonObject | null;
-  replay: JsonObject;
-  fork: JsonObject | null;
+  world: RuntimeSimulationWorldResult;
+  policy_journal: JsonObject[];
+  policy_journal_count?: number;
+  budget: RuntimeBudgetResult | null;
+  replay: RuntimeReplayResult;
+  replay_outcome_count?: number;
+  replay_complete?: boolean;
+  fork: RuntimeForkResult | null;
+  fork_requested?: boolean;
   guarantees: string[];
   limitations: string[];
 }

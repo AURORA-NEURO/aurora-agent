@@ -400,6 +400,9 @@ complete replay, and counterfactual fork evidence. `runtimeTapeVerify` additiona
 checkpoint restoration rows, artifact ledger, and reconciled verification counts; see
 [`docs/RUNTIME_TAPE_VERIFY.md`](../docs/RUNTIME_TAPE_VERIFY.md). The runtime inspection and simulation surfaces
 never reach a host filesystem, network, process, model, message, or payment endpoint.
+`runtimeExecutionSimulate` additionally types recording/replay completeness, deterministic-world
+state, budget accounting, and fork continuation evidence; see
+[`docs/RUNTIME_EXECUTION_SIMULATE.md`](../docs/RUNTIME_EXECUTION_SIMULATE.md).
 
 The bioethics facade adds `bioethicsActionReview`, `humanSubjectScreen`, `bioethicsDualUseReview`,
 `bioethicsValidationCheck`, and `bioethicsRepresentationAudit`. These retain physical versus
