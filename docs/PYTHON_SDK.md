@@ -392,6 +392,11 @@ invent defaults:
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,
   evidence posture, release readiness, safe paths, and deterministic YAML.
+- `ci_execution_evidence_audit(...)` regenerates that canonical CI plan and reconciles a run report
+  against its digest and exact checks. `CiExecutionEvidenceReport` preserves per-check result
+  digests, missing/unknown/duplicate/non-passing findings, provider provenance, structural-only
+  verification, and the bounded `ci_evidence_ready` handoff. It never executes or authenticates a
+  provider run; see [`docs/CI_EVIDENCE.md`](CI_EVIDENCE.md).
 - `developer_platform_status(...)` exposes the in-repository developer-platform contract through
   sync MCP, async MCP, and HTTP. `DeveloperPlatformStatusReport` types the module classification
   ledger, every walkthrough's checkable/partly-outside/entirely-outside standing, cookbook

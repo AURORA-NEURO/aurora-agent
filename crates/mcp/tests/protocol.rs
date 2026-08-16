@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 169);
+    assert_eq!(tools.len(), 170);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4092,6 +4092,81 @@ fn developer_workbench_refuses_notebook_cycles_and_unsafe_ci() {
 }
 
 #[test]
+fn ci_execution_evidence_audit_reconciles_plan_and_run_without_execution() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "consumer contracts",
+        "triggers": ["push", "pull_request"],
+        "rust_toolchain": "stable",
+        "offline": true,
+        "checks": [
+            {"name": "tests", "run": "cargo test --workspace --offline", "required": true},
+            {"name": "lint", "run": "cargo clippy --workspace --offline", "required": false}
+        ]
+    });
+    let planned = call(
+        &mut server,
+        "developer_workbench",
+        json!({
+            "session": {"session_id": "ci-evidence", "owner": "agent-a", "goal": "reconcile CI", "artifacts": [], "cells": [], "changes": []},
+            "ci": ci.clone()
+        }),
+    );
+    let plan_digest = planned["ci"]["digest"].as_str().unwrap().to_owned();
+    let result = call(
+        &mut server,
+        "ci_execution_evidence_audit",
+        json!({
+            "ci": ci.clone(),
+            "evidence": {
+                "run_id": "run-42",
+                "provider": "github_actions",
+                "source": "provider_observed",
+                "plan_digest": plan_digest,
+                "conclusion": "success",
+                "checks": [
+                    {"name": "tests", "status": "passed", "result_digest": "a".repeat(64)},
+                    {"name": "lint", "status": "passed", "result_digest": "b".repeat(64)}
+                ]
+            }
+        }),
+    );
+    assert_eq!(result["workflow"], json!("ci_execution_evidence_audit"));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["ci_evidence_ready"], json!(true));
+    assert_eq!(result["audit"]["complete"], json!(true));
+    assert_eq!(result["audit"]["passed_check_count"], json!(2));
+    assert_eq!(result["audit"]["verification"], json!("structural_only"));
+    assert_eq!(result["audit"]["execution"], json!("evidence_supplied_not_executed_here"));
+
+    let incomplete = call(
+        &mut server,
+        "ci_execution_evidence_audit",
+        json!({
+            "ci": ci,
+            "evidence": {
+                "run_id": "run-43",
+                "provider": "caller",
+                "source": "caller_attested",
+                "plan_digest": result["plan_digest"].clone(),
+                "conclusion": "success",
+                "checks": [
+                    {"name": "tests", "status": "failed", "result_digest": "c".repeat(64)}
+                ]
+            }
+        }),
+    );
+    assert_eq!(incomplete["valid"], json!(false));
+    assert_eq!(incomplete["ci_evidence_ready"], json!(false));
+    assert_eq!(incomplete["audit"]["required_failed"], json!(["tests"]));
+    assert!(incomplete["audit"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "missing_check_evidence"));
+}
+
+#[test]
 fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     let mut server = server();
     let planned = call(
@@ -4501,12 +4576,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(169));
-    assert_eq!(result["advertised_tool_count"], json!(169));
+    assert_eq!(result["unique_catalog_tools"], json!(170));
+    assert_eq!(result["advertised_tool_count"], json!(170));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(169));
-    assert_eq!(result["schema_quality"]["valid"], json!(169));
+    assert_eq!(result["schema_quality"]["checked"], json!(170));
+    assert_eq!(result["schema_quality"]["valid"], json!(170));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

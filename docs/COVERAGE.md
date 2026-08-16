@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 169 callable tools. That count is intentionally
+The MCP integration layer currently exposes 170 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -49,6 +49,11 @@ coverage rows: callable, partial, and declared-only readiness are separated; cra
 MCP-membership, and authoritative-schema counts remain independent; and missing surfaces are
 reported as explicit gaps. Filtering and truncation are part of the audit evidence, so a clean row
 never implies that a local CLI, Python import, permission check, or deployment exists.
+`ci_execution_evidence_audit` closes the review-to-evidence boundary below the generated CI plan:
+it regenerates the plan, compares the supplied run to its digest and exact checks, requires a
+result digest for each check, and preserves provider/caller provenance, missingness, non-passing
+states, structural-only verification, and the bounded `ci_evidence_ready` signal. It does not
+contact GitHub, verify signatures, fetch logs, execute checks, or approve a release.
 `developer_delivery_audit` composes the platform, repository, SDK, conformance, provider,
 governance, and release checks into independently inspectable readiness gates. Its typed Python and
 TypeScript projections preserve explicit release targets, blockers, fail-closed/no-implicit-release

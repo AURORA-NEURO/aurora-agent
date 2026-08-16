@@ -128,9 +128,10 @@ use bioprism_dataops::{
     DataClass, Plane, TenantPattern,
 };
 use bioprism_devplat::{
-    apply_binding, build_dashboard, plan_mission, run_workbench, standard_walkthroughs,
+    apply_binding, audit_ci_execution_evidence, build_dashboard, plan_mission, run_workbench,
+    standard_walkthroughs,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    DevPlatReport, MissionReport, MissionRequest,
+    CiExecutionEvidenceRequest, DevPlatReport, MissionReport, MissionRequest,
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
@@ -1481,6 +1482,7 @@ impl Server {
             "sandbox_runtime_simulate" => self.sandbox_runtime_simulate(&arguments),
             "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
+            "ci_execution_evidence_audit" => self.ci_execution_evidence_audit(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
             "capability_dashboard" => self.capability_dashboard(&arguments),
@@ -24148,6 +24150,44 @@ impl Server {
         Ok(output)
     }
 
+    /// Reconcile caller-supplied CI evidence against a freshly generated workbench plan.
+    ///
+    /// This is deliberately a structural audit: it never contacts a provider or executes the
+    /// checks. A release candidate requires the exact plan digest, complete passing evidence, and
+    /// a successful conclusion, while the response keeps provider provenance and limitations
+    /// explicit.
+    fn ci_execution_evidence_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode CI execution evidence input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("CI execution evidence input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: CiExecutionEvidenceRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid CI execution evidence input: {error}"))?;
+        let audit = audit_ci_execution_evidence(&request)
+            .map_err(|error| format!("CI execution evidence refused: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "workflow": "ci_execution_evidence_audit",
+            "schema": bioprism_devplat::CI_EXECUTION_EVIDENCE_SCHEMA,
+            "valid": audit.structurally_valid,
+            "ci_evidence_ready": audit.release_candidate,
+            "plan_digest": audit.plan_digest,
+            "evidence_digest": audit.evidence_digest,
+            "audit": audit,
+            "guarantees": [
+                "the canonical plan is regenerated from the supplied CI request before evidence is assessed",
+                "complete passing check evidence and a successful conclusion are required for the structural release-candidate signal",
+                "the route remains non-executing and preserves missing, unknown, duplicate, failed, skipped, cancelled, and unknown states"
+            ],
+            "limitations": [
+                "the route does not contact GitHub, verify provider signatures, fetch logs, or execute checks",
+                "provider_observed and caller_attested are provenance labels rather than cryptographic trust decisions",
+                "ci_evidence_ready is not deployment, security, scientific, clinical, or production approval"
+            ]
+        }))
+    }
+
     fn engineering_manifest_audit(&self, arguments: &Value) -> Result<Value, String> {
         let raw_manifest = arguments
             .get("manifest")
@@ -26898,7 +26938,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_execution_evidence_audit", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -29289,6 +29329,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "ci": { "type": "object", "description": "Optional CiRequest with workflow, triggers, rust_toolchain, checks, and offline. Generated YAML is returned but never executed or written." }
                 },
                 "required": ["session"]
+            }
+        }),
+        json!({
+            "name": "ci_execution_evidence_audit",
+            "description": "Reconcile caller-supplied CI run evidence against a freshly regenerated canonical workbench plan. It binds the run to the plan digest and exact check set, requires per-check result digests, separates missing/unknown/duplicate/failed/skipped/cancelled states, and emits a structural release-candidate signal without contacting GitHub, verifying provider signatures, fetching logs, or executing checks.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ci": { "type": "object", "description": "Canonical CiRequest used to regenerate the workflow plan: workflow, triggers, rust_toolchain, checks, and optional offline." },
+                    "evidence": { "type": "object", "description": "CiRunEvidence with run_id, provider, source, plan_digest, conclusion, checks, and optional environment_digest/run_url. Each check requires a valid result_digest." }
+                },
+                "required": ["ci", "evidence"]
             }
         }),
         json!({

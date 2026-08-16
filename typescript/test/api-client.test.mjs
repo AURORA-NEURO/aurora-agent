@@ -86,6 +86,44 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         limitations: ["no network publisher"],
       } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
+      if (path === "/v1/tools/ci_execution_evidence_audit") return jsonResponse({ ok: true, tool: "ci_execution_evidence_audit", request_id: "r27", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "ci_execution_evidence_audit",
+        schema: "bioprism-devplat-ci-execution-evidence/0.1",
+        valid: true,
+        ci_evidence_ready: true,
+        plan_digest: "p".repeat(64),
+        evidence_digest: "e".repeat(64),
+        audit: {
+          schema: "bioprism-devplat-ci-execution-evidence/0.1",
+          workflow: "contracts",
+          plan_digest: "p".repeat(64),
+          evidence_digest: "e".repeat(64),
+          run_id: "run-42",
+          provider: "github_actions",
+          source: "provider_observed",
+          conclusion: "success",
+          expected_check_count: 1,
+          observed_check_count: 1,
+          passed_check_count: 1,
+          failed_check_count: 0,
+          skipped_check_count: 0,
+          unknown_check_count: 0,
+          required_missing: [],
+          required_failed: [],
+          optional_nonpassing: [],
+          complete: true,
+          structurally_valid: true,
+          release_candidate: true,
+          execution: "evidence_supplied_not_executed_here",
+          verification: "structural_only",
+          findings: [],
+          guarantees: [],
+          limitations: [],
+        },
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/developer_platform_status") return jsonResponse({ ok: true, tool: "developer_platform_status", request_id: "r16", mcp: { result: { structuredContent: {
         ok: true,
         root: "workspace",
@@ -1498,6 +1536,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(otel.mcp.result.structuredContent.events[0].kind, "goal");
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
+  const ciEvidence = await client.ciExecutionEvidenceAudit({ ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } });
+  assert.equal(ciEvidence.mcp.result.structuredContent.workflow, "ci_execution_evidence_audit");
+  assert.equal(ciEvidence.mcp.result.structuredContent.ci_evidence_ready, true);
+  assert.equal(ciEvidence.mcp.result.structuredContent.audit.verification, "structural_only");
   const platform = await client.developerPlatformStatus({ include_details: false, max_items: 3 });
   assert.equal(platform.mcp.result.structuredContent.detail_mode, "summary");
   assert.equal(platform.mcp.result.structuredContent.devplat.modules_classified, 4);

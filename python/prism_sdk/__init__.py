@@ -106,6 +106,13 @@ from .capability_dashboard import (
     CapabilityDashboardReport,
     capability_dashboard_report,
 )
+from .ci_evidence import (
+    CI_EXECUTION_EVIDENCE_SCHEMA,
+    CiEvidenceFindingReport,
+    CiExecutionEvidenceReport,
+    CiExecutionEvidenceRequest,
+    ci_execution_evidence_report,
+)
 from .conformance import (
     ConformanceCaseReport,
     ConformanceOutcomeReport,
@@ -2230,6 +2237,11 @@ __all__ = [
     "CapabilityDashboardGroupReport",
     "CapabilityDashboardReport",
     "capability_dashboard_report",
+    "CI_EXECUTION_EVIDENCE_SCHEMA",
+    "CiEvidenceFindingReport",
+    "CiExecutionEvidenceReport",
+    "CiExecutionEvidenceRequest",
+    "ci_execution_evidence_report",
     "DeliveryTargetReport",
     "DeliveryReadinessReport",
     "DeliveryExternalSurfaceReport",

@@ -225,6 +225,8 @@ import type {
   WeaveLangCompileArgs,
   WeaveLangCompileResult,
   DeveloperWorkbenchArgs,
+  CiExecutionEvidenceArgs,
+  CiExecutionEvidenceResult,
   EventMetrics,
   EventPersistenceStatus,
   EventsResponse,
@@ -672,6 +674,10 @@ export class ApiClient {
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {
     return this.callTool("developer_workbench", args, options);
+  }
+
+  async ciExecutionEvidenceAudit(args: CiExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiExecutionEvidenceResult>> {
+    return this.callTool<CiExecutionEvidenceResult>("ci_execution_evidence_audit", args, options);
   }
 
   async capabilityDiscover(args: CapabilityDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityDiscoverResult>> {

@@ -35,6 +35,11 @@ from .capability_dashboard import (
     CapabilityDashboardReport,
     capability_dashboard_report,
 )
+from .ci_evidence import (
+    CiExecutionEvidenceReport,
+    CiExecutionEvidenceRequest,
+    ci_execution_evidence_report,
+)
 from .conformance import ConformanceRunArgs, ConformanceRunReport, conformance_run_report
 from .context_requests import (
     ContextLayer,
@@ -1476,6 +1481,23 @@ class Workspace:
         """Return typed callable, partial, declared-only, and surface-gap evidence."""
 
         return capability_dashboard_report(self.capability_dashboard(request))
+
+    def ci_execution_evidence_audit(
+        self,
+        request: CiExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Reconcile caller-supplied CI evidence against a regenerated workbench plan."""
+
+        normalized = request if isinstance(request, CiExecutionEvidenceRequest) else CiExecutionEvidenceRequest(**dict(request))
+        return self.tool("ci_execution_evidence_audit", normalized.to_mcp_arguments())
+
+    def ci_execution_evidence_report(
+        self,
+        request: CiExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> CiExecutionEvidenceReport:
+        """Return typed structural CI evidence and release-candidate findings."""
+
+        return ci_execution_evidence_report(self.ci_execution_evidence_audit(request))
 
     def capability_discover_report(
         self,
@@ -4256,6 +4278,23 @@ class AsyncWorkspace:
         """Return typed dashboard evidence through async MCP."""
 
         return capability_dashboard_report(await self.capability_dashboard(request))
+
+    async def ci_execution_evidence_audit(
+        self,
+        request: CiExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.ci_execution_evidence_audit`."""
+
+        normalized = request if isinstance(request, CiExecutionEvidenceRequest) else CiExecutionEvidenceRequest(**dict(request))
+        return await self.tool("ci_execution_evidence_audit", normalized.to_mcp_arguments())
+
+    async def ci_execution_evidence_report(
+        self,
+        request: CiExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> CiExecutionEvidenceReport:
+        """Return typed CI evidence through async MCP."""
+
+        return ci_execution_evidence_report(await self.ci_execution_evidence_audit(request))
 
     async def capability_discover_report(
         self,

@@ -238,6 +238,12 @@ ordering, logical change history, stale-digest findings, evidence-aware dashboar
 review-only CI workflow plan. Python and TypeScript expose the same composition surface. This does
 not close the external authoring UI, consumer-repository action, hosted GitHub runner, or full
 Python distribution backlog, so those gaps remain explicit rather than being relabelled complete.
+The `ci_execution_evidence_audit` route adds the next safe boundary without claiming the external
+runner: it regenerates the canonical plan, requires a matching plan digest and per-check result
+digests, reconciles exact check names and requiredness, and keeps caller/provider provenance,
+missingness, failure, cancellation, and structural-only verification visible. A complete passing
+report can become a bounded handoff signal, but it is not provider authentication, log retrieval,
+deployment approval, or scientific validity.
 The mission layer now composes the shipped domain tools into a deterministic DAG with an explicit
 preview/execute boundary, tool allow-list, side-effect policy, output budgets, and refusal-to-blocked
 dependency propagation. This materially improves agent usefulness across domains without claiming

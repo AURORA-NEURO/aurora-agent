@@ -3803,6 +3803,59 @@ export interface DeveloperWorkbenchArgs extends JsonObject {
   ci?: JsonObject;
 }
 
+export interface CiExecutionEvidenceArgs extends JsonObject {
+  ci: JsonObject;
+  evidence: JsonObject;
+}
+
+export interface CiEvidenceFindingResult extends JsonObject {
+  code: string;
+  severity: string;
+  subject: string;
+  detail: string;
+}
+
+export interface CiExecutionEvidenceAuditResult extends JsonObject {
+  schema: "bioprism-devplat-ci-execution-evidence/0.1";
+  workflow: string;
+  plan_digest: string;
+  evidence_digest: string;
+  run_id: string;
+  provider: string;
+  source: string;
+  conclusion: string;
+  expected_check_count: number;
+  observed_check_count: number;
+  passed_check_count: number;
+  failed_check_count: number;
+  skipped_check_count: number;
+  unknown_check_count: number;
+  required_missing: string[];
+  required_failed: string[];
+  optional_nonpassing: string[];
+  complete: boolean;
+  structurally_valid: boolean;
+  release_candidate: boolean;
+  execution: string;
+  verification: string;
+  findings: CiEvidenceFindingResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiExecutionEvidenceResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_execution_evidence_audit";
+  schema: "bioprism-devplat-ci-execution-evidence/0.1";
+  valid: boolean;
+  ci_evidence_ready: boolean;
+  plan_digest: string;
+  evidence_digest: string;
+  audit: CiExecutionEvidenceAuditResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CapabilityDiscoverArgs extends JsonObject {
   query?: string;
   group_id?: string;

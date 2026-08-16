@@ -104,6 +104,10 @@ Convenience methods currently cover:
 - `developerDeliveryAudit`: developer-platform delivery evidence;
 - `developerWorkbench`: digest-bound authoring/notebook audit, capability dashboard query, and
   review-only CI workflow planning;
+- `ciExecutionEvidenceAudit`: digest-bound reconciliation of a supplied CI run against a freshly
+  generated workbench plan, with per-check result digests, complete/missing/non-passing findings,
+  provider provenance, and structural-only verification. Its ready flag is a handoff signal, not
+  proof that a runner, provider signature, deployment, or scientific workflow was verified;
 - `agentMission`: deterministic cross-domain mission planning or explicitly allow-listed execution
   with refusal propagation, output budgets, and optional JSON-pointer bindings;
 - `submitMission`, `missionStatus`, and `cancelMission`: typed asynchronous mission jobs with
@@ -162,7 +166,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 169-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 170-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
