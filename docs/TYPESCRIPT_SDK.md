@@ -201,6 +201,10 @@ the client does not infer a complete closure from a capped page.
 retain their caveat and rung ancestry, while mechanistic or otherwise unsupported claims remain
 structured `ok: false` refusals with `fail_closed: true`. The TypeScript boundary does not promote
 synthetic or simulator evidence to biological validity.
+`observedWorldDeclare` types the declaration artifact that feeds that boundary: pinned sources,
+public versus controlled access, cohort strata, selection, outcome labels, controlled-source
+names, and the observed-only provenance projection remain explicit instead of being inferred from
+an identifier or a green transport response.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

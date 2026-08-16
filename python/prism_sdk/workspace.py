@@ -111,7 +111,13 @@ from .hub import (
 )
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
-from .world import WorldClaimCheckReport, world_claim_check_report
+from .world import (
+    ObservedWorldDeclareArgs,
+    ObservedWorldDeclareReport,
+    WorldClaimCheckReport,
+    observed_world_declare_report,
+    world_claim_check_report,
+)
 
 
 def _targets(request_id: str | None, targets: Sequence[str] | None) -> dict[str, Any] | None:
@@ -275,6 +281,23 @@ class Workspace:
         if result.is_error:
             return result.require_ok()
         return result.require_object()
+
+    def observed_world_declare(
+        self,
+        request: ObservedWorldDeclareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate and seal a pinned observed-world declaration."""
+
+        normalized = request if isinstance(request, ObservedWorldDeclareArgs) else ObservedWorldDeclareArgs.from_wire(request)
+        return self.tool("observed_world_declare", normalized.to_mcp_arguments())
+
+    def observed_world_declare_report(
+        self,
+        request: ObservedWorldDeclareArgs | Mapping[str, Any],
+    ) -> ObservedWorldDeclareReport:
+        """Return typed observed-world sources, design, provenance, and boundary counts."""
+
+        return observed_world_declare_report(self.observed_world_declare(request))
 
     def world_claim_check_report(
         self,
@@ -1280,6 +1303,23 @@ class AsyncWorkspace:
         if result.is_error:
             return result.require_ok()
         return result.require_object()
+
+    async def observed_world_declare(
+        self,
+        request: ObservedWorldDeclareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.observed_world_declare`."""
+
+        normalized = request if isinstance(request, ObservedWorldDeclareArgs) else ObservedWorldDeclareArgs.from_wire(request)
+        return await self.tool("observed_world_declare", normalized.to_mcp_arguments())
+
+    async def observed_world_declare_report(
+        self,
+        request: ObservedWorldDeclareArgs | Mapping[str, Any],
+    ) -> ObservedWorldDeclareReport:
+        """Return typed async observed-world declaration evidence."""
+
+        return observed_world_declare_report(await self.observed_world_declare(request))
 
     async def world_claim_check_report(
         self,

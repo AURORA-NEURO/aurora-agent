@@ -315,6 +315,10 @@ safe defaults.
 `supported`, validates rung ancestry and selection shape, requires grounded evidence plus a caveat
 for success, and requires a refusal plus `fail_closed` for refusal. This keeps the observed versus
 synthetic versus mechanistic claim ladder inspectable without claiming to verify the underlying data.
+The paired `observed_world_declare` projection is typed too: source access/versions, controlled
+redistribution boundaries, cohort strata, selection, outcome-label counts, and provenance parity
+are reconciled so a later claim check can retain a traceable declaration rather than only a free-form
+world identifier.
 
 The table below is a snapshot; the script is the live source.
 

@@ -86,6 +86,10 @@ invent defaults:
   counterfactuals, grounded claim evidence, caveats, and fail-closed refusal strings remain
   distinct. Sync MCP preserves the kernel's `ok: false` structured refusal instead of converting
   it into an uninspectable generic transport exception.
+- `ObservedWorldDeclareArgs` and `observed_world_declare_report(...)` seal the preceding
+  declaration boundary: source versions/access policies, controlled-source names, cohort/stratum
+  reconciliation, selection, unsupported counterfactuals, outcome labels, and observed-only
+  provenance are all reconciled before callers treat the declaration as a usable artifact.
 - `FiberCompileRequest`, `FiberRefineRequest`, `FiberExplainRequest`, `FiberVerifyRequest`, and
   `ProjectionBundleRequest` make the full FIBER progressive-disclosure lifecycle typed across sync
   MCP, async MCP, and HTTP. `Workspace.fiber_compile(...)` validates relative world/query paths and

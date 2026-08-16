@@ -111,7 +111,13 @@ from .hub import (
     hub_search_report,
 )
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
-from .world import WorldClaimCheckReport, world_claim_check_report
+from .world import (
+    ObservedWorldDeclareArgs,
+    ObservedWorldDeclareReport,
+    WorldClaimCheckReport,
+    observed_world_declare_report,
+    world_claim_check_report,
+)
 from .tabular import TabularIngestReport, TabularIngestRequest, tabular_ingest_report
 from .repository_requests import (
     RepositoryBundleRequest,
@@ -992,6 +998,23 @@ class ApiClient:
                 raise ArgumentError("claim is required when provenance is a mapping")
             request = WorldClaimCheckRequest(provenance, claim)
         return self.call_tool("world_claim_check", request.to_mcp_arguments())
+
+    def observed_world_declare(
+        self,
+        request: ObservedWorldDeclareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate an observed-world declaration through the HTTP gateway."""
+
+        normalized = request if isinstance(request, ObservedWorldDeclareArgs) else ObservedWorldDeclareArgs.from_wire(request)
+        return self.call_tool("observed_world_declare", normalized.to_mcp_arguments())
+
+    def observed_world_declare_report(
+        self,
+        request: ObservedWorldDeclareArgs | Mapping[str, Any],
+    ) -> ObservedWorldDeclareReport:
+        """Return typed HTTP observed-world declaration evidence."""
+
+        return observed_world_declare_report(self.observed_world_declare(request))
 
     def world_claim_check_report(
         self,
@@ -2036,6 +2059,23 @@ class AsyncApiClient:
                 raise ArgumentError("claim is required when provenance is a mapping")
             request = WorldClaimCheckRequest(provenance, claim)
         return await self.call_tool("world_claim_check", request.to_mcp_arguments())
+
+    async def observed_world_declare(
+        self,
+        request: ObservedWorldDeclareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.observed_world_declare`."""
+
+        normalized = request if isinstance(request, ObservedWorldDeclareArgs) else ObservedWorldDeclareArgs.from_wire(request)
+        return await self.call_tool("observed_world_declare", normalized.to_mcp_arguments())
+
+    async def observed_world_declare_report(
+        self,
+        request: ObservedWorldDeclareArgs | Mapping[str, Any],
+    ) -> ObservedWorldDeclareReport:
+        """Return typed async HTTP observed-world declaration evidence."""
+
+        return observed_world_declare_report(await self.observed_world_declare(request))
 
     async def world_claim_check_report(
         self,

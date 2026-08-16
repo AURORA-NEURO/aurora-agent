@@ -40,6 +40,8 @@ import type {
   HubLockResult,
   WorldClaimCheckArgs,
   WorldClaimCheckResult,
+  ObservedWorldDeclareArgs,
+  ObservedWorldDeclareResult,
   MeasurementCompareArgs,
   MeasurementCompareResult,
   OpsAcceptanceArgs,
@@ -349,6 +351,10 @@ export class ApiClient {
 
   async worldClaimCheck(args: WorldClaimCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorldClaimCheckResult>> {
     return this.callTool<WorldClaimCheckResult>("world_claim_check", args, options);
+  }
+
+  async observedWorldDeclare(args: ObservedWorldDeclareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ObservedWorldDeclareResult>> {
+    return this.callTool<ObservedWorldDeclareResult>("observed_world_declare", args, options);
   }
 
   async measurementCompare(args: MeasurementCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MeasurementCompareResult>> {

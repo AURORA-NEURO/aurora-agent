@@ -1451,6 +1451,55 @@ export interface RefusedWorldClaimResult extends JsonObject {
 
 export type WorldClaimCheckResult = SupportedWorldClaimResult | RefusedWorldClaimResult;
 
+export interface ObservedWorldDeclareArgs extends JsonObject {
+  id: string;
+  sources: JsonObject[];
+  design: JsonObject;
+  outcome_labels: string[];
+}
+
+export type WorldSourceAccessResult =
+  | { access: "public" }
+  | { access: "controlled"; policy: string };
+
+export interface WorldSourceResult extends JsonObject {
+  name: string;
+  version: string | null;
+  access: WorldSourceAccessResult;
+  embedded: boolean;
+}
+
+export interface WorldStratumResult extends JsonObject {
+  name: string;
+  count: number;
+}
+
+export interface WorldStudyDesignResult extends JsonObject {
+  cohort_size: number;
+  strata: WorldStratumResult[];
+  selection: WorldSelectionResult;
+  stands_for_population: string | null;
+  unsupported_counterfactuals: string[];
+}
+
+export interface ObservedWorldResult extends JsonObject {
+  id: string;
+  sources: WorldSourceResult[];
+  design: WorldStudyDesignResult;
+  outcome_labels: string[];
+}
+
+export interface ObservedWorldDeclareResult extends JsonObject {
+  ok: true;
+  world: ObservedWorldResult;
+  provenance: WorldProvenanceResult;
+  world_id: string;
+  source_count: number;
+  controlled_sources: string[];
+  outcome_label_count: number;
+  guarantees: string[];
+}
+
 export interface MeasurementCompareArgs extends JsonObject {
   left: JsonObject;
   right: JsonObject;

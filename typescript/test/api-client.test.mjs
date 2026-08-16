@@ -318,6 +318,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         provenance: { top: "mechanistic", stands_on: ["mechanistic"], assumptions: ["tumour growth rate"], unsupported_counterfactuals: [], selection: { selection: "undeclared" } },
         fail_closed: true,
       } } } });
+      if (path === "/v1/tools/observed_world_declare") return jsonResponse({ ok: true, tool: "observed_world_declare", request_id: "r26", mcp: { result: { structuredContent: {
+        ok: true,
+        world: { id: "observed-demo", sources: [{ name: "cohort", version: "v1", access: { access: "controlled", policy: "reviewer-only" }, embedded: false }], design: { cohort_size: 2, strata: [{ name: "all", count: 2 }], selection: { selection: "consecutive", criterion: "all eligible participants" }, stands_for_population: "RG-DEMO population", unsupported_counterfactuals: [] }, outcome_labels: ["negative", "positive"] },
+        provenance: { top: "observed", stands_on: ["observed"], assumptions: [], unsupported_counterfactuals: [], selection: { selection: "consecutive", criterion: "all eligible participants" } },
+        world_id: "observed-demo",
+        source_count: 1,
+        controlled_sources: ["cohort"],
+        outcome_label_count: 2,
+        guarantees: ["pinned sources are retained"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -505,6 +515,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const resolvedHub = await client.hubResolve({ federation: { members: {} }, catalogs: [], request: { name: "bioprism/root" } });
   const lockedHub = await client.hubLock({ federation: { members: {} }, catalogs: [], request: { name: "bioprism/root" }, max_items: 3 });
   const worldClaim = await client.worldClaimCheck({ provenance: { top: "mechanistic" }, claim: { kind: "biology", quantity: "tumour growth rate" } });
+  const observedWorld = await client.observedWorldDeclare({ id: "observed-demo", sources: [], design: { cohort_size: 0 }, outcome_labels: [] });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -545,6 +556,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(resolvedHub.mcp.result.structuredContent.resolution.subject.digest, "sha256:root");
   assert.equal(lockedHub.mcp.result.structuredContent.entries[0].locked.required_by[0].source.source, "root");
   assert.equal(worldClaim.mcp.result.structuredContent.fail_closed, true);
+  assert.equal(observedWorld.mcp.result.structuredContent.provenance.top, "observed");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");
