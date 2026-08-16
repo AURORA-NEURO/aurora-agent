@@ -102,6 +102,12 @@ invent defaults:
   review program: pose/validation/examination refusals, admissible hypotheses, discriminating
   actions, cue scans, expectedness evidence, and the distinct resolved, not-yet-examined, and
   unresolvable states. No helper selects a winning modality.
+- `lab_plan_report(...)` types inference-lab acquisition ordering, privacy and budget exclusions,
+  optional hypothesis separation, declared spend, stop reason, and the explicit `should_escalate`
+  predicate. Planning remains visibly non-executing.
+- `OncoBoundaryArgs` and `onco_boundary_report(...)` preserve oncology's partial-release contract:
+  aggregate research uses can remain released while individual clinical uses are refused and
+  escalated, and direct-identifier refusals remain fail-closed without echoing request data.
 - `FiberCompileRequest`, `FiberRefineRequest`, `FiberExplainRequest`, `FiberVerifyRequest`, and
   `ProjectionBundleRequest` make the full FIBER progressive-disclosure lifecycle typed across sync
   MCP, async MCP, and HTTP. `Workspace.fiber_compile(...)` validates relative world/query paths and

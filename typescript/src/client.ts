@@ -50,6 +50,10 @@ import type {
   PreanalyticApplyResult,
   ContradictionReviewArgs,
   ContradictionReviewResult,
+  LabPlanArgs,
+  LabPlanResult,
+  OncoBoundaryArgs,
+  OncoBoundaryResult,
   OpsAcceptanceArgs,
   OpsAcceptanceResult,
   BioAtlasPublicationAuditArgs,
@@ -377,6 +381,14 @@ export class ApiClient {
 
   async contradictionReview(args: ContradictionReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ContradictionReviewResult>> {
     return this.callTool<ContradictionReviewResult>("contradiction_review", args, options);
+  }
+
+  async labPlan(args: LabPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LabPlanResult>> {
+    return this.callTool<LabPlanResult>("lab_plan", args, options);
+  }
+
+  async oncoBoundaryCheck(args: OncoBoundaryArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoBoundaryResult>> {
+    return this.callTool<OncoBoundaryResult>("onco_boundary_check", args, options);
   }
 
   async opsAcceptance(args: OpsAcceptanceArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OpsAcceptanceResult>> {

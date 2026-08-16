@@ -331,6 +331,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/lineage_audit") return jsonResponse({ ok: true, tool: "lineage_audit", request_id: "r27", mcp: { result: { structuredContent: { ok: true, clean: true, identity_complete: true, finding_count: 0 } } } });
       if (path === "/v1/tools/preanalytic_apply") return jsonResponse({ ok: true, tool: "preanalytic_apply", request_id: "r28", mcp: { result: { structuredContent: { ok: false, applied: false, refusal: "biology changed", fail_closed: true } } } });
       if (path === "/v1/tools/contradiction_review") return jsonResponse({ ok: true, tool: "contradiction_review", request_id: "r29", mcp: { result: { structuredContent: { ok: false, stage: "pose", refusal: "readings agree", fail_closed: true } } } });
+      if (path === "/v1/tools/lab_plan") return jsonResponse({ ok: true, tool: "lab_plan", request_id: "r30", mcp: { result: { structuredContent: { ok: true, goal: "safe assay", should_escalate: true } } } });
+      if (path === "/v1/tools/onco_boundary_check") return jsonResponse({ ok: true, tool: "onco_boundary_check", request_id: "r31", mcp: { result: { structuredContent: { ok: true, released: ["cohort_analysis"], refused: ["treatment_recommendation"], terminal_action: "escalate" } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -522,6 +524,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const lineage = await client.lineageAudit({ registry: { nodes: {}, artifacts: {} }, max_items: 3 });
   const preanalytic = await client.preanalyticApply({ specimen: { id: "sp-1" }, mutation: { id: "m-1" } });
   const contradiction = await client.contradictionReview({ left: {}, right: {}, intent: "resolvable", hypotheses: [{ id: "h-1", account: {} }] });
+  const lab = await client.labPlan({ graph: {}, actions: [], budget: {}, max_items: 3 });
+  const onco = await client.oncoBoundaryCheck({ request: { requested_uses: ["cohort_analysis"] } });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -566,6 +570,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(lineage.mcp.result.structuredContent.identity_complete, true);
   assert.equal(preanalytic.mcp.result.structuredContent.fail_closed, true);
   assert.equal(contradiction.mcp.result.structuredContent.stage, "pose");
+  assert.equal(lab.mcp.result.structuredContent.should_escalate, true);
+  assert.equal(onco.mcp.result.structuredContent.terminal_action, "escalate");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

@@ -5,10 +5,14 @@ import unittest
 from prism_sdk import (
     ArgumentError,
     ContradictionReviewArgs,
+    LabPlanRequest,
+    OncoBoundaryArgs,
     LineageAuditArgs,
     PreanalyticApplyArgs,
     contradiction_review_report,
+    lab_plan_report,
     lineage_audit_report,
+    onco_boundary_report,
     preanalytic_apply_report,
 )
 
@@ -190,6 +194,60 @@ class ContradictionReportTests(unittest.TestCase):
             ContradictionReviewArgs(
                 {}, {}, "resolvable", ({"id": "h", "account": {}}, {"id": "h", "account": {}})
             )
+
+
+class LabAndOncoReportTests(unittest.TestCase):
+    def test_lab_report_keeps_privacy_exclusion_and_escalation(self) -> None:
+        report = lab_plan_report({
+            "ok": True,
+            "goal": "choose a safe assay",
+            "obligation_count": 1,
+            "frontier": [{"id": "identity"}],
+            "omitted_frontier": 0,
+            "separation": None,
+            "ordered": [{"action": "inspect", "kind": {"kind": "inspect_metadata"}, "targets": ["identity"], "value_per_unit_cost": 10.0, "cost": {"tokens": 1, "latency_units": 0}}],
+            "omitted_ordered": 0,
+            "excluded": [["private", {"excluded_because": "crosses_boundary", "policy": "no-private-db"}]],
+            "omitted_excluded": 0,
+            "spent": {"tokens": 1, "latency_units": 0},
+            "stop": {"stopped_because": "evidence_unreachable", "outstanding": ["identity"]},
+            "should_escalate": True,
+            "guarantees": ["privacy"],
+            "limitations": ["no execution"],
+        })
+        self.assertTrue(report.should_escalate)
+        self.assertEqual(report.excluded[0].reason_kind, "crosses_boundary")
+        self.assertFalse(report.execution_started)
+
+    def test_lab_refusal_and_onco_partial_release_remain_structured(self) -> None:
+        refused = lab_plan_report({"ok": False, "stage": "planning", "refusal": "crosses boundary", "fail_closed": True, "guarantee": "bounded"})
+        self.assertTrue(refused.refused)
+        onco = onco_boundary_report({
+            "ok": True,
+            "permitted": ["cohort_analysis", "method_development"],
+            "disposition": {
+                "disposition": "release_partial",
+                "released": ["cohort_analysis"],
+                "refused": ["treatment_recommendation"],
+                "escalation": {"trigger": "individual_clinical_request", "route": "treating_clinical_team"},
+            },
+            "released": ["cohort_analysis"],
+            "refused": ["treatment_recommendation"],
+            "terminal_action": "escalate",
+            "escalation": {"trigger": "individual_clinical_request", "route": "treating_clinical_team"},
+            "research_statement": "Research use only.",
+            "guarantees": ["split"],
+            "limitations": ["declared"],
+        })
+        self.assertTrue(onco.ok)
+        self.assertTrue(onco.refused_individual_use)
+        self.assertFalse(onco.research_only)
+
+    def test_lab_and_onco_requests_bound_inputs(self) -> None:
+        self.assertEqual(LabPlanRequest({}, [], {}).to_mcp_arguments()["max_items"], 100)
+        self.assertEqual(OncoBoundaryArgs({"requested_uses": ["cohort_analysis"]}).to_mcp_arguments()["request"]["requested_uses"], ["cohort_analysis"])
+        with self.assertRaises(ArgumentError):
+            OncoBoundaryArgs({"requested_uses": ["treatment"]})
 
 
 if __name__ == "__main__":

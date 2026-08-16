@@ -1726,6 +1726,73 @@ export interface ContradictionReviewResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface LabPlanArgs extends JsonObject {
+  graph: JsonObject;
+  actions: JsonObject[];
+  budget: JsonObject;
+  marginal_value_floor?: number;
+  hypotheses?: JsonObject;
+  observations?: JsonObject;
+  max_items?: number;
+}
+
+export interface LabPlanResult extends JsonObject {
+  ok: boolean;
+  goal?: string;
+  obligation_count?: number;
+  frontier?: JsonObject[];
+  omitted_frontier?: number;
+  separation?: JsonObject | null;
+  ordered?: JsonObject[];
+  omitted_ordered?: number;
+  excluded?: JsonValue[];
+  omitted_excluded?: number;
+  spent?: JsonObject;
+  stop?: JsonObject;
+  should_escalate?: boolean;
+  stage?: string;
+  refusal?: string;
+  fail_closed: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoBoundaryArgs extends JsonObject {
+  request: JsonObject;
+  boundary?: JsonObject;
+}
+
+export interface OncoEscalationResult extends JsonObject {
+  trigger: string;
+  route: string;
+}
+
+export interface OncoDispositionResult extends JsonObject {
+  disposition: "release_in_full" | "release_partial" | "refuse_and_escalate";
+  uses?: string[];
+  released?: string[];
+  refused?: string[];
+  escalation?: OncoEscalationResult;
+}
+
+export interface OncoBoundaryResult extends JsonObject {
+  ok: boolean;
+  permitted?: string[];
+  disposition?: OncoDispositionResult;
+  released?: string[];
+  refused?: string[];
+  terminal_action?: "stop" | "abstain" | "escalate";
+  escalation?: OncoEscalationResult | null;
+  research_statement?: string;
+  stage?: string;
+  refusal?: string;
+  fail_closed: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface OpsAcceptanceArgs extends JsonObject {
   max_items?: number;
 }

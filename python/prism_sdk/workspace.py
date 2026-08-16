@@ -112,6 +112,8 @@ from .hub import (
 from .lineage import LineageAuditArgs, LineageAuditReport, lineage_audit_report
 from .preanalytic import PreanalyticApplyArgs, PreanalyticApplyReport, preanalytic_apply_report
 from .contradiction import ContradictionReviewArgs, ContradictionReviewReport, contradiction_review_report
+from .lab import LabPlanReport, lab_plan_report
+from .oncology import OncoBoundaryArgs, OncoBoundaryReport, onco_boundary_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -368,6 +370,26 @@ class Workspace:
 
         return contradiction_review_report(self.contradiction_review(request))
 
+    def onco_boundary_check(
+        self,
+        request: OncoBoundaryArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply the research-only oncology boundary, preserving partial release/refusal."""
+
+        normalized = request if isinstance(request, OncoBoundaryArgs) else OncoBoundaryArgs.from_wire(request)
+        result = self.client.call_tool("onco_boundary_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def onco_boundary_report(
+        self,
+        request: OncoBoundaryArgs | Mapping[str, Any],
+    ) -> OncoBoundaryReport:
+        """Return typed oncology research release, clinical refusal, and escalation evidence."""
+
+        return onco_boundary_report(self.onco_boundary_check(request))
+
     def lab_plan(
         self,
         graph: Mapping[str, Any] | LabPlanRequest,
@@ -390,6 +412,31 @@ class Workspace:
                 raise ArgumentError("actions and budget are required when graph is a mapping")
             request = LabPlanRequest(graph, actions, budget, marginal_value_floor, hypotheses, observations, max_items)
         return self.tool("lab_plan", request.to_mcp_arguments())
+
+    def lab_plan_report(
+        self,
+        graph: Mapping[str, Any] | LabPlanRequest,
+        actions: Sequence[Mapping[str, Any]] | None = None,
+        budget: Mapping[str, Any] | None = None,
+        *,
+        marginal_value_floor: float = 0.0,
+        hypotheses: Mapping[str, Any] | None = None,
+        observations: Mapping[str, Any] | None = None,
+        max_items: int = 100,
+    ) -> LabPlanReport:
+        """Return typed ordered/excluded acquisition evidence and stop/escalation state."""
+
+        return lab_plan_report(
+            self.lab_plan(
+                graph,
+                actions,
+                budget,
+                marginal_value_floor=marginal_value_floor,
+                hypotheses=hypotheses,
+                observations=observations,
+                max_items=max_items,
+            )
+        )
 
     def routing_decide(
         self,
@@ -1441,6 +1488,24 @@ class AsyncWorkspace:
     ) -> ContradictionReviewReport:
         return contradiction_review_report(await self.contradiction_review(request))
 
+    async def onco_boundary_check(
+        self,
+        request: OncoBoundaryArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.onco_boundary_check`."""
+
+        normalized = request if isinstance(request, OncoBoundaryArgs) else OncoBoundaryArgs.from_wire(request)
+        result = await self.client.call_tool("onco_boundary_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def onco_boundary_report(
+        self,
+        request: OncoBoundaryArgs | Mapping[str, Any],
+    ) -> OncoBoundaryReport:
+        return onco_boundary_report(await self.onco_boundary_check(request))
+
     async def lab_plan(
         self,
         graph: Mapping[str, Any] | LabPlanRequest,
@@ -1463,6 +1528,29 @@ class AsyncWorkspace:
                 raise ArgumentError("actions and budget are required when graph is a mapping")
             request = LabPlanRequest(graph, actions, budget, marginal_value_floor, hypotheses, observations, max_items)
         return await self.tool("lab_plan", request.to_mcp_arguments())
+
+    async def lab_plan_report(
+        self,
+        graph: Mapping[str, Any] | LabPlanRequest,
+        actions: Sequence[Mapping[str, Any]] | None = None,
+        budget: Mapping[str, Any] | None = None,
+        *,
+        marginal_value_floor: float = 0.0,
+        hypotheses: Mapping[str, Any] | None = None,
+        observations: Mapping[str, Any] | None = None,
+        max_items: int = 100,
+    ) -> LabPlanReport:
+        return lab_plan_report(
+            await self.lab_plan(
+                graph,
+                actions,
+                budget,
+                marginal_value_floor=marginal_value_floor,
+                hypotheses=hypotheses,
+                observations=observations,
+                max_items=max_items,
+            )
+        )
 
     async def routing_decide(
         self,

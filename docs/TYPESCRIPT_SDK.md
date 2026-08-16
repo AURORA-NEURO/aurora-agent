@@ -218,6 +218,10 @@ response checks, family null controls, and detectability evidence remain separat
 `contradictionReview` keeps typed hypotheses, discriminating actions, answer-cue diagnostics, and
 the resolved/not-yet-examined/unresolvable state machine in the REST/MCP envelope without choosing
 a correct modality. Nested domain records remain JSON objects where the Rust kernel is authoritative.
+`labPlan` adds typed acquisition ordering, privacy exclusions, spend, stop reasons, and escalation
+without executing a lab action. `oncoBoundaryCheck` preserves oncology's partial aggregate release
+versus individual-clinical refusal and human-escalation state, including fail-closed identifier
+handling.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;
