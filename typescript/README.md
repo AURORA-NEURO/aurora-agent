@@ -45,7 +45,8 @@ if (result.mcp.result?.isError) {
   to type every domain payload twice. Repository helpers keep catalog, route traversal, and
   changed-module impact requests explicit; `telemetryProject` preserves the event, treatment
   policy, trace, and optional observed-metric boundary without silently treating projected
-  telemetry as a claim.
+  telemetry as a claim. Its `TelemetryProjectionResult` keeps record metadata, exact dropped /
+  coarsened loss, and the supported-versus-refused metric union typed in the REST/MCP envelope.
 - `packHealthAssess` keeps observed calibration counts, discrimination, health findings, digest
   binding, and score withholding in one raw REST/MCP envelope. A saturated, contaminated, or
   otherwise unreportable pack remains inspectable, but its numeric score is explicitly absent;

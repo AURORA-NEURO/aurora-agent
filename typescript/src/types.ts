@@ -321,6 +321,59 @@ export interface TelemetryProjectArgs extends JsonObject {
   observations?: JsonObject;
 }
 
+export interface TelemetryLossResult extends JsonObject {
+  dropped: string[];
+  coarsened: string[];
+}
+
+export interface TelemetryRecordResult extends JsonObject {
+  event_id: string;
+  kind: string;
+  trace: string;
+  attributes: JsonObject;
+  epoch: number;
+  policy: string;
+}
+
+export interface TelemetryMetricValueResult extends JsonObject {
+  metric: string;
+  unit: string;
+  value: number;
+  supported_by: string[];
+}
+
+export interface TelemetryMetricSuccessResult extends JsonObject {
+  ok: true;
+  value: TelemetryMetricValueResult;
+  audit_statement: string;
+}
+
+export interface TelemetryMetricRefusalResult extends JsonObject {
+  ok: false;
+  refusal: string;
+  asserted_signals?: string[];
+  observed_sample_count?: number;
+}
+
+export type TelemetryMetricResult = TelemetryMetricSuccessResult | TelemetryMetricRefusalResult;
+
+export interface TelemetryProjectionResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/telemetry-projection/0.1";
+  stage?: "telemetry_projection";
+  event_id?: string;
+  event_kind?: string;
+  trace?: string;
+  policy_version?: string;
+  record: TelemetryRecordResult | null;
+  loss: TelemetryLossResult | null;
+  lossless?: boolean;
+  metric?: TelemetryMetricResult | null;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+}
+
 export interface MetricsProfileAuditArgs extends JsonObject {
   vectors: JsonValue[];
   waived_dimensions?: string[];

@@ -79,6 +79,9 @@ Convenience methods currently cover:
 - `traceOtelIngest`: bounded OTLP JSON import with semantic-loss reporting;
 - `metricsProfileAudit` and `metricsAnalyticsAudit`: missingness-aware capability profiles plus
   bounded scalar, paired-contrast, cost/latency, replicate, and calibration analytics;
+- `telemetryProject`: canonical-event redaction with a typed `TelemetryProjectionResult`; its
+  record, exact dropped/coarsened loss, and observed-supported versus asserted-refused metric
+  result remain visible without claiming OTLP export or backend delivery;
 - `bioCapabilityEvidenceAudit`: evidence posture;
 - `bioAtlasPublicationAudit`: atlas, evidence, card, and leaderboard release gates;
 - `developerDeliveryAudit`: developer-platform delivery evidence;

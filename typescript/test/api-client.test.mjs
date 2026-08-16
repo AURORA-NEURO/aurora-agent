@@ -395,7 +395,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/repository_catalog") return jsonResponse({ ok: true, tool: "repository_catalog", request_id: "r11", mcp: { result: { structuredContent: { workflow: "repository_catalog", prefix: "docs/" } } } });
       if (path === "/v1/tools/repository_bundle") return jsonResponse({ ok: true, tool: "repository_bundle", request_id: "r12", mcp: { result: { structuredContent: { workflow: "repository_bundle", policy: "exhaustive" } } } });
       if (path === "/v1/tools/repository_impact") return jsonResponse({ ok: true, tool: "repository_impact", request_id: "r13", mcp: { result: { structuredContent: { workflow: "repository_impact", changed: "docs/README" } } } });
-      if (path === "/v1/tools/telemetry_project") return jsonResponse({ ok: true, tool: "telemetry_project", request_id: "r14", mcp: { result: { structuredContent: { workflow: "telemetry_project", trace: "trace-ts" } } } });
+      if (path === "/v1/tools/telemetry_project") return jsonResponse({ ok: true, tool: "telemetry_project", request_id: "r14", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/telemetry-projection/0.1",
+        event_id: "evt-ts",
+        event_kind: "tool.completed",
+        trace: "trace-ts",
+        policy_version: "telemetry-v1",
+        record: { event_id: "evt-ts", kind: "tool.completed", trace: "trace-ts", attributes: { status: "ok" }, epoch: 7, policy: "telemetry-v1" },
+        loss: { dropped: [], coarsened: [] },
+        lossless: true,
+        metric: null,
+        guarantees: ["telemetry is a one-way projection of the canonical DomainEvent"],
+      } } } });
       if (path === "/v1/tools/capability_discover") return jsonResponse({ ok: true, tool: "capability_discover", request_id: "r6", mcp: { result: { structuredContent: { workflow: "capability_discover", capability_schema_version: "bioprism-devplat-capability/0.1", schema_version: "bioprism-devplat-capability/0.1", catalog_digest: "c".repeat(64), total_groups: 1, query: {}, result_count: 1, matches: [{ group: { id: "testing", domains: ["verification"], crates: ["bioprism-devplat"], mcp_tools: ["echo"], cli_entrypoints: ["bioprism test"], python_artifacts: ["prism_sdk.testing"], status: "implemented" }, score: 100, matched_fields: ["domains"], matched_tools: ["echo"], tool_schemas: [] }], schema_attachment: { requested: false, returned: 0, missing: [] } } } } });
       if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: {
         ok: true,
@@ -766,6 +778,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(bundle.mcp.result.structuredContent.policy, "exhaustive");
   assert.equal(impact.mcp.result.structuredContent.changed, "docs/README");
   assert.equal(telemetry.mcp.result.structuredContent.trace, "trace-ts");
+  assert.equal(telemetry.mcp.result.structuredContent.record.event_id, "evt-ts");
+  assert.equal(telemetry.mcp.result.structuredContent.lossless, true);
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
   const platform = await client.developerPlatformStatus({ include_details: false, max_items: 3 });

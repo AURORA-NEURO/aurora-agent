@@ -223,6 +223,8 @@ class TelemetryProjectRequest:
             if self.observations is None:
                 raise ArgumentError("observations are required when metric is supplied")
         if self.observations is not None:
+            if self.metric is None:
+                raise ArgumentError("metric is required when observations are supplied")
             object.__setattr__(self, "observations", _mapping("observations", self.observations))
 
     def to_mcp_arguments(self) -> dict[str, Any]:

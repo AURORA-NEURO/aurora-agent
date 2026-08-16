@@ -230,6 +230,9 @@ invent defaults:
   It couples optional metric definitions to observations, requires an explicit redaction policy and
   trace id, and leaves unclassified emission, missing treatments, asserted-only evidence, and zero
   denominators as Rust-owned refusals rather than locally inventing telemetry truth.
+  `telemetry_project_report(...)` adds a typed projection report: canonical record metadata,
+  field-level dropped/coarsened loss, supported metric inputs, asserted-only metric refusals, and
+  the explicit no-OTLP/no-network limitation remain inspectable through sync/async MCP and HTTP.
 - `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON
   importer and preserves its semantic-loss/readiness report.
 - `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and

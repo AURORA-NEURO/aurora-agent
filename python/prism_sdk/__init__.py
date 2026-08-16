@@ -685,6 +685,16 @@ from .repository_requests import (
     RepositoryTraversalPolicy,
     TelemetryProjectRequest,
 )
+from .telemetry import (
+    TELEMETRY_PROJECTION_SCHEMA,
+    TELEMETRY_PROJECTION_STAGES,
+    TelemetryLossReport,
+    TelemetryMetricReport,
+    TelemetryMetricValueReport,
+    TelemetryProjectionReport,
+    TelemetryRecordReport,
+    telemetry_project,
+)
 from .optional_readers import (
     OptionalDependencyUnavailable,
     read_alignment_file,
@@ -1507,6 +1517,14 @@ __all__ = [
     "RepositoryImpactRequest",
     "RepositoryTraversalPolicy",
     "TelemetryProjectRequest",
+    "TELEMETRY_PROJECTION_SCHEMA",
+    "TELEMETRY_PROJECTION_STAGES",
+    "TelemetryLossReport",
+    "TelemetryMetricReport",
+    "TelemetryMetricValueReport",
+    "TelemetryProjectionReport",
+    "TelemetryRecordReport",
+    "telemetry_project",
     "MAX_TOOL_ARGUMENT_DEPTH",
     "MAX_TOOL_CATALOGUE_BYTES",
     "MAX_TOOL_DEFINITIONS",

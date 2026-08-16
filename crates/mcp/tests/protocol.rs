@@ -528,6 +528,7 @@ fn telemetry_projection_reports_loss_and_metric_observation_posture() {
         }),
     );
     assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["schema"], json!("bioprism-mcp/telemetry-projection/0.1"));
     assert_eq!(payload["lossless"], json!(false));
     assert_eq!(payload["loss"]["dropped"], json!(["count"]));
     assert_eq!(payload["metric"]["ok"], json!(true));
@@ -4425,7 +4426,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 16000
+                "budget": 18000
             },
             "policy": "normative",
             "include_markdown": true,

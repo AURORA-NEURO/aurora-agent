@@ -255,6 +255,7 @@ from .repository_requests import (
     RepositoryTraversalPolicy,
     TelemetryProjectRequest,
 )
+from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry_project_report
 from .tooling import ToolCallPlan, ToolCatalogue
 
 
@@ -2151,6 +2152,19 @@ class ApiClient:
                 raise ArgumentError("policy and trace are required when event is a mapping")
             request = TelemetryProjectRequest(event, policy, trace, metric, observations)
         return self.call_tool("telemetry_project", request.to_mcp_arguments())
+
+    def telemetry_project_report(
+        self,
+        event: Mapping[str, Any] | TelemetryProjectRequest,
+        policy: Mapping[str, Any] | None = None,
+        trace: str | None = None,
+        *,
+        metric: Mapping[str, Any] | None = None,
+        observations: Mapping[str, Any] | None = None,
+    ) -> TelemetryProjectionReport:
+        """Return typed telemetry projection evidence through HTTP."""
+
+        return telemetry_project_report(self.telemetry_project(event, policy, trace, metric=metric, observations=observations))
 
     def fiber_compile(
         self,
@@ -4081,6 +4095,19 @@ class AsyncApiClient:
                 raise ArgumentError("policy and trace are required when event is a mapping")
             request = TelemetryProjectRequest(event, policy, trace, metric, observations)
         return await self.call_tool("telemetry_project", request.to_mcp_arguments())
+
+    async def telemetry_project_report(
+        self,
+        event: Mapping[str, Any] | TelemetryProjectRequest,
+        policy: Mapping[str, Any] | None = None,
+        trace: str | None = None,
+        *,
+        metric: Mapping[str, Any] | None = None,
+        observations: Mapping[str, Any] | None = None,
+    ) -> TelemetryProjectionReport:
+        """Return async typed telemetry projection evidence through HTTP."""
+
+        return telemetry_project_report(await self.telemetry_project(event, policy, trace, metric=metric, observations=observations))
 
     async def fiber_compile(
         self,

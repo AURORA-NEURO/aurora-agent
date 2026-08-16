@@ -15268,6 +15268,7 @@ impl Server {
             Err(error) => {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/telemetry-projection/0.1",
                     "stage": "telemetry_projection",
                     "refusal": error.to_string(),
                     "fail_closed": true,
@@ -15318,6 +15319,7 @@ impl Server {
         };
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/telemetry-projection/0.1",
             "event_id": projected.record.event_id(),
             "event_kind": projected.record.kind(),
             "trace": projected.record.trace(),

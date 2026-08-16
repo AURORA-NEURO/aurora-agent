@@ -194,6 +194,7 @@ import type {
   SubscriptionListResponse,
   SubscriptionResponse,
   TelemetryProjectArgs,
+  TelemetryProjectionResult,
   ToolCallPlan,
   ToolArguments,
   ToolsResponse,
@@ -384,8 +385,8 @@ export class ApiClient {
     return this.callTool("repository_impact", args, options);
   }
 
-  async telemetryProject(args: TelemetryProjectArgs, options?: ClientRequestOptions) {
-    return this.callTool("telemetry_project", args, options);
+  async telemetryProject(args: TelemetryProjectArgs, options?: ClientRequestOptions): Promise<RestToolResponse<TelemetryProjectionResult>> {
+    return this.callTool<TelemetryProjectionResult>("telemetry_project", args, options);
   }
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {
