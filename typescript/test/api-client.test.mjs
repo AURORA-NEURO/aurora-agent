@@ -634,6 +634,30 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         },
         guarantees: ["edges checked"], limitations: ["artifact only"],
       } } } });
+      if (path === "/v1/tools/release_pipeline_audit") return jsonResponse({ ok: true, tool: "release_pipeline_audit", request_id: "r15releasepipeline", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-release-pipeline-audit/0.1",
+        workflow: "release_pipeline_audit",
+        manifest_digest: "a".repeat(64),
+        valid: true,
+        release_ready: true,
+        blocking_issue_count: 0,
+        warning_count: 0,
+        audit: {
+          schema: "bioprism-release-pipeline-audit/0.1",
+          manifest_schema: "bioprism-release-pipeline/0.1",
+          digest: "a".repeat(64),
+          valid: true,
+          counts: { environments: 2, protected_environments: 2, stages: 2, required_stages: 2, artifacts: 1, attestations: 3, promotions: 2, production_promotions: 1 },
+          stage_order: ["build", "test"],
+          cyclic_stages: [],
+          stage_readiness: [{ stage_id: "build", state: "ready_to_schedule", dependency_ready: true, blocking_dependencies: [] }],
+          artifact_audits: [{ artifact_id: "binary", digest_valid: true, producer_valid: true, inputs_valid: true, attestations_valid: true, provenance_present: true, signature_present: true }],
+          promotion_audits: [{ promotion_id: "to-production", from: "staging", to: "production", valid: true, production: true, missing_attestations: [], missing_approvals: [], rollback_present: true }],
+          issues: [], guarantees: ["layers remain separate"], limitations: ["artifact only"],
+        },
+        guarantees: ["layers remain separate"], limitations: ["artifact only"],
+      } } } });
       if (path === "/v1/tools/adaptive_panel") return jsonResponse({ ok: true, tool: "adaptive_panel", request_id: "r15d", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/adaptive-panel/0.1",
@@ -1478,6 +1502,21 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(engineering.mcp.result.structuredContent.schema, "bioprism-engineering-audit/0.1");
   assert.equal(engineering.mcp.result.structuredContent.audit.package_order[1], "api");
   assert.equal(engineering.mcp.result.structuredContent.audit.counts.actionable_tickets, 1);
+  const releasePipeline = await client.releasePipelineAudit({
+    project: { id: "aurora-agent", version: "0.1.0", repository: "github.com/AURORA-NEURO/aurora-agent" },
+    source: { ref_name: "main", commit_digest: "a".repeat(64), workflow: "release.yml" },
+    environments: [{ id: "staging", class: "staging" }, { id: "production", class: "production", protected: true, required_approvals: 1 }],
+    stages: [{ id: "build", kind: "build", environment: "staging" }, { id: "test", kind: "test", environment: "staging", depends_on: ["build"] }],
+    artifacts: [{ id: "binary", kind: "binary", digest: "a".repeat(64), produced_by: "build", attestations: ["prov", "sig"] }],
+    attestations: [
+      { id: "prov", kind: "provenance", artifact: "binary", digest: "a".repeat(64), issuer: "ci", statement: "built" },
+      { id: "sig", kind: "signature", artifact: "binary", digest: "a".repeat(64), issuer: "key", statement: "signed" },
+    ],
+    promotions: [{ id: "to-production", kind: "advance", from: "staging", to: "production", artifacts: ["binary"], required_attestations: ["prov", "sig"], rollback_target: "rollback" }],
+  });
+  assert.equal(releasePipeline.mcp.result.structuredContent.schema, "bioprism-release-pipeline-audit/0.1");
+  assert.equal(releasePipeline.mcp.result.structuredContent.release_ready, true);
+  assert.equal(releasePipeline.mcp.result.structuredContent.audit.promotion_audits[0].rollback_present, true);
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });
   const evidenceAudit = await client.bioCapabilityEvidenceAudit({ evidence: [], claim_requests: [], metrics: {} });
   const publicationAudit = await client.bioAtlasPublicationAudit({ atlas: { atlas_id: "atlas-1" }, release_request: { id: "publication-1", targets: ["atlas_profile"] } });

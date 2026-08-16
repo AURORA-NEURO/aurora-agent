@@ -1154,3 +1154,14 @@ policies. The report preserves canonical digest, dependency-first package order,
 components, ticket readiness, warning/blocking issues, independent-review collisions, and
 non-claims about checkout state, CI, GitHub, and release authority. See
 ENGINEERING_MANIFEST_AUDIT.md.
+
+## Release-pipeline audit
+
+`ReleasePipelineManifestArgs` and `release_pipeline_audit_report(...)` expose the bounded
+release-pipeline contract across sync/async MCP and HTTP. Nested typed arguments cover source
+identity, environments, stage dependencies, artifact digests and lineage, attestations,
+promotions, approval floors, and rollback targets. `ReleasePipelineAuditReport` preserves
+deterministic stage order/readiness, artifact and promotion audits, production promotions,
+warning/blocking issue rows, `release_ready`, the canonical manifest digest, guarantees, and
+limitations. It remains an artifact audit: it does not run CI, verify signatures, query registries,
+authenticate approvals, or deploy. See RELEASE_PIPELINE_AUDIT.md.

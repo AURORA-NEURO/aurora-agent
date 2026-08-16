@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 161);
+    assert_eq!(tools.len(), 162);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3654,6 +3654,55 @@ fn engineering_manifest_audit_keeps_topology_ticket_readiness_and_raci_separate(
 }
 
 #[test]
+fn release_pipeline_audit_preserves_promotion_provenance_and_rollback_boundaries() {
+    let mut server = server();
+    let digest = "a".repeat(64);
+    let manifest = json!({
+        "schema": "bioprism-release-pipeline/0.1",
+        "project": { "id": "aurora-agent", "version": "0.1.0", "repository": "github.com/AURORA-NEURO/aurora-agent" },
+        "source": { "ref_name": "main", "commit_digest": digest, "workflow": "release.yml" },
+        "environments": [
+            { "id": "staging", "class": "staging", "protected": true, "required_approvals": 0, "secrets_allowed": true, "immutable_artifacts": true },
+            { "id": "production", "class": "production", "protected": true, "required_approvals": 1, "secrets_allowed": true, "immutable_artifacts": true }
+        ],
+        "stages": [
+            { "id": "build", "kind": "build", "environment": "staging", "depends_on": [], "command": "cargo build --locked", "produces": ["binary"], "required": true },
+            { "id": "test", "kind": "test", "environment": "staging", "depends_on": ["build"], "command": "cargo test --locked", "produces": [], "required": true }
+        ],
+        "artifacts": [{ "id": "binary", "kind": "binary", "digest": digest, "produced_by": "build", "inputs": [], "attestations": ["prov", "sig"], "immutable": true }],
+        "attestations": [
+            { "id": "prov", "kind": "provenance", "artifact": "binary", "digest": digest, "issuer": "ci", "statement": "built from pinned source" },
+            { "id": "sig", "kind": "signature", "artifact": "binary", "digest": digest, "issuer": "release-key", "statement": "signed artifact" },
+            { "id": "approval", "kind": "approval", "artifact": "binary", "digest": digest, "issuer": "release-board", "statement": "approved" }
+        ],
+        "promotions": [
+            { "id": "to-production", "kind": "advance", "from": "staging", "to": "production", "artifacts": ["binary"], "required_attestations": ["prov", "sig"], "approvals": ["approval"], "rollback_target": "rollback" },
+            { "id": "rollback", "kind": "rollback", "from": "production", "to": "staging", "artifacts": ["binary"], "required_attestations": ["prov"], "approvals": [] }
+        ]
+    });
+    let result = call(&mut server, "release_pipeline_audit", json!({ "manifest": manifest.clone() }));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["release_ready"], json!(true));
+    assert_eq!(result["audit"]["stage_order"], json!(["build", "test"]));
+    assert_eq!(result["audit"]["promotion_audits"][0]["rollback_present"], json!(true));
+    assert_eq!(result["blocking_issue_count"], json!(0));
+
+    let mut refused = manifest;
+    refused["attestations"][1]["digest"] = json!("b".repeat(64));
+    refused["promotions"][0]["rollback_target"] = json!(null);
+    refused["stages"][0]["depends_on"] = json!(["test"]);
+    let refusal = call(&mut server, "release_pipeline_audit", json!({ "manifest": refused }));
+    assert_eq!(refusal["ok"], json!(true));
+    assert_eq!(refusal["valid"], json!(false));
+    assert_eq!(refusal["release_ready"], json!(false));
+    let issues = refusal["audit"]["issues"].as_array().unwrap();
+    assert!(issues.iter().any(|issue| issue["code"] == "attestation_digest_mismatch"));
+    assert!(issues.iter().any(|issue| issue["code"] == "production_rollback_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "stage_cycle"));
+}
+
+#[test]
 fn developer_workbench_audits_notebook_digests_queries_dashboard_and_plans_ci() {
     let mut server = server();
     let digest = "a".repeat(64);
@@ -4190,12 +4239,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(161));
-    assert_eq!(result["advertised_tool_count"], json!(161));
+    assert_eq!(result["unique_catalog_tools"], json!(162));
+    assert_eq!(result["advertised_tool_count"], json!(162));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(161));
-    assert_eq!(result["schema_quality"]["valid"], json!(161));
+    assert_eq!(result["schema_quality"]["checked"], json!(162));
+    assert_eq!(result["schema_quality"]["valid"], json!(162));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

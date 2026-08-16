@@ -211,6 +211,7 @@ pub mod exploit;
 pub mod engineering;
 pub mod mission;
 pub mod report;
+pub mod release_pipeline;
 pub mod repro;
 pub mod surface;
 pub mod walkthrough;
@@ -252,6 +253,14 @@ pub use mission::{
 pub use report::{
     drifted_figures, render, render_all, Audience, Depth, EvidenceState, Figure, FigureStatus,
     Limitation, RenderedFigure, Rendering, Section, SourcePointer, Uncertainty,
+};
+pub use release_pipeline::{
+    EnvironmentClass, PipelineArtifact, PipelineArtifactKind, PipelineAttestation,
+    PipelineAttestationKind, PipelineEnvironment, PipelineIssueSeverity, PipelinePromotion,
+    PipelinePromotionAudit, PipelinePromotionKind, PipelineStage, PipelineStageKind,
+    PipelineStageReadiness, PipelineProject, PipelineSource, ReleasePipelineAudit,
+    ReleasePipelineCounts, ReleasePipelineError, ReleasePipelineIssue, ReleasePipelineManifest,
+    ReleasePipelinePolicies, RELEASE_PIPELINE_AUDIT_SCHEMA, RELEASE_PIPELINE_MANIFEST_SCHEMA,
 };
 pub use repro::{
     figure_reproduction_case, forbidden_by_default, summarise, Effect, MoleculeCard, Obligation,

@@ -390,6 +390,13 @@ supersession, RACI rows, independent-review separation, canonical digest, and fa
 severity. The backlog keeps the six blueprint entries because the route does not claim to replace
 the surrounding process, repository automation, external ticket authority, or release systems.
 
+The `release_pipeline_audit` route now adds an artifact-level contract for the CI/CD and release
+automation entry (`40.40`): it checks stage DAG closure, artifact lineage, digest-bound provenance,
+signature and approval declarations, environment protection, promotion order, and rollback
+targets. It still does not replace hosted CI, signing infrastructure, registry state, approval
+authority, deployment execution, or rollback testing, so the six blueprint entries remain
+uncovered as process/external artifacts.
+
 ## §19 Reference Examples — 3 uncovered
 
 - `19.01` Decision Cell Example

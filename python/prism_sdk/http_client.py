@@ -307,6 +307,7 @@ from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate
 from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
 from .atlas_surface import AtlasSurfaceAuditArgs, AtlasSurfaceAuditReport, atlas_surface_audit_report
 from .engineering_manifest import EngineeringAuditReport, EngineeringManifestArgs, engineering_manifest_audit_report
+from .release_pipeline import ReleasePipelineAuditReport, ReleasePipelineManifestArgs, release_pipeline_audit_report
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2877,6 +2878,17 @@ class ApiClient:
         """Return typed engineering-manifest evidence through HTTP."""
 
         return engineering_manifest_audit_report(self.engineering_manifest_audit(request))
+
+    def release_pipeline_audit(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit release provenance and promotion boundaries through the HTTP gateway."""
+
+        normalized = request if isinstance(request, ReleasePipelineManifestArgs) else ReleasePipelineManifestArgs.from_wire(request)
+        return self.call_tool("release_pipeline_audit", normalized.to_mcp_arguments())
+
+    def release_pipeline_audit_report(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> ReleasePipelineAuditReport:
+        """Return typed release-pipeline evidence through HTTP."""
+
+        return release_pipeline_audit_report(self.release_pipeline_audit(request))
 
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive panel through the HTTP gateway."""
@@ -5501,6 +5513,17 @@ class AsyncApiClient:
         """Return async typed engineering-manifest evidence through HTTP."""
 
         return engineering_manifest_audit_report(await self.engineering_manifest_audit(request))
+
+    async def release_pipeline_audit(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async release-pipeline audit through the HTTP gateway."""
+
+        normalized = request if isinstance(request, ReleasePipelineManifestArgs) else ReleasePipelineManifestArgs.from_wire(request)
+        return await self.call_tool("release_pipeline_audit", normalized.to_mcp_arguments())
+
+    async def release_pipeline_audit_report(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> ReleasePipelineAuditReport:
+        """Return async typed release-pipeline evidence through HTTP."""
+
+        return release_pipeline_audit_report(await self.release_pipeline_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async adaptive panel audit through the HTTP gateway."""

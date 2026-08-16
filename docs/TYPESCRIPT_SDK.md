@@ -644,3 +644,12 @@ engineeringManifestAudit provides typed engineering-manifest digest, package top
 readiness, ADR supersession, ownership/RACI, and warning/blocking issue evidence. The result
 remains an artifact audit and does not imply checkout inspection, CI execution, GitHub state, or
 release authority. See ENGINEERING_MANIFEST_AUDIT.md.
+
+## Release-pipeline audit
+
+`ApiClient.releasePipelineAudit(...)` accepts `ReleasePipelineManifestArgs` and returns a typed
+`ReleasePipelineAuditToolResult`. The types retain stage DAG/readiness, artifact digest and
+lineage checks, attestation binding, promotion order, production signature/approval requirements,
+rollback presence, and explicit warning/blocking issue rows. `release_ready` is a derived artifact
+projection, not proof of CI execution or deployment. The client does not verify signatures,
+contact registries, or mutate release state. See RELEASE_PIPELINE_AUDIT.md.

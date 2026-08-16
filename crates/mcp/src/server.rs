@@ -131,8 +131,9 @@ use bioprism_devplat::{
     apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
     CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
-    EngineeringManifest, CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
-    MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    EngineeringManifest, ReleasePipelineManifest, CAPABILITY_SCHEMA_VERSION,
+    ENGINEERING_AUDIT_SCHEMA, RELEASE_PIPELINE_AUDIT_SCHEMA, MISSION_SCHEMA_VERSION,
+    WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1465,6 +1466,7 @@ impl Server {
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "engineering_manifest_audit" => self.engineering_manifest_audit(&arguments),
+            "release_pipeline_audit" => self.release_pipeline_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
@@ -24120,6 +24122,54 @@ impl Server {
         }))
     }
 
+    fn release_pipeline_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_manifest = arguments
+            .get("manifest")
+            .cloned()
+            .ok_or("manifest is required and must be a serialized ReleasePipelineManifest")?;
+        let encoded = serde_json::to_vec(&raw_manifest)
+            .map_err(|error| format!("cannot measure release pipeline manifest: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("manifest exceeds the 20000000-byte safety bound".into());
+        }
+        let manifest: ReleasePipelineManifest = serde_json::from_value(raw_manifest)
+            .map_err(|error| format!("invalid release pipeline manifest: {error}"))?;
+        let audit = manifest
+            .audit()
+            .map_err(|error| format!("cannot audit release pipeline manifest: {error}"))?;
+        let blocking_issue_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::PipelineIssueSeverity::Blocking)
+            .count();
+        let warning_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::PipelineIssueSeverity::Warning)
+            .count();
+        Ok(json!({
+            "ok": true,
+            "workflow": "release_pipeline_audit",
+            "schema": RELEASE_PIPELINE_AUDIT_SCHEMA,
+            "manifest_digest": audit.digest,
+            "valid": audit.valid,
+            "release_ready": audit.valid,
+            "blocking_issue_count": blocking_issue_count,
+            "warning_count": warning_count,
+            "audit": audit,
+            "guarantees": [
+                "stage DAG, artifact lineage, attestation binding, promotion order, and rollback declarations are audited independently",
+                "production protection, approval, provenance, and signature requirements remain explicit policy checks",
+                "the manifest digest binds the declared release plan and is independent of JSON formatting",
+            ],
+            "limitations": [
+                "the route does not execute commands, contact CI, verify cryptographic signatures, query registries, or mutate deployments",
+                "issuer identity, approval authority, and external runner success remain caller-declared evidence",
+                "a valid manifest is a coherent release plan, not proof that a release was built, approved, or deployed",
+            ],
+        }))
+    }
+
     fn developer_delivery_audit(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery input: {error}"))?;
@@ -26448,7 +26498,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -28602,6 +28652,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "manifest": { "type": "object", "description": "Serialized bioprism-devplat EngineeringManifest with project, baseline, packages, tickets, ADRs, ownership rows, and explicit policies." }
+                },
+                "required": ["manifest"]
+            }
+        }),
+        json!({
+            "name": "release_pipeline_audit",
+            "description": "Validate a bounded machine-readable release-pipeline manifest. It audits stage DAG closure, artifact digests and lineage, provenance and signature bindings, promotion order, production protection and approval floors, and explicit rollback targets; it returns deterministic readiness and a canonical manifest digest without executing commands, contacting CI, verifying signatures, or mutating a deployment.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifest": { "type": "object", "description": "Serialized bioprism-devplat ReleasePipelineManifest with project/source identity, environments, stages, artifacts, attestations, promotions, and explicit policies." }
                 },
                 "required": ["manifest"]
             }

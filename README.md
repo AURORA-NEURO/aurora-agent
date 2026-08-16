@@ -900,6 +900,15 @@ warning/blocking issue semantics. It validates declared coherence only; it does 
 checkout, run CI, query GitHub, or grant release authority. See
 docs/ENGINEERING_MANIFEST_AUDIT.md.
 
+## Release-pipeline audit
+
+The `release_pipeline_audit` route adds a bounded delivery contract over stage DAGs, artifact
+digests and lineage, provenance/signature bindings, environment protection, approval floors,
+promotion order, and explicit rollback targets. `release_ready` is derived from blocking issues;
+it is not evidence that CI ran or that a deployment succeeded. The route never executes commands,
+contacts CI or registries, verifies cryptographic signatures, or mutates deployment state. See
+docs/RELEASE_PIPELINE_AUDIT.md.
+
 ## License
 
 Apache-2.0

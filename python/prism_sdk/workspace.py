@@ -87,6 +87,11 @@ from .engineering_manifest import (
     EngineeringManifestArgs,
     engineering_manifest_audit_report,
 )
+from .release_pipeline import (
+    ReleasePipelineAuditReport,
+    ReleasePipelineManifestArgs,
+    release_pipeline_audit_report,
+)
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2992,6 +2997,17 @@ class Workspace:
 
         return engineering_manifest_audit_report(self.engineering_manifest_audit(request))
 
+    def release_pipeline_audit(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit release stages, provenance, promotion policy, and rollback boundaries through MCP."""
+
+        normalized = request if isinstance(request, ReleasePipelineManifestArgs) else ReleasePipelineManifestArgs.from_wire(request)
+        return self.tool("release_pipeline_audit", normalized.to_mcp_arguments())
+
+    def release_pipeline_audit_report(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> ReleasePipelineAuditReport:
+        """Return typed release readiness, artifact evidence, and production promotion blockers."""
+
+        return release_pipeline_audit_report(self.release_pipeline_audit(request))
+
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive evaluation panel through MCP."""
 
@@ -5657,6 +5673,17 @@ class AsyncWorkspace:
         """Async counterpart to Workspace.engineering_manifest_audit_report."""
 
         return engineering_manifest_audit_report(await self.engineering_manifest_audit(request))
+
+    async def release_pipeline_audit(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.release_pipeline_audit."""
+
+        normalized = request if isinstance(request, ReleasePipelineManifestArgs) else ReleasePipelineManifestArgs.from_wire(request)
+        return (await self.client.call_tool("release_pipeline_audit", normalized.to_mcp_arguments())).require_ok()
+
+    async def release_pipeline_audit_report(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> ReleasePipelineAuditReport:
+        """Async counterpart to Workspace.release_pipeline_audit_report."""
+
+        return release_pipeline_audit_report(await self.release_pipeline_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.adaptive_panel`."""

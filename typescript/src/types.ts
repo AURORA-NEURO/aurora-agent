@@ -1460,6 +1460,175 @@ export interface EngineeringManifestAuditResult extends JsonObject {
   fail_closed?: boolean;
 }
 
+export type ReleasePipelineEnvironmentClass = "development" | "staging" | "production";
+export type ReleasePipelineStageKind = "verify" | "build" | "test" | "package" | "sign" | "publish" | "deploy" | "smoke" | "rollback";
+export type ReleasePipelineArtifactKind = "source" | "binary" | "container" | "package" | "manifest" | "sbom" | "provenance";
+export type ReleasePipelineAttestationKind = "test" | "provenance" | "signature" | "approval";
+export type ReleasePipelinePromotionKind = "advance" | "rollback";
+export type ReleasePipelineIssueSeverity = "warning" | "blocking";
+
+export interface ReleasePipelineProjectArgs extends JsonObject {
+  id: string;
+  version: string;
+  repository: string;
+}
+
+export interface ReleasePipelineSourceArgs extends JsonObject {
+  ref_name: string;
+  commit_digest: string;
+  workflow: string;
+}
+
+export interface ReleasePipelineEnvironmentArgs extends JsonObject {
+  id: string;
+  class: ReleasePipelineEnvironmentClass;
+  protected?: boolean;
+  required_approvals?: number;
+  secrets_allowed?: boolean;
+  immutable_artifacts?: boolean;
+}
+
+export interface ReleasePipelineStageArgs extends JsonObject {
+  id: string;
+  kind: ReleasePipelineStageKind;
+  environment: string;
+  depends_on?: string[];
+  command?: string;
+  produces?: string[];
+  required?: boolean;
+}
+
+export interface ReleasePipelineArtifactArgs extends JsonObject {
+  id: string;
+  kind: ReleasePipelineArtifactKind;
+  digest: string;
+  produced_by: string;
+  inputs?: string[];
+  attestations?: string[];
+  immutable?: boolean;
+}
+
+export interface ReleasePipelineAttestationArgs extends JsonObject {
+  id: string;
+  kind: ReleasePipelineAttestationKind;
+  artifact: string;
+  digest: string;
+  issuer: string;
+  statement: string;
+}
+
+export interface ReleasePipelinePromotionArgs extends JsonObject {
+  id: string;
+  kind: ReleasePipelinePromotionKind;
+  from: string;
+  to: string;
+  artifacts?: string[];
+  required_attestations?: string[];
+  approvals?: string[];
+  rollback_target?: string;
+}
+
+export interface ReleasePipelinePoliciesArgs extends JsonObject {
+  require_stage_dag?: boolean;
+  require_provenance?: boolean;
+  require_production_signature?: boolean;
+  require_protected_production?: boolean;
+  require_rollback?: boolean;
+  require_approval?: boolean;
+}
+
+export interface ReleasePipelineManifestArgs extends JsonObject {
+  schema?: "bioprism-release-pipeline/0.1";
+  project: ReleasePipelineProjectArgs;
+  source: ReleasePipelineSourceArgs;
+  environments?: ReleasePipelineEnvironmentArgs[];
+  stages?: ReleasePipelineStageArgs[];
+  artifacts?: ReleasePipelineArtifactArgs[];
+  attestations?: ReleasePipelineAttestationArgs[];
+  promotions?: ReleasePipelinePromotionArgs[];
+  policies?: ReleasePipelinePoliciesArgs;
+}
+
+export interface ReleasePipelineIssueResult extends JsonObject {
+  code: string;
+  severity: ReleasePipelineIssueSeverity;
+  subject: string;
+  detail: string;
+  remediation: string;
+}
+
+export interface ReleasePipelineStageReadinessResult extends JsonObject {
+  stage_id: string;
+  state: string;
+  dependency_ready: boolean;
+  blocking_dependencies: string[];
+}
+
+export interface ReleasePipelineArtifactAuditResult extends JsonObject {
+  artifact_id: string;
+  digest_valid: boolean;
+  producer_valid: boolean;
+  inputs_valid: boolean;
+  attestations_valid: boolean;
+  provenance_present: boolean;
+  signature_present: boolean;
+}
+
+export interface ReleasePipelinePromotionAuditResult extends JsonObject {
+  promotion_id: string;
+  from: string;
+  to: string;
+  valid: boolean;
+  production: boolean;
+  missing_attestations: string[];
+  missing_approvals: string[];
+  rollback_present: boolean;
+}
+
+export interface ReleasePipelineCountsResult extends JsonObject {
+  environments: number;
+  protected_environments: number;
+  stages: number;
+  required_stages: number;
+  artifacts: number;
+  attestations: number;
+  promotions: number;
+  production_promotions: number;
+}
+
+export interface ReleasePipelineAuditResult extends JsonObject {
+  schema: "bioprism-release-pipeline-audit/0.1";
+  manifest_schema: string;
+  digest: string;
+  valid: boolean;
+  counts: ReleasePipelineCountsResult;
+  stage_order: string[];
+  cyclic_stages: string[][];
+  stage_readiness: ReleasePipelineStageReadinessResult[];
+  artifact_audits: ReleasePipelineArtifactAuditResult[];
+  promotion_audits: ReleasePipelinePromotionAuditResult[];
+  issues: ReleasePipelineIssueResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface ReleasePipelineAuditToolResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-release-pipeline-audit/0.1";
+  workflow: "release_pipeline_audit";
+  manifest_digest: string;
+  valid: boolean;
+  release_ready: boolean;
+  blocking_issue_count: number;
+  warning_count: number;
+  audit: ReleasePipelineAuditResult;
+  guarantees: string[];
+  limitations: string[];
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
 export interface DeveloperPlatformStatusArgs extends JsonObject {
   include_details?: boolean;
   max_items?: number;
