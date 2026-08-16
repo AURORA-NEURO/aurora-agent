@@ -125,8 +125,11 @@ use bioprism_interweave::workflow::{catalogue as interweave_catalogue, outstandi
 use bioprism_lab::{
     expand as expand_acquisitions, separate as separate_hypotheses, AcquisitionAction,
     AcquisitionCost, HypothesisSet as LabHypothesisSet,
+    holdout::{Holdout, HoldoutId, HoldoutLedger, Partition},
     pareto::{ParetoFront, Profile as LabParetoProfile},
     risk::{BranchLedger, BranchOutcome, BranchPolicy, RiskFeatures},
+    rollback::{Checkpoint, Deployment},
+    space::{ArchitectureSpace, CandidateArchitecture, ConfigurationId},
     Observations,
 };
 use bioprism_ledger::{ClassCounts, Event, EventLedger, SubjectLatest, TemporalCut};
@@ -1274,6 +1277,7 @@ impl Server {
             "lab_plan" => self.lab_plan(&arguments),
             "lab_pareto_audit" => self.lab_pareto_audit(&arguments),
             "lab_branch_audit" => self.lab_branch_audit(&arguments),
+            "lab_holdout_audit" => self.lab_holdout_audit(&arguments),
             "obligation_gate_check" => self.obligation_gate_check(&arguments),
             "lens_catalogue" => Ok(json!({
                 "ok": true,
@@ -7289,6 +7293,416 @@ impl Server {
                 "this endpoint plans and audits branching; it does not fork execution, invoke a verifier, or execute a tool",
                 "risk features, trigger thresholds, catches, escapes, and counterfactual descriptions are caller-supplied",
                 "the ledger measures declared branch utility and does not calibrate a learned risk model or infer causal benefit"
+            ]
+        }))
+    }
+
+    fn lab_holdout_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure holdout-audit input: {error}"))?;
+        if encoded.len() > 10_000_000 {
+            return Err("holdout-audit input exceeds the 10000000-byte safety bound".into());
+        }
+        let cost_ceiling = arguments
+            .get("cost_ceiling")
+            .and_then(Value::as_u64)
+            .ok_or("cost_ceiling is required and must be a non-negative integer")?;
+        if cost_ceiling > 1_000_000_000 {
+            return Err("cost_ceiling must be at most 1000000000".into());
+        }
+        let raw_candidates = arguments
+            .get("candidates")
+            .and_then(Value::as_array)
+            .ok_or("candidates is required and must be an array of CandidateArchitecture values")?;
+        if raw_candidates.is_empty() || raw_candidates.len() > 512 {
+            return Err("candidates must contain between 1 and 512 values".into());
+        }
+        let mut space = ArchitectureSpace::new();
+        for (index, raw_candidate) in raw_candidates.iter().enumerate() {
+            let candidate: CandidateArchitecture = serde_json::from_value(raw_candidate.clone())
+                .map_err(|error| format!("invalid candidates[{index}]: {error}"))?;
+            if candidate.id.as_str().trim().is_empty() || candidate.id.as_str().len() > 512 {
+                return Err(format!(
+                    "candidates[{index}].id must contain between 1 and 512 bytes"
+                ));
+            }
+            if let Err(error) = candidate.validate(cost_ceiling) {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "space_error_serialization_failed"
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-holdout-audit/0.1",
+                    "stage": "architecture_validation",
+                    "candidate_index": index,
+                    "candidate": candidate.id,
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "guarantees": [
+                        "no deployment state is created from an invalid architecture bundle",
+                        "required components, graph integrity, protected surfaces, and cost ceiling are checked before holdout operations"
+                    ]
+                }));
+            }
+            if let Err(error) = space.register(candidate) {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "space_error_serialization_failed"
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-holdout-audit/0.1",
+                    "stage": "architecture_registration",
+                    "candidate_index": index,
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "guarantees": [
+                        "duplicate bundles and unregistered parents are refused rather than rebound or silently orphaned"
+                    ]
+                }));
+            }
+        }
+
+        let raw_holdouts = arguments
+            .get("holdouts")
+            .and_then(Value::as_array)
+            .ok_or("holdouts is required and must be an array")?;
+        if raw_holdouts.is_empty() || raw_holdouts.len() > 128 {
+            return Err("holdouts must contain between 1 and 128 values".into());
+        }
+        let mut holdouts = HoldoutLedger::new();
+        for (index, raw_holdout) in raw_holdouts.iter().enumerate() {
+            let object = raw_holdout
+                .as_object()
+                .ok_or_else(|| format!("holdouts[{index}] must be an object"))?;
+            let id = object
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("holdouts[{index}].id must be a string"))?;
+            if id.trim().is_empty() || id.len() > 512 {
+                return Err(format!(
+                    "holdouts[{index}].id must contain between 1 and 512 bytes"
+                ));
+            }
+            let partition: Partition = serde_json::from_value(
+                object
+                    .get("partition")
+                    .cloned()
+                    .ok_or_else(|| format!("holdouts[{index}].partition is required"))?,
+            )
+            .map_err(|error| format!("invalid holdouts[{index}].partition: {error}"))?;
+            let query_budget = object
+                .get("query_budget")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| format!("holdouts[{index}].query_budget must be a non-negative integer"))?;
+            if query_budget > u32::MAX as u64 {
+                return Err(format!("holdouts[{index}].query_budget exceeds u32"));
+            }
+            holdouts
+                .register(Holdout::new(id, partition, query_budget as u32))
+                .map_err(|error| format!("holdout registration refused holdouts[{index}]: {error}"))?;
+        }
+
+        let current = arguments
+            .get("current")
+            .and_then(Value::as_str)
+            .ok_or("current is required and must name a registered configuration")?;
+        let current = ConfigurationId::new(current);
+        let mut deployment = match Deployment::new(space, holdouts, current) {
+            Ok(deployment) => deployment,
+            Err(error) => {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "rollback_error_serialization_failed"
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-holdout-audit/0.1",
+                    "stage": "deployment_initialization",
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "guarantees": [
+                        "deployment state is created only at a registered configuration"
+                    ]
+                }));
+            }
+        };
+        let raw_operations = arguments
+            .get("operations")
+            .and_then(Value::as_array)
+            .ok_or("operations is required and must be an array")?;
+        if raw_operations.is_empty() || raw_operations.len() > 2_000 {
+            return Err("operations must contain between 1 and 2000 values".into());
+        }
+        let max_rows = arguments
+            .get("max_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_rows == 0 || max_rows > 1_000 {
+            return Err("max_rows must be between 1 and 1000".into());
+        }
+        let max_rows = max_rows as usize;
+        let mut checkpoints: BTreeMap<String, Checkpoint> = BTreeMap::new();
+        let mut rows = Vec::with_capacity(raw_operations.len());
+        let mut measurement_count = 0usize;
+        let mut measurement_refusal_count = 0usize;
+        let mut rollback_count = 0usize;
+        for (index, raw_operation) in raw_operations.iter().enumerate() {
+            let object = raw_operation
+                .as_object()
+                .ok_or_else(|| format!("operations[{index}] must be an object"))?;
+            let kind = object
+                .get("kind")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("operations[{index}].kind must be a string"))?;
+            let row = match kind {
+                "checkpoint" => {
+                    let label = object
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("operations[{index}].label must be a string"))?;
+                    if label.trim().is_empty() || label.len() > 512 {
+                        return Err(format!("operations[{index}].label must contain between 1 and 512 bytes"));
+                    }
+                    if checkpoints.contains_key(label) {
+                        return Err(format!("operations[{index}] duplicates checkpoint label {label:?}"));
+                    }
+                    let checkpoint = deployment.checkpoint(label);
+                    checkpoints.insert(label.to_string(), checkpoint.clone());
+                    json!({
+                        "index": index,
+                        "kind": kind,
+                        "result": "accepted",
+                        "checkpoint": checkpoint,
+                    })
+                }
+                "promote" => {
+                    let configuration = object
+                        .get("configuration")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("operations[{index}].configuration must be a string"))?;
+                    let configuration = ConfigurationId::new(configuration);
+                    let selected_using = object
+                        .get("selected_using")
+                        .map(|value| {
+                            value
+                                .as_str()
+                                .map(HoldoutId::new)
+                                .ok_or_else(|| format!("operations[{index}].selected_using must be a string"))
+                        })
+                        .transpose()?;
+                    let rationale = object
+                        .get("rationale")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("operations[{index}].rationale must be a string"))?;
+                    deployment
+                        .promote(&configuration, selected_using.as_ref(), rationale)
+                        .map_err(|error| format!("operations[{index}] promotion refused: {error}"))?;
+                    json!({
+                        "index": index,
+                        "kind": kind,
+                        "result": "accepted",
+                        "current": deployment.current(),
+                        "selected_using": selected_using,
+                    })
+                }
+                "search" => {
+                    let holdout = object
+                        .get("holdout")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("operations[{index}].holdout must be a string"))?;
+                    let raw_configurations = object
+                        .get("configurations")
+                        .and_then(Value::as_array)
+                        .ok_or_else(|| format!("operations[{index}].configurations must be an array"))?;
+                    if raw_configurations.is_empty() || raw_configurations.len() > 512 {
+                        return Err(format!("operations[{index}].configurations must contain between 1 and 512 ids"));
+                    }
+                    let configurations: Vec<ConfigurationId> = raw_configurations
+                        .iter()
+                        .enumerate()
+                        .map(|(item_index, value)| {
+                            let id = value.as_str().ok_or_else(|| {
+                                format!("operations[{index}].configurations[{item_index}] must be a string")
+                            })?;
+                            let id = ConfigurationId::new(id);
+                            if !deployment.space.contains(&id) {
+                                return Err(format!("operations[{index}] names unknown configuration {id}"));
+                            }
+                            Ok(id)
+                        })
+                        .collect::<Result<_, String>>()?;
+                    deployment
+                        .holdouts
+                        .record_search(&HoldoutId::new(holdout), &configurations)
+                        .map_err(|error| format!("operations[{index}] search refused: {error}"))?;
+                    json!({
+                        "index": index,
+                        "kind": kind,
+                        "result": "accepted",
+                        "holdout": holdout,
+                        "configurations": configurations,
+                    })
+                }
+                "measure" => {
+                    let holdout = object
+                        .get("holdout")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("operations[{index}].holdout must be a string"))?;
+                    let configuration = object
+                        .get("configuration")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("operations[{index}].configuration must be a string"))?;
+                    let metric = object
+                        .get("metric")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("operations[{index}].metric must be a string"))?;
+                    let value = object
+                        .get("value")
+                        .and_then(Value::as_f64)
+                        .ok_or_else(|| format!("operations[{index}].value must be a number"))?;
+                    let result = deployment.holdouts.measure(
+                        &HoldoutId::new(holdout),
+                        &deployment.space,
+                        &ConfigurationId::new(configuration),
+                        metric,
+                        value,
+                    );
+                    match result {
+                        Ok(measurement) => {
+                            measurement_count += 1;
+                            json!({
+                                "index": index,
+                                "kind": kind,
+                                "result": "clean_measurement",
+                                "measurement": measurement,
+                            })
+                        }
+                        Err(error) => {
+                            measurement_refusal_count += 1;
+                            let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                                "error": "holdout_error_serialization_failed"
+                            }));
+                            json!({
+                                "index": index,
+                                "kind": kind,
+                                "result": "measurement_refused",
+                                "refusal": error.to_string(),
+                                "error": detail,
+                                "fail_closed": true,
+                            })
+                        }
+                    }
+                }
+                "rollback" => {
+                    let label = object
+                        .get("checkpoint")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("operations[{index}].checkpoint must be a string"))?;
+                    let checkpoint = checkpoints
+                        .get(label)
+                        .cloned()
+                        .ok_or_else(|| format!("operations[{index}] names unknown checkpoint {label:?}"))?;
+                    let receipt = deployment
+                        .rollback(&checkpoint)
+                        .map_err(|error| format!("operations[{index}] rollback refused: {error}"))?;
+                    rollback_count += 1;
+                    json!({
+                        "index": index,
+                        "kind": kind,
+                        "result": "accepted",
+                        "receipt": receipt,
+                        "complete_restoration": receipt.is_complete_restoration(),
+                    })
+                }
+                _ => {
+                    return Err(format!(
+                        "operations[{index}].kind {kind:?} is not one of checkpoint, promote, search, measure, rollback"
+                    ));
+                }
+            };
+            rows.push(row);
+        }
+
+        let holdout_rows = deployment
+            .holdouts
+            .iter()
+            .map(|holdout| {
+                json!({
+                    "id": holdout.id,
+                    "partition": holdout.partition,
+                    "certifies": holdout.partition.certifies(),
+                    "reuse_note": holdout.partition.reuse_note(),
+                    "query_budget": holdout.query_budget,
+                    "queries_used": holdout.queries_used(),
+                    "remaining_budget": holdout.query_budget.saturating_sub(holdout.queries_used()),
+                    "retired": holdout.is_retired(),
+                    "watermark": holdout.watermark(),
+                    "exposure": holdout.exposure(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let permanently_burned = holdout_rows
+            .iter()
+            .flat_map(|row| {
+                row.get("exposure")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|event| {
+                        let consumes = event
+                            .get("kind")
+                            .and_then(|kind| kind.get("kind"))
+                            .and_then(Value::as_str)
+                            .map(|kind| kind != "rollback")
+                            .unwrap_or(false);
+                        if consumes {
+                            Some(json!({
+                                "holdout": row.get("id"),
+                                "configuration": event.get("configuration"),
+                                "event": event.get("seq"),
+                            }))
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/lab-holdout-audit/0.1",
+            "current": deployment.current(),
+            "space": {
+                "candidate_count": deployment.space.len(),
+                "registered_ids": deployment.space.iter().map(|candidate| candidate.id.clone()).collect::<Vec<_>>(),
+            },
+            "holdouts": holdout_rows,
+            "remaining_certification_budget": deployment.holdouts.remaining_certification_budget(),
+            "checkpoints": checkpoints.values().collect::<Vec<_>>(),
+            "checkpoint_count": checkpoints.len(),
+            "history": deployment.history(),
+            "operations": rows.iter().take(max_rows).collect::<Vec<_>>(),
+            "operations_omitted": rows.len().saturating_sub(max_rows),
+            "operation_count": rows.len(),
+            "measurement_count": measurement_count,
+            "measurement_refusal_count": measurement_refusal_count,
+            "rollback_count": rollback_count,
+            "permanently_burned": permanently_burned,
+            "max_rows": max_rows,
+            "guarantees": [
+                "candidate architecture validation and parent registration happen before deployment state is created",
+                "clean measurements can only come from HoldoutLedger::measure after lineage and exposure checks",
+                "measurement refusals remain typed rows and are never emitted as clean measurements",
+                "selection and search exposure propagate through lineage and survive rollback",
+                "rollback restores the complete known configuration but reports exposure retained since the checkpoint",
+                "rollback never rewinds the append-only holdout ledger"
+            ],
+            "limitations": [
+                "architecture components and metric values are caller-declared; no component or benchmark execution occurs",
+                "a successful clean point measurement is not a confidence interval or a release approval",
+                "the endpoint records the residual human-use risk of reading a baseline without an exposure event",
+                "operations are an offline audit program and do not deploy traffic, trigger live rollback, or alter external state"
             ]
         }))
     }
@@ -20206,7 +20620,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "inference_lab",
             "domains": ["hypothesis separation", "evidence acquisition", "holdout-aware improvement", "risk-triggered research"],
             "crates": ["bioprism-lab", "bioprism-obligation", "bioprism-routing", "bioprism-evalengine"],
-            "mcp_tools": ["lab_plan", "lab_pareto_audit", "lab_branch_audit", "routing_decide", "routing_lab_run"],
+            "mcp_tools": ["lab_plan", "lab_pareto_audit", "lab_branch_audit", "lab_holdout_audit", "routing_decide", "routing_lab_run"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -21053,6 +21467,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum decision rows returned; omission counts remain explicit. Defaults to 100." }
                 },
                 "required": ["policy", "decisions"]
+            }
+        }),
+        json!({
+            "name": "lab_holdout_audit",
+            "description": "Run an offline holdout and rollback audit over validated immutable architecture bundles, declared holdout partitions, and an ordered operation program. It preserves clean measurements, typed contamination refusals, selection/search lineage burns, checkpoints, retained exposure, and the fact that rollback cannot un-burn a holdout.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cost_ceiling": { "type": "integer", "minimum": 0, "maximum": 1000000000, "description": "Maximum declared architecture cost accepted during candidate validation." },
+                    "candidates": { "type": "array", "minItems": 1, "maxItems": 512, "description": "Serialized CandidateArchitecture bundles. Required component kinds, graph integrity, protected surfaces, cost, and parent registration are validated before deployment state exists." },
+                    "holdouts": { "type": "array", "minItems": 1, "maxItems": 128, "description": "Declared holdout instances: {id, partition, query_budget}. Exposure history is created empty and can only grow through operations." },
+                    "current": { "type": "string", "description": "Registered configuration initially deployed." },
+                    "operations": { "type": "array", "minItems": 1, "maxItems": 2000, "description": "Ordered checkpoint, promote, search, measure, and rollback operations. Measurement contamination is retained as a typed row rather than converted into a clean score." },
+                    "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum operation rows returned; omission counts remain explicit. Defaults to 100." }
+                },
+                "required": ["cost_ceiling", "candidates", "holdouts", "current", "operations"]
             }
         }),
         json!({

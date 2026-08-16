@@ -2370,6 +2370,47 @@ test("client exposes risk-triggered branch cost and escaped harm accounting", as
   assert.equal(result.mcp.result.structuredContent.yield.escalations_on_undetermined, 1);
 });
 
+test("client exposes holdout contamination and rollback retention", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/lab_holdout_audit");
+      return jsonResponse({ ok: true, tool: "lab_holdout_audit", request_id: "holdout-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/lab-holdout-audit/0.1",
+        current: "v1",
+        space: { candidate_count: 2, registered_ids: ["v1", "v2"] },
+        holdouts: [{ id: "private-a", measurement_refusal: "selected" }],
+        remaining_certification_budget: [],
+        checkpoints: [{ label: "before-v2" }],
+        checkpoint_count: 1,
+        history: [{ event: "rolled_back" }],
+        operations: [{ index: 0, kind: "measure", result: "measurement_refused" }],
+        operations_omitted: 0,
+        operation_count: 1,
+        measurement_count: 0,
+        measurement_refusal_count: 1,
+        rollback_count: 1,
+        permanently_burned: [{ holdout: "private-a", configuration: "v2" }],
+        max_rows: 100,
+        guarantees: ["rollback never rewinds exposure"],
+        limitations: ["offline audit"],
+      } } } });
+    },
+  });
+  const result = await client.labHoldoutAudit({
+    cost_ceiling: 100,
+    candidates: [{ id: "v1" }],
+    holdouts: [{ id: "private-a", partition: "rotating_private_certification", query_budget: 4 }],
+    current: "v1",
+    operations: [{ kind: "measure" }],
+    max_rows: 1,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/lab-holdout-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.measurement_refusal_count, 1);
+  assert.equal(result.mcp.result.structuredContent.permanently_burned[0].configuration, "v2");
+});
+
 test("client exposes provider gate states and differential indeterminacy", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

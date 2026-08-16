@@ -460,6 +460,10 @@ unresolved holes, and `unique`/`ambiguous`/`empty` selection without scalarizing
 hard branch/verifier ceilings, trigger plans, catches, wasted escalations, escaped harms, and
 explicit row omissions. It is planning evidence, not verifier execution or safety clearance. See
 [`docs/LAB_BRANCH_AUDIT.md`](../docs/LAB_BRANCH_AUDIT.md).
+`labHoldoutAudit` exposes validated architecture bundles, append-only exposure, clean versus
+contaminated measurements, checkpoint/rollback receipts, retained burn, and certification-budget
+state. It keeps measurement refusals as auditable rows rather than scores. See
+[`docs/LAB_HOLDOUT_AUDIT.md`](../docs/LAB_HOLDOUT_AUDIT.md).
 `providerCapabilityGate` preserves untested/failed/passed provider states, conjunctive gate
 outcomes, measurement counts, reproducible run evidence, and indeterminate cross-provider drift;
 performance observations remain measurements rather than invented pass/fail claims.

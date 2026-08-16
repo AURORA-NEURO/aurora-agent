@@ -196,6 +196,7 @@ from .routing import RoutingDecisionReport, routing_decision_report
 from .routing_lab import RoutingLabRunArgs, RoutingLabRunReport, routing_lab_run_report
 from .lab_pareto import LabParetoAuditArgs, LabParetoAuditReport, lab_pareto_audit_report
 from .lab_branch import LabBranchAuditArgs, LabBranchAuditReport, lab_branch_audit_report
+from .lab_holdout import LabHoldoutAuditArgs, LabHoldoutAuditReport, lab_holdout_audit_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
@@ -2301,6 +2302,23 @@ class ApiClient:
         """Return typed branch cost, catch, escape, and undetermined-risk evidence."""
 
         return lab_branch_audit_report(self.lab_branch_audit(request))
+
+    def lab_holdout_audit(
+        self,
+        request: LabHoldoutAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the offline holdout and rollback audit through HTTP."""
+
+        normalized = request if isinstance(request, LabHoldoutAuditArgs) else LabHoldoutAuditArgs.from_wire(request)
+        return self.call_tool("lab_holdout_audit", normalized.to_mcp_arguments())
+
+    def lab_holdout_audit_report(
+        self,
+        request: LabHoldoutAuditArgs | Mapping[str, Any],
+    ) -> LabHoldoutAuditReport:
+        """Return typed clean-measurement and contamination evidence."""
+
+        return lab_holdout_audit_report(self.lab_holdout_audit(request))
 
     def provider_capability_gate(
         self,
@@ -4614,6 +4632,23 @@ class AsyncApiClient:
         """Return typed branch cost, catch, escape, and undetermined-risk evidence."""
 
         return lab_branch_audit_report(await self.lab_branch_audit(request))
+
+    async def lab_holdout_audit(
+        self,
+        request: LabHoldoutAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the offline holdout and rollback audit through async HTTP."""
+
+        normalized = request if isinstance(request, LabHoldoutAuditArgs) else LabHoldoutAuditArgs.from_wire(request)
+        return await self.call_tool("lab_holdout_audit", normalized.to_mcp_arguments())
+
+    async def lab_holdout_audit_report(
+        self,
+        request: LabHoldoutAuditArgs | Mapping[str, Any],
+    ) -> LabHoldoutAuditReport:
+        """Return typed clean-measurement and contamination evidence."""
+
+        return lab_holdout_audit_report(await self.lab_holdout_audit(request))
 
     async def provider_capability_gate(
         self,

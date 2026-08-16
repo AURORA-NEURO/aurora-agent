@@ -41,7 +41,10 @@ use bioprism_hubapi::{
 use bioprism_ids::ContentHash;
 use bioprism_ids::RunId;
 use bioprism_infra::{Check as QualityCheck, Dataset as QualityDataset, Gate as QualityGate};
-use bioprism_lab::{AcquisitionAction, AcquisitionCost, AcquisitionKind, PrivacyBoundary};
+use bioprism_lab::{
+    space::{CandidateArchitecture, ComponentKind, ComponentSpec},
+    AcquisitionAction, AcquisitionCost, AcquisitionKind, PrivacyBoundary,
+};
 use bioprism_ledger::{
     Actor as LedgerActor, Event as LedgerEvent, EventClass as LedgerEventClass,
     EventKind as LedgerEventKind, EventTimes as LedgerEventTimes, IdempotencyKey,
@@ -311,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 142);
+    assert_eq!(tools.len(), 143);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(142));
-    assert_eq!(result["advertised_tool_count"], json!(142));
+    assert_eq!(result["unique_catalog_tools"], json!(143));
+    assert_eq!(result["advertised_tool_count"], json!(143));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(142));
-    assert_eq!(result["schema_quality"]["valid"], json!(142));
+    assert_eq!(result["schema_quality"]["checked"], json!(143));
+    assert_eq!(result["schema_quality"]["valid"], json!(143));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5487,6 +5490,60 @@ fn lab_branch_audit_keeps_undetermined_escalation_cost_catches_and_escapes_separ
     assert_eq!(refused["ok"], json!(false));
     assert_eq!(refused["stage"], json!("policy_validation"));
     assert_eq!(refused["fail_closed"], json!(true));
+}
+
+#[test]
+fn lab_holdout_audit_never_mints_clean_scores_after_selection_and_rollback() {
+    let v1 = CandidateArchitecture::new("v1")
+        .with_component(ComponentSpec::new("select", ComponentKind::ContextSelector))
+        .with_component(ComponentSpec::new("run", ComponentKind::Executor))
+        .with_component(ComponentSpec::new("stop", ComponentKind::Terminator));
+    let v2 = CandidateArchitecture::new("v2")
+        .derived_from("v1")
+        .with_component(ComponentSpec::new("select", ComponentKind::ContextSelector))
+        .with_component(ComponentSpec::new("run", ComponentKind::Executor))
+        .with_component(ComponentSpec::new("stop", ComponentKind::Terminator));
+    let result = call(
+        &mut server(),
+        "lab_holdout_audit",
+        json!({
+            "cost_ceiling": 100,
+            "candidates": [serde_json::to_value(&v1).unwrap(), serde_json::to_value(&v2).unwrap()],
+            "holdouts": [{
+                "id": "private-a",
+                "partition": "rotating_private_certification",
+                "query_budget": 4
+            }],
+            "current": "v1",
+            "operations": [
+                { "kind": "checkpoint", "label": "before-v2" },
+                { "kind": "promote", "configuration": "v2", "selected_using": "private-a", "rationale": "won the development panel" },
+                { "kind": "rollback", "checkpoint": "before-v2" },
+                { "kind": "measure", "holdout": "private-a", "configuration": "v2", "metric": "admissible_rate", "value": 0.9 },
+                { "kind": "measure", "holdout": "private-a", "configuration": "v1", "metric": "admissible_rate", "value": 0.8 },
+                { "kind": "measure", "holdout": "private-a", "configuration": "v1", "metric": "admissible_rate", "value": 0.7 }
+            ],
+            "max_rows": 10
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/lab-holdout-audit/0.1"));
+    assert_eq!(result["current"], json!("v1"));
+    assert_eq!(result["measurement_count"], json!(1));
+    assert_eq!(result["measurement_refusal_count"], json!(2));
+    assert_eq!(result["rollback_count"], json!(1));
+    assert_eq!(result["operations"][1]["result"], json!("accepted"));
+    assert_eq!(result["operations"][2]["complete_restoration"], json!(false));
+    assert_eq!(result["operations"][3]["result"], json!("measurement_refused"));
+    assert!(result["operations"][3]["refusal"]
+        .as_str()
+        .unwrap()
+        .contains("used to select"));
+    assert_eq!(result["operations"][4]["result"], json!("clean_measurement"));
+    assert_eq!(result["operations"][5]["result"], json!("measurement_refused"));
+    assert!(result["holdouts"][0]["exposure"].as_array().unwrap().len() >= 3);
+    assert_eq!(result["holdouts"][0]["retired"], json!(false));
 }
 
 #[test]

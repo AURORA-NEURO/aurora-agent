@@ -230,6 +230,11 @@ invent defaults:
   catches, wasted escalations, escaped harms, and the complete decision denominator. A catch's
   single-path counterfactual remains explicit; the parser does not treat a verifier invocation as
   a success claim. See [`docs/LAB_BRANCH_AUDIT.md`](LAB_BRANCH_AUDIT.md).
+- `LabHoldoutAuditArgs` / `lab_holdout_audit_report(...)` expose validated architecture bundles,
+  append-only holdout exposure, clean point measurements, typed contamination refusals,
+  checkpoints, rollback receipts, retained exposure, and current certification budget. Measurement
+  refusals remain successful audit evidence but never become clean scores; structural failures
+  remain fail-closed. See [`docs/LAB_HOLDOUT_AUDIT.md`](LAB_HOLDOUT_AUDIT.md).
 - `OncoBoundaryArgs` and `onco_boundary_report(...)` preserve oncology's partial-release contract:
   aggregate research uses can remain released while individual clinical uses are refused and
   escalated, and direct-identifier refusals remain fail-closed without echoing request data. The
