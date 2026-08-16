@@ -108,6 +108,28 @@ invent defaults:
 - `OncoBoundaryArgs` and `onco_boundary_report(...)` preserve oncology's partial-release contract:
   aggregate research uses can remain released while individual clinical uses are refused and
   escalated, and direct-identifier refusals remain fail-closed without echoing request data.
+- `OncoResponseAssessArgs`/`onco_response_report(...)` expose the criteria-aware response gate:
+  the raw radiologic reading, reportable call, withheld-progression flag, surviving hypothesis
+  count, and discriminating evidence requests remain separate. A structured refusal is retained
+  as a fail-closed domain value, and the parser rejects a forged `withheld_progression` value that
+  does not carry the kernel's `not evaluable` call label.
+- `OncoWorldlineViewArgs`/`onco_worldline_report(...)` reconcile biological acquisition order,
+  record order, timepoint rows, and an optional agent-visibility partition. The four-clock rows
+  remain nested authoritative records; a cutoff is never inferred from a record timestamp, and
+  visible/hidden partitions are required only when the caller explicitly requested filtering.
+- `OncoClassificationArgs`/`onco_classification_report(...)` preserve integrated versus
+  unresolved molecular classification, panel states, and prioritized assay obligations. The
+  client refuses contradictory reports where an unresolved result supplies an entity or an
+  integrated result omits one; uncollected assays remain JSON state records rather than negatives.
+- `OncoIdentityJoinArgs`/`onco_identity_join_report(...)` expose participant/lesion/specimen/
+  imaging-series joins with optional identity evidence and epoch bridges. `joinable=False` is a
+  successful, auditable domain verdict—not a transport exception—and `bridge_declared` remains
+  explicit. `OncoOutcomeAnalyzeArgs`/`onco_outcome_report(...)` carry the predeclared estimand,
+  at-risk days, immortal-time exposure, event/censoring split, and informative-bias flags; the
+  parser rejects event/censoring contradictions.
+  All five workflows are available on sync/async MCP and HTTP facades, with matching TypeScript
+  methods (`oncoResponseAssess`, `oncoWorldlineView`, `oncoClassificationCheck`,
+  `oncoworldsIdentityJoin`, and `oncoOutcomeAnalyze`).
 - `FiberCompileRequest`, `FiberRefineRequest`, `FiberExplainRequest`, `FiberVerifyRequest`, and
   `ProjectionBundleRequest` make the full FIBER progressive-disclosure lifecycle typed across sync
   MCP, async MCP, and HTTP. `Workspace.fiber_compile(...)` validates relative world/query paths and

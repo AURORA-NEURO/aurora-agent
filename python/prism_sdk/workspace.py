@@ -113,7 +113,26 @@ from .lineage import LineageAuditArgs, LineageAuditReport, lineage_audit_report
 from .preanalytic import PreanalyticApplyArgs, PreanalyticApplyReport, preanalytic_apply_report
 from .contradiction import ContradictionReviewArgs, ContradictionReviewReport, contradiction_review_report
 from .lab import LabPlanReport, lab_plan_report
-from .oncology import OncoBoundaryArgs, OncoBoundaryReport, onco_boundary_report
+from .oncology import (
+    OncoBoundaryArgs,
+    OncoBoundaryReport,
+    OncoClassificationArgs,
+    OncoClassificationReport,
+    OncoIdentityJoinArgs,
+    OncoIdentityJoinReport,
+    OncoOutcomeAnalyzeArgs,
+    OncoOutcomeReport,
+    OncoResponseAssessArgs,
+    OncoResponseReport,
+    OncoWorldlineReport,
+    OncoWorldlineViewArgs,
+    onco_boundary_report,
+    onco_classification_report,
+    onco_identity_join_report,
+    onco_outcome_report,
+    onco_response_report,
+    onco_worldline_report,
+)
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -389,6 +408,96 @@ class Workspace:
         """Return typed oncology research release, clinical refusal, and escalation evidence."""
 
         return onco_boundary_report(self.onco_boundary_check(request))
+
+    def onco_response_assess(
+        self,
+        request: OncoResponseAssessArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Assess longitudinal response without turning unconfirmed change into progression."""
+
+        normalized = request if isinstance(request, OncoResponseAssessArgs) else OncoResponseAssessArgs.from_wire(request)
+        result = self.client.call_tool("onco_response_assess", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def onco_response_report(
+        self,
+        request: OncoResponseAssessArgs | Mapping[str, Any],
+    ) -> OncoResponseReport:
+        return onco_response_report(self.onco_response_assess(request))
+
+    def onco_worldline_view(
+        self,
+        request: OncoWorldlineViewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Render biological/record order and apply an explicit agent-visibility cutoff."""
+
+        normalized = request if isinstance(request, OncoWorldlineViewArgs) else OncoWorldlineViewArgs.from_wire(request)
+        result = self.client.call_tool("onco_worldline_view", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def onco_worldline_report(
+        self,
+        request: OncoWorldlineViewArgs | Mapping[str, Any],
+    ) -> OncoWorldlineReport:
+        return onco_worldline_report(self.onco_worldline_view(request))
+
+    def onco_classification_check(
+        self,
+        request: OncoClassificationArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run integrated classification while retaining unresolved assay obligations."""
+
+        normalized = request if isinstance(request, OncoClassificationArgs) else OncoClassificationArgs.from_wire(request)
+        result = self.client.call_tool("onco_classification_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def onco_classification_report(
+        self,
+        request: OncoClassificationArgs | Mapping[str, Any],
+    ) -> OncoClassificationReport:
+        return onco_classification_report(self.onco_classification_check(request))
+
+    def oncoworlds_identity_join(
+        self,
+        request: OncoIdentityJoinArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Check identity evidence without collapsing a declined join into an exception."""
+
+        normalized = request if isinstance(request, OncoIdentityJoinArgs) else OncoIdentityJoinArgs.from_wire(request)
+        result = self.client.call_tool("oncoworlds_identity_join", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def oncoworlds_identity_join_report(
+        self,
+        request: OncoIdentityJoinArgs | Mapping[str, Any],
+    ) -> OncoIdentityJoinReport:
+        return onco_identity_join_report(self.oncoworlds_identity_join(request))
+
+    def onco_outcome_analyze(
+        self,
+        request: OncoOutcomeAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Analyze one follow-up record under a predeclared estimand."""
+
+        normalized = request if isinstance(request, OncoOutcomeAnalyzeArgs) else OncoOutcomeAnalyzeArgs.from_wire(request)
+        result = self.client.call_tool("onco_outcome_analyze", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def onco_outcome_report(
+        self,
+        request: OncoOutcomeAnalyzeArgs | Mapping[str, Any],
+    ) -> OncoOutcomeReport:
+        return onco_outcome_report(self.onco_outcome_analyze(request))
 
     def lab_plan(
         self,
@@ -1505,6 +1614,96 @@ class AsyncWorkspace:
         request: OncoBoundaryArgs | Mapping[str, Any],
     ) -> OncoBoundaryReport:
         return onco_boundary_report(await self.onco_boundary_check(request))
+
+    async def onco_response_assess(
+        self,
+        request: OncoResponseAssessArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.onco_response_assess`."""
+
+        normalized = request if isinstance(request, OncoResponseAssessArgs) else OncoResponseAssessArgs.from_wire(request)
+        result = await self.client.call_tool("onco_response_assess", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def onco_response_report(
+        self,
+        request: OncoResponseAssessArgs | Mapping[str, Any],
+    ) -> OncoResponseReport:
+        return onco_response_report(await self.onco_response_assess(request))
+
+    async def onco_worldline_view(
+        self,
+        request: OncoWorldlineViewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.onco_worldline_view`."""
+
+        normalized = request if isinstance(request, OncoWorldlineViewArgs) else OncoWorldlineViewArgs.from_wire(request)
+        result = await self.client.call_tool("onco_worldline_view", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def onco_worldline_report(
+        self,
+        request: OncoWorldlineViewArgs | Mapping[str, Any],
+    ) -> OncoWorldlineReport:
+        return onco_worldline_report(await self.onco_worldline_view(request))
+
+    async def onco_classification_check(
+        self,
+        request: OncoClassificationArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.onco_classification_check`."""
+
+        normalized = request if isinstance(request, OncoClassificationArgs) else OncoClassificationArgs.from_wire(request)
+        result = await self.client.call_tool("onco_classification_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def onco_classification_report(
+        self,
+        request: OncoClassificationArgs | Mapping[str, Any],
+    ) -> OncoClassificationReport:
+        return onco_classification_report(await self.onco_classification_check(request))
+
+    async def oncoworlds_identity_join(
+        self,
+        request: OncoIdentityJoinArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.oncoworlds_identity_join`."""
+
+        normalized = request if isinstance(request, OncoIdentityJoinArgs) else OncoIdentityJoinArgs.from_wire(request)
+        result = await self.client.call_tool("oncoworlds_identity_join", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def oncoworlds_identity_join_report(
+        self,
+        request: OncoIdentityJoinArgs | Mapping[str, Any],
+    ) -> OncoIdentityJoinReport:
+        return onco_identity_join_report(await self.oncoworlds_identity_join(request))
+
+    async def onco_outcome_analyze(
+        self,
+        request: OncoOutcomeAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.onco_outcome_analyze`."""
+
+        normalized = request if isinstance(request, OncoOutcomeAnalyzeArgs) else OncoOutcomeAnalyzeArgs.from_wire(request)
+        result = await self.client.call_tool("onco_outcome_analyze", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def onco_outcome_report(
+        self,
+        request: OncoOutcomeAnalyzeArgs | Mapping[str, Any],
+    ) -> OncoOutcomeReport:
+        return onco_outcome_report(await self.onco_outcome_analyze(request))
 
     async def lab_plan(
         self,

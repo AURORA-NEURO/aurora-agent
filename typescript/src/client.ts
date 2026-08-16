@@ -54,6 +54,16 @@ import type {
   LabPlanResult,
   OncoBoundaryArgs,
   OncoBoundaryResult,
+  OncoClassificationArgs,
+  OncoClassificationResult,
+  OncoIdentityJoinArgs,
+  OncoIdentityJoinResult,
+  OncoOutcomeAnalyzeArgs,
+  OncoOutcomeResult,
+  OncoResponseAssessArgs,
+  OncoResponseResult,
+  OncoWorldlineViewArgs,
+  OncoWorldlineResult,
   OpsAcceptanceArgs,
   OpsAcceptanceResult,
   BioAtlasPublicationAuditArgs,
@@ -389,6 +399,26 @@ export class ApiClient {
 
   async oncoBoundaryCheck(args: OncoBoundaryArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoBoundaryResult>> {
     return this.callTool<OncoBoundaryResult>("onco_boundary_check", args, options);
+  }
+
+  async oncoResponseAssess(args: OncoResponseAssessArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoResponseResult>> {
+    return this.callTool<OncoResponseResult>("onco_response_assess", args, options);
+  }
+
+  async oncoWorldlineView(args: OncoWorldlineViewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldlineResult>> {
+    return this.callTool<OncoWorldlineResult>("onco_worldline_view", args, options);
+  }
+
+  async oncoClassificationCheck(args: OncoClassificationArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoClassificationResult>> {
+    return this.callTool<OncoClassificationResult>("onco_classification_check", args, options);
+  }
+
+  async oncoworldsIdentityJoin(args: OncoIdentityJoinArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoIdentityJoinResult>> {
+    return this.callTool<OncoIdentityJoinResult>("oncoworlds_identity_join", args, options);
+  }
+
+  async oncoOutcomeAnalyze(args: OncoOutcomeAnalyzeArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoOutcomeResult>> {
+    return this.callTool<OncoOutcomeResult>("onco_outcome_analyze", args, options);
   }
 
   async opsAcceptance(args: OpsAcceptanceArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OpsAcceptanceResult>> {

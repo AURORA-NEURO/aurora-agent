@@ -7,12 +7,22 @@ from prism_sdk import (
     ContradictionReviewArgs,
     LabPlanRequest,
     OncoBoundaryArgs,
+    OncoClassificationArgs,
+    OncoIdentityJoinArgs,
+    OncoOutcomeAnalyzeArgs,
+    OncoResponseAssessArgs,
+    OncoWorldlineViewArgs,
     LineageAuditArgs,
     PreanalyticApplyArgs,
     contradiction_review_report,
     lab_plan_report,
     lineage_audit_report,
     onco_boundary_report,
+    onco_classification_report,
+    onco_identity_join_report,
+    onco_outcome_report,
+    onco_response_report,
+    onco_worldline_report,
     preanalytic_apply_report,
 )
 
@@ -248,6 +258,109 @@ class LabAndOncoReportTests(unittest.TestCase):
         self.assertEqual(OncoBoundaryArgs({"requested_uses": ["cohort_analysis"]}).to_mcp_arguments()["request"]["requested_uses"], ["cohort_analysis"])
         with self.assertRaises(ArgumentError):
             OncoBoundaryArgs({"requested_uses": ["treatment"]})
+
+    def test_response_report_keeps_post_treatment_progression_withheld(self) -> None:
+        report = onco_response_report({
+            "ok": True,
+            "assessment": {
+                "unconfirmed_reading": "progression",
+                "call": {"call": "not_evaluable"},
+                "hypotheses": {"entries": []},
+            },
+            "call_label": "not evaluable",
+            "withheld_progression": True,
+            "hypothesis_count": 3,
+            "evidence_requests": ["histopathology", "interval_follow_up"],
+            "guarantees": ["withheld"],
+            "limitations": ["research"],
+        })
+        self.assertTrue(report.withheld_progression)
+        self.assertEqual(report.call_label, "not evaluable")
+        self.assertEqual(report.hypothesis_count, 3)
+        with self.assertRaises(ArgumentError):
+            onco_response_report({
+                "ok": True,
+                "assessment": {},
+                "call_label": "progression",
+                "withheld_progression": True,
+                "hypothesis_count": 1,
+                "evidence_requests": [],
+                "guarantees": [],
+                "limitations": [],
+            })
+
+    def test_worldline_report_reconciles_orders_and_visibility_partitions(self) -> None:
+        report = onco_worldline_report({
+            "ok": True,
+            "subject": "S-1",
+            "baseline": "baseline",
+            "timepoint_count": 2,
+            "biological_order": ["baseline", "future"],
+            "record_order": ["future", "baseline"],
+            "record_order_differs": True,
+            "visibility_cutoff": "2026-01-10T12:00:00Z",
+            "visibility_filter_applied": True,
+            "visible_timepoints": ["future"],
+            "hidden_from_agent": ["baseline"],
+            "timepoints": [{"label": "baseline"}, {"label": "future"}],
+            "guarantees": ["separate clocks"],
+            "limitations": ["exact dates"],
+        })
+        self.assertTrue(report.record_order_differs)
+        self.assertEqual(report.visible_timepoints, ("future",))
+        self.assertEqual(len(report.timepoints), 2)
+
+    def test_classification_identity_and_outcome_reports_keep_negative_states_typed(self) -> None:
+        classification = onco_classification_report({
+            "ok": True,
+            "histology": "diffuse_glioma",
+            "resolution": {"resolution": "unresolved"},
+            "is_integrated": False,
+            "entity": None,
+            "obligations": [{"marker": "idh_mutation", "priority": 1}],
+            "panel_states": [{"marker": "idh_mutation", "state": "not_collected"}],
+            "guarantees": ["unresolved"],
+            "limitations": ["bounded criteria"],
+        })
+        self.assertTrue(classification.unresolved)
+        self.assertEqual(len(classification.obligations), 1)
+        identity = onco_identity_join_report({
+            "ok": True,
+            "joinable": False,
+            "report": {"verdict": {"declined": {"reason": "no_identity_evidence"}}},
+            "bridge_declared": False,
+            "guarantees": ["auditable"],
+            "limitations": ["caller evidence"],
+        })
+        self.assertTrue(identity.declined)
+        outcome = onco_outcome_report({
+            "ok": True,
+            "analysis": {"outcome": {"censored": "lost_to_follow_up"}},
+            "at_risk_days": 10,
+            "immortal_time_days": 10,
+            "event": False,
+            "censoring_reason": "lost_to_follow_up",
+            "informative_bias_flags": ["informative_loss_to_follow_up"],
+            "guarantees": ["censoring"],
+            "limitations": ["one subject"],
+        })
+        self.assertTrue(outcome.left_truncated)
+        self.assertEqual(outcome.censoring_reason, "lost_to_follow_up")
+
+    def test_new_onco_args_preserve_optional_warrants_and_bound_numbers(self) -> None:
+        response = OncoResponseAssessArgs(
+            {"id": "criterion"}, {"id": "baseline"}, {"id": "current"}, "2026-01-01T00:00:00Z",
+            {"trend": "stable"}, {"trend": "stable"}, {"modality": "none"}, {"confirmatory": None}, 25.0, 0.1
+        )
+        self.assertEqual(response.to_mcp_arguments()["nadir_spd_mm2"], 25.0)
+        self.assertEqual(OncoWorldlineViewArgs({"timepoints": []}, "2026-01-01T00:00:00Z").to_mcp_arguments()["visible_at"], "2026-01-01T00:00:00Z")
+        self.assertEqual(OncoClassificationArgs("diffuse_glioma", {}).to_mcp_arguments()["histology"], "diffuse_glioma")
+        self.assertEqual(OncoIdentityJoinArgs({}, {}, "specimen").to_mcp_arguments()["unit"], "specimen")
+        self.assertEqual(OncoOutcomeAnalyzeArgs({}, {}).to_mcp_arguments(), {"follow_up": {}, "estimand": {}})
+        with self.assertRaises(ArgumentError):
+            OncoIdentityJoinArgs({}, {}, "sample")
+        with self.assertRaises(ArgumentError):
+            OncoResponseAssessArgs({}, {}, {}, "now", {}, {}, {}, measurement_error_fraction=-1)
 
 
 if __name__ == "__main__":

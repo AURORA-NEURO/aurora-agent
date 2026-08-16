@@ -222,6 +222,16 @@ a correct modality. Nested domain records remain JSON objects where the Rust ker
 without executing a lab action. `oncoBoundaryCheck` preserves oncology's partial aggregate release
 versus individual-clinical refusal and human-escalation state, including fail-closed identifier
 handling.
+`oncoResponseAssess` types the criteria-aware response projection, retaining the unconfirmed
+reading separately from the reportable call and exposing post-treatment progression withholding,
+surviving hypotheses, and evidence requests. `oncoWorldlineView` keeps biological and record
+orders separate and makes the agent-visibility cutoff/visible-hidden partition explicit.
+`oncoClassificationCheck` preserves integrated versus unresolved molecular classification and
+assay obligations; `oncoworldsIdentityJoin` returns a typed `joinable: false` domain verdict
+without treating it as a transport failure; and `oncoOutcomeAnalyze` keeps estimand, event,
+censoring, delayed entry, and informative-bias fields distinct. Nested domain records remain
+`JsonObject` values so the Rust oncology crate remains the serialization authority, while the
+top-level invariants and contradictions are checked by the SDK.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

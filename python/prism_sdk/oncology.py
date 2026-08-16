@@ -8,6 +8,7 @@ state and the direct-identifier fail-closed refusal without offering any clinica
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -75,6 +76,476 @@ def _payload(value: Mapping[str, Any]) -> dict[str, Any]:
                 if "ok" in decoded_mapping:
                     return decoded_mapping
     raise ArgumentError("response does not contain an oncology boundary projection")
+
+
+def _projection_payload(
+    value: Mapping[str, Any],
+    *,
+    description: str,
+    direct_keys: tuple[str, ...],
+) -> dict[str, Any]:
+    """Extract one typed oncology projection from direct, MCP, or REST envelopes.
+
+    REST responses carry a transport-level ``ok`` and MCP responses may carry a structured
+    result one or two envelopes below it.  Looking for a domain marker as well as ``ok`` keeps
+    those transport fields from being mistaken for a successful domain projection.
+    """
+
+    raw = _route_mapping(f"{description} response", value)
+
+    def matches(candidate: Mapping[str, Any]) -> bool:
+        return "ok" in candidate and any(key in candidate for key in direct_keys)
+
+    if matches(raw):
+        return raw
+    envelopes: list[Mapping[str, Any]] = [raw]
+    mcp = raw.get("mcp")
+    if isinstance(mcp, Mapping):
+        envelopes.append(mcp)
+    for envelope in envelopes:
+        result = envelope.get("result")
+        candidates: list[Mapping[str, Any]] = [envelope]
+        if isinstance(result, Mapping):
+            candidates.append(result)
+        for candidate in candidates:
+            structured = candidate.get("structuredContent")
+            if isinstance(structured, Mapping) and matches(structured):
+                return dict(structured)
+            content = candidate.get("content")
+            if not isinstance(content, Sequence) or isinstance(content, (str, bytes)):
+                continue
+            for block in content:
+                if not isinstance(block, Mapping) or not isinstance(block.get("text"), str):
+                    continue
+                try:
+                    decoded = json.loads(block["text"])
+                except json.JSONDecodeError as error:
+                    raise ArgumentError(f"{description} response text is not JSON: {error}") from error
+                decoded_mapping = _route_mapping(f"decoded {description} response", decoded)
+                if matches(decoded_mapping):
+                    return decoded_mapping
+    raise ArgumentError(f"response does not contain a {description} projection")
+
+
+def _optional_mapping(name: str, value: Any) -> dict[str, Any] | None:
+    return None if value is None else _route_mapping(name, value)
+
+
+def _finite_nonnegative(name: str, value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        raise ArgumentError(f"{name} must be a finite number")
+    result = float(value)
+    if result < 0:
+        raise ArgumentError(f"{name} must be non-negative")
+    return result
+
+
+@dataclass(frozen=True)
+class OncoResponseAssessArgs:
+    """Serialized inputs for the criteria-aware response and progression gate."""
+
+    criterion: Mapping[str, Any]
+    baseline: Mapping[str, Any]
+    current: Mapping[str, Any]
+    current_acquired: str
+    baseline_clinical: Mapping[str, Any]
+    current_clinical: Mapping[str, Any]
+    treatment: Mapping[str, Any]
+    evidence: Mapping[str, Any] | None = None
+    nadir_spd_mm2: float | None = None
+    measurement_error_fraction: float = 0.0
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoResponseAssessArgs":
+        raw = _route_mapping("oncology response arguments", value)
+        return cls(
+            raw.get("criterion"),
+            raw.get("baseline"),
+            raw.get("current"),
+            raw.get("current_acquired"),
+            raw.get("baseline_clinical"),
+            raw.get("current_clinical"),
+            raw.get("treatment"),
+            raw.get("evidence"),
+            raw.get("nadir_spd_mm2"),
+            raw.get("measurement_error_fraction", 0.0),
+        )
+
+    def __post_init__(self) -> None:
+        for name in ("criterion", "baseline", "current", "baseline_clinical", "current_clinical", "treatment"):
+            object.__setattr__(self, name, _route_mapping(f"oncology response {name}", getattr(self, name)))
+        object.__setattr__(self, "current_acquired", _route_text("oncology current_acquired", self.current_acquired))
+        object.__setattr__(self, "evidence", _optional_mapping("oncology progression evidence", self.evidence))
+        if self.nadir_spd_mm2 is not None:
+            object.__setattr__(self, "nadir_spd_mm2", _finite_nonnegative("oncology nadir_spd_mm2", self.nadir_spd_mm2))
+        object.__setattr__(self, "measurement_error_fraction", _finite_nonnegative("oncology measurement_error_fraction", self.measurement_error_fraction))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "criterion": dict(self.criterion),
+            "baseline": dict(self.baseline),
+            "current": dict(self.current),
+            "current_acquired": self.current_acquired,
+            "baseline_clinical": dict(self.baseline_clinical),
+            "current_clinical": dict(self.current_clinical),
+            "treatment": dict(self.treatment),
+            "measurement_error_fraction": self.measurement_error_fraction,
+        }
+        if self.evidence is not None:
+            result["evidence"] = dict(self.evidence)
+        if self.nadir_spd_mm2 is not None:
+            result["nadir_spd_mm2"] = self.nadir_spd_mm2
+        return result
+
+
+@dataclass(frozen=True)
+class OncoResponseReport:
+    raw: dict[str, Any]
+    ok: bool
+    assessment: dict[str, Any] | None
+    call_label: str | None
+    withheld_progression: bool | None
+    hypothesis_count: int | None
+    evidence_requests: tuple[Any, ...]
+    stage: str | None
+    refusal: str | None
+    fail_closed: bool
+    guarantee: str | None
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoResponseReport":
+        raw = _projection_payload(value, description="oncology response", direct_keys=("assessment", "stage"))
+        ok = _bool("oncology response ok", raw.get("ok"))
+        fail_closed = _bool("oncology response fail_closed", raw.get("fail_closed", False))
+        if not ok:
+            refusal = _route_text("oncology response refusal", raw.get("refusal"))
+            if not fail_closed:
+                raise ArgumentError("refused oncology response results must be fail-closed")
+            return cls(
+                raw,
+                False,
+                None,
+                None,
+                None,
+                None,
+                (),
+                _route_text("oncology response stage", raw.get("stage")),
+                refusal,
+                True,
+                None if raw.get("guarantee") is None else _route_text("oncology response guarantee", raw.get("guarantee")),
+                (),
+                (),
+            )
+        if fail_closed or raw.get("refusal") is not None or raw.get("stage") is not None:
+            raise ArgumentError("successful oncology response results cannot carry refusal evidence")
+        assessment = _route_mapping("oncology response assessment", raw.get("assessment"))
+        call_label = _route_text("oncology response call_label", raw.get("call_label"))
+        withheld = _bool("oncology response withheld_progression", raw.get("withheld_progression"))
+        if withheld and call_label != "not evaluable":
+            raise ArgumentError("withheld progression must have a not evaluable reportable call")
+        evidence_requests = _array("oncology response evidence_requests", raw.get("evidence_requests"))
+        return cls(
+            raw,
+            True,
+            assessment,
+            call_label,
+            withheld,
+            _route_count("oncology response hypothesis_count", raw.get("hypothesis_count")),
+            evidence_requests,
+            None,
+            None,
+            False,
+            None,
+            _route_strings("oncology response guarantees", raw.get("guarantees")),
+            _route_strings("oncology response limitations", raw.get("limitations")),
+        )
+
+
+@dataclass(frozen=True)
+class OncoWorldlineViewArgs:
+    """Serialized worldline plus an optional agent-visibility cutoff."""
+
+    worldline: Mapping[str, Any]
+    visible_at: str | None = None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldlineViewArgs":
+        raw = _route_mapping("oncology worldline arguments", value)
+        return cls(raw.get("worldline"), raw.get("visible_at"))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "worldline", _route_mapping("oncology worldline", self.worldline))
+        if self.visible_at is not None:
+            object.__setattr__(self, "visible_at", _route_text("oncology visible_at", self.visible_at))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"worldline": dict(self.worldline)}
+        if self.visible_at is not None:
+            result["visible_at"] = self.visible_at
+        return result
+
+
+@dataclass(frozen=True)
+class OncoWorldlineReport:
+    raw: dict[str, Any]
+    ok: bool
+    subject: str
+    baseline: str
+    timepoint_count: int
+    biological_order: tuple[str, ...]
+    record_order: tuple[str, ...]
+    record_order_differs: bool
+    visibility_cutoff: str | None
+    visibility_filter_applied: bool
+    visible_timepoints: tuple[str, ...] | None
+    hidden_from_agent: tuple[str, ...] | None
+    timepoints: tuple[dict[str, Any], ...]
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldlineReport":
+        raw = _projection_payload(value, description="oncology worldline", direct_keys=("timepoints", "worldline"))
+        if not _bool("oncology worldline ok", raw.get("ok")):
+            raise ArgumentError("oncology worldline view is not successful")
+        biological = _route_strings("oncology biological_order", raw.get("biological_order"))
+        record = _route_strings("oncology record_order", raw.get("record_order"))
+        count = _route_count("oncology timepoint_count", raw.get("timepoint_count"))
+        rows = tuple(_route_mapping("oncology timepoint", item) for item in _array("oncology timepoints", raw.get("timepoints")))
+        if len(biological) != count or len(record) != count or len(rows) != count:
+            raise ArgumentError("oncology worldline timepoint counts do not reconcile")
+        row_labels = tuple(_route_text("oncology timepoint label", row.get("label")) for row in rows)
+        if set(row_labels) != set(biological) or set(row_labels) != set(record):
+            raise ArgumentError("oncology worldline order projections do not reconcile with timepoint rows")
+        if _route_text("oncology baseline", raw.get("baseline")) not in set(biological):
+            raise ArgumentError("oncology worldline baseline is not present in biological order")
+        differs = _bool("oncology record_order_differs", raw.get("record_order_differs"))
+        if differs != (biological != record):
+            raise ArgumentError("oncology record_order_differs does not reconcile with the order projections")
+        filtered = _bool("oncology visibility_filter_applied", raw.get("visibility_filter_applied"))
+        cutoff = None if raw.get("visibility_cutoff") is None else _route_text("oncology visibility_cutoff", raw.get("visibility_cutoff"))
+        visible_value = raw.get("visible_timepoints")
+        hidden_value = raw.get("hidden_from_agent")
+        if filtered != (cutoff is not None):
+            raise ArgumentError("oncology visibility filter and cutoff do not reconcile")
+        if filtered:
+            visible = _route_strings("oncology visible_timepoints", visible_value)
+            hidden = _route_strings("oncology hidden_from_agent", hidden_value)
+            if set(visible).intersection(hidden) or set(visible).union(hidden) != set(row_labels):
+                raise ArgumentError("oncology visibility partitions do not cover disjoint timepoint rows")
+        elif visible_value is not None or hidden_value is not None:
+            raise ArgumentError("unfiltered oncology worldline results cannot carry visibility partitions")
+        else:
+            visible = hidden = None
+        return cls(
+            raw,
+            True,
+            _route_text("oncology subject", raw.get("subject")),
+            _route_text("oncology baseline", raw.get("baseline")),
+            count,
+            biological,
+            record,
+            differs,
+            cutoff,
+            filtered,
+            visible,
+            hidden,
+            rows,
+            _route_strings("oncology worldline guarantees", raw.get("guarantees")),
+            _route_strings("oncology worldline limitations", raw.get("limitations")),
+        )
+
+
+@dataclass(frozen=True)
+class OncoClassificationArgs:
+    histology: str
+    panel: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClassificationArgs":
+        raw = _route_mapping("oncology classification arguments", value)
+        return cls(raw.get("histology"), raw.get("panel"))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "histology", _route_text("oncology histology", self.histology))
+        object.__setattr__(self, "panel", _route_mapping("oncology marker panel", self.panel))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"histology": self.histology, "panel": dict(self.panel)}
+
+
+@dataclass(frozen=True)
+class OncoClassificationReport:
+    raw: dict[str, Any]
+    ok: bool
+    histology: str
+    resolution: dict[str, Any]
+    is_integrated: bool
+    entity: str | None
+    obligations: tuple[dict[str, Any], ...]
+    panel_states: tuple[dict[str, Any], ...]
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClassificationReport":
+        raw = _projection_payload(value, description="oncology classification", direct_keys=("resolution", "panel_states"))
+        if not _bool("oncology classification ok", raw.get("ok")):
+            raise ArgumentError("oncology classification is not successful")
+        integrated = _bool("oncology classification is_integrated", raw.get("is_integrated"))
+        entity_value = raw.get("entity")
+        entity = None if entity_value is None else _route_text("oncology classification entity", entity_value)
+        if integrated != (entity is not None):
+            raise ArgumentError("integrated classification and entity do not reconcile")
+        obligations = tuple(_route_mapping("oncology classification obligation", item) for item in _array("oncology classification obligations", raw.get("obligations")))
+        states = tuple(_route_mapping("oncology panel state", item) for item in _array("oncology classification panel_states", raw.get("panel_states")))
+        return cls(
+            raw,
+            True,
+            _route_text("oncology classification histology", raw.get("histology")),
+            _route_mapping("oncology classification resolution", raw.get("resolution")),
+            integrated,
+            entity,
+            obligations,
+            states,
+            _route_strings("oncology classification guarantees", raw.get("guarantees")),
+            _route_strings("oncology classification limitations", raw.get("limitations")),
+        )
+
+    @property
+    def unresolved(self) -> bool:
+        return not self.is_integrated
+
+
+ONCO_ANALYSIS_UNITS = frozenset({"participant", "lesion", "specimen", "imaging_series"})
+ONCO_BIAS_FLAGS = frozenset({"left_truncation", "informative_loss_to_follow_up", "competing_death", "treatment_switching"})
+
+
+@dataclass(frozen=True)
+class OncoIdentityJoinArgs:
+    left: Mapping[str, Any]
+    right: Mapping[str, Any]
+    unit: str
+    evidence: Mapping[str, Any] | None = None
+    epoch_bridge: Mapping[str, Any] | None = None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoIdentityJoinArgs":
+        raw = _route_mapping("oncology identity arguments", value)
+        return cls(raw.get("left"), raw.get("right"), raw.get("unit"), raw.get("evidence"), raw.get("epoch_bridge"))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "left", _route_mapping("oncology identity left", self.left))
+        object.__setattr__(self, "right", _route_mapping("oncology identity right", self.right))
+        unit = _route_text("oncology identity unit", self.unit)
+        if unit not in ONCO_ANALYSIS_UNITS:
+            raise ArgumentError(f"unknown oncology identity analysis unit: {unit!r}")
+        object.__setattr__(self, "unit", unit)
+        object.__setattr__(self, "evidence", _optional_mapping("oncology identity evidence", self.evidence))
+        object.__setattr__(self, "epoch_bridge", _optional_mapping("oncology epoch bridge", self.epoch_bridge))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"left": dict(self.left), "right": dict(self.right), "unit": self.unit}
+        if self.evidence is not None:
+            result["evidence"] = dict(self.evidence)
+        if self.epoch_bridge is not None:
+            result["epoch_bridge"] = dict(self.epoch_bridge)
+        return result
+
+
+@dataclass(frozen=True)
+class OncoIdentityJoinReport:
+    raw: dict[str, Any]
+    ok: bool
+    joinable: bool
+    report: dict[str, Any]
+    bridge_declared: bool
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoIdentityJoinReport":
+        raw = _projection_payload(value, description="oncology identity join", direct_keys=("joinable", "report"))
+        if not _bool("oncology identity ok", raw.get("ok")):
+            raise ArgumentError("oncology identity join transport projection is not successful")
+        return cls(
+            raw,
+            True,
+            _bool("oncology identity joinable", raw.get("joinable")),
+            _route_mapping("oncology identity report", raw.get("report")),
+            _bool("oncology identity bridge_declared", raw.get("bridge_declared")),
+            _route_strings("oncology identity guarantees", raw.get("guarantees")),
+            _route_strings("oncology identity limitations", raw.get("limitations")),
+        )
+
+    @property
+    def declined(self) -> bool:
+        return not self.joinable
+
+
+@dataclass(frozen=True)
+class OncoOutcomeAnalyzeArgs:
+    follow_up: Mapping[str, Any]
+    estimand: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoOutcomeAnalyzeArgs":
+        raw = _route_mapping("oncology outcome arguments", value)
+        return cls(raw.get("follow_up"), raw.get("estimand"))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "follow_up", _route_mapping("oncology follow_up", self.follow_up))
+        object.__setattr__(self, "estimand", _route_mapping("oncology estimand", self.estimand))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"follow_up": dict(self.follow_up), "estimand": dict(self.estimand)}
+
+
+@dataclass(frozen=True)
+class OncoOutcomeReport:
+    raw: dict[str, Any]
+    ok: bool
+    analysis: dict[str, Any]
+    at_risk_days: int
+    immortal_time_days: int
+    event: bool
+    censoring_reason: str | None
+    informative_bias_flags: tuple[str, ...]
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoOutcomeReport":
+        raw = _projection_payload(value, description="oncology outcome", direct_keys=("analysis", "censoring_reason"))
+        if not _bool("oncology outcome ok", raw.get("ok")):
+            raise ArgumentError("oncology outcome analysis is not successful")
+        event = _bool("oncology outcome event", raw.get("event"))
+        reason = None if raw.get("censoring_reason") is None else _route_text("oncology censoring_reason", raw.get("censoring_reason"))
+        if event and reason is not None:
+            raise ArgumentError("an oncology event cannot carry a censoring reason")
+        if not event and reason is None:
+            raise ArgumentError("a censored oncology outcome must carry a censoring reason")
+        flags = _route_strings("oncology informative_bias_flags", raw.get("informative_bias_flags"))
+        if any(flag not in ONCO_BIAS_FLAGS for flag in flags):
+            raise ArgumentError("oncology informative_bias_flags contains an unknown bias")
+        return cls(
+            raw,
+            True,
+            _route_mapping("oncology outcome analysis", raw.get("analysis")),
+            _route_count("oncology at_risk_days", raw.get("at_risk_days")),
+            _route_count("oncology immortal_time_days", raw.get("immortal_time_days")),
+            event,
+            reason,
+            flags,
+            _route_strings("oncology outcome guarantees", raw.get("guarantees")),
+            _route_strings("oncology outcome limitations", raw.get("limitations")),
+        )
+
+    @property
+    def left_truncated(self) -> bool:
+        return self.immortal_time_days > 0
 
 
 @dataclass(frozen=True)
@@ -244,13 +715,60 @@ def onco_boundary_report(value: Mapping[str, Any]) -> OncoBoundaryReport:
     return OncoBoundaryReport.from_wire(value)
 
 
+def onco_response_report(value: Mapping[str, Any]) -> OncoResponseReport:
+    """Parse criteria-aware response assessment while preserving withheld progression."""
+
+    return OncoResponseReport.from_wire(value)
+
+
+def onco_worldline_report(value: Mapping[str, Any]) -> OncoWorldlineReport:
+    """Parse biological, record, and agent-visibility worldline projections."""
+
+    return OncoWorldlineReport.from_wire(value)
+
+
+def onco_classification_report(value: Mapping[str, Any]) -> OncoClassificationReport:
+    """Parse integrated or unresolved molecular classification projections."""
+
+    return OncoClassificationReport.from_wire(value)
+
+
+def onco_identity_join_report(value: Mapping[str, Any]) -> OncoIdentityJoinReport:
+    """Parse an auditable identity join, including a typed declined verdict."""
+
+    return OncoIdentityJoinReport.from_wire(value)
+
+
+def onco_outcome_report(value: Mapping[str, Any]) -> OncoOutcomeReport:
+    """Parse per-subject outcome, censoring, and delayed-entry analysis."""
+
+    return OncoOutcomeReport.from_wire(value)
+
+
 __all__ = [
     "ONCO_DISPOSITIONS",
+    "ONCO_ANALYSIS_UNITS",
+    "ONCO_BIAS_FLAGS",
     "ONCO_OUTPUT_USES",
     "ONCO_TERMINAL_ACTIONS",
     "OncoBoundaryArgs",
     "OncoBoundaryDispositionReport",
     "OncoBoundaryReport",
+    "OncoClassificationArgs",
+    "OncoClassificationReport",
     "OncoEscalationReport",
+    "OncoIdentityJoinArgs",
+    "OncoIdentityJoinReport",
+    "OncoOutcomeAnalyzeArgs",
+    "OncoOutcomeReport",
+    "OncoResponseAssessArgs",
+    "OncoResponseReport",
+    "OncoWorldlineReport",
+    "OncoWorldlineViewArgs",
     "onco_boundary_report",
+    "onco_classification_report",
+    "onco_identity_join_report",
+    "onco_outcome_report",
+    "onco_response_report",
+    "onco_worldline_report",
 ]

@@ -1793,6 +1793,107 @@ export interface OncoBoundaryResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface OncoResponseAssessArgs extends JsonObject {
+  criterion: JsonObject;
+  baseline: JsonObject;
+  current: JsonObject;
+  current_acquired: string;
+  baseline_clinical: JsonObject;
+  current_clinical: JsonObject;
+  treatment: JsonObject;
+  evidence?: JsonObject;
+  nadir_spd_mm2?: number;
+  measurement_error_fraction?: number;
+}
+
+export interface OncoResponseResult extends JsonObject {
+  ok: boolean;
+  assessment?: JsonObject;
+  call_label?: string;
+  withheld_progression?: boolean;
+  hypothesis_count?: number;
+  evidence_requests?: JsonValue[];
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoWorldlineViewArgs extends JsonObject {
+  worldline: JsonObject;
+  visible_at?: string;
+}
+
+export interface OncoWorldlineResult extends JsonObject {
+  ok: boolean;
+  subject?: string;
+  baseline?: string;
+  timepoint_count?: number;
+  biological_order?: string[];
+  record_order?: string[];
+  record_order_differs?: boolean;
+  visibility_cutoff?: string | null;
+  visibility_filter_applied?: boolean;
+  visible_timepoints?: string[] | null;
+  hidden_from_agent?: string[] | null;
+  timepoints?: JsonObject[];
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoClassificationArgs extends JsonObject {
+  histology: JsonValue;
+  panel: JsonObject;
+}
+
+export interface OncoClassificationResult extends JsonObject {
+  ok: boolean;
+  histology?: JsonValue;
+  resolution?: JsonObject;
+  is_integrated?: boolean;
+  entity?: string | null;
+  obligations?: JsonObject[];
+  panel_states?: JsonObject[];
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoIdentityJoinArgs extends JsonObject {
+  left: JsonObject;
+  right: JsonObject;
+  unit: "participant" | "lesion" | "specimen" | "imaging_series";
+  evidence?: JsonObject;
+  epoch_bridge?: JsonObject;
+}
+
+export interface OncoIdentityJoinResult extends JsonObject {
+  ok: boolean;
+  joinable?: boolean;
+  report?: JsonObject;
+  bridge_declared?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoOutcomeAnalyzeArgs extends JsonObject {
+  follow_up: JsonObject;
+  estimand: JsonObject;
+}
+
+export interface OncoOutcomeResult extends JsonObject {
+  ok: boolean;
+  analysis?: JsonObject;
+  at_risk_days?: number;
+  immortal_time_days?: number;
+  event?: boolean;
+  censoring_reason?: string | null;
+  informative_bias_flags?: string[];
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface OpsAcceptanceArgs extends JsonObject {
   max_items?: number;
 }

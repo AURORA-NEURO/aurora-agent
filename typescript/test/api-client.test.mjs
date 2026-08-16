@@ -333,6 +333,11 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/contradiction_review") return jsonResponse({ ok: true, tool: "contradiction_review", request_id: "r29", mcp: { result: { structuredContent: { ok: false, stage: "pose", refusal: "readings agree", fail_closed: true } } } });
       if (path === "/v1/tools/lab_plan") return jsonResponse({ ok: true, tool: "lab_plan", request_id: "r30", mcp: { result: { structuredContent: { ok: true, goal: "safe assay", should_escalate: true } } } });
       if (path === "/v1/tools/onco_boundary_check") return jsonResponse({ ok: true, tool: "onco_boundary_check", request_id: "r31", mcp: { result: { structuredContent: { ok: true, released: ["cohort_analysis"], refused: ["treatment_recommendation"], terminal_action: "escalate" } } } });
+      if (path === "/v1/tools/onco_response_assess") return jsonResponse({ ok: true, tool: "onco_response_assess", request_id: "r32", mcp: { result: { structuredContent: { ok: true, call_label: "not evaluable", withheld_progression: true, hypothesis_count: 2 } } } });
+      if (path === "/v1/tools/onco_worldline_view") return jsonResponse({ ok: true, tool: "onco_worldline_view", request_id: "r33", mcp: { result: { structuredContent: { ok: true, timepoint_count: 1, record_order_differs: false } } } });
+      if (path === "/v1/tools/onco_classification_check") return jsonResponse({ ok: true, tool: "onco_classification_check", request_id: "r34", mcp: { result: { structuredContent: { ok: true, is_integrated: false, obligations: [{ marker: "idh_mutation" }] } } } });
+      if (path === "/v1/tools/oncoworlds_identity_join") return jsonResponse({ ok: true, tool: "oncoworlds_identity_join", request_id: "r35", mcp: { result: { structuredContent: { ok: true, joinable: false, bridge_declared: false } } } });
+      if (path === "/v1/tools/onco_outcome_analyze") return jsonResponse({ ok: true, tool: "onco_outcome_analyze", request_id: "r36", mcp: { result: { structuredContent: { ok: true, event: false, censoring_reason: "lost_to_follow_up", immortal_time_days: 4 } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -526,6 +531,11 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const contradiction = await client.contradictionReview({ left: {}, right: {}, intent: "resolvable", hypotheses: [{ id: "h-1", account: {} }] });
   const lab = await client.labPlan({ graph: {}, actions: [], budget: {}, max_items: 3 });
   const onco = await client.oncoBoundaryCheck({ request: { requested_uses: ["cohort_analysis"] } });
+  const responseAssessment = await client.oncoResponseAssess({ criterion: {}, baseline: {}, current: {}, current_acquired: "2026-01-01T00:00:00Z", baseline_clinical: {}, current_clinical: {}, treatment: {} });
+  const worldline = await client.oncoWorldlineView({ worldline: {}, visible_at: "2026-01-02T00:00:00Z" });
+  const classification = await client.oncoClassificationCheck({ histology: "diffuse_glioma", panel: {} });
+  const identity = await client.oncoworldsIdentityJoin({ left: {}, right: {}, unit: "specimen" });
+  const outcome = await client.oncoOutcomeAnalyze({ follow_up: {}, estimand: {} });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -572,6 +582,12 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(contradiction.mcp.result.structuredContent.stage, "pose");
   assert.equal(lab.mcp.result.structuredContent.should_escalate, true);
   assert.equal(onco.mcp.result.structuredContent.terminal_action, "escalate");
+  assert.equal(responseAssessment.mcp.result.structuredContent.withheld_progression, true);
+  assert.equal(responseAssessment.mcp.result.structuredContent.call_label, "not evaluable");
+  assert.equal(worldline.mcp.result.structuredContent.record_order_differs, false);
+  assert.equal(classification.mcp.result.structuredContent.is_integrated, false);
+  assert.equal(identity.mcp.result.structuredContent.joinable, false);
+  assert.equal(outcome.mcp.result.structuredContent.censoring_reason, "lost_to_follow_up");
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");
