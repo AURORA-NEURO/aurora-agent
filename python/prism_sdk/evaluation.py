@@ -623,6 +623,38 @@ class BioevalReferenceAuditReport:
 
 
 @dataclass(frozen=True)
+class EvaluationLeakWitnessProjection:
+    raw: dict[str, Any]
+    decision: str
+    observation: str
+    clock: str
+    decision_at: str
+    available_at: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationLeakWitnessProjection":
+        raw = _route_mapping("evaluation leakage witness", value)
+        clock = _route_text("evaluation leakage clock", raw.get("clock"))
+        if clock not in {"occurred", "measured", "recorded", "accessible"}:
+            raise ArgumentError(f"unknown evaluation leakage clock: {clock!r}")
+        return cls(raw, _route_text("evaluation leakage decision", raw.get("decision")), _route_text("evaluation leakage observation", raw.get("observation")), clock, _route_text("evaluation leakage decision_at", raw.get("decision_at")), _route_text("evaluation leakage available_at", raw.get("available_at")))
+
+
+@dataclass(frozen=True)
+class EvaluationDanglingReferenceProjection:
+    raw: tuple[Any, ...]
+    decision: str
+    observation: str
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "EvaluationDanglingReferenceProjection":
+        raw = _array("evaluation dangling reference", value)
+        if len(raw) != 2:
+            raise ArgumentError("evaluation dangling references must contain decision and observation")
+        return cls(raw, _route_text("evaluation dangling decision", raw[0]), _route_text("evaluation dangling observation", raw[1]))
+
+
+@dataclass(frozen=True)
 class EvaluationWorldlineReport:
     raw: dict[str, Any]
     ok: bool
@@ -634,6 +666,8 @@ class EvaluationWorldlineReport:
     admissible_at: tuple[Any, ...] | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    leak_records: tuple[EvaluationLeakWitnessProjection, ...] = field(default_factory=tuple)
+    dangling_records: tuple[EvaluationDanglingReferenceProjection, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationWorldlineReport":
@@ -648,6 +682,8 @@ class EvaluationWorldlineReport:
         dangling_count = _route_count("evaluation dangling_count", raw.get("dangling_count"))
         if len(dangling) != dangling_count:
             raise ArgumentError("evaluation dangling count does not reconcile")
+        leak_records = tuple(EvaluationLeakWitnessProjection.from_wire(item) for item in leaks)
+        dangling_records = tuple(EvaluationDanglingReferenceProjection.from_wire(item) for item in dangling)
         admissible = raw.get("admissible_at")
         admissible_at = None if admissible is None else _array("evaluation admissible_at", admissible)
         return cls(
@@ -661,6 +697,8 @@ class EvaluationWorldlineReport:
             admissible_at,
             _route_strings("evaluation worldline guarantees", raw.get("guarantees")),
             _route_strings("evaluation worldline limitations", raw.get("limitations")),
+            leak_records,
+            dangling_records,
         )
 
     @property
@@ -670,6 +708,14 @@ class EvaluationWorldlineReport:
     @property
     def dangling_context_detected(self) -> bool:
         return self.dangling_count > 0
+
+    @property
+    def accessibility_leakage_is_separate(self) -> bool:
+        return all(record.clock == "accessible" for record in self.leak_records)
+
+    @property
+    def admissibility_cut_is_explicit(self) -> bool:
+        return self.admissible_at is not None
 
 
 @dataclass(frozen=True)
@@ -803,6 +849,8 @@ __all__ = [
     "ORACLE_STATUSES",
     "BioevalReferenceAuditReport",
     "EvaluationReproductionReport",
+    "EvaluationDanglingReferenceProjection",
+    "EvaluationLeakWitnessProjection",
     "EvaluationTrajectoryReport",
     "EvaluationWorldlineReport",
     "OracleCombineReport",

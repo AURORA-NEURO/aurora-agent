@@ -4239,14 +4239,23 @@ export interface EvaluationWorldlineArgs extends JsonObject {
   at?: string;
 }
 
+export interface EvaluationLeakWitnessResult extends JsonObject {
+  decision: string;
+  observation: string;
+  clock: "occurred" | "measured" | "recorded" | "accessible";
+  decision_at: string;
+  available_at: string;
+}
+
 export interface EvaluationWorldlineResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/evaluation-worldline-audit/0.1";
   decisions?: number;
   leak_count?: number;
-  leaks?: JsonObject[];
+  leaks?: EvaluationLeakWitnessResult[];
   dangling_count?: number;
-  dangling_references?: JsonValue[];
-  admissible_at?: JsonValue[] | null;
+  dangling_references?: [string, string][];
+  admissible_at?: string[] | null;
   guarantees?: string[];
   limitations?: string[];
 }

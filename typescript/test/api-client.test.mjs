@@ -761,7 +761,17 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         dispersion: "mixed", queried_state: "progression", queried_state_mass: 0.6,
         guarantees: ["mass normalized"], limitations: ["not a scorer"],
       } } } });
-      if (path === "/v1/tools/evaluation_worldline_audit") return jsonResponse({ ok: true, tool: "evaluation_worldline_audit", request_id: "r41", mcp: { result: { structuredContent: { ok: true, leak_count: 1, dangling_count: 0 } } } });
+      if (path === "/v1/tools/evaluation_worldline_audit") return jsonResponse({ ok: true, tool: "evaluation_worldline_audit", request_id: "r41", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/evaluation-worldline-audit/0.1",
+        decisions: 2,
+        leak_count: 1,
+        leaks: [{ decision: "decision-1", observation: "future", clock: "accessible", decision_at: "2026-01-08T00:00:00Z", available_at: "2026-01-10T00:00:00Z" }],
+        dangling_count: 1,
+        dangling_references: [["decision-1", "missing"]],
+        admissible_at: ["early"],
+        guarantees: ["accessibility clock"], limitations: ["no denominator"],
+      } } } });
       if (path === "/v1/tools/evaluation_reproduction_check") return jsonResponse({ ok: true, tool: "evaluation_reproduction_check", request_id: "r42", mcp: { result: { structuredContent: { ok: true, reproduced: false, portability_demonstrated: false } } } });
       if (path === "/v1/tools/evaluation_trajectory_check") return jsonResponse({ ok: true, tool: "evaluation_trajectory_check", request_id: "r43", mcp: { result: { structuredContent: { ok: true, steps: 1 } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
@@ -1190,6 +1200,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(referenceAudit.mcp.result.structuredContent.reference.mass.progression, 0.6);
   assert.equal(referenceAudit.mcp.result.structuredContent.resolution.resolution, "distributed");
   assert.equal(evaluationWorldline.mcp.result.structuredContent.leak_count, 1);
+  assert.equal(evaluationWorldline.mcp.result.structuredContent.schema, "bioprism-mcp/evaluation-worldline-audit/0.1");
+  assert.equal(evaluationWorldline.mcp.result.structuredContent.leaks[0].clock, "accessible");
+  assert.equal(evaluationWorldline.mcp.result.structuredContent.dangling_references[0][1], "missing");
   assert.equal(reproduction.mcp.result.structuredContent.reproduced, false);
   assert.equal(trajectory.mcp.result.structuredContent.steps, 1);
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });

@@ -5230,6 +5230,7 @@ fn evaluation_worldline_audit_separates_future_leakage_from_dangling_context() {
         }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/evaluation-worldline-audit/0.1"));
     assert_eq!(result["leak_count"], json!(1));
     assert_eq!(result["dangling_count"], json!(1));
     assert_eq!(result["leaks"][0]["observation"], json!("future"));

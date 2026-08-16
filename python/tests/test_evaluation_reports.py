@@ -113,7 +113,7 @@ class EvaluationReportTests(unittest.TestCase):
             "ok": True,
             "decisions": 1,
             "leak_count": 1,
-            "leaks": [{"decision": "d1", "observation": "future"}],
+            "leaks": [{"decision": "d1", "observation": "future", "clock": "accessible", "decision_at": "2026-01-01T00:00:00Z", "available_at": "2026-01-02T00:00:00Z"}],
             "dangling_count": 1,
             "dangling_references": [["d1", "missing"]],
             "admissible_at": ["early"],
@@ -122,6 +122,9 @@ class EvaluationReportTests(unittest.TestCase):
         })
         self.assertTrue(worldline.leakage_detected)
         self.assertTrue(worldline.dangling_context_detected)
+        self.assertTrue(worldline.accessibility_leakage_is_separate)
+        self.assertTrue(worldline.admissibility_cut_is_explicit)
+        self.assertEqual(worldline.leak_records[0].available_at, "2026-01-02T00:00:00Z")
         reproduction = evaluation_reproduction_check_report({
             "ok": True,
             "certificate": {"workflow": "w1"},

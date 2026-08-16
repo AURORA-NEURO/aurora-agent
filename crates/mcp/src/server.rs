@@ -9161,6 +9161,7 @@ impl Server {
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/evaluation-worldline-audit/0.1",
             "decisions": worldline.decisions().len(),
             "leak_count": audit.len(),
             "leaks": audit,

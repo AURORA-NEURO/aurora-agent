@@ -792,7 +792,9 @@ rows remain available. The same projections are available on `Workspace`, `Async
 `ApiClient`, and `AsyncApiClient`. `BioevalReferenceAuditReport` additionally types distributed
 mass, resolution, dispersion attribution, and unresolved/not-evaluable reference states. See
 [`docs/ORACLE_COMBINE.md`](ORACLE_COMBINE.md) and
-[`docs/BIOEVAL_REFERENCE_AUDIT.md`](BIOEVAL_REFERENCE_AUDIT.md).
+[`docs/BIOEVAL_REFERENCE_AUDIT.md`](BIOEVAL_REFERENCE_AUDIT.md). `EvaluationWorldlineReport`
+additionally types accessibility leak witnesses and dangling-reference pairs; see
+[`docs/EVALUATION_WORLDLINE_AUDIT.md`](EVALUATION_WORLDLINE_AUDIT.md).
 
 ## Biological stress profiling
 
