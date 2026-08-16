@@ -991,6 +991,72 @@ export interface BenchmarkTraceAnalysisResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface FoundationContractCheckArgs extends JsonObject {
+  contract: JsonObject;
+  parent?: JsonObject;
+  envelope?: JsonObject;
+  present_as_established?: boolean;
+  world?: JsonObject;
+  claim?: "associational" | "analysis_fork" | "injected_factor_effect" | "simulated_intervention" | "reveal_prediction" | "specified_ground_truth" | "real_treatment_effect";
+  transition?: JsonObject;
+}
+
+export interface FoundationContractGateResult extends JsonObject {
+  ok: boolean;
+  id?: string;
+  intent?: string;
+  falsifier_count?: number;
+  action_count?: number;
+  evidence_obligation_count?: number;
+  minimum_reviewers?: number;
+  uncertainty_required?: boolean;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface FoundationParentRelationResult extends JsonObject {
+  ok: boolean;
+  relation: "refines" | "refused";
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface FoundationEnvelopeResult extends JsonObject {
+  ok: boolean;
+  structure: string;
+  maturity: string;
+  maturity_rung: string;
+  fail_closed: boolean;
+}
+
+export interface FoundationWorldResult extends JsonObject {
+  ok: boolean;
+  world_id: string;
+  class: string;
+  counterfactual_strength: string;
+  reveal_policy: string;
+  claim?: string;
+  fail_closed: boolean;
+}
+
+export interface FoundationTransitionResult extends JsonObject {
+  ok: boolean;
+  verdict: "plane_consistent" | "plane_confusion";
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface FoundationContractCheckResult extends JsonObject {
+  ok: boolean;
+  verdict: "admitted" | "refused";
+  contract: FoundationContractGateResult;
+  parent_relation?: FoundationParentRelationResult | null;
+  envelope?: FoundationEnvelopeResult | null;
+  world?: FoundationWorldResult | null;
+  transition?: FoundationTransitionResult | null;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

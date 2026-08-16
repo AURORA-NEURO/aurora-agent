@@ -449,6 +449,8 @@ refusing a numeric score for an unreportable revision.
 `foundation_contract_check` validates falsifiable-contract admissibility, safe refinement, claim
 applicability, world-class counterfactual strength, reveal policy, and transition-plane consistency
 as separate gates.
+The Python and TypeScript SDKs expose those gates as typed subreports and keep a transport-success
+response distinct from an admitted contract or an authorized biological claim.
 `world_generate` creates deterministic synthetic world/query pairs from a bounded `WorldSpec`,
 parses both through the typed runtime, and returns exact digests and structural validation;
 `hub_submission_review` checks the public submission contract and can replay append-only moderation

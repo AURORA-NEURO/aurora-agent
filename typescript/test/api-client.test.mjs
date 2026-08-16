@@ -171,6 +171,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         summary: { episode_count: 0, boundary_count: 0, extractable_boundaries: 0, repetition_groups: 0 },
         guarantees: ["causal ranking remains separate"],
       } } } });
+      if (path === "/v1/tools/foundation_contract_check") return jsonResponse({ ok: true, tool: "foundation_contract_check", request_id: "r21", mcp: { result: { structuredContent: {
+        ok: true,
+        verdict: "refused",
+        contract: { ok: true, id: "fbc:test:001", intent: "check", falsifier_count: 1, action_count: 1, evidence_obligation_count: 0, minimum_reviewers: 0, uncertainty_required: true },
+        parent_relation: null,
+        envelope: null,
+        world: { ok: false, world_id: "observed-world", class: "observed_replay", counterfactual_strength: "low", reveal_policy: "admissible", claim: "unsupported", fail_closed: true },
+        transition: { ok: false, verdict: "plane_confusion", refusal: "latent state", fail_closed: true },
+        guarantees: ["contract gates remain separate"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -630,6 +640,12 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     },
   });
   assert.equal(traceAnalysis.mcp.result.structuredContent.analysis.verdict.verdict, "first_causal");
+  const foundation = await client.foundationContractCheck({
+    contract: { id: "fbc:test:001", intent: "check", falsifiers: ["disagree"], actions: ["inspect"], claim_schema: "typed", reference_standard: "fixture", terminations: ["success"] },
+    claim: "real_treatment_effect",
+  });
+  assert.equal(foundation.mcp.result.structuredContent.verdict, "refused");
+  assert.equal(foundation.mcp.result.structuredContent.transition.verdict, "plane_confusion");
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

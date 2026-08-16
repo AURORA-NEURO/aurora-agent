@@ -106,6 +106,13 @@ invent defaults:
   boundary-ranking arithmetic. Typed verdicts preserve first-causal, conjunction,
   environment-divergence, no-divergence, and unlocalizable outcomes, while structured refusals
   remain fail-closed and never become fabricated blame or executable benchmark cells.
+- `FoundationContractCheckArgs` and `foundation_contract_check_report(...)` type the foundation
+  declaration gate across sync MCP, async MCP, and HTTP. `FoundationContractGateReport`,
+  `FoundationParentRelationReport`, `FoundationEnvelopeReport`, `FoundationWorldReport`, and
+  `FoundationTransitionReport` keep admissibility, inheritance, applicability/maturity,
+  counterfactual authority/reveal policy, and transition-plane consistency independent. The
+  aggregate `admitted` property is conservative: a valid contract can still be refused by an
+  optional gate, and no declaration is promoted to evidence, treatment authority, or execution.
 - `WorldClaimCheckRequest`, `LabPlanRequest`, and `RoutingDecisionRequest` expose typed envelope
   helpers for world support checks, no-execution acquisition planning, and unseen-task routing over
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and

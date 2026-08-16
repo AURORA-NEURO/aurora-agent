@@ -176,6 +176,11 @@ candidate scores, textual divergence, decision-boundary ranks, reversibility bas
 episodes, repeated-action progress, and reconciled summary counts. Causal verdicts remain distinct
 from boundary ranking, environment-produced divergence is not assigned to an agent, and a
 fail-closed refusal does not become a benchmark cell or replay claim.
+`foundationContractCheck` returns typed `FoundationContractCheckResult` evidence with separate
+contract, parent-refinement, applicability/maturity, world-class, and transition-plane gates. A
+top-level `ok` transport result does not imply admission: callers must inspect the explicit
+`verdict` and gate objects, and a refused world claim or plane confusion remains visible rather
+than being flattened into a generic invalid-contract error.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

@@ -118,6 +118,8 @@ import type {
   EpistemicVoiResult,
   BenchmarkTraceAnalyzeArgs,
   BenchmarkTraceAnalysisResult,
+  FoundationContractCheckArgs,
+  FoundationContractCheckResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -384,6 +386,10 @@ export class ApiClient {
 
   async benchmarkTraceAnalyze(args: BenchmarkTraceAnalyzeArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkTraceAnalysisResult>> {
     return this.callTool<BenchmarkTraceAnalysisResult>("benchmark_trace_analyze", args, options);
+  }
+
+  async foundationContractCheck(args: FoundationContractCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FoundationContractCheckResult>> {
+    return this.callTool<FoundationContractCheckResult>("foundation_contract_check", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

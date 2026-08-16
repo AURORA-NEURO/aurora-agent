@@ -219,6 +219,7 @@ from .token_context import (
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
+from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -1640,6 +1641,26 @@ class Workspace:
         """Return typed causal, boundary, episode, repetition, and refusal evidence."""
 
         return benchmark_trace_analysis_report(self.benchmark_trace_analyze(request))
+
+    def foundation_contract_check(
+        self,
+        request: FoundationContractCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate independent foundation contract gates without executing a world."""
+
+        normalized = request if isinstance(request, FoundationContractCheckArgs) else FoundationContractCheckArgs.from_wire(request)
+        result = self.client.call_tool("foundation_contract_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def foundation_contract_check_report(
+        self,
+        request: FoundationContractCheckArgs | Mapping[str, Any],
+    ) -> FoundationContractCheckReport:
+        """Return typed admissibility, refinement, applicability, world, and plane gates."""
+
+        return foundation_contract_check_report(self.foundation_contract_check(request))
 
     def developer_delivery_audit_report(
         self,
@@ -3302,6 +3323,26 @@ class AsyncWorkspace:
         """Return async typed benchmark compiler evidence."""
 
         return benchmark_trace_analysis_report(await self.benchmark_trace_analyze(request))
+
+    async def foundation_contract_check(
+        self,
+        request: FoundationContractCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async foundation contract validation with structured gate outcomes."""
+
+        normalized = request if isinstance(request, FoundationContractCheckArgs) else FoundationContractCheckArgs.from_wire(request)
+        result = await self.client.call_tool("foundation_contract_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def foundation_contract_check_report(
+        self,
+        request: FoundationContractCheckArgs | Mapping[str, Any],
+    ) -> FoundationContractCheckReport:
+        """Return async typed foundation gate evidence."""
+
+        return foundation_contract_check_report(await self.foundation_contract_check(request))
 
     async def developer_delivery_audit_report(
         self,
