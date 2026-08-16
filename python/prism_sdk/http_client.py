@@ -205,6 +205,7 @@ from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, tok
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .epistemic_context import EpistemicContextAuditArgs, EpistemicContextAuditReport, epistemic_context_audit_report
+from .epistemic_selection import EpistemicSelectionAuditArgs, EpistemicSelectionAuditReport, epistemic_selection_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -799,6 +800,23 @@ class ApiClient:
         """Return typed frontier, sufficiency, identification, and subset evidence."""
 
         return epistemic_context_audit_report(self.epistemic_context_audit(request))
+
+    def epistemic_selection_audit(
+        self,
+        request: EpistemicSelectionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run bounded observed-evidence selection through the HTTP gateway."""
+
+        normalized = request if isinstance(request, EpistemicSelectionAuditArgs) else EpistemicSelectionAuditArgs.from_wire(request)
+        return self.call_tool("epistemic_selection_audit", normalized.to_mcp_arguments())
+
+    def epistemic_selection_audit_report(
+        self,
+        request: EpistemicSelectionAuditArgs | Mapping[str, Any],
+    ) -> EpistemicSelectionAuditReport:
+        """Return typed HTTP selection, guarantee, and exactness evidence."""
+
+        return epistemic_selection_audit_report(self.epistemic_selection_audit(request))
 
     def benchmark_trace_analyze(
         self,
@@ -3186,6 +3204,23 @@ class AsyncApiClient:
         """Return typed frontier, sufficiency, identification, and subset evidence."""
 
         return epistemic_context_audit_report(await self.epistemic_context_audit(request))
+
+    async def epistemic_selection_audit(
+        self,
+        request: EpistemicSelectionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async bounded observed-evidence selection through HTTP."""
+
+        normalized = request if isinstance(request, EpistemicSelectionAuditArgs) else EpistemicSelectionAuditArgs.from_wire(request)
+        return await self.call_tool("epistemic_selection_audit", normalized.to_mcp_arguments())
+
+    async def epistemic_selection_audit_report(
+        self,
+        request: EpistemicSelectionAuditArgs | Mapping[str, Any],
+    ) -> EpistemicSelectionAuditReport:
+        """Return async typed HTTP selection and guarantee evidence."""
+
+        return epistemic_selection_audit_report(await self.epistemic_selection_audit(request))
 
     async def benchmark_trace_analyze(
         self,

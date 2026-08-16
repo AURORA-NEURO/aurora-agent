@@ -249,6 +249,7 @@ from .token_context import (
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .epistemic_context import EpistemicContextAuditArgs, EpistemicContextAuditReport, epistemic_context_audit_report
+from .epistemic_selection import EpistemicSelectionAuditArgs, EpistemicSelectionAuditReport, epistemic_selection_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -2185,6 +2186,26 @@ class Workspace:
         """Return typed frontier, sufficiency, identification, and subset evidence."""
 
         return epistemic_context_audit_report(self.epistemic_context_audit(request))
+
+    def epistemic_selection_audit(
+        self,
+        request: EpistemicSelectionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run bounded observed-evidence selection through workspace MCP."""
+
+        normalized = request if isinstance(request, EpistemicSelectionAuditArgs) else EpistemicSelectionAuditArgs.from_wire(request)
+        result = self.client.call_tool("epistemic_selection_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def epistemic_selection_audit_report(
+        self,
+        request: EpistemicSelectionAuditArgs | Mapping[str, Any],
+    ) -> EpistemicSelectionAuditReport:
+        """Return typed selections, guarantee applicability, submodularity, and exactness."""
+
+        return epistemic_selection_audit_report(self.epistemic_selection_audit(request))
 
     def benchmark_trace_analyze(
         self,
@@ -4584,6 +4605,26 @@ class AsyncWorkspace:
         """Return typed frontier, sufficiency, identification, and subset evidence."""
 
         return epistemic_context_audit_report(await self.epistemic_context_audit(request))
+
+    async def epistemic_selection_audit(
+        self,
+        request: EpistemicSelectionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async bounded observed-evidence selection with fail-closed audit metadata."""
+
+        normalized = request if isinstance(request, EpistemicSelectionAuditArgs) else EpistemicSelectionAuditArgs.from_wire(request)
+        result = await self.client.call_tool("epistemic_selection_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def epistemic_selection_audit_report(
+        self,
+        request: EpistemicSelectionAuditArgs | Mapping[str, Any],
+    ) -> EpistemicSelectionAuditReport:
+        """Return async typed selection, guarantee, and exactness evidence."""
+
+        return epistemic_selection_audit_report(await self.epistemic_selection_audit(request))
 
     async def benchmark_trace_analyze(
         self,

@@ -1600,6 +1600,43 @@ export interface EpistemicContextAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface EpistemicSelectionConstraintArgs extends JsonObject {
+  cardinality?: number;
+  budget?: number;
+  costs?: number[];
+}
+
+export interface EpistemicSelectionAuditArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  evidence_pool: EpistemicEvidencePoolArgs;
+  constraint: EpistemicSelectionConstraintArgs;
+  protected?: number[];
+  check_submodularity?: boolean;
+  include_lazy?: boolean;
+  compare_optimum?: boolean;
+  tolerance?: number;
+}
+
+export interface EpistemicSelectionAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/epistemic-selection-audit/0.1";
+  objective?: "regret_reduction";
+  problem?: JsonObject;
+  evidence_pool?: JsonObject;
+  constraint?: JsonObject;
+  baseline?: JsonObject;
+  submodularity?: JsonObject;
+  greedy?: JsonObject;
+  lazy?: JsonObject | null;
+  comparisons?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface BenchmarkTraceEventArgs extends JsonObject {
   step: number;
   kind: "goal" | "observation" | "choice" | "action" | "result" | "claim" | "termination";

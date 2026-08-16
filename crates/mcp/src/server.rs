@@ -84,16 +84,22 @@ use bioprism_docgraph::{
     ScanOptions, TaskRoute, TraversalPolicy,
 };
 use bioprism_epistemic::{
+    brute_force_optimum as epistemic_brute_force_optimum,
     complementarity as epistemic_complementarity, joint_value as epistemic_joint_value,
     evaluate_context as epistemic_evaluate_context,
     frontier as epistemic_frontier,
+    greedy as epistemic_greedy,
+    lazy_greedy as epistemic_lazy_greedy,
     identification as epistemic_identification,
     minimal_sufficient_context as epistemic_minimal_sufficient_context,
+    Constraint as EpistemicConstraint,
     value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
     Belief as EpistemicBelief, DecisionProblem as EpistemicDecisionProblem,
     DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
     Outcome as EpistemicOutcome,
+    RegretReduction as EpistemicRegretReduction, SetFunction as EpistemicSetFunction,
 };
+use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
 use bioprism_evalengine::{
     CapabilityPosterior, CreditPolicy, Observation, ReleaseGate as EvalReleaseGate,
 };
@@ -1367,6 +1373,7 @@ impl Server {
             "bioql_compile" => self.bioql_compile(&arguments),
             "epistemic_voi" => self.epistemic_voi(&arguments),
             "epistemic_context_audit" => self.epistemic_context_audit(&arguments),
+            "epistemic_selection_audit" => self.epistemic_selection_audit(&arguments),
             "routing_lab_run" => self.routing_lab_run(&arguments),
             "benchmark_trace_analyze" => self.benchmark_trace_analyze(&arguments),
             "benchmark_decision_audit" => self.benchmark_decision_audit(&arguments),
@@ -9371,6 +9378,402 @@ impl Server {
                 ],
             })),
         }
+    }
+
+    fn epistemic_selection_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/epistemic-selection-audit/0.1";
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required and must be a serialized epistemic DecisionProblem")?;
+        let raw_belief = arguments
+            .get("belief")
+            .cloned()
+            .ok_or("belief is required and must be a serialized epistemic Belief")?;
+        let raw_pool = arguments
+            .get("evidence_pool")
+            .cloned()
+            .ok_or("evidence_pool is required and must be a serialized epistemic EvidencePool")?;
+        let raw_constraint = arguments
+            .get("constraint")
+            .and_then(Value::as_object)
+            .ok_or("constraint is required and must be an object")?;
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "belief": raw_belief.clone(),
+            "evidence_pool": raw_pool.clone(),
+            "constraint": raw_constraint,
+            "protected": arguments.get("protected").cloned().unwrap_or_else(|| json!([])),
+        }))
+        .map_err(|error| format!("cannot measure epistemic selection envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("epistemic selection input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let parsed_problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        if parsed_problem.action_count() > 1_000 || parsed_problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let action_count = parsed_problem.action_count();
+        let model_count = parsed_problem.model_count();
+        let problem_ref = &parsed_problem;
+        let loss = (0..action_count)
+            .flat_map(|action| (0..model_count).map(move |model| problem_ref.loss(action, model)))
+            .collect::<Vec<_>>();
+        let problem = EpistemicDecisionProblem::new(
+            parsed_problem.actions().to_vec(),
+            parsed_problem.models().to_vec(),
+            loss,
+        )
+        .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+
+        let parsed_belief: EpistemicBelief = serde_json::from_value(raw_belief)
+            .map_err(|error| format!("invalid belief: {error}"))?;
+        if parsed_belief.len() > 1_000 {
+            return Err("belief is bounded at 1000 models".into());
+        }
+        let belief = EpistemicBelief::new(parsed_belief.masses().to_vec())
+            .map_err(|error| format!("belief invariant failed: {error}"))?;
+
+        let parsed_pool: EpistemicEvidencePool = serde_json::from_value(raw_pool)
+            .map_err(|error| format!("invalid evidence pool: {error}"))?;
+        if !(1..=64).contains(&parsed_pool.len()) {
+            return Err("evidence_pool must contain between 1 and 64 observed items".into());
+        }
+        let pool = EpistemicEvidencePool::new(parsed_pool.items().to_vec())
+            .map_err(|error| format!("evidence pool invariant failed: {error}"))?;
+        pool.check_against(&problem)
+            .map_err(|error| format!("evidence pool is incompatible with the decision problem: {error}"))?;
+
+        let parse_optional_cardinality = |key: &str| -> Result<Option<usize>, String> {
+            raw_constraint
+                .get(key)
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .map(|number| number as usize)
+                        .ok_or_else(|| format!("constraint {key} must be a non-negative integer"))
+                })
+                .transpose()
+        };
+        let cardinality = parse_optional_cardinality("cardinality")?;
+        if cardinality.is_some_and(|value| value > 64) {
+            return Err("constraint cardinality is bounded at 64".into());
+        }
+        let budget = raw_constraint
+            .get("budget")
+            .map(|value| {
+                value
+                    .as_f64()
+                    .ok_or("constraint budget must be a finite number".to_string())
+            })
+            .transpose()?;
+        let costs = match raw_constraint.get("costs") {
+            Some(value) => value
+                .as_array()
+                .ok_or("constraint costs must be an array".to_string())?
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    value.as_f64().ok_or_else(|| {
+                        format!("constraint costs[{index}] must be a finite number")
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            None => pool.items().iter().map(|item| item.cost).collect(),
+        };
+        if costs.len() != pool.len() {
+            return Err(format!(
+                "constraint costs must contain exactly {} entries",
+                pool.len()
+            ));
+        }
+        let constraint = EpistemicConstraint::bounded(cardinality, budget, costs)
+            .map_err(|error| format!("constraint invariant failed: {error}"))?;
+
+        let mut protected = BTreeSet::new();
+        let raw_protected = arguments
+            .get("protected")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let raw_protected = raw_protected
+            .as_array()
+            .ok_or("protected must be an array of evidence indexes")?;
+        for value in raw_protected {
+            let index = value
+                .as_u64()
+                .map(|number| number as usize)
+                .ok_or("protected indexes must be non-negative integers")?;
+            if index >= pool.len() {
+                return Err(format!(
+                    "protected evidence index {index} is outside the pool of {} items",
+                    pool.len()
+                ));
+            }
+            if !protected.insert(index) {
+                return Err(format!("protected evidence index {index} is duplicated"));
+            }
+        }
+
+        let check_submodularity = arguments
+            .get("check_submodularity")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let include_lazy = arguments
+            .get("include_lazy")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let compare_optimum = arguments
+            .get("compare_optimum")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let tolerance = arguments
+            .get("tolerance")
+            .map(|value| {
+                value
+                    .as_f64()
+                    .ok_or("tolerance must be a finite non-negative number".to_string())
+            })
+            .transpose()?
+            .unwrap_or(1e-9);
+        if !tolerance.is_finite() || tolerance < 0.0 {
+            return Err("tolerance must be a finite non-negative number".into());
+        }
+
+        let objective = match EpistemicRegretReduction::new(&problem, &belief, &pool) {
+            Ok(objective) => objective,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": SCHEMA,
+                    "stage": "objective",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "selection never proceeds when the full observed context contradicts every supplied model",
+                        "regret reduction remains decision-relative and does not become a causal or clinical claim",
+                    ],
+                }))
+            }
+        };
+
+        let submodularity_report = if check_submodularity && pool.len() <= 12 {
+            match epistemic_submodularity_check(&objective, tolerance) {
+                Ok(report) => Some(report),
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": SCHEMA,
+                        "stage": "submodularity",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "guarantees": [
+                            "the exhaustive check never degrades to sampling",
+                            "no approximation factor is attached when the objective cannot be tabulated safely",
+                        ],
+                    }))
+                }
+            }
+        } else {
+            None
+        };
+        let submodularity = if !check_submodularity {
+            json!({
+                "status": "not_requested",
+                "tolerance": tolerance,
+            })
+        } else if pool.len() > 12 {
+            json!({
+                "status": "not_run",
+                "reason": "exhaustive_cap",
+                "ground": pool.len(),
+                "cap": 12,
+                "tolerance": tolerance,
+            })
+        } else {
+            json!({
+                "status": "evaluated",
+                "report": submodularity_report.as_ref(),
+            })
+        };
+
+        let selection = match epistemic_greedy(
+            &objective,
+            &constraint,
+            &protected,
+            submodularity_report.as_ref(),
+        ) {
+            Ok(selection) => selection,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": SCHEMA,
+                    "stage": "greedy_selection",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "submodularity": submodularity,
+                    "guarantees": [
+                        "protected closure is validated before any marginal is evaluated",
+                        "non-positive marginal steps are not forced merely to fill a quota",
+                    ],
+                }))
+            }
+        };
+
+        let item_rows: Vec<Value> = pool
+            .items()
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                json!({
+                    "index": index,
+                    "id": item.id,
+                    "cost": item.cost,
+                })
+            })
+            .collect();
+        let project_index = |index: usize| {
+            item_rows
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| json!({"index": index, "refused": "unknown evidence index"}))
+        };
+        let project_selection = |value: &bioprism_epistemic::Selection| {
+            json!({
+                "protected": value.protected.iter().map(|index| project_index(*index)).collect::<Vec<_>>(),
+                "chosen": value.chosen.iter().map(|index| project_index(*index)).collect::<Vec<_>>(),
+                "value": value.value,
+                "cost": value.cost,
+                "steps": value.steps.iter().map(|step| json!({
+                    "evidence": project_index(step.element),
+                    "marginal": step.marginal,
+                    "cost": step.cost,
+                    "reevaluations": step.reevaluations,
+                })).collect::<Vec<_>>(),
+                "guarantee": value.guarantee,
+                "evaluations": value.evaluations,
+            })
+        };
+
+        let lazy_selection = if include_lazy {
+            match epistemic_lazy_greedy(
+                &objective,
+                &constraint,
+                &protected,
+                submodularity_report.as_ref(),
+            ) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": SCHEMA,
+                        "stage": "lazy_selection",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "submodularity": submodularity,
+                        "greedy": project_selection(&selection),
+                    }))
+                }
+            }
+        } else {
+            None
+        };
+
+        let exact_optimum = if !compare_optimum {
+            json!({
+                "status": "not_requested",
+                "cap": 20,
+            })
+        } else if pool.len() > 20 {
+            json!({
+                "status": "not_run",
+                "reason": "exhaustive_cap",
+                "ground": pool.len(),
+                "cap": 20,
+            })
+        } else {
+            let (chosen, value) = match epistemic_brute_force_optimum(
+                &objective,
+                &constraint,
+                &protected,
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": SCHEMA,
+                        "stage": "exact_optimum",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "submodularity": submodularity,
+                        "greedy": project_selection(&selection),
+                        "lazy": lazy_selection.as_ref().map(project_selection),
+                    }))
+                }
+            };
+            let selected_value = selection.value;
+            let (ratio, ratio_status) = if value.abs() <= 1e-12 {
+                (Value::Null, "undefined_zero_optimum")
+            } else {
+                (json!(selected_value / value), "computed")
+            };
+            json!({
+                "status": "evaluated",
+                "chosen": chosen.iter().map(|index| project_index(*index)).collect::<Vec<_>>(),
+                "value": value,
+                "cost": constraint.cost_of(&chosen),
+                "ratio": ratio,
+                "ratio_status": ratio_status,
+                "greedy_gap": value - selected_value,
+            })
+        };
+
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "objective": "regret_reduction",
+            "problem": {
+                "actions": problem.actions(),
+                "models": problem.models(),
+                "action_count": problem.action_count(),
+                "model_count": problem.model_count(),
+            },
+            "belief": { "mass": belief.masses() },
+            "evidence_pool": {
+                "count": pool.len(),
+                "items": item_rows,
+                "total_cost": pool.rate(&pool.everything()).map_err(|error| error.to_string())?,
+            },
+            "constraint": {
+                "cardinality": constraint.cardinality,
+                "budget": constraint.budget,
+                "costs": constraint.costs,
+            },
+            "protected": protected.iter().map(|index| project_index(*index)).collect::<Vec<_>>(),
+            "baseline": {
+                "full_context_regret": objective.baseline(),
+                "empty_context_value": objective.value(&BTreeSet::new()).map_err(|error| error.to_string())?,
+            },
+            "submodularity": submodularity,
+            "greedy": project_selection(&selection),
+            "lazy": lazy_selection.as_ref().map(project_selection),
+            "comparisons": {
+                "greedy_lazy_agree": lazy_selection.as_ref().map(|value| value.chosen == selection.chosen),
+                "exact_optimum": exact_optimum,
+            },
+            "guarantees": [
+                "the 1 - 1/e factor is serialized only when exhaustive monotonicity and submodularity checks pass under a cardinality-only constraint",
+                "protected evidence is charged and validated before relevance selection",
+                "exact comparison is exhaustive only within the stated 20-item cap; above it the route reports not_run rather than sampling",
+                "regret reduction is a decision-relative observed-context objective, not causal identification, adaptive acquisition, clinical advice, or execution",
+            ],
+            "limitations": [
+                "selection cost is a caller-supplied scalarization; token, compute, latency, privacy, specimen, and expert burden vectors are not inferred",
+                "lazy-greedy agreement is diagnostic and does not establish submodularity without the exhaustive report",
+                "adaptive or sequential acquisition policies remain outside this non-adaptive observed-context planner",
+            ],
+        }))
     }
 
     fn epistemic_context_audit(&self, arguments: &Value) -> Result<Value, String> {
@@ -21441,7 +21844,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "epistemic_voi", "epistemic_context_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -23262,6 +23665,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum requested subset rows returned; omission count remains explicit. Defaults to 100." }
                 },
                 "required": ["problem", "belief", "evidence_pool", "criterion", "tolerance", "compatibility_floor"]
+            }
+        }),
+        json!({
+            "name": "epistemic_selection_audit",
+            "description": "Plan decision-relative selection over an explicit observed EvidencePool. It validates protected closure and scalarized constraints, runs exhaustive submodularity checks when the ground set fits, compares plain and lazy greedy, and optionally computes the exact small-instance optimum; approximation factors and exactness are never inferred outside their caps.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem with explicit actions, models, and row-major loss matrix." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief over the problem models." },
+                    "evidence_pool": { "type": "object", "description": "Serialized ordered observed EvidencePool; each item is {id, cost, likelihood}." },
+                    "constraint": { "type": "object", "description": "Selection bounds {cardinality?, budget?, costs?}. At least one bound is required; costs default to evidence item costs." },
+                    "protected": { "type": "array", "maxItems": 64, "description": "Optional evidence indexes forced into the context before relevance selection." },
+                    "check_submodularity": { "type": "boolean", "default": true, "description": "Run the exhaustive monotonicity and diminishing-returns audit when at most 12 evidence items are supplied." },
+                    "include_lazy": { "type": "boolean", "default": true, "description": "Include a lazy-greedy selection and evaluation-count comparison." },
+                    "compare_optimum": { "type": "boolean", "default": true, "description": "Enumerate the exact constrained optimum when at most 20 evidence items are supplied." },
+                    "tolerance": { "type": "number", "minimum": 0, "description": "Absolute tolerance for the exhaustive submodularity audit; defaults to 1e-9." }
+                },
+                "required": ["problem", "belief", "evidence_pool", "constraint"]
             }
         }),
         json!({

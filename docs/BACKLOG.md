@@ -101,8 +101,10 @@ remain explicit rather than being represented by a completion percentage.
 BioQL compilation is callable too: it type-checks explicit schemas for units, frames, builds, clocks,
 ontology expansion, labels, provenance, and cost bounds, but does not execute queries, load stores,
 infer schemas, convert units, expand ontologies, or enforce permissions.
-The epistemic value-of-information, benchmark trace compiler, and pack portfolio contracts are now
-callable as well. They preserve explicit losses and beliefs, review-gated causal localization, and
+The epistemic value-of-information, observed-context compression, and bounded evidence-selection
+contracts are now callable as well, alongside the benchmark trace compiler and pack portfolio
+contracts. They preserve explicit losses and beliefs, exhaustive rate-distortion/submodularity
+checks, protected closure, exact small-instance comparison, review-gated causal localization, and
 declaration-versus-measurement boundaries; they do not add adaptive acquisition, trajectory replay,
 benchmark execution, pack generation, SDKs, external APIs, or a public evaluation service.
 The foundation contract surface is callable too: it keeps admissibility, refinement, applicability,

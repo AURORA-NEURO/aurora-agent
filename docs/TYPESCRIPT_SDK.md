@@ -193,6 +193,12 @@ identification, minimal sufficient contexts, exhaustive rate–distortion points
 subset evaluations remain distinct. Its minimax non-identification abstention and contradictory
 subset refusals are typed instead of being collapsed into an efficiency score. See
 [`docs/EPISTEMIC_CONTEXT_AUDIT.md`](../docs/EPISTEMIC_CONTEXT_AUDIT.md).
+`epistemicSelectionAudit` exposes the complementary bounded observed-context planner. Its typed
+constraints and protected closure feed plain/lazy greedy selection, while the result keeps
+exhaustive submodularity status, guarantee applicability, and exact small-instance comparison
+separate. Above the structural or exactness caps the client preserves `not_run` posture rather
+than implying a factor or optimum. See
+[`docs/EPISTEMIC_SELECTION_AUDIT.md`](../docs/EPISTEMIC_SELECTION_AUDIT.md).
 `benchmarkTraceAnalyze` returns typed `BenchmarkTraceAnalysisResult` evidence for causal
 candidate scores, textual divergence, decision-boundary ranks, reversibility basis, goal-anchored
 episodes, repeated-action progress, and reconciled summary counts. Causal verdicts remain distinct

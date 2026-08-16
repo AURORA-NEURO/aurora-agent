@@ -50,24 +50,34 @@ pub struct Constraint {
 }
 
 impl Constraint {
-    /// A pure cardinality constraint. Costs are unit, so `rate` reads as a count.
-    pub fn cardinality(k: usize, ground: usize) -> Result<Self, EpistemicError> {
+    /// Builds a selection constraint with any combination of the supported bounds.
+    ///
+    /// The public convenience constructors cover the common cardinality-only and knapsack-only
+    /// cases.  The composed form is useful at transport boundaries where a caller may want both a
+    /// maximum number of items and a scalarized cost budget; it still runs through the same
+    /// validation, so a missing bound, negative budget, non-finite cost, or zero-cost knapsack
+    /// element cannot enter the selector through a deserialization shortcut.
+    pub fn bounded(
+        cardinality: Option<usize>,
+        budget: Option<f64>,
+        costs: Vec<f64>,
+    ) -> Result<Self, EpistemicError> {
         Constraint {
-            cardinality: Some(k),
-            budget: None,
-            costs: vec![1.0; ground],
+            cardinality,
+            budget,
+            costs,
         }
         .validated()
     }
 
+    /// A pure cardinality constraint. Costs are unit, so `rate` reads as a count.
+    pub fn cardinality(k: usize, ground: usize) -> Result<Self, EpistemicError> {
+        Constraint::bounded(Some(k), None, vec![1.0; ground])
+    }
+
     /// A knapsack constraint with explicit costs.
     pub fn knapsack(budget: f64, costs: Vec<f64>) -> Result<Self, EpistemicError> {
-        Constraint {
-            cardinality: None,
-            budget: Some(budget),
-            costs,
-        }
-        .validated()
+        Constraint::bounded(None, Some(budget), costs)
     }
 
     fn validated(self) -> Result<Self, EpistemicError> {

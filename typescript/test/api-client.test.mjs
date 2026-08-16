@@ -2586,3 +2586,44 @@ test("client exposes epistemic context frontier and subset refusal accounting", 
   assert.equal(result.mcp.result.structuredContent.frontier.evaluated, 4);
   assert.equal(result.mcp.result.structuredContent.subset_rows_omitted, 1);
 });
+
+test("client exposes epistemic selection guarantee and exactness posture", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/epistemic_selection_audit");
+      return jsonResponse({ ok: true, tool: "epistemic_selection_audit", request_id: "selection-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/epistemic-selection-audit/0.1",
+        objective: "regret_reduction",
+        problem: { action_count: 2, model_count: 2 },
+        evidence_pool: { count: 3, total_cost: 4 },
+        constraint: { cardinality: 2, budget: null },
+        baseline: { full_context_regret: 9.5, empty_context_value: 0 },
+        submodularity: { status: "evaluated" },
+        greedy: { chosen: [{ index: 0, id: "scan" }], guarantee: { applicability: "applies" } },
+        lazy: { chosen: [{ index: 0, id: "scan" }] },
+        comparisons: { greedy_lazy_agree: true, exact_optimum: { status: "evaluated", ratio: 1 } },
+        guarantees: ["factor gated"],
+        limitations: ["scalarized cost"],
+      } } } });
+    },
+  });
+  const result = await client.epistemicSelectionAudit({
+    problem: { actions: ["treat", "defer"], models: ["responsive", "resistant"], loss: [0, 10, 10, 0] },
+    belief: { mass: [0.4, 0.6] },
+    evidence_pool: { items: [
+      { id: "scan", cost: 2, likelihood: [0.9, 0.1] },
+      { id: "marker", cost: 1, likelihood: [0.8, 0.2] },
+      { id: "uninformative", cost: 1, likelihood: [1, 1] },
+    ] },
+    constraint: { cardinality: 2 },
+    protected: [],
+    check_submodularity: true,
+    include_lazy: true,
+    compare_optimum: true,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/epistemic-selection-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.greedy.guarantee.applicability, "applies");
+  assert.equal(result.mcp.result.structuredContent.comparisons.exact_optimum.status, "evaluated");
+});

@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 146);
+    assert_eq!(tools.len(), 147);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(146));
-    assert_eq!(result["advertised_tool_count"], json!(146));
+    assert_eq!(result["unique_catalog_tools"], json!(147));
+    assert_eq!(result["advertised_tool_count"], json!(147));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(146));
-    assert_eq!(result["schema_quality"]["valid"], json!(146));
+    assert_eq!(result["schema_quality"]["checked"], json!(147));
+    assert_eq!(result["schema_quality"]["valid"], json!(147));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -8163,6 +8163,45 @@ fn epistemic_context_audit_keeps_frontier_sufficiency_and_subset_refusals_distin
     assert_eq!(result["subset_refusal_count"], json!(1));
     assert_eq!(result["subset_rows"][2]["result"], json!("refused"));
     assert!(result["identification"]["status"].is_string());
+}
+
+#[test]
+fn epistemic_selection_audit_gates_guarantees_and_exact_comparisons() {
+    let result = call(
+        &mut server(),
+        "epistemic_selection_audit",
+        json!({
+            "problem": {
+                "actions": ["treat", "defer"],
+                "models": ["responsive", "resistant"],
+                "loss": [0.0, 10.0, 10.0, 0.0]
+            },
+            "belief": { "mass": [0.4, 0.6] },
+            "evidence_pool": {
+                "items": [
+                    { "id": "scan", "cost": 2.0, "likelihood": [0.9, 0.1] },
+                    { "id": "marker", "cost": 1.0, "likelihood": [0.8, 0.2] },
+                    { "id": "uninformative", "cost": 1.0, "likelihood": [1.0, 1.0] }
+                ]
+            },
+            "constraint": { "cardinality": 2 },
+            "protected": [],
+            "check_submodularity": true,
+            "include_lazy": true,
+            "compare_optimum": true
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/epistemic-selection-audit/0.1"));
+    assert_eq!(result["objective"], json!("regret_reduction"));
+    assert_eq!(result["evidence_pool"]["count"], json!(3));
+    assert_eq!(result["submodularity"]["status"], json!("evaluated"));
+    assert_eq!(result["comparisons"]["exact_optimum"]["status"], json!("evaluated"));
+    assert!(result["greedy"]["chosen"].is_array());
+    assert!(result["lazy"]["chosen"].is_array());
+    assert!(result["comparisons"]["greedy_lazy_agree"].is_boolean());
+    assert!(result["greedy"]["guarantee"]["applicability"].is_string());
 }
 
 #[test]
