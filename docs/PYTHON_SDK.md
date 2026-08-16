@@ -943,6 +943,12 @@ structured coverage/margin reason, considered architecture scores, neighbourhood
 identity, and holdout check are all retained. The parser enforces that an abstention agrees with
 its reason and treats `caller_must_supply_unseen_identity` as a caller posture rather than proof
 that holdout isolation was actually performed.
+`RoutingLabRunArgs` / `routing_lab_run_report(...)` expose the offline multi-task routing lab. The
+typed report preserves the approved panel, fixed default, task/regime holdout posture, regret
+account, calibration, oracle agreement, abstention, task outcome counts, bounded task rows, and
+explicit omissions. It rejects non-finite rates, unknown verdicts, unreconciled outcome counts,
+and row projections that do not add back to the task count; a fail-closed lab refusal remains a
+refusal rather than a zero-gain result. See [`docs/ROUTING_LAB_RUN.md`](ROUTING_LAB_RUN.md).
 
 `ProviderCapabilityGateArgs` / `provider_capability_gate_report(...)` type the runtime-provider
 evidence gate. Required checks are restricted to pass/fail capabilities; the report distinguishes

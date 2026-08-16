@@ -448,6 +448,10 @@ numeric infinity or an implicit robustness claim.
 `routingDecide` types the approved architecture, confidence score, abstention reason, considered
 panel, neighbourhood evidence, and holdout posture; safe-default abstention remains distinct from
 a routed win.
+`routingLabRun` exposes the bounded offline routing experiment with typed task inputs and result
+envelopes. Its report keeps task/regime holdout posture, fixed-default and oracle comparators,
+regret, calibration, abstention, task outcome counts, and explicit row omissions visible; it is
+not a production routing or deployment approval. See [`docs/ROUTING_LAB_RUN.md`](../docs/ROUTING_LAB_RUN.md).
 `providerCapabilityGate` preserves untested/failed/passed provider states, conjunctive gate
 outcomes, measurement counts, reproducible run evidence, and indeterminate cross-provider drift;
 performance observations remain measurements rather than invented pass/fail claims.

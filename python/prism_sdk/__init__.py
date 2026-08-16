@@ -350,6 +350,17 @@ from .influence import (
     influence_analysis_report,
 )
 from .routing import RoutingDecisionReport, routing_decision_report
+from .routing_lab import (
+    MAX_ROUTING_LAB_INPUT_BYTES,
+    MAX_ROUTING_LAB_ROWS,
+    MAX_ROUTING_LAB_TASKS,
+    ROUTING_LAB_HOLDOUTS,
+    ROUTING_LAB_SCHEMA,
+    ROUTING_LAB_VERDICTS,
+    RoutingLabRunArgs,
+    RoutingLabRunReport,
+    routing_lab_run_report,
+)
 from .provider import (
     CHECK_NAMES,
     PASS_FAIL_CHECKS,
@@ -1465,6 +1476,15 @@ __all__ = [
     "DicomFinding",
     "LabPlanRequest",
     "RoutingDecisionRequest",
+    "ROUTING_LAB_SCHEMA",
+    "ROUTING_LAB_HOLDOUTS",
+    "ROUTING_LAB_VERDICTS",
+    "MAX_ROUTING_LAB_TASKS",
+    "MAX_ROUTING_LAB_ROWS",
+    "MAX_ROUTING_LAB_INPUT_BYTES",
+    "RoutingLabRunArgs",
+    "RoutingLabRunReport",
+    "routing_lab_run_report",
     "WorldClaimCheckRequest",
     "MAX_DOMAIN_REQUEST_BYTES",
     "MAX_LAB_ACTIONS",

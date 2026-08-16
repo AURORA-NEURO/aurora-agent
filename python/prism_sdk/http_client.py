@@ -193,6 +193,7 @@ from .stress import (
 )
 from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_analysis_report
 from .routing import RoutingDecisionReport, routing_decision_report
+from .routing_lab import RoutingLabRunArgs, RoutingLabRunReport, routing_lab_run_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
@@ -2247,6 +2248,23 @@ class ApiClient:
         task_id: str | None = None,
     ) -> RoutingDecisionReport:
         return routing_decision_report(self.routing_decide(fingerprint, evidence, policy, task_id=task_id))
+
+    def routing_lab_run(
+        self,
+        request: RoutingLabRunArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the offline routing lab through HTTP."""
+
+        normalized = request if isinstance(request, RoutingLabRunArgs) else RoutingLabRunArgs.from_wire(request)
+        return self.call_tool("routing_lab_run", normalized.to_mcp_arguments())
+
+    def routing_lab_run_report(
+        self,
+        request: RoutingLabRunArgs | Mapping[str, Any],
+    ) -> RoutingLabRunReport:
+        """Return typed holdout, regret, comparator, and calibration evidence."""
+
+        return routing_lab_run_report(self.routing_lab_run(request))
 
     def provider_capability_gate(
         self,
@@ -4509,6 +4527,23 @@ class AsyncApiClient:
         task_id: str | None = None,
     ) -> RoutingDecisionReport:
         return routing_decision_report(await self.routing_decide(fingerprint, evidence, policy, task_id=task_id))
+
+    async def routing_lab_run(
+        self,
+        request: RoutingLabRunArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the offline routing lab through async HTTP."""
+
+        normalized = request if isinstance(request, RoutingLabRunArgs) else RoutingLabRunArgs.from_wire(request)
+        return await self.call_tool("routing_lab_run", normalized.to_mcp_arguments())
+
+    async def routing_lab_run_report(
+        self,
+        request: RoutingLabRunArgs | Mapping[str, Any],
+    ) -> RoutingLabRunReport:
+        """Return typed async routing-lab evidence."""
+
+        return routing_lab_run_report(await self.routing_lab_run(request))
 
     async def provider_capability_gate(
         self,

@@ -6168,6 +6168,42 @@ export interface RoutingToolResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface RoutingLabRunArgs extends JsonObject {
+  tasks: JsonObject[];
+  settings: JsonObject;
+  include_rows?: boolean;
+  max_rows?: number;
+}
+
+export interface RoutingLabRunResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/routing-lab-run/0.1";
+  tasks?: number;
+  holdout?: "task" | "regime";
+  holdout_label?: string;
+  approved_architectures?: string[];
+  fixed_default?: RoutingArchitectureResult;
+  include_rows?: boolean;
+  report?: {
+    account: JsonObject;
+    calibration: JsonObject;
+    verdict: "router_loses_to_fixed_default" | "no_achievable_gain" | "router_matches_fixed_default" | "router_beats_fixed_default";
+    abstention_rate: number;
+    oracle_agreement_rate?: number | null;
+    tasks_won: number;
+    tasks_lost: number;
+    tasks_tied: number;
+    caveats: string[];
+    task_rows: JsonObject[];
+    task_rows_omitted: number;
+  };
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface ProviderCapabilityGateArgs extends JsonObject {
   card: JsonObject;
   required: string[];

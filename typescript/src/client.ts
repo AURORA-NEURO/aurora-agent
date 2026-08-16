@@ -100,6 +100,8 @@ import type {
   InfluenceAnalyzeResult,
   RoutingDecideArgs,
   RoutingToolResult,
+  RoutingLabRunArgs,
+  RoutingLabRunResult,
   ProviderCapabilityGateArgs,
   ProviderCapabilityGateResult,
   SdkRegistryCheckArgs,
@@ -752,6 +754,10 @@ export class ApiClient {
 
   async routingDecide(args: RoutingDecideArgs, options?: ClientRequestOptions): Promise<RestToolResponse<RoutingToolResult>> {
     return this.callTool<RoutingToolResult>("routing_decide", args, options);
+  }
+
+  async routingLabRun(args: RoutingLabRunArgs, options?: ClientRequestOptions): Promise<RestToolResponse<RoutingLabRunResult>> {
+    return this.callTool<RoutingLabRunResult>("routing_lab_run", args, options);
   }
 
   async providerCapabilityGate(args: ProviderCapabilityGateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ProviderCapabilityGateResult>> {

@@ -2251,6 +2251,44 @@ test("client exposes typed routing abstention and holdout posture", async () => 
   assert.equal(result.mcp.result.structuredContent.holdout_check, "caller_must_supply_unseen_identity");
 });
 
+test("client exposes offline routing lab regret and holdout evidence", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/routing_lab_run");
+      return jsonResponse({ ok: true, tool: "routing_lab_run", request_id: "routing-lab-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/routing-lab-run/0.1",
+        tasks: 2,
+        holdout: "task",
+        holdout_label: "leave-one-task-out",
+        approved_architectures: ["full-context", "fiber"],
+        fixed_default: { kind: "full_context" },
+        include_rows: true,
+        report: {
+          account: { router: {}, oracle: {} },
+          calibration: { bins: [] },
+          verdict: "router_loses_to_fixed_default",
+          abstention_rate: 0.5,
+          oracle_agreement_rate: 0,
+          tasks_won: 0,
+          tasks_lost: 1,
+          tasks_tied: 1,
+          caveats: ["leave-one-task-out"],
+          task_rows: [{ task_id: "reference-task" }],
+          task_rows_omitted: 1,
+        },
+        guarantees: ["route_unseen holdout is enforced"],
+        limitations: ["offline lab"],
+      } } } });
+    },
+  });
+  const result = await client.routingLabRun({ tasks: [], settings: {}, include_rows: true, max_rows: 1 });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/routing-lab-run/0.1");
+  assert.equal(result.mcp.result.structuredContent.report.verdict, "router_loses_to_fixed_default");
+  assert.equal(result.mcp.result.structuredContent.report.task_rows_omitted, 1);
+});
+
 test("client exposes provider gate states and differential indeterminacy", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

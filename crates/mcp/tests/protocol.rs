@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 139);
+    assert_eq!(tools.len(), 140);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(139));
-    assert_eq!(result["advertised_tool_count"], json!(139));
+    assert_eq!(result["unique_catalog_tools"], json!(140));
+    assert_eq!(result["advertised_tool_count"], json!(140));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(139));
-    assert_eq!(result["schema_quality"]["valid"], json!(139));
+    assert_eq!(result["schema_quality"]["checked"], json!(140));
+    assert_eq!(result["schema_quality"]["valid"], json!(140));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -7117,6 +7117,50 @@ fn routing_decide_refuses_evidence_leakage_when_task_identity_is_supplied() {
         .as_str()
         .unwrap()
         .contains("contains that task's own outcome"));
+}
+
+#[test]
+fn routing_lab_run_keeps_holdout_comparators_and_bounded_task_rows_visible() {
+    let reference = bioprism_worldgen::generate(&bioprism_worldgen::WorldSpec::reference_like(2));
+    let discriminating =
+        bioprism_worldgen::generate(&bioprism_worldgen::WorldSpec::discriminating(2));
+    let approved = ApprovedSet::new([
+        RoutingArchitecture::FullContext,
+        RoutingArchitecture::FiberCompiled,
+    ])
+    .unwrap();
+    let settings = bioprism_routing::LabSettings::new(
+        RoutingPolicy::defaulting_to(approved, RoutingArchitecture::FullContext).unwrap(),
+        RoutingArchitecture::FullContext,
+    )
+    .unwrap();
+    let result = call(
+        &mut server(),
+        "routing_lab_run",
+        json!({
+            "tasks": [
+                { "task_id": "reference-task", "world": reference.world, "query": reference.query },
+                { "task_id": "discriminating-task", "world": discriminating.world, "query": discriminating.query }
+            ],
+            "settings": serde_json::to_value(settings).unwrap(),
+            "include_rows": true,
+            "max_rows": 1
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/routing-lab-run/0.1"));
+    assert_eq!(result["tasks"], json!(2));
+    assert_eq!(result["holdout_label"], json!("leave-one-task-out"));
+    assert_eq!(result["report"]["task_rows"].as_array().unwrap().len(), 1);
+    assert_eq!(result["report"]["task_rows_omitted"], json!(1));
+    assert!(result["report"]["account"]["router"].is_object());
+    assert!(result["report"]["verdict"].is_string());
+    assert!(result["guarantees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("route_unseen")));
 }
 
 #[test]
