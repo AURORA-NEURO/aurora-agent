@@ -292,7 +292,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/observed_world_declare", "/v1/tools/lineage_audit", "/v1/tools/preanalytic_apply", "/v1/tools/contradiction_review", "/v1/tools/onco_boundary_check", "/v1/tools/onco_response_assess", "/v1/tools/onco_worldline_view", "/v1/tools/onco_classification_check", "/v1/tools/oncoworlds_identity_join", "/v1/tools/onco_outcome_analyze", "/v1/tools/oracle_combine", "/v1/tools/oracle_reference_panel", "/v1/tools/oracle_missingness", "/v1/tools/bioeval_reference_audit", "/v1/tools/evaluation_worldline_audit", "/v1/tools/evaluation_reproduction_check", "/v1/tools/evaluation_trajectory_check", "/v1/tools/runtime_effect_check", "/v1/tools/runtime_tape_verify", "/v1/tools/runtime_execution_simulate", "/v1/tools/bioethics_action_review", "/v1/tools/bioethics_human_subject_screen", "/v1/tools/bioethics_dual_use_review", "/v1/tools/bioethics_validation_check", "/v1/tools/bioethics_representation_audit", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run", "/v1/tools/release_audit", "/v1/tools/operations_catalog", "/v1/tools/ops_acceptance", "/v1/tools/safety_release_gate", "/v1/tools/medical_boundary_check", "/v1/tools/safety_posture", "/v1/tools/measurement_compare", "/v1/tools/hub_search", "/v1/tools/hub_resolve", "/v1/tools/hub_lock"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/observed_world_declare", "/v1/tools/lineage_audit", "/v1/tools/preanalytic_apply", "/v1/tools/contradiction_review", "/v1/tools/onco_boundary_check", "/v1/tools/onco_response_assess", "/v1/tools/onco_worldline_view", "/v1/tools/onco_classification_check", "/v1/tools/oncoworlds_identity_join", "/v1/tools/oncoworlds_model_transport", "/v1/tools/oncoworlds_methylation_classify", "/v1/tools/oncoworlds_methylation_compare", "/v1/tools/oncoworlds_radiogenomic_check", "/v1/tools/oncoworlds_clonal_history_check", "/v1/tools/onco_outcome_analyze", "/v1/tools/oracle_combine", "/v1/tools/oracle_reference_panel", "/v1/tools/oracle_missingness", "/v1/tools/bioeval_reference_audit", "/v1/tools/evaluation_worldline_audit", "/v1/tools/evaluation_reproduction_check", "/v1/tools/evaluation_trajectory_check", "/v1/tools/runtime_effect_check", "/v1/tools/runtime_tape_verify", "/v1/tools/runtime_execution_simulate", "/v1/tools/bioethics_action_review", "/v1/tools/bioethics_human_subject_screen", "/v1/tools/bioethics_dual_use_review", "/v1/tools/bioethics_validation_check", "/v1/tools/bioethics_representation_audit", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run", "/v1/tools/release_audit", "/v1/tools/operations_catalog", "/v1/tools/ops_acceptance", "/v1/tools/safety_release_gate", "/v1/tools/medical_boundary_check", "/v1/tools/safety_posture", "/v1/tools/measurement_compare", "/v1/tools/hub_search", "/v1/tools/hub_resolve", "/v1/tools/hub_lock"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -599,6 +599,26 @@ class HttpApiClientTests(unittest.TestCase):
         )
         self.assertEqual(
             client.bioethics_representation_audit({"subject": "study", "observations": []})["mcp"]["result"]["observations"],
+            [],
+        )
+        self.assertEqual(
+            client.oncoworlds_model_transport({"result": {}, "establishment": {}, "claimed_n": 1, "transport": {}})["mcp"]["result"]["claimed_n"],
+            1,
+        )
+        self.assertEqual(
+            client.oncoworlds_methylation_classify({"classifier": {}, "scores": {}, "context": {}})["mcp"]["result"]["scores"],
+            {},
+        )
+        self.assertEqual(
+            client.oncoworlds_methylation_compare({"left": {}, "right": {}})["mcp"]["result"]["right"],
+            {},
+        )
+        self.assertEqual(
+            client.oncoworlds_radiogenomic_check({"claim": {}, "design": {}, "observation": {}, "transport": {}})["mcp"]["result"]["claim"],
+            {},
+        )
+        self.assertEqual(
+            client.oncoworlds_clonal_history_check({"population": {}, "candidates": []})["mcp"]["result"]["candidates"],
             [],
         )
         self.assertEqual(

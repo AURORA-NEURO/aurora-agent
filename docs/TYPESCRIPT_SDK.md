@@ -232,6 +232,15 @@ without treating it as a transport failure; and `oncoOutcomeAnalyze` keeps estim
 censoring, delayed entry, and informative-bias fields distinct. Nested domain records remain
 `JsonObject` values so the Rust oncology crate remains the serialization authority, while the
 top-level invariants and contradictions are checked by the SDK.
+`oncoworldsModelTransport` preserves model-system fidelity, establishment, declared sample size,
+transport assumptions, and typed fail-closed patient-transport refusals. The methylation pair
+(`oncoworldsMethylationClassify` and `oncoworldsMethylationCompare`) keeps QC abstention,
+threshold/calibration/tumour-content caveats, and classifier-version disagreement explicit.
+`oncoworldsRadiogenomicCheck` retains participant-safe split, training-only fitting, target scope,
+mechanism strata, and transport assumptions; `oncoworldsClonalHistoryCheck` returns compatible and
+rejected histories with typed reasons and preserves ambiguity when more than one history survives.
+These methods are projections only: they do not perform clinical classification, patient transport,
+or clonal-history selection.
 `oracleCombine` retains tiered decisions, underdetermination, suppressed overrides, inadmissible
 and withheld ledgers, and nullable deciding/confidence evidence. `oracleReferencePanel` and
 `oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and

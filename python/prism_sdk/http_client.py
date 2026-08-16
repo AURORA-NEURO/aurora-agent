@@ -144,6 +144,23 @@ from .oncology import (
     onco_response_report,
     onco_worldline_report,
 )
+from .oncoworlds import (
+    OncoWorldsClonalHistoryCheckArgs,
+    OncoWorldsClonalHistoryCheckReport,
+    OncoWorldsMethylationClassifyArgs,
+    OncoWorldsMethylationClassifyReport,
+    OncoWorldsMethylationCompareArgs,
+    OncoWorldsMethylationCompareReport,
+    OncoWorldsModelTransportArgs,
+    OncoWorldsModelTransportReport,
+    OncoWorldsRadiogenomicCheckArgs,
+    OncoWorldsRadiogenomicCheckReport,
+    oncoworlds_clonal_history_check_report,
+    oncoworlds_methylation_classify_report,
+    oncoworlds_methylation_compare_report,
+    oncoworlds_model_transport_report,
+    oncoworlds_radiogenomic_check_report,
+)
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -1457,6 +1474,71 @@ class ApiClient:
         request: OncoOutcomeAnalyzeArgs | Mapping[str, Any],
     ) -> OncoOutcomeReport:
         return onco_outcome_report(self.onco_outcome_analyze(request))
+
+    def oncoworlds_model_transport(
+        self,
+        request: OncoWorldsModelTransportArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsModelTransportArgs) else OncoWorldsModelTransportArgs.from_wire(request)
+        return self.call_tool("oncoworlds_model_transport", normalized.to_mcp_arguments())
+
+    def oncoworlds_model_transport_report(
+        self,
+        request: OncoWorldsModelTransportArgs | Mapping[str, Any],
+    ) -> OncoWorldsModelTransportReport:
+        return oncoworlds_model_transport_report(self.oncoworlds_model_transport(request))
+
+    def oncoworlds_methylation_classify(
+        self,
+        request: OncoWorldsMethylationClassifyArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsMethylationClassifyArgs) else OncoWorldsMethylationClassifyArgs.from_wire(request)
+        return self.call_tool("oncoworlds_methylation_classify", normalized.to_mcp_arguments())
+
+    def oncoworlds_methylation_classify_report(
+        self,
+        request: OncoWorldsMethylationClassifyArgs | Mapping[str, Any],
+    ) -> OncoWorldsMethylationClassifyReport:
+        return oncoworlds_methylation_classify_report(self.oncoworlds_methylation_classify(request))
+
+    def oncoworlds_methylation_compare(
+        self,
+        request: OncoWorldsMethylationCompareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsMethylationCompareArgs) else OncoWorldsMethylationCompareArgs.from_wire(request)
+        return self.call_tool("oncoworlds_methylation_compare", normalized.to_mcp_arguments())
+
+    def oncoworlds_methylation_compare_report(
+        self,
+        request: OncoWorldsMethylationCompareArgs | Mapping[str, Any],
+    ) -> OncoWorldsMethylationCompareReport:
+        return oncoworlds_methylation_compare_report(self.oncoworlds_methylation_compare(request))
+
+    def oncoworlds_radiogenomic_check(
+        self,
+        request: OncoWorldsRadiogenomicCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsRadiogenomicCheckArgs) else OncoWorldsRadiogenomicCheckArgs.from_wire(request)
+        return self.call_tool("oncoworlds_radiogenomic_check", normalized.to_mcp_arguments())
+
+    def oncoworlds_radiogenomic_check_report(
+        self,
+        request: OncoWorldsRadiogenomicCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsRadiogenomicCheckReport:
+        return oncoworlds_radiogenomic_check_report(self.oncoworlds_radiogenomic_check(request))
+
+    def oncoworlds_clonal_history_check(
+        self,
+        request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsClonalHistoryCheckArgs) else OncoWorldsClonalHistoryCheckArgs.from_wire(request)
+        return self.call_tool("oncoworlds_clonal_history_check", normalized.to_mcp_arguments())
+
+    def oncoworlds_clonal_history_check_report(
+        self,
+        request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsClonalHistoryCheckReport:
+        return oncoworlds_clonal_history_check_report(self.oncoworlds_clonal_history_check(request))
 
     def lab_plan(
         self,
@@ -2896,6 +2978,71 @@ class AsyncApiClient:
         request: OncoOutcomeAnalyzeArgs | Mapping[str, Any],
     ) -> OncoOutcomeReport:
         return onco_outcome_report(await self.onco_outcome_analyze(request))
+
+    async def oncoworlds_model_transport(
+        self,
+        request: OncoWorldsModelTransportArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsModelTransportArgs) else OncoWorldsModelTransportArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_model_transport", normalized.to_mcp_arguments())
+
+    async def oncoworlds_model_transport_report(
+        self,
+        request: OncoWorldsModelTransportArgs | Mapping[str, Any],
+    ) -> OncoWorldsModelTransportReport:
+        return oncoworlds_model_transport_report(await self.oncoworlds_model_transport(request))
+
+    async def oncoworlds_methylation_classify(
+        self,
+        request: OncoWorldsMethylationClassifyArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsMethylationClassifyArgs) else OncoWorldsMethylationClassifyArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_methylation_classify", normalized.to_mcp_arguments())
+
+    async def oncoworlds_methylation_classify_report(
+        self,
+        request: OncoWorldsMethylationClassifyArgs | Mapping[str, Any],
+    ) -> OncoWorldsMethylationClassifyReport:
+        return oncoworlds_methylation_classify_report(await self.oncoworlds_methylation_classify(request))
+
+    async def oncoworlds_methylation_compare(
+        self,
+        request: OncoWorldsMethylationCompareArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsMethylationCompareArgs) else OncoWorldsMethylationCompareArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_methylation_compare", normalized.to_mcp_arguments())
+
+    async def oncoworlds_methylation_compare_report(
+        self,
+        request: OncoWorldsMethylationCompareArgs | Mapping[str, Any],
+    ) -> OncoWorldsMethylationCompareReport:
+        return oncoworlds_methylation_compare_report(await self.oncoworlds_methylation_compare(request))
+
+    async def oncoworlds_radiogenomic_check(
+        self,
+        request: OncoWorldsRadiogenomicCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsRadiogenomicCheckArgs) else OncoWorldsRadiogenomicCheckArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_radiogenomic_check", normalized.to_mcp_arguments())
+
+    async def oncoworlds_radiogenomic_check_report(
+        self,
+        request: OncoWorldsRadiogenomicCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsRadiogenomicCheckReport:
+        return oncoworlds_radiogenomic_check_report(await self.oncoworlds_radiogenomic_check(request))
+
+    async def oncoworlds_clonal_history_check(
+        self,
+        request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsClonalHistoryCheckArgs) else OncoWorldsClonalHistoryCheckArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_clonal_history_check", normalized.to_mcp_arguments())
+
+    async def oncoworlds_clonal_history_check_report(
+        self,
+        request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsClonalHistoryCheckReport:
+        return oncoworlds_clonal_history_check_report(await self.oncoworlds_clonal_history_check(request))
 
     async def lab_plan(
         self,

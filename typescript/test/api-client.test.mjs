@@ -796,3 +796,40 @@ test("client exposes runtime and bioethics safety workflows with their exact too
     "bioethics_representation_audit",
   ]);
 });
+
+test("client exposes the complete typed OncoWorlds transport family", async () => {
+  const calls = [];
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const tool = path.split("/").pop();
+      calls.push({ tool, body: JSON.parse(init.body) });
+      const projections = {
+        oncoworlds_model_transport: { ok: true, model_statement: "effect", effective_biological_n: 3, patient_relevant_claim: { claim: "bounded" }, guarantees: [], limitations: [] },
+        oncoworlds_methylation_classify: { ok: true, classified: false, class: null, report: { outcome: "unclassifiable" }, guarantees: [], limitations: [] },
+        oncoworlds_methylation_compare: { ok: true, comparison: { divergence: { divergence: "version_conditioned" } }, left_classifier: {}, right_classifier: {}, guarantees: [], limitations: [] },
+        oncoworlds_radiogenomic_check: { ok: true, supported_claim: { statement: "supported" }, guarantees: [], limitations: [] },
+        oncoworlds_clonal_history_check: { ok: true, compatible_count: 1, rejected_count: 0, compatible: [{}], rejected: [], unique_history: { ok: true, history: {} }, guarantees: [], limitations: [] },
+      }[tool];
+      return jsonResponse({ ok: true, tool, request_id: "oncoworlds-1", mcp: { result: { structuredContent: projections } }, guarantee: "bounded" });
+    },
+  });
+  const model = await client.oncoworldsModelTransport({ result: {}, establishment: {}, claimed_n: 3, transport: {} });
+  const classify = await client.oncoworldsMethylationClassify({ classifier: {}, scores: {}, context: {} });
+  const compare = await client.oncoworldsMethylationCompare({ left: {}, right: {} });
+  const radiogenomic = await client.oncoworldsRadiogenomicCheck({ claim: {}, design: {}, observation: {}, transport: {} });
+  const clonal = await client.oncoworldsClonalHistoryCheck({ population: {}, candidates: [] });
+  assert.equal(model.mcp.result.structuredContent.patient_relevant_claim.claim, "bounded");
+  assert.equal(classify.mcp.result.structuredContent.classified, false);
+  assert.equal(compare.mcp.result.structuredContent.comparison.divergence.divergence, "version_conditioned");
+  assert.equal(radiogenomic.mcp.result.structuredContent.supported_claim.statement, "supported");
+  assert.equal(clonal.mcp.result.structuredContent.unique_history.ok, true);
+  assert.deepEqual(calls.map((call) => call.tool), [
+    "oncoworlds_model_transport",
+    "oncoworlds_methylation_classify",
+    "oncoworlds_methylation_compare",
+    "oncoworlds_radiogenomic_check",
+    "oncoworlds_clonal_history_check",
+  ]);
+});

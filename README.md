@@ -518,6 +518,9 @@ mechanism strata, and declared transport assumptions before admitting a cross-mo
 keeps loss to follow-up and competing death as censoring distinctions, and reports delayed-entry
 bias. `oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and
 keeps multiple compatible histories as ambiguity rather than selecting one.
+The Python and TypeScript SDKs expose all five OncoWorlds workflows as typed MCP and HTTP
+projections, retaining domain refusals, QC abstention, version-conditioned disagreement, transport
+assumptions, and clonal ambiguity without claiming clinical classification or patient-level truth.
 `stress_profile` and `stress_report` sweep biological stress families and report breaking points,
 generator defects, confounding, effective sample size, and unresolved measurements without reducing
 robustness to a single score.

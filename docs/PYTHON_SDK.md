@@ -127,9 +127,22 @@ invent defaults:
   explicit. `OncoOutcomeAnalyzeArgs`/`onco_outcome_report(...)` carry the predeclared estimand,
   at-risk days, immortal-time exposure, event/censoring split, and informative-bias flags; the
   parser rejects event/censoring contradictions.
-  All five workflows are available on sync/async MCP and HTTP facades, with matching TypeScript
-  methods (`oncoResponseAssess`, `oncoWorldlineView`, `oncoClassificationCheck`,
-  `oncoworldsIdentityJoin`, and `oncoOutcomeAnalyze`).
+- `OncoWorldsModelTransportArgs`/`oncoworlds_model_transport_report(...)` preserve model-system
+  fidelity, establishment, declared sample size, transport assumptions, and the distinction
+  between a supported patient-relevant research claim and a typed fail-closed transport refusal.
+  `OncoWorldsMethylationClassifyArgs`/`oncoworlds_methylation_classify_report(...)` retain QC,
+  calibration, threshold, and tumour-content caveats while treating an abstention as an explicit
+  unclassifiable result. `OncoWorldsMethylationCompareArgs`/
+  `oncoworlds_methylation_compare_report(...)` keep classifier-version disagreement separate from
+  agreement and from the case where both sides are unclassifiable.
+- `OncoWorldsRadiogenomicCheckArgs`/`oncoworlds_radiogenomic_check_report(...)` preserve split,
+  feature-fitting, target-scope, mechanism-stratum, and transport assumptions before admitting a
+  cross-modal claim. `OncoWorldsClonalHistoryCheckArgs`/
+  `oncoworlds_clonal_history_check_report(...)` reconcile candidate histories against cellular
+  fractions, preserve per-candidate typed rejection reasons, and represent multiple compatible
+  histories as ambiguity rather than selecting one. All five OncoWorlds workflows are available on
+  sync/async MCP and HTTP facades, with matching TypeScript methods alongside the earlier oncology
+  projections.
 - `FiberCompileRequest`, `FiberRefineRequest`, `FiberExplainRequest`, `FiberVerifyRequest`, and
   `ProjectionBundleRequest` make the full FIBER progressive-disclosure lifecycle typed across sync
   MCP, async MCP, and HTTP. `Workspace.fiber_compile(...)` validates relative world/query paths and

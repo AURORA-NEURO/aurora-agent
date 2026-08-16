@@ -64,6 +64,16 @@ import type {
   OncoResponseResult,
   OncoWorldlineViewArgs,
   OncoWorldlineResult,
+  OncoWorldsModelTransportArgs,
+  OncoWorldsModelTransportResult,
+  OncoWorldsMethylationClassifyArgs,
+  OncoWorldsMethylationClassifyResult,
+  OncoWorldsMethylationCompareArgs,
+  OncoWorldsMethylationCompareResult,
+  OncoWorldsRadiogenomicCheckArgs,
+  OncoWorldsRadiogenomicCheckResult,
+  OncoWorldsClonalHistoryCheckArgs,
+  OncoWorldsClonalHistoryCheckResult,
   OracleCombineArgs,
   OracleCombineResult,
   OracleReferencePanelArgs,
@@ -448,6 +458,26 @@ export class ApiClient {
 
   async oncoOutcomeAnalyze(args: OncoOutcomeAnalyzeArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoOutcomeResult>> {
     return this.callTool<OncoOutcomeResult>("onco_outcome_analyze", args, options);
+  }
+
+  async oncoworldsModelTransport(args: OncoWorldsModelTransportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsModelTransportResult>> {
+    return this.callTool<OncoWorldsModelTransportResult>("oncoworlds_model_transport", args, options);
+  }
+
+  async oncoworldsMethylationClassify(args: OncoWorldsMethylationClassifyArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsMethylationClassifyResult>> {
+    return this.callTool<OncoWorldsMethylationClassifyResult>("oncoworlds_methylation_classify", args, options);
+  }
+
+  async oncoworldsMethylationCompare(args: OncoWorldsMethylationCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsMethylationCompareResult>> {
+    return this.callTool<OncoWorldsMethylationCompareResult>("oncoworlds_methylation_compare", args, options);
+  }
+
+  async oncoworldsRadiogenomicCheck(args: OncoWorldsRadiogenomicCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsRadiogenomicCheckResult>> {
+    return this.callTool<OncoWorldsRadiogenomicCheckResult>("oncoworlds_radiogenomic_check", args, options);
+  }
+
+  async oncoworldsClonalHistoryCheck(args: OncoWorldsClonalHistoryCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsClonalHistoryCheckResult>> {
+    return this.callTool<OncoWorldsClonalHistoryCheckResult>("oncoworlds_clonal_history_check", args, options);
   }
 
   async oracleCombine(args: OracleCombineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleCombineResult>> {

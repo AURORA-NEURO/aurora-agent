@@ -2544,4 +2544,95 @@ export interface BioethicsRepresentationAuditResult extends JsonObject {
   guarantees?: string[];
 }
 
+export interface OncoWorldsModelTransportArgs extends JsonObject {
+  result: JsonObject;
+  fidelity?: JsonObject;
+  establishment: JsonObject;
+  claimed_n: number;
+  transport: JsonObject;
+}
+
+export interface OncoWorldsModelTransportResult extends JsonObject {
+  ok: boolean;
+  model_statement?: string;
+  effective_biological_n?: number;
+  patient_relevant_claim?: JsonObject;
+  stage?: string;
+  refusal?: JsonObject;
+  refusal_text?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoWorldsMethylationClassifyArgs extends JsonObject {
+  classifier: JsonObject;
+  scores: JsonObject;
+  context: JsonObject;
+}
+
+export interface OncoWorldsMethylationClassifyResult extends JsonObject {
+  ok: boolean;
+  classified?: boolean;
+  class?: string | null;
+  report?: JsonObject;
+  stage?: string;
+  refusal?: JsonObject;
+  refusal_text?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoWorldsMethylationCompareArgs extends JsonObject {
+  left: JsonObject;
+  right: JsonObject;
+}
+
+export interface OncoWorldsMethylationCompareResult extends JsonObject {
+  ok: boolean;
+  comparison: JsonObject;
+  left_classifier: JsonObject;
+  right_classifier: JsonObject;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface OncoWorldsRadiogenomicCheckArgs extends JsonObject {
+  claim: JsonObject;
+  design: JsonObject;
+  observation: JsonObject;
+  transport: JsonObject;
+}
+
+export interface OncoWorldsRadiogenomicCheckResult extends JsonObject {
+  ok: boolean;
+  supported_claim?: JsonObject;
+  stage?: string;
+  refusal?: JsonObject;
+  refusal_text?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoWorldsClonalHistoryCheckArgs extends JsonObject {
+  population: JsonObject;
+  candidates: JsonObject[];
+}
+
+export interface OncoWorldsClonalHistoryCheckResult extends JsonObject {
+  ok: boolean;
+  compatible_count: number;
+  rejected_count: number;
+  compatible: JsonValue[];
+  rejected: JsonValue[];
+  unique_history: JsonObject;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export type ToolArguments = JsonObject;
