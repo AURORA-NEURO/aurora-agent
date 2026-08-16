@@ -198,6 +198,7 @@ use bioprism_packs::health::{
 use bioprism_packs::ir::PackIr;
 use bioprism_packs::portfolio::{
     all as all_packs, duplicate_signatures as duplicate_pack_signatures,
+    release_order as pack_release_order, unsequenced as pack_unsequenced,
 };
 use bioprism_packs::{coverage as pack_coverage, matrix as pack_coverage_matrix};
 use bioprism_policy::{PolicyLabel, PolicyLattice, PolicyRule, Request as PolicyRequest};
@@ -1353,6 +1354,7 @@ impl Server {
             "benchmark_compile" => self.benchmark_compile(&arguments),
             "benchmark_compile_review" => self.benchmark_compile_review(&arguments),
             "pack_coverage_audit" => self.pack_coverage_audit(&arguments),
+            "pack_release_audit" => self.pack_release_audit(&arguments),
             "pack_catalogue" => self.pack_catalogue(&arguments),
             "pack_health_assess" => self.pack_health_assess(&arguments),
             "foundation_contract_check" => self.foundation_contract_check(&arguments),
@@ -10426,6 +10428,165 @@ impl Server {
         }))
     }
 
+    fn pack_release_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let section = arguments
+            .get("section")
+            .and_then(Value::as_str)
+            .unwrap_or("all");
+        if !matches!(section, "all" | "15" | "29") {
+            return Err("section must be one of all, 15, or 29".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let requested_ids = arguments.get("pack_ids").and_then(Value::as_array);
+        if let Some(ids) = requested_ids {
+            if ids.is_empty() || ids.len() > 100 {
+                return Err("pack_ids must contain between 1 and 100 ids when supplied".into());
+            }
+        }
+        let section_matches = |pack: &bioprism_packs::PackDefinition| {
+            section == "all"
+                || (section == "15" && pack.blueprint_module.starts_with("15."))
+                || (section == "29" && pack.blueprint_module.starts_with("29."))
+        };
+        let mut selected = Vec::new();
+        let mut selected_ids = BTreeSet::new();
+        let mut unknown = Vec::new();
+        let mut out_of_section = Vec::new();
+        if let Some(ids) = requested_ids {
+            for id in ids {
+                let id = id.as_str().ok_or("pack_ids must be an array of strings")?;
+                if !selected_ids.insert(id.to_string()) {
+                    return Err(format!("pack_ids contains duplicate id {id}"));
+                }
+                match all_packs().iter().find(|pack| pack.id == id) {
+                    Some(pack) if section_matches(pack) => selected.push(pack),
+                    Some(_) => out_of_section.push(id.to_string()),
+                    None => unknown.push(id.to_string()),
+                }
+            }
+        } else {
+            selected = all_packs().iter().filter(|pack| section_matches(pack)).collect();
+            selected_ids.extend(selected.iter().map(|pack| pack.id.to_string()));
+        }
+        if !unknown.is_empty() || !out_of_section.is_empty() {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/pack-release-audit/0.1",
+                "stage": "pack_selection",
+                "unknown_pack_ids": unknown,
+                "out_of_section_pack_ids": out_of_section,
+                "refusal": "release order cannot be computed for an unknown or section-incompatible pack selection",
+                "fail_closed": true,
+                "guarantees": [
+                    "an invalid pack is not silently dropped from the release denominator",
+                    "section-incompatible identifiers are reported rather than reassigned",
+                ],
+            }));
+        }
+        if selected.is_empty() {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/pack-release-audit/0.1",
+                "stage": "pack_selection",
+                "refusal": "the selected section and pack_ids intersection is empty",
+                "fail_closed": true,
+                "guarantees": ["an empty portfolio is not rendered as a complete release plan"],
+            }));
+        }
+        let selected_ids: BTreeSet<String> = selected.iter().map(|pack| pack.id.to_string()).collect();
+        let global_release = pack_release_order();
+        let global_positions: BTreeMap<&str, usize> = global_release
+            .iter()
+            .enumerate()
+            .map(|(index, pack)| (pack.id, index + 1))
+            .collect();
+        let selected_release = global_release
+            .iter()
+            .filter(|pack| selected_ids.contains(pack.id))
+            .collect::<Vec<_>>();
+        let global_unsequenced = pack_unsequenced();
+        let selected_unsequenced = global_unsequenced
+            .iter()
+            .filter(|pack| selected_ids.contains(pack.id))
+            .collect::<Vec<_>>();
+        let max_items = max_items as usize;
+        let release_rows = selected_release
+            .iter()
+            .enumerate()
+            .map(|(index, pack)| {
+                json!({
+                    "selected_position": index + 1,
+                    "portfolio_position": global_positions.get(pack.id).copied(),
+                    "id": pack.id,
+                    "title": pack.title,
+                    "blueprint_module": pack.blueprint_module,
+                    "axis": pack.axis,
+                    "release_wave": pack.release_wave,
+                    "strongest_oracle": pack.strongest_oracle(),
+                    "has_execution_grounded_oracle": pack.has_grounded_oracle(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let unsequenced_rows = selected_unsequenced
+            .iter()
+            .map(|pack| {
+                json!({
+                    "id": pack.id,
+                    "title": pack.title,
+                    "blueprint_module": pack.blueprint_module,
+                    "axis": pack.axis,
+                    "release_wave": pack.release_wave,
+                    "strongest_oracle": pack.strongest_oracle(),
+                    "has_execution_grounded_oracle": pack.has_grounded_oracle(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut wave_counts = BTreeMap::new();
+        let mut axis_counts = BTreeMap::new();
+        for pack in &selected {
+            *axis_counts
+                .entry(format!("{:?}", pack.axis).to_ascii_lowercase())
+                .or_insert(0usize) += 1;
+            if let bioprism_packs::ReleaseWave::Wave(wave) = pack.release_wave {
+                *wave_counts.entry(wave.to_string()).or_insert(0usize) += 1;
+            }
+        }
+        let sequenced_count = selected_release.len();
+        let unsequenced_count = selected_unsequenced.len();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/pack-release-audit/0.1",
+            "section": section,
+            "selected_pack_count": selected.len(),
+            "selected_pack_ids": selected_ids,
+            "sequenced_count": sequenced_count,
+            "unsequenced_count": unsequenced_count,
+            "release_coverage_fraction": sequenced_count as f64 / selected.len() as f64,
+            "wave_counts": wave_counts,
+            "axis_counts": axis_counts,
+            "release_order": release_rows.iter().take(max_items).collect::<Vec<_>>(),
+            "release_order_omitted": release_rows.len().saturating_sub(max_items),
+            "unsequenced": unsequenced_rows.iter().take(max_items).collect::<Vec<_>>(),
+            "unsequenced_omitted": unsequenced_rows.len().saturating_sub(max_items),
+            "guarantees": [
+                "release order is the stable portfolio kernel order with wave/module tie-breaking",
+                "unsequenced packs remain explicit and are not assigned an invented wave",
+                "selected positions, global positions, wave counts, and omission counts remain visible",
+            ],
+            "limitations": [
+                "this is a blueprint release-order projection, not an approval, registry admission, or deployment action",
+                "it does not infer dependencies, staffing, calibration, ownership, or readiness for an unsequenced pack",
+                "release-wave membership is declaration-level and does not measure pack quality or execution performance",
+            ],
+        }))
+    }
+
     fn foundation_contract_check(&self, arguments: &Value) -> Result<Value, String> {
         let raw_contract = arguments
             .get("contract")
@@ -19369,7 +19530,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "benchmark_pack_portfolio",
             "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
             "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
-            "mcp_tools": ["pack_catalogue", "pack_coverage_audit", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "mutation_family", "scale_family_split_verify"],
+            "mcp_tools": ["pack_catalogue", "pack_coverage_audit", "pack_release_audit", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "mutation_family", "scale_family_split_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -21209,6 +21370,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "section": { "type": "string", "enum": ["all", "15", "29"], "description": "Optional portfolio section filter; defaults to all." },
                     "pack_ids": { "type": "array", "maxItems": 100, "description": "Optional explicit pack-id subset; unknown or duplicate ids refuse rather than disappearing from the denominator." },
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows, gaps, and matrix cells returned; defaults to 100." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "pack_release_audit",
+            "description": "Expose the stable portfolio release order and the explicitly unsequenced remainder from the packs kernel. It reports selected positions, global positions, wave and axis counts, and bounded release rows without inventing readiness, dependencies, or approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "section": { "type": "string", "enum": ["all", "15", "29"], "description": "Optional portfolio section filter; defaults to all." },
+                    "pack_ids": { "type": "array", "maxItems": 100, "description": "Optional explicit pack-id subset; unknown, duplicate, and section-incompatible ids refuse." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum release and unsequenced rows returned; defaults to 100." }
                 },
                 "required": []
             }

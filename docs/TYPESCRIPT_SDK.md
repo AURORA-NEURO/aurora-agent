@@ -237,6 +237,11 @@ summary visible. Unknown identifiers and empty selections are fail-closed; cover
 declaration-level portfolio projection, not measured performance. See
 [`docs/PACK_COVERAGE_AUDIT.md`](PACK_COVERAGE_AUDIT.md) for the wire contract and interpretation
 rules.
+`packReleaseAudit` returns the declared stable release order plus the explicit unsequenced
+remainder from the packs kernel. `PackReleaseAuditResult` preserves selected/global positions,
+wave and axis counts, bounded rows, omission reconciliation, and fail-closed unknown or
+section-incompatible selection outcomes; it is not a readiness or approval decision. See
+[`docs/PACK_RELEASE_AUDIT.md`](PACK_RELEASE_AUDIT.md) for the interpretation contract.
 `packHealthAssess` accepts a serialized pack, observed calibration, optional baselines and
 contamination signals, and an optional health policy, returning `PackHealthAssessmentResult` with
 the digest-bound health report, calibration denominators, tagged findings, and an explicit score

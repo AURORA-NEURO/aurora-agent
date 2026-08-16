@@ -82,3 +82,5 @@ The endpoint is also listed in the `benchmark_pack_portfolio` workspace capabili
 `pack_catalogue`, `pack_health_assess`, and the benchmark audit/compiler surfaces. Those surfaces
 are complementary: catalogue describes declarations, coverage audits portfolio representation,
 health audits observed pack quality, and benchmark compilation produces a reviewed decision cell.
+For the adjacent declared release sequence and unsequenced remainder, see
+[`PACK_RELEASE_AUDIT.md`](PACK_RELEASE_AUDIT.md).

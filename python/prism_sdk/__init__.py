@@ -499,6 +499,16 @@ from .pack_coverage import (
     PackCoverageAuditReport,
     pack_coverage_audit_report,
 )
+from .pack_release import (
+    MAX_PACK_RELEASE_IDS,
+    MAX_PACK_RELEASE_INPUT_BYTES,
+    MAX_PACK_RELEASE_ITEMS,
+    PACK_RELEASE_SCHEMA,
+    PACK_RELEASE_SECTIONS,
+    PackReleaseAuditArgs,
+    PackReleaseAuditReport,
+    pack_release_audit_report,
+)
 from .foundation import (
     COUNTERFACTUAL_CLAIMS,
     FOUNDATION_MAX_INPUT_BYTES,
@@ -1644,6 +1654,14 @@ __all__ = [
     "PackCoverageAuditArgs",
     "PackCoverageAuditReport",
     "pack_coverage_audit_report",
+    "PACK_RELEASE_SCHEMA",
+    "PACK_RELEASE_SECTIONS",
+    "MAX_PACK_RELEASE_IDS",
+    "MAX_PACK_RELEASE_ITEMS",
+    "MAX_PACK_RELEASE_INPUT_BYTES",
+    "PackReleaseAuditArgs",
+    "PackReleaseAuditReport",
+    "pack_release_audit_report",
     "FOUNDATION_MAX_INPUT_BYTES",
     "COUNTERFACTUAL_CLAIMS",
     "FOUNDATION_VERDICTS",

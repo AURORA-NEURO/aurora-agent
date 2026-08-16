@@ -1931,6 +1931,34 @@ export interface PackCoverageAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface PackReleaseAuditArgs extends JsonObject {
+  section?: "all" | "15" | "29";
+  pack_ids?: string[];
+  max_items?: number;
+}
+
+export interface PackReleaseAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/pack-release-audit/0.1";
+  section?: "all" | "15" | "29";
+  selected_pack_count?: number;
+  selected_pack_ids?: string[];
+  sequenced_count?: number;
+  unsequenced_count?: number;
+  release_coverage_fraction?: number;
+  wave_counts?: Record<string, number>;
+  axis_counts?: Record<string, number>;
+  release_order?: JsonObject[];
+  release_order_omitted?: number;
+  unsequenced?: JsonObject[];
+  unsequenced_omitted?: number;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface FoundationContractCheckArgs extends JsonObject {
   contract: JsonObject;
   parent?: JsonObject;

@@ -282,6 +282,24 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["gaps remain visible"],
         limitations: ["declaration level"],
       } } } });
+      if (path === "/v1/tools/pack_release_audit") return jsonResponse({ ok: true, tool: "pack_release_audit", request_id: "r20i", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/pack-release-audit/0.1",
+        section: "15",
+        selected_pack_count: 1,
+        selected_pack_ids: ["prism.context-acquisition"],
+        sequenced_count: 1,
+        unsequenced_count: 0,
+        release_coverage_fraction: 1,
+        wave_counts: { "1": 1 },
+        axis_counts: { mechanism: 1 },
+        release_order: [{ selected_position: 1, portfolio_position: 1, id: "prism.context-acquisition" }],
+        release_order_omitted: 0,
+        unsequenced: [],
+        unsequenced_omitted: 0,
+        guarantees: ["unsequenced packs remain explicit"],
+        limitations: ["not an approval"],
+      } } } });
       if (path === "/v1/tools/foundation_contract_check") return jsonResponse({ ok: true, tool: "foundation_contract_check", request_id: "r21", mcp: { result: { structuredContent: {
         ok: true,
         verdict: "refused",
@@ -1310,6 +1328,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(coverage.mcp.result.structuredContent.schema, "bioprism-mcp/pack-coverage-audit/0.1");
   assert.equal(coverage.mcp.result.structuredContent.summary.uncovered, 4);
   assert.equal(coverage.mcp.result.structuredContent.rows_omitted, 13);
+  const packRelease = await client.packReleaseAudit({ section: "15", max_items: 3 });
+  assert.equal(packRelease.mcp.result.structuredContent.schema, "bioprism-mcp/pack-release-audit/0.1");
+  assert.equal(packRelease.mcp.result.structuredContent.sequenced_count, 1);
+  assert.equal(packRelease.mcp.result.structuredContent.unsequenced_omitted, 0);
   const foundation = await client.foundationContractCheck({
     contract: { id: "fbc:test:001", intent: "check", falsifiers: ["disagree"], actions: ["inspect"], claim_schema: "typed", reference_standard: "fixture", terminations: ["success"] },
     claim: "real_treatment_effect",

@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 138);
+    assert_eq!(tools.len(), 139);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(138));
-    assert_eq!(result["advertised_tool_count"], json!(138));
+    assert_eq!(result["unique_catalog_tools"], json!(139));
+    assert_eq!(result["advertised_tool_count"], json!(139));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(138));
-    assert_eq!(result["schema_quality"]["valid"], json!(138));
+    assert_eq!(result["schema_quality"]["checked"], json!(139));
+    assert_eq!(result["schema_quality"]["valid"], json!(139));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -8156,6 +8156,45 @@ fn pack_coverage_audit_exposes_portfolio_gaps_and_refuses_unknown_subsets() {
     assert_eq!(refused["__isError"], json!(false));
     assert_eq!(refused["ok"], json!(false));
     assert_eq!(refused["stage"], json!("pack_selection"));
+    assert_eq!(refused["fail_closed"], json!(true));
+}
+
+#[test]
+fn pack_release_audit_preserves_stable_order_and_unsequenced_remainder() {
+    let result = call(
+        &mut server(),
+        "pack_release_audit",
+        json!({ "section": "15", "max_items": 3 }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/pack-release-audit/0.1"));
+    assert_eq!(result["selected_pack_count"], json!(25));
+    assert_eq!(result["sequenced_count"], json!(13));
+    assert_eq!(result["unsequenced_count"], json!(12));
+    assert_eq!(result["release_order"].as_array().unwrap().len(), 3);
+    assert_eq!(result["release_order_omitted"], json!(10));
+    assert_eq!(result["unsequenced"].as_array().unwrap().len(), 3);
+    assert_eq!(result["unsequenced_omitted"], json!(9));
+    assert_eq!(result["release_order"][0]["selected_position"], json!(1));
+    assert_eq!(result["release_order"][0]["portfolio_position"], json!(1));
+    assert!(result["wave_counts"].is_object());
+    assert!(result["axis_counts"].is_object());
+    assert!(result["limitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("not an approval")));
+
+    let refused = call(
+        &mut server(),
+        "pack_release_audit",
+        json!({ "section": "15", "pack_ids": ["bio.statistical-estimands"] }),
+    );
+    assert_eq!(refused["__isError"], json!(false));
+    assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["stage"], json!("pack_selection"));
+    assert_eq!(refused["out_of_section_pack_ids"], json!(["bio.statistical-estimands"]));
     assert_eq!(refused["fail_closed"], json!(true));
 }
 

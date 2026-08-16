@@ -177,6 +177,11 @@ invent defaults:
   declaration-level coverage and does not claim measured instance performance or health. See
   [`docs/PACK_COVERAGE_AUDIT.md`](PACK_COVERAGE_AUDIT.md) for the wire contract and interpretation
   rules.
+- `PackReleaseAuditArgs` and `pack_release_audit_report(...)` expose the real stable portfolio
+  release order and explicitly unsequenced remainder across sync MCP, async MCP, and HTTP. The
+  typed report keeps selected versus global positions, wave/axis counts, omission reconciliation,
+  section-incompatible selection refusals, and the non-approval limitations visible. See
+  [`docs/PACK_RELEASE_AUDIT.md`](PACK_RELEASE_AUDIT.md) for the interpretation contract.
 - `PackHealthAssessArgs` and `pack_health_assessment_report(...)` expose the observed pack-health
   gate across sync MCP, async MCP, and HTTP. `PackCalibrationReport` retains system-level pass and
   trial denominators; `PackDiscriminationReport` distinguishes undetermined, saturated, floored,

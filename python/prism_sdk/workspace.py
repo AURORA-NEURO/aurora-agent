@@ -252,6 +252,7 @@ from .benchmark_compile_review import BenchmarkCompileReviewArgs, BenchmarkCompi
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_coverage import PackCoverageAuditArgs, PackCoverageAuditReport, pack_coverage_audit_report
+from .pack_release import PackReleaseAuditArgs, PackReleaseAuditReport, pack_release_audit_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
@@ -604,6 +605,23 @@ class Workspace:
         """Return typed selected-portfolio coverage and gap evidence."""
 
         return pack_coverage_audit_report(self.pack_coverage_audit(request))
+
+    def pack_release_audit(
+        self,
+        request: PackReleaseAuditArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Audit pack release sequencing through workspace MCP."""
+
+        normalized = request if isinstance(request, PackReleaseAuditArgs) else PackReleaseAuditArgs.from_wire(request or {})
+        return self.tool("pack_release_audit", normalized.to_mcp_arguments())
+
+    def pack_release_audit_report(
+        self,
+        request: PackReleaseAuditArgs | Mapping[str, Any] | None = None,
+    ) -> PackReleaseAuditReport:
+        """Return typed release-order and unsequenced-pack evidence."""
+
+        return pack_release_audit_report(self.pack_release_audit(request))
 
     def mutation_family(
         self,
@@ -2880,6 +2898,23 @@ class AsyncWorkspace:
         """Return typed async selected-portfolio coverage evidence."""
 
         return pack_coverage_audit_report(await self.pack_coverage_audit(request))
+
+    async def pack_release_audit(
+        self,
+        request: PackReleaseAuditArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Audit pack release sequencing through async workspace MCP."""
+
+        normalized = request if isinstance(request, PackReleaseAuditArgs) else PackReleaseAuditArgs.from_wire(request or {})
+        return await self.tool("pack_release_audit", normalized.to_mcp_arguments())
+
+    async def pack_release_audit_report(
+        self,
+        request: PackReleaseAuditArgs | Mapping[str, Any] | None = None,
+    ) -> PackReleaseAuditReport:
+        """Return typed async release-order evidence."""
+
+        return pack_release_audit_report(await self.pack_release_audit(request))
 
     async def mutation_family(
         self,
