@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 164);
+    assert_eq!(tools.len(), 165);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3784,6 +3784,51 @@ fn security_privacy_audit_keeps_asset_flow_identity_threat_and_review_layers_exp
 }
 
 #[test]
+fn sandbox_admission_audit_keeps_artifact_isolation_capability_resource_and_output_layers_explicit() {
+    let mut server = server();
+    let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let manifest = json!({
+        "schema": "bioprism-sandbox/0.1",
+        "system": { "id": "prism-sandbox", "version": "0.1.0", "owner": "platform" },
+        "artifacts": [
+            { "id": "source", "kind": "source_code", "digest": digest, "source": "repo/source.py", "producer": "ci", "trust": "reviewed" },
+            { "id": "dataset", "kind": "dataset", "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "source": "registry/dataset", "producer": "registry", "trust": "untrusted", "inputs": ["source"] }
+        ],
+        "profiles": [{
+            "id": "profile", "artifact": "dataset", "runtime": "oci", "image_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "environment_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "user": "runner", "rootless": true, "read_only_root": true, "no_privilege_escalation": true, "network": "allowlist", "network_allowlist": ["packages.example"], "mounts": [{ "id": "input", "source_artifact": "dataset", "target": "/inputs/data", "mode": "read_only" }], "capabilities": ["network"], "resources": { "cpu_millis": 1000, "memory_mb": 1024, "wall_time_seconds": 60, "processes": 8, "output_bytes": 1000000 }, "output_quarantine": true, "release_requires_review": true
+        }],
+        "capabilities": [{ "id": "network", "profile": "profile", "kind": "network_egress", "target": "packages.example", "decision": "allow", "evidence_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }],
+        "outputs": [{ "id": "result", "profile": "profile", "artifact": "dataset", "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "destination": "quarantine", "quarantined": true, "released": false, "reviewed": false, "parents": ["dataset"] }]
+    });
+    let result = call(&mut server, "sandbox_admission_audit", json!({ "manifest": manifest.clone() }));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["sandbox_ready"], json!(true));
+    assert_eq!(result["audit"]["counts"]["untrusted_artifacts"], json!(1));
+    assert_eq!(result["audit"]["profile_audits"][0]["isolation_valid"], json!(true));
+    assert_eq!(result["audit"]["capability_audits"][0]["evidence_valid"], json!(true));
+    assert_eq!(result["audit"]["resource_audits"][0]["ready"], json!(true));
+    assert_eq!(result["audit"]["output_audits"][0]["quarantined"], json!(true));
+
+    let mut refused = manifest;
+    refused["profiles"][0]["rootless"] = json!(false);
+    refused["profiles"][0]["network"] = json!("unrestricted");
+    refused["profiles"][0]["resources"]["memory_mb"] = Value::Null;
+    refused["capabilities"][0]["target"] = json!("*");
+    refused["capabilities"][0]["evidence_digest"] = Value::Null;
+    let refusal = call(&mut server, "sandbox_admission_audit", json!({ "manifest": refused }));
+    assert_eq!(refusal["ok"], json!(true));
+    assert_eq!(refusal["valid"], json!(false));
+    assert_eq!(refusal["sandbox_ready"], json!(false));
+    let issues = refusal["audit"]["issues"].as_array().unwrap();
+    assert!(issues.iter().any(|issue| issue["code"] == "rootless_required"));
+    assert!(issues.iter().any(|issue| issue["code"] == "network_boundary_invalid"));
+    assert!(issues.iter().any(|issue| issue["code"] == "resource_limits_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "capability_target_broad"));
+    assert!(issues.iter().any(|issue| issue["code"] == "dangerous_capability_evidence_missing"));
+}
+
+#[test]
 fn developer_workbench_audits_notebook_digests_queries_dashboard_and_plans_ci() {
     let mut server = server();
     let digest = "a".repeat(64);
@@ -4320,12 +4365,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(164));
-    assert_eq!(result["advertised_tool_count"], json!(164));
+    assert_eq!(result["unique_catalog_tools"], json!(165));
+    assert_eq!(result["advertised_tool_count"], json!(165));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(164));
-    assert_eq!(result["schema_quality"]["valid"], json!(164));
+    assert_eq!(result["schema_quality"]["checked"], json!(165));
+    assert_eq!(result["schema_quality"]["valid"], json!(165));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

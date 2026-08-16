@@ -285,6 +285,8 @@ import type {
   OperationalReadinessToolResult,
   SecurityPrivacyManifestArgs,
   SecurityPrivacyToolResult,
+  SandboxManifestArgs,
+  SandboxAdmissionToolResult,
   AdaptivePanelRunArgs,
   AdaptivePanelResult,
   PosteriorGateArgs,
@@ -514,6 +516,10 @@ export class ApiClient {
 
   async securityPrivacyAudit(args: SecurityPrivacyManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<SecurityPrivacyToolResult>> {
     return this.callTool<SecurityPrivacyToolResult>("security_privacy_audit", args, options);
+  }
+
+  async sandboxAdmissionAudit(args: SandboxManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<SandboxAdmissionToolResult>> {
+    return this.callTool<SandboxAdmissionToolResult>("sandbox_admission_audit", args, options);
   }
 
   async adaptivePanel(args: AdaptivePanelRunArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptivePanelResult>> {

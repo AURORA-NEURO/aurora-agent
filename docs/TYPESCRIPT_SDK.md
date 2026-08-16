@@ -671,3 +671,13 @@ MFA/least-privilege, threat treatment, independent review, control audits, count
 warning/blocking issue rows. `security_privacy_ready` is a declaration-derived posture, not proof
 of live security controls, legal compliance, authentication, erasure, or executed red-team work.
 See SECURITY_PRIVACY_AUDIT.md.
+
+## Sandbox admission audit
+
+`ApiClient.sandboxAdmissionAudit(...)` accepts `SandboxManifestArgs` and returns
+`SandboxAdmissionToolResult`. Types retain content-addressed artifact lineage, hardened execution
+profiles, network/mount boundaries, exact capability decisions, resource ceilings, quarantine and
+reviewed output release across six independent audit row families. `sandbox_ready` is a
+declaration-derived admission posture, not proof of code execution safety, kernel/runtime
+enforcement, secret isolation, quarantine operation, or output publication. See
+SANDBOX_ADMISSION_AUDIT.md.

@@ -409,6 +409,13 @@ not replace infrastructure scanning, identity authority, legal analysis, erasure
 vendor assurance, or an operational red-team/incident program, so those external/process claims
 remain explicit.
 
+The `sandbox_admission_audit` route adds an artifact-level companion for `36.07`: content-addressed
+artifact identity and lineage, rootless/read-only/no-escalation profiles, bounded network and mount
+surfaces, explicit dangerous capabilities, resource ceilings, quarantine, and reviewed output
+release. It does not replace a kernel sandbox, runtime admission controller, scanner, credential
+revocation, quarantine storage, or operator response; the runtime/process portion of `36.07` and
+the program portion of `36.19` therefore remain explicit rather than being relabelled complete.
+
 ## §19 Reference Examples — 3 uncovered
 
 - `19.01` Decision Cell Example

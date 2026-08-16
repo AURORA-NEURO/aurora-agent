@@ -927,6 +927,16 @@ high-risk threat treatment, independent review evidence, and required security/p
 security scan, proof of authentication or encryption, executed red-team evidence, or a data-erasure
 claim. See docs/SECURITY_PRIVACY_AUDIT.md.
 
+## Sandbox admission audit
+
+The `sandbox_admission_audit` route adds a bounded admission contract for untrusted code and
+research artifacts: content-addressed artifact identity and lineage, rootless/read-only/no-
+escalation profiles, network and mount boundaries, exact dangerous capabilities, finite resource
+ceilings, quarantine, and reviewed output release. `sandbox_ready` is derived from six independent
+row families and blocking issue rows; it is not proof that code ran safely or that an external
+runtime enforced the declaration. The route never executes code, mounts paths, opens sockets,
+reads secrets, or mutates quarantine. See docs/SANDBOX_ADMISSION_AUDIT.md.
+
 ## License
 
 Apache-2.0

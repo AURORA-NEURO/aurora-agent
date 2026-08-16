@@ -684,6 +684,32 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         },
         guarantees: ["layers remain separate"], limitations: ["artifact only"],
       } } } });
+      if (path === "/v1/tools/sandbox_admission_audit") return jsonResponse({ ok: true, tool: "sandbox_admission_audit", request_id: "r15sandbox", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-sandbox-audit/0.1",
+        workflow: "sandbox_admission_audit",
+        manifest_digest: "a".repeat(64),
+        valid: true,
+        sandbox_ready: true,
+        blocking_issue_count: 0,
+        warning_count: 0,
+        audit: {
+          schema: "bioprism-sandbox-audit/0.1",
+          manifest_schema: "bioprism-sandbox/0.1",
+          digest: "a".repeat(64),
+          valid: true,
+          system_id: "prism-sandbox",
+          counts: { artifacts: 2, untrusted_artifacts: 1, profiles: 1, isolated_profiles: 1, capabilities: 1, approved_capabilities: 1, dangerous_capabilities: 1, outputs: 1, quarantined_outputs: 1, released_outputs: 0 },
+          artifact_audits: [{ artifact_id: "dataset", digest_valid: true, lineage_valid: true, source_valid: true, trust: "untrusted", hardening_required: true, ready: true }],
+          profile_audits: [{ profile_id: "profile", artifact_valid: true, isolation_valid: true, network_valid: true, mounts_valid: true, capabilities_valid: true, resources_valid: true, output_valid: true, ready: true }],
+          capability_audits: [{ capability_id: "network", profile_valid: true, target_valid: true, approved: true, dangerous: true, evidence_valid: true, ready: true }],
+          boundary_audits: [{ profile_id: "profile", default_deny: true, network_mode: "allowlist", allowlist_valid: true, host_paths_rejected: true, dangerous_capabilities: 1, ready: true }],
+          resource_audits: [{ profile_id: "profile", cpu_bounded: true, memory_bounded: true, wall_time_bounded: true, processes_bounded: true, output_bounded: true, ready: true }],
+          output_audits: [{ output_id: "result", profile_valid: true, artifact_valid: true, digest_valid: true, lineage_valid: true, quarantined: true, review_valid: true, release_valid: true, ready: true }],
+          issues: [], guarantees: ["layers remain separate"], limitations: ["admission only"],
+        },
+        guarantees: ["layers remain separate"], limitations: ["admission only"],
+      } } } });
       if (path === "/v1/tools/operational_readiness_audit") return jsonResponse({ ok: true, tool: "operational_readiness_audit", request_id: "r15operational", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-operational-readiness-audit/0.1",
@@ -1581,6 +1607,20 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(securityPrivacy.mcp.result.structuredContent.security_privacy_ready, true);
   assert.equal(securityPrivacy.mcp.result.structuredContent.audit.flow_audits[0].authorization_present, true);
   assert.equal(securityPrivacy.mcp.result.structuredContent.audit.threat_audits[0].treated, true);
+  const sandboxAdmission = await client.sandboxAdmissionAudit({
+    system: { id: "prism-sandbox", version: "0.1.0", owner: "platform" },
+    artifacts: [
+      { id: "source", kind: "source_code", digest: "a".repeat(64), source: "repo/source.py", producer: "ci", trust: "reviewed" },
+      { id: "dataset", kind: "dataset", digest: "b".repeat(64), source: "registry/dataset", producer: "registry", trust: "untrusted", inputs: ["source"] },
+    ],
+    profiles: [{ id: "profile", artifact: "dataset", runtime: "oci", image_digest: "c".repeat(64), environment_digest: "d".repeat(64), user: "runner", rootless: true, read_only_root: true, no_privilege_escalation: true, network: "allowlist", network_allowlist: ["packages.example"], mounts: [{ id: "input", source_artifact: "dataset", target: "/inputs/data", mode: "read_only" }], capabilities: ["network"], resources: { cpu_millis: 1000, memory_mb: 1024, wall_time_seconds: 60, processes: 8, output_bytes: 1000000 }, output_quarantine: true, release_requires_review: true }],
+    capabilities: [{ id: "network", profile: "profile", kind: "network_egress", target: "packages.example", decision: "allow", evidence_digest: "e".repeat(64) }],
+    outputs: [{ id: "result", profile: "profile", artifact: "dataset", digest: "f".repeat(64), destination: "quarantine", quarantined: true, released: false, reviewed: false, parents: ["dataset"] }],
+  });
+  assert.equal(sandboxAdmission.mcp.result.structuredContent.schema, "bioprism-sandbox-audit/0.1");
+  assert.equal(sandboxAdmission.mcp.result.structuredContent.sandbox_ready, true);
+  assert.equal(sandboxAdmission.mcp.result.structuredContent.audit.profile_audits[0].isolation_valid, true);
+  assert.equal(sandboxAdmission.mcp.result.structuredContent.audit.output_audits[0].quarantined, true);
   const operational = await client.operationalReadinessAudit({
     service: { id: "aurora-api", version: "0.1.0", owner: "platform", criticality: "critical" },
     contracts: [{ id: "availability", kind: "availability", objective: "serve requests", target: "99.9%", required: true }],

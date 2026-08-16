@@ -215,6 +215,7 @@ pub mod report;
 pub mod release_pipeline;
 pub mod repro;
 pub mod security_privacy;
+pub mod sandbox_admission;
 pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
@@ -284,6 +285,14 @@ pub use security_privacy::{
     SecurityPrivacyThreat, SecurityPrivacyThreatAudit, SecurityPrivacyThreatSeverity,
     SecurityPrivacyThreatStatus, SecurityPrivacyCounts, SECURITY_PRIVACY_AUDIT_SCHEMA,
     SECURITY_PRIVACY_MANIFEST_SCHEMA,
+};
+pub use sandbox_admission::{
+    SandboxArtifact, SandboxArtifactAudit, SandboxArtifactKind, SandboxAudit, SandboxBoundaryAudit,
+    SandboxCapability, SandboxCapabilityAudit, SandboxCapabilityKind, SandboxDecision, SandboxError,
+    SandboxExecutionProfile, SandboxIssue, SandboxIssueSeverity, SandboxManifest, SandboxMount,
+    SandboxMountMode, SandboxNetworkMode, SandboxOutput, SandboxOutputAudit, SandboxPolicies,
+    SandboxProfileAudit, SandboxResourceAudit, SandboxResourceLimits, SandboxSystem, SandboxTrust,
+    SANDBOX_AUDIT_SCHEMA, SANDBOX_MANIFEST_SCHEMA,
 };
 pub use repro::{
     figure_reproduction_case, forbidden_by_default, summarise, Effect, MoleculeCard, Obligation,

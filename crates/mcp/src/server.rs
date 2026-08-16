@@ -133,8 +133,10 @@ use bioprism_devplat::{
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
     EngineeringManifest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
+    SandboxManifest,
     CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
-    RELEASE_PIPELINE_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA, MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA,
+    MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1470,6 +1472,7 @@ impl Server {
             "release_pipeline_audit" => self.release_pipeline_audit(&arguments),
             "operational_readiness_audit" => self.operational_readiness_audit(&arguments),
             "security_privacy_audit" => self.security_privacy_audit(&arguments),
+            "sandbox_admission_audit" => self.sandbox_admission_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
@@ -24269,6 +24272,54 @@ impl Server {
         }))
     }
 
+    fn sandbox_admission_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_manifest = arguments
+            .get("manifest")
+            .cloned()
+            .ok_or("manifest is required and must be a serialized SandboxManifest")?;
+        let encoded = serde_json::to_vec(&raw_manifest)
+            .map_err(|error| format!("cannot measure sandbox manifest: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("manifest exceeds the 20000000-byte safety bound".into());
+        }
+        let manifest: SandboxManifest = serde_json::from_value(raw_manifest)
+            .map_err(|error| format!("invalid sandbox manifest: {error}"))?;
+        let audit = manifest
+            .audit()
+            .map_err(|error| format!("cannot audit sandbox manifest: {error}"))?;
+        let blocking_issue_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::SandboxIssueSeverity::Blocking)
+            .count();
+        let warning_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::SandboxIssueSeverity::Warning)
+            .count();
+        Ok(json!({
+            "ok": true,
+            "workflow": "sandbox_admission_audit",
+            "schema": SANDBOX_AUDIT_SCHEMA,
+            "manifest_digest": audit.digest,
+            "valid": audit.valid,
+            "sandbox_ready": audit.valid,
+            "blocking_issue_count": blocking_issue_count,
+            "warning_count": warning_count,
+            "audit": audit,
+            "guarantees": [
+                "artifact identity, content digests, producer/source lineage, and profile binding are audited before admission",
+                "rootless execution, read-only roots, no privilege escalation, bounded networking, mounts, capabilities, and resources remain separate layers",
+                "dangerous capabilities and released outputs require bounded targets, quarantine, lineage, and independent evidence",
+            ],
+            "limitations": [
+                "the route does not execute code, mount a filesystem, open a socket, read a secret, or enforce a kernel policy",
+                "runtime admission, credential revocation, scanners, quarantine storage, and operator response remain external",
+                "a valid declaration is admission evidence, not proof that an external runtime enforced it",
+            ],
+        }))
+    }
+
     fn developer_delivery_audit(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery input: {error}"))?;
@@ -26597,7 +26648,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -28784,6 +28835,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "manifest": { "type": "object", "description": "Serialized bioprism-devplat SecurityPrivacyManifest with system identity, assets, flows, identities, threats, reviews, controls, and explicit policies." }
+                },
+                "required": ["manifest"]
+            }
+        }),
+        json!({
+            "name": "sandbox_admission_audit",
+            "description": "Validate a bounded machine-readable admission manifest for untrusted code and research artifacts. It audits content-addressed artifact identity and lineage, rootless and read-only execution, privilege boundaries, network and mount allowlists, exact dangerous capabilities, resource ceilings, quarantine, and reviewed output release; it returns deterministic sandbox readiness without executing code, mounting paths, opening sockets, reading secrets, or asserting runtime enforcement.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifest": { "type": "object", "description": "Serialized bioprism-devplat SandboxManifest with artifacts, execution profiles, capabilities, outputs, and explicit fail-closed policies." }
                 },
                 "required": ["manifest"]
             }

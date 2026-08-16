@@ -1185,3 +1185,14 @@ HTTP. `SecurityPrivacyAuditReport` preserves separate governance rows, canonical
 warning/blocking issues, `security_privacy_ready`, counts, guarantees, and limitations. The
 projection remains declaration-only: it does not scan hosts, authenticate people, validate law,
 execute red-team actions, erase records, or contact vendors. See SECURITY_PRIVACY_AUDIT.md.
+
+## Sandbox admission audit
+
+`SandboxManifestArgs` and `sandbox_admission_audit_report(...)` expose typed artifact lineage,
+rootless/read-only/no-escalation profiles, network and mount boundaries, exact capabilities,
+resource ceilings, quarantine, and reviewed output release across sync/async MCP and HTTP. The
+`SandboxAuditReport` retains artifact/profile/capability/boundary/resource/output rows, canonical
+digest, deterministic blocking and warning issues, `sandbox_ready`, guarantees, and limitations.
+It is a declaration-only admission projection: it does not execute code, mount paths, open
+sockets, inspect kernels, read or revoke secrets, operate quarantine storage, or attest runtime
+enforcement. See SANDBOX_ADMISSION_AUDIT.md.

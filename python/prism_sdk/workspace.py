@@ -102,6 +102,11 @@ from .security_privacy import (
     SecurityPrivacyManifestArgs,
     security_privacy_audit_report,
 )
+from .sandbox_admission import (
+    SandboxAuditReport,
+    SandboxManifestArgs,
+    sandbox_admission_audit_report,
+)
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -3040,6 +3045,17 @@ class Workspace:
 
         return security_privacy_audit_report(self.security_privacy_audit(request))
 
+    def sandbox_admission_audit(self, request: SandboxManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit artifact identity, sandbox isolation, capabilities, resources, and output release."""
+
+        normalized = request if isinstance(request, SandboxManifestArgs) else SandboxManifestArgs.from_wire(request)
+        return self.tool("sandbox_admission_audit", normalized.to_mcp_arguments())
+
+    def sandbox_admission_audit_report(self, request: SandboxManifestArgs | Mapping[str, Any]) -> SandboxAuditReport:
+        """Return typed sandbox admission evidence and fail-closed blockers."""
+
+        return sandbox_admission_audit_report(self.sandbox_admission_audit(request))
+
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive evaluation panel through MCP."""
 
@@ -5738,6 +5754,17 @@ class AsyncWorkspace:
         """Async counterpart to Workspace.security_privacy_audit_report."""
 
         return security_privacy_audit_report(await self.security_privacy_audit(request))
+
+    async def sandbox_admission_audit(self, request: SandboxManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.sandbox_admission_audit."""
+
+        normalized = request if isinstance(request, SandboxManifestArgs) else SandboxManifestArgs.from_wire(request)
+        return (await self.client.call_tool("sandbox_admission_audit", normalized.to_mcp_arguments())).require_ok()
+
+    async def sandbox_admission_audit_report(self, request: SandboxManifestArgs | Mapping[str, Any]) -> SandboxAuditReport:
+        """Async counterpart to Workspace.sandbox_admission_audit_report."""
+
+        return sandbox_admission_audit_report(await self.sandbox_admission_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.adaptive_panel`."""
