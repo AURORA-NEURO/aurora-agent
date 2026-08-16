@@ -215,6 +215,7 @@ pub mod report;
 pub mod release_pipeline;
 pub mod repro;
 pub mod security_privacy;
+pub mod security_program;
 pub mod sandbox_admission;
 pub mod surface;
 pub mod walkthrough;
@@ -285,6 +286,19 @@ pub use security_privacy::{
     SecurityPrivacyThreat, SecurityPrivacyThreatAudit, SecurityPrivacyThreatSeverity,
     SecurityPrivacyThreatStatus, SecurityPrivacyCounts, SECURITY_PRIVACY_AUDIT_SCHEMA,
     SECURITY_PRIVACY_MANIFEST_SCHEMA,
+};
+pub use security_program::{
+    SecurityProgramAudit, SecurityProgramCampaign, SecurityProgramCampaignAudit,
+    SecurityProgramCampaignStatus, SecurityProgramControlAudit, SecurityProgramControls,
+    SecurityProgramDisclosure, SecurityProgramDisclosureAudit, SecurityProgramDisclosureStage,
+    SecurityProgramError, SecurityProgramFinding, SecurityProgramFindingAudit,
+    SecurityProgramFindingSeverity, SecurityProgramFindingStatus, SecurityProgramIncident,
+    SecurityProgramIncidentAudit, SecurityProgramIncidentStatus, SecurityProgramIssue,
+    SecurityProgramIssueSeverity, SecurityProgramManifest, SecurityProgramPolicies,
+    SecurityProgramRemediation, SecurityProgramRemediationAudit, SecurityProgramRemediationStatus,
+    SecurityProgramScope, SecurityProgramScopeAudit, SecurityProgramScopeKind,
+    SecurityProgramSystem, SecurityProgramTimelineEvent, SECURITY_PROGRAM_AUDIT_SCHEMA,
+    SECURITY_PROGRAM_MANIFEST_SCHEMA,
 };
 pub use sandbox_admission::{
     SandboxArtifact, SandboxArtifactAudit, SandboxArtifactKind, SandboxAudit, SandboxBoundaryAudit,

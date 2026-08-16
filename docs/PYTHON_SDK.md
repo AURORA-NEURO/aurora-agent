@@ -1196,3 +1196,12 @@ digest, deterministic blocking and warning issues, `sandbox_ready`, guarantees, 
 It is a declaration-only admission projection: it does not execute code, mount paths, open
 sockets, inspect kernels, read or revoke secrets, operate quarantine storage, or attest runtime
 enforcement. See SANDBOX_ADMISSION_AUDIT.md.
+
+## Security, safety, and red-team program audit
+
+`SecurityProgramManifestArgs` and `security_program_audit_report(...)` expose typed scope,
+campaign, finding, remediation, incident, disclosure, and control contracts across sync/async
+MCP and HTTP. `SecurityProgramAuditReport` retains seven row families, canonical digest,
+deterministic blocking/warning issues, `security_program_ready`, counts, guarantees, and
+limitations. The projection does not run scanners, fuzzers, probes, containment, notifications,
+publication, or live-control checks. See SECURITY_PROGRAM_AUDIT.md.

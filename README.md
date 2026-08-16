@@ -937,6 +937,15 @@ row families and blocking issue rows; it is not proof that code ran safely or th
 runtime enforced the declaration. The route never executes code, mounts paths, opens sockets,
 reads secrets, or mutates quarantine. See docs/SANDBOX_ADMISSION_AUDIT.md.
 
+## Security, safety, and red-team program audit
+
+The `security_program_audit` route audits the program around red-team work: authorized scope,
+independent campaign review, immutable evidence, finding-to-remediation closure, incident
+containment/closure, sequential disclosure, public-safety review, regression witnesses, and
+explicit program controls. `security_program_ready` is derived from seven independent row
+families and blocking issues; it is not proof that scanners ran, incidents were contained,
+disclosures were sent, or controls are live. See docs/SECURITY_PROGRAM_AUDIT.md.
+
 ## License
 
 Apache-2.0

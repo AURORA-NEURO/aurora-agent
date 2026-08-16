@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 165);
+    assert_eq!(tools.len(), 166);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3829,6 +3829,51 @@ fn sandbox_admission_audit_keeps_artifact_isolation_capability_resource_and_outp
 }
 
 #[test]
+fn security_program_audit_keeps_scope_campaign_finding_incident_and_disclosure_layers_explicit() {
+    let mut server = server();
+    let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let manifest = json!({
+        "schema": "bioprism-security-program/0.1",
+        "system": { "id": "aurora-security", "version": "0.1.0", "owner": "security-owner", "mission": "bounded adversarial assurance" },
+        "scopes": [{ "id": "api-staging", "name": "staging API", "kind": "api", "target": "api-staging.internal", "owner": "service-owner", "authorization_digest": digest, "allowed_methods": ["authenticated-read", "rate-limited-input"], "forbidden_actions": ["production-write", "credential-exfiltration"], "environments": ["isolated-staging"], "data_handling": "synthetic fixtures only" }],
+        "campaigns": [{ "id": "campaign-1", "scope": "api-staging", "operator": "red-team", "independent_reviewer": "independent-reviewer", "methodology": "bounded mutation and manual review", "hypothesis": "invalid input can cross a trust boundary", "status": "completed", "started_at": "2026-01-01", "completed_at": "2026-01-02", "evidence_digest": digest, "stop_conditions": ["stop on production boundary"], "finding_ids": ["finding-1"] }],
+        "findings": [{ "id": "finding-1", "campaign": "campaign-1", "title": "boundary mismatch", "severity": "high", "status": "closed", "evidence_digest": digest, "reproduction_digest": digest, "regression_digest": digest, "discovered_at": "2026-01-02", "affected_targets": ["api-staging"], "remediation_ids": ["remediation-1"], "incident_id": "incident-1", "public_safe": true }],
+        "remediations": [{ "id": "remediation-1", "finding": "finding-1", "owner": "service-owner", "action": "validate boundary before dispatch", "status": "complete", "due_at": "2026-01-10", "verification_digest": digest }],
+        "incidents": [{ "id": "incident-1", "finding": "finding-1", "severity": "high", "owner": "incident-owner", "status": "closed", "opened_at": "2026-01-02", "contained_at": "2026-01-02", "closed_at": "2026-01-03", "containment_evidence": digest, "closure_evidence": digest, "notification_required": true, "timeline": [{ "epoch": 1, "actor": "incident-owner", "event": "incident opened", "evidence_digest": digest }, { "epoch": 2, "actor": "incident-owner", "event": "containment verified", "evidence_digest": digest }] }],
+        "disclosures": [{ "id": "advisory-1", "finding": "finding-1", "stage": "advisory", "audience": "affected operators", "requested_at": "2026-01-04", "approver": "independent-reviewer", "approval_digest": digest, "advisory_digest": digest, "published_at": "2026-01-04" }],
+        "controls": { "scope_authorization": true, "operator_separation": true, "independent_review": true, "evidence_retention": true, "remediation_tracking": true, "incident_response": true, "disclosure_review": true, "regression_testing": true }
+    });
+    let result = call(&mut server, "security_program_audit", json!({ "manifest": manifest.clone() }));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["security_program_ready"], json!(true));
+    assert_eq!(result["audit"]["counts"]["authorized_scopes"], json!(1));
+    assert_eq!(result["audit"]["finding_audits"][0]["incident_valid"], json!(true));
+    assert_eq!(result["audit"]["remediation_audits"][0]["verification_valid"], json!(true));
+    assert_eq!(result["audit"]["incident_audits"][0]["closure_valid"], json!(true));
+    assert_eq!(result["audit"]["disclosure_audits"][0]["approval_valid"], json!(true));
+
+    let mut refused = manifest;
+    refused["scopes"][0]["authorization_digest"] = Value::Null;
+    refused["campaigns"][0]["independent_reviewer"] = Value::Null;
+    refused["findings"][0]["evidence_digest"] = Value::Null;
+    refused["remediations"][0]["verification_digest"] = Value::Null;
+    refused["incidents"][0]["closure_evidence"] = Value::Null;
+    refused["controls"]["disclosure_review"] = json!(false);
+    let refusal = call(&mut server, "security_program_audit", json!({ "manifest": refused }));
+    assert_eq!(refusal["ok"], json!(true));
+    assert_eq!(refusal["valid"], json!(false));
+    assert_eq!(refusal["security_program_ready"], json!(false));
+    let issues = refusal["audit"]["issues"].as_array().unwrap();
+    assert!(issues.iter().any(|issue| issue["code"] == "scope_authorization_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "campaign_independent_review_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "finding_evidence_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "remediation_verification_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "incident_closure_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "required_control_disabled"));
+}
+
+#[test]
 fn developer_workbench_audits_notebook_digests_queries_dashboard_and_plans_ci() {
     let mut server = server();
     let digest = "a".repeat(64);
@@ -4365,12 +4410,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(165));
-    assert_eq!(result["advertised_tool_count"], json!(165));
+    assert_eq!(result["unique_catalog_tools"], json!(166));
+    assert_eq!(result["advertised_tool_count"], json!(166));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(165));
-    assert_eq!(result["schema_quality"]["valid"], json!(165));
+    assert_eq!(result["schema_quality"]["checked"], json!(166));
+    assert_eq!(result["schema_quality"]["valid"], json!(166));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

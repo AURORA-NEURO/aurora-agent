@@ -279,6 +279,10 @@ cells, advisory-gated disclosure, deny-by-default crossings, across-trial evalua
 complete-lineage containment, and observed-versus-asserted evidence explicit; it does not create
 fuzzers, runtime sandboxes, detectors, containment execution, notifications, signing, external
 checkpoints, or durable security infrastructure.
+`security_program_audit` now adds the surrounding program contract: authorized scope, independent
+campaign review, immutable evidence, finding/remediation closure, incident timelines, sequential
+disclosure, publication safety, and regression controls. It remains declaration-only and does not
+run scanners, fuzzers, probes, containment, notifications, publication, or live control checks.
 `biocapability_evidence_audit` now composes the metrics profile with an explicit nine-dimension
 evidence matrix: grounding, information acquisition, resource efficiency, temporal validity,
 cross-modal consistency, causal identification, reproducibility, translation maturity, and

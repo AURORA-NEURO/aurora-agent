@@ -311,6 +311,7 @@ from .release_pipeline import ReleasePipelineAuditReport, ReleasePipelineManifes
 from .operational_readiness import OperationalReadinessAuditReport, OperationalReadinessManifestArgs, operational_readiness_audit_report
 from .security_privacy import SecurityPrivacyAuditReport, SecurityPrivacyManifestArgs, security_privacy_audit_report
 from .sandbox_admission import SandboxAuditReport, SandboxManifestArgs, sandbox_admission_audit_report
+from .security_program import SecurityProgramAuditReport, SecurityProgramManifestArgs, security_program_audit_report
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2925,6 +2926,17 @@ class ApiClient:
         """Return typed sandbox admission evidence through HTTP."""
 
         return sandbox_admission_audit_report(self.sandbox_admission_audit(request))
+
+    def security_program_audit(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit the security, safety, and red-team program through HTTP."""
+
+        normalized = request if isinstance(request, SecurityProgramManifestArgs) else SecurityProgramManifestArgs.from_wire(request)
+        return self.call_tool("security_program_audit", normalized.to_mcp_arguments())
+
+    def security_program_audit_report(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> SecurityProgramAuditReport:
+        """Return typed security-program evidence through HTTP."""
+
+        return security_program_audit_report(self.security_program_audit(request))
 
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive panel through the HTTP gateway."""
@@ -5593,6 +5605,17 @@ class AsyncApiClient:
         """Return async typed sandbox admission evidence through HTTP."""
 
         return sandbox_admission_audit_report(await self.sandbox_admission_audit(request))
+
+    async def security_program_audit(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async security-program audit through HTTP."""
+
+        normalized = request if isinstance(request, SecurityProgramManifestArgs) else SecurityProgramManifestArgs.from_wire(request)
+        return await self.call_tool("security_program_audit", normalized.to_mcp_arguments())
+
+    async def security_program_audit_report(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> SecurityProgramAuditReport:
+        """Return async typed security-program evidence through HTTP."""
+
+        return security_program_audit_report(await self.security_program_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async adaptive panel audit through the HTTP gateway."""

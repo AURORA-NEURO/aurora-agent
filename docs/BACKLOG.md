@@ -416,6 +416,13 @@ release. It does not replace a kernel sandbox, runtime admission controller, sca
 revocation, quarantine storage, or operator response; the runtime/process portion of `36.07` and
 the program portion of `36.19` therefore remain explicit rather than being relabelled complete.
 
+The `security_program_audit` route adds an artifact-level companion for the program portion of
+`36.19`: authorized scope, independent campaign review, evidence, finding/remediation closure,
+incident timelines, disclosure sequencing, publication safety, and regression controls. It does
+not replace scanners, a live incident system, containment, notification, disclosure delivery,
+vendor coordination, or durable security operations; those runtime and external-process claims
+remain explicit.
+
 ## §19 Reference Examples — 3 uncovered
 
 - `19.01` Decision Cell Example

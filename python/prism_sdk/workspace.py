@@ -107,6 +107,11 @@ from .sandbox_admission import (
     SandboxManifestArgs,
     sandbox_admission_audit_report,
 )
+from .security_program import (
+    SecurityProgramAuditReport,
+    SecurityProgramManifestArgs,
+    security_program_audit_report,
+)
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -3056,6 +3061,17 @@ class Workspace:
 
         return sandbox_admission_audit_report(self.sandbox_admission_audit(request))
 
+    def security_program_audit(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit authorized scope, red-team evidence, remediation, incidents, disclosure, and controls."""
+
+        normalized = request if isinstance(request, SecurityProgramManifestArgs) else SecurityProgramManifestArgs.from_wire(request)
+        return self.tool("security_program_audit", normalized.to_mcp_arguments())
+
+    def security_program_audit_report(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> SecurityProgramAuditReport:
+        """Return typed security-program evidence and fail-closed blockers."""
+
+        return security_program_audit_report(self.security_program_audit(request))
+
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive evaluation panel through MCP."""
 
@@ -5765,6 +5781,17 @@ class AsyncWorkspace:
         """Async counterpart to Workspace.sandbox_admission_audit_report."""
 
         return sandbox_admission_audit_report(await self.sandbox_admission_audit(request))
+
+    async def security_program_audit(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.security_program_audit."""
+
+        normalized = request if isinstance(request, SecurityProgramManifestArgs) else SecurityProgramManifestArgs.from_wire(request)
+        return (await self.client.call_tool("security_program_audit", normalized.to_mcp_arguments())).require_ok()
+
+    async def security_program_audit_report(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> SecurityProgramAuditReport:
+        """Async counterpart to Workspace.security_program_audit_report."""
+
+        return security_program_audit_report(await self.security_program_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.adaptive_panel`."""

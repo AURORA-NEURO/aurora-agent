@@ -134,8 +134,10 @@ use bioprism_devplat::{
     EngineeringManifest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
     SandboxManifest,
+    SecurityProgramManifest,
     CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
     RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA,
+    SECURITY_PROGRAM_AUDIT_SCHEMA,
     MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
@@ -1473,6 +1475,7 @@ impl Server {
             "operational_readiness_audit" => self.operational_readiness_audit(&arguments),
             "security_privacy_audit" => self.security_privacy_audit(&arguments),
             "sandbox_admission_audit" => self.sandbox_admission_audit(&arguments),
+            "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
@@ -24320,6 +24323,54 @@ impl Server {
         }))
     }
 
+    fn security_program_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_manifest = arguments
+            .get("manifest")
+            .cloned()
+            .ok_or("manifest is required and must be a serialized SecurityProgramManifest")?;
+        let encoded = serde_json::to_vec(&raw_manifest)
+            .map_err(|error| format!("cannot measure security program manifest: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("manifest exceeds the 20000000-byte safety bound".into());
+        }
+        let manifest: SecurityProgramManifest = serde_json::from_value(raw_manifest)
+            .map_err(|error| format!("invalid security program manifest: {error}"))?;
+        let audit = manifest
+            .audit()
+            .map_err(|error| format!("cannot audit security program manifest: {error}"))?;
+        let blocking_issue_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Blocking)
+            .count();
+        let warning_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Warning)
+            .count();
+        Ok(json!({
+            "ok": true,
+            "workflow": "security_program_audit",
+            "schema": SECURITY_PROGRAM_AUDIT_SCHEMA,
+            "manifest_digest": audit.digest,
+            "valid": audit.valid,
+            "security_program_ready": audit.valid,
+            "blocking_issue_count": blocking_issue_count,
+            "warning_count": warning_count,
+            "audit": audit,
+            "guarantees": [
+                "authorized scope, campaign independence, evidence, findings, remediation, incidents, disclosure, and regression controls remain separate evidence layers",
+                "high and critical findings cannot become ready without evidence, action, incident linkage, and bounded closure",
+                "disclosure sequencing and public-safety review are explicit rather than hidden in a delivery boolean",
+            ],
+            "limitations": [
+                "the route does not run scanners, fuzzers, probes, sandboxes, containment actions, or live controls",
+                "the route does not contact vendors, publish disclosures, mutate incidents, or verify a production boundary",
+                "scope authorization, evidence digests, approvals, timestamps, and control states are caller-declared",
+            ],
+        }))
+    }
+
     fn developer_delivery_audit(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery input: {error}"))?;
@@ -26648,7 +26699,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "security_program_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -28846,6 +28897,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "manifest": { "type": "object", "description": "Serialized bioprism-devplat SandboxManifest with artifacts, execution profiles, capabilities, outputs, and explicit fail-closed policies." }
+                },
+                "required": ["manifest"]
+            }
+        }),
+        json!({
+            "name": "security_program_audit",
+            "description": "Validate a bounded machine-readable security, safety, and red-team program manifest. It audits authorized scope, campaign independence and evidence, finding-to-remediation closure, incident response, disclosure sequencing, public-safety review, regression witnesses, and explicit program controls; it returns deterministic program readiness without running scanners, fuzzers, probes, containment, notifications, or publication.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifest": { "type": "object", "description": "Serialized bioprism-devplat SecurityProgramManifest with scopes, campaigns, findings, remediations, incidents, disclosures, controls, and explicit policies." }
                 },
                 "required": ["manifest"]
             }

@@ -681,3 +681,12 @@ reviewed output release across six independent audit row families. `sandbox_read
 declaration-derived admission posture, not proof of code execution safety, kernel/runtime
 enforcement, secret isolation, quarantine operation, or output publication. See
 SANDBOX_ADMISSION_AUDIT.md.
+
+## Security, safety, and red-team program audit
+
+`ApiClient.securityProgramAudit(...)` accepts `SecurityProgramManifestArgs` and returns
+`SecurityProgramToolResult`. Types retain authorized scope, independent campaign evidence,
+finding/remediation closure, incident timelines, disclosure sequencing, publication safety,
+regression witnesses, counts, and seven independent audit row families. `security_program_ready`
+is declaration-derived, not proof that scanners ran, containment occurred, disclosures were sent,
+or controls are live. See SECURITY_PROGRAM_AUDIT.md.

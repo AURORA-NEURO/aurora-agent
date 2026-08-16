@@ -351,6 +351,36 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["only confirmed findings can become regression cells"],
         limitations: ["this endpoint replays typed contracts; it does not run fuzzers"],
       } } } });
+      if (path === "/v1/tools/security_program_audit") return jsonResponse({ ok: true, tool: "security_program_audit", request_id: "r26", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "security_program_audit",
+        schema: "bioprism-security-program-audit/0.1",
+        manifest_digest: "a".repeat(64),
+        valid: true,
+        security_program_ready: true,
+        blocking_issue_count: 0,
+        warning_count: 0,
+        audit: {
+          schema: "bioprism-security-program-audit/0.1",
+          manifest_schema: "bioprism-security-program/0.1",
+          digest: "a".repeat(64),
+          valid: true,
+          system_id: "aurora-security",
+          counts: { scopes: 1, authorized_scopes: 1, campaigns: 1, completed_campaigns: 1, findings: 1, high_or_worse_findings: 1, actionable_findings: 0, remediations: 1, completed_remediations: 1, incidents: 1, open_incidents: 0, closed_incidents: 1, disclosures: 1, advisory_disclosures: 1, public_disclosures: 0, enabled_controls: 8 },
+          scope_audits: [{ scope_id: "api-staging", authorization_valid: true, methods_valid: true, guardrails_valid: true, environments_valid: true, ready: true }],
+          campaign_audits: [{ campaign_id: "campaign-1", scope_valid: true, operator_present: true, independent_review_valid: true, methodology_valid: true, evidence_valid: true, complete: true, ready: true }],
+          finding_audits: [{ finding_id: "finding-1", campaign_valid: true, evidence_valid: true, reproduction_valid: true, severity_requires_action: true, remediation_valid: true, incident_required: true, incident_valid: true, regression_present: true, ready: true }],
+          remediation_audits: [{ remediation_id: "remediation-1", finding_valid: true, owner_valid: true, completion_valid: true, verification_valid: true, ready: true }],
+          incident_audits: [{ incident_id: "incident-1", finding_valid: true, timeline_valid: true, containment_valid: true, closure_valid: true, notification_valid: true, ready: true }],
+          disclosure_audits: [{ disclosure_id: "advisory-1", finding_valid: true, stage_order_valid: true, approval_valid: true, advisory_valid: true, publication_valid: true, ready: true }],
+          control_audits: [{ control: "independent_review", enabled: true, required: true, ready: true }],
+          issues: [],
+          guarantees: ["program layers remain separate"],
+          limitations: ["declaration only"],
+        },
+        guarantees: ["program layers remain separate"],
+        limitations: ["declaration only"],
+      } } } });
       if (path === "/v1/tools/factory_lifecycle_simulate") return jsonResponse({ ok: true, tool: "factory_lifecycle_simulate", request_id: "r25", mcp: { result: { structuredContent: {
         ok: true,
         action_count: 3,
@@ -1621,6 +1651,20 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(sandboxAdmission.mcp.result.structuredContent.sandbox_ready, true);
   assert.equal(sandboxAdmission.mcp.result.structuredContent.audit.profile_audits[0].isolation_valid, true);
   assert.equal(sandboxAdmission.mcp.result.structuredContent.audit.output_audits[0].quarantined, true);
+  const securityProgram = await client.securityProgramAudit({
+    system: { id: "aurora-security", version: "0.1.0", owner: "security-owner", mission: "bounded adversarial assurance" },
+    scopes: [{ id: "api-staging", name: "staging API", kind: "api", target: "api-staging.internal", owner: "service-owner", authorization_digest: "a".repeat(64), allowed_methods: ["authenticated-read"], forbidden_actions: ["production-write"], environments: ["isolated-staging"], data_handling: "synthetic fixtures only" }],
+    campaigns: [{ id: "campaign-1", scope: "api-staging", operator: "red-team", independent_reviewer: "independent-reviewer", methodology: "bounded mutation", hypothesis: "boundary crossing", status: "completed", started_at: "2026-01-01", completed_at: "2026-01-02", evidence_digest: "a".repeat(64), stop_conditions: ["stop on production boundary"], finding_ids: ["finding-1"] }],
+    findings: [{ id: "finding-1", campaign: "campaign-1", title: "boundary mismatch", severity: "high", status: "closed", evidence_digest: "a".repeat(64), reproduction_digest: "a".repeat(64), regression_digest: "a".repeat(64), discovered_at: "2026-01-02", affected_targets: ["api-staging"], remediation_ids: ["remediation-1"], incident_id: "incident-1", public_safe: true }],
+    remediations: [{ id: "remediation-1", finding: "finding-1", owner: "service-owner", action: "validate boundary", status: "complete", due_at: "2026-01-10", verification_digest: "a".repeat(64) }],
+    incidents: [{ id: "incident-1", finding: "finding-1", severity: "high", owner: "incident-owner", status: "closed", opened_at: "2026-01-02", contained_at: "2026-01-02", closed_at: "2026-01-03", containment_evidence: "a".repeat(64), closure_evidence: "a".repeat(64), notification_required: true, timeline: [{ epoch: 1, actor: "incident-owner", event: "opened", evidence_digest: "a".repeat(64) }] }],
+    disclosures: [{ id: "advisory-1", finding: "finding-1", stage: "advisory", audience: "affected operators", requested_at: "2026-01-04", approver: "independent-reviewer", approval_digest: "a".repeat(64), advisory_digest: "a".repeat(64), published_at: "2026-01-04" }],
+    controls: { scope_authorization: true, operator_separation: true, independent_review: true, evidence_retention: true, remediation_tracking: true, incident_response: true, disclosure_review: true, regression_testing: true },
+  });
+  assert.equal(securityProgram.mcp.result.structuredContent.schema, "bioprism-security-program-audit/0.1");
+  assert.equal(securityProgram.mcp.result.structuredContent.security_program_ready, true);
+  assert.equal(securityProgram.mcp.result.structuredContent.audit.finding_audits[0].incident_valid, true);
+  assert.equal(securityProgram.mcp.result.structuredContent.audit.disclosure_audits[0].approval_valid, true);
   const operational = await client.operationalReadinessAudit({
     service: { id: "aurora-api", version: "0.1.0", owner: "platform", criticality: "critical" },
     contracts: [{ id: "availability", kind: "availability", objective: "serve requests", target: "99.9%", required: true }],
