@@ -582,8 +582,10 @@ post-treatment progression, threshold sensitivity, and non-identifiable change s
 reports indexed biological and record orders, and exposes a versioned visibility partition at a
 caller-supplied cutoff. Its typed SDK projection rejects forged clock copies, order indices, and
 leakage partitions; see [`docs/ONCO_WORLDLINE_VIEW.md`](docs/ONCO_WORLDLINE_VIEW.md).
-`onco_classification_check` runs the integrated molecular criteria table
-without treating uncollected assays as negative. `oncoworlds_identity_join` checks participant,
+`onco_classification_check` runs the integrated molecular criteria table without treating
+uncollected assays as negative, and its typed projection preserves all five resolution states,
+obligations, satisfied evidence, and panel-state accounting; see [`docs/ONCO_CLASSIFICATION_CHECK.md`](docs/ONCO_CLASSIFICATION_CHECK.md).
+`oncoworlds_identity_join` checks participant,
 lesion, specimen, disease-epoch, relation, and permissible-use boundaries and returns typed join
 refusals rather than silently discarding cross-modal mismatches.
 `oncoworlds_model_transport` checks whether a model-system result can carry a declared, lossy

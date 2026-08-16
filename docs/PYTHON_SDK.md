@@ -186,10 +186,10 @@ invent defaults:
   `OncoWorldlineReport.timepoint_records` exposes typed clock and visibility projections; a cutoff
   is never inferred from a record timestamp, and visible/hidden partitions are required only when
   the caller explicitly requested filtering. See `docs/ONCO_WORLDLINE_VIEW.md`.
-- `OncoClassificationArgs`/`onco_classification_report(...)` preserve integrated versus
-  unresolved molecular classification, panel states, and prioritized assay obligations. The
-  client refuses contradictory reports where an unresolved result supplies an entity or an
-  integrated result omits one; uncollected assays remain JSON state records rather than negatives.
+- `OncoClassificationArgs`/`onco_classification_report(...)` preserve the five tagged resolution
+  states, typed panel observations, satisfied evidence, and prioritized assay obligations. The
+  client refuses contradictory variants, forged panel/obligation counts, and uncollected assays
+  represented as negatives. See `docs/ONCO_CLASSIFICATION_CHECK.md`.
 - `OncoIdentityJoinArgs`/`onco_identity_join_report(...)` expose participant/lesion/specimen/
   imaging-series joins with optional identity evidence and epoch bridges. `joinable=False` is a
   successful, auditable domain verdict—not a transport exception—and `bridge_declared` remains

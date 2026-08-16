@@ -10063,14 +10063,32 @@ impl Server {
             return Err("molecular marker panel exceeds the 100-marker safety bound".into());
         }
         let resolution = onco_classify(histology, &panel);
+        let resolution_value =
+            serde_json::to_value(&resolution).map_err(|error| error.to_string())?;
+        let resolution_kind = resolution_value
+            .get("resolution")
+            .and_then(Value::as_str)
+            .ok_or("classification resolution must carry a tagged resolution kind")?;
+        let obligation_count = resolution.obligations().len();
+        let observed_panel_state_count = panel
+            .iter()
+            .filter(|(_, state)| state.is_observed())
+            .count();
+        let unobserved_panel_state_count = states.len().saturating_sub(observed_panel_state_count);
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/onco-classification-check/0.1",
             "histology": histology,
-            "resolution": resolution,
+            "resolution": resolution_value,
+            "resolution_kind": resolution_kind,
             "is_integrated": resolution.is_integrated(),
             "entity": resolution.entity(),
             "obligations": resolution.obligations(),
+            "obligation_count": obligation_count,
             "panel_states": states,
+            "panel_state_count": states.len(),
+            "observed_panel_state_count": observed_panel_state_count,
+            "unobserved_panel_state_count": unobserved_panel_state_count,
             "guarantees": [
                 "histology selects candidates but never supplies a molecular call",
                 "unobserved assays remain obligations and are never treated as negative",

@@ -5766,7 +5766,15 @@ fn onco_classification_check_preserves_unresolved_obligations_and_integrated_cal
         }),
     );
     assert_eq!(unresolved["ok"], json!(true));
+    assert_eq!(
+        unresolved["schema"],
+        json!("bioprism-mcp/onco-classification-check/0.1")
+    );
     assert_eq!(unresolved["is_integrated"], json!(false));
+    assert_eq!(unresolved["resolution_kind"], json!("unresolved"));
+    assert_eq!(unresolved["panel_state_count"], json!(0));
+    assert_eq!(unresolved["observed_panel_state_count"], json!(0));
+    assert_eq!(unresolved["unobserved_panel_state_count"], json!(0));
     assert_eq!(unresolved["resolution"]["resolution"], json!("unresolved"));
     assert!(!unresolved["obligations"].as_array().unwrap().is_empty());
 
@@ -5783,6 +5791,10 @@ fn onco_classification_check_preserves_unresolved_obligations_and_integrated_cal
     );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["is_integrated"], json!(true));
+    assert_eq!(result["resolution_kind"], json!("integrated"));
+    assert_eq!(result["obligation_count"], json!(0));
+    assert_eq!(result["observed_panel_state_count"], json!(2));
+    assert_eq!(result["unobserved_panel_state_count"], json!(0));
     assert_eq!(
         result["entity"],
         json!("oligodendroglioma_idh_mutant1p19q_codeleted")

@@ -556,6 +556,145 @@ class OncoClassificationArgs:
         return {"histology": self.histology, "panel": dict(self.panel)}
 
 
+ONCO_CLASSIFICATION_SCHEMA = "bioprism-mcp/onco-classification-check/0.1"
+ONCO_CLASSIFICATION_RESOLUTION_KINDS = frozenset({"integrated", "provisional", "unresolved", "mixed", "not_otherwise_resolved"})
+ONCO_CLASSIFICATION_MARKERS = frozenset({"idh_mutation", "codeletion1p19q", "tert_promoter_mutation", "egfr_amplification", "chromosome7_gain10_loss", "cdkn2a_cdkn2b_homozygous_deletion", "h3k27_alteration", "h3g34_mutation"})
+ONCO_CLASSIFICATION_ROLES = frozenset({"required", "supportive", "exclusionary"})
+ONCO_CLASSIFICATION_CALLS = frozenset({"present", "absent"})
+ONCO_CLASSIFICATION_STATUSES = frozenset({"missing", "not_collected", "technically_failed", "below_detection", "not_applicable", "redacted"})
+
+
+@dataclass(frozen=True)
+class OncoMarkerObservationProjection:
+    """An observed call or an explicit reason why no call exists."""
+
+    raw: dict[str, Any]
+    observed: bool
+    call: str | None
+    status: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoMarkerObservationProjection":
+        raw = _route_mapping("oncology marker observation", value)
+        has_value = "value" in raw
+        has_status = "unobserved" in raw
+        if has_value == has_status:
+            raise ArgumentError("oncology marker observations must carry exactly one value or unobserved state")
+        if has_value:
+            call = _route_text("oncology marker call", raw.get("value"))
+            if call not in ONCO_CLASSIFICATION_CALLS:
+                raise ArgumentError(f"unknown oncology marker call: {call!r}")
+            return cls(raw, True, call, None)
+        status = _route_text("oncology marker observation status", raw.get("unobserved"))
+        if status not in ONCO_CLASSIFICATION_STATUSES:
+            raise ArgumentError(f"unknown oncology marker observation status: {status!r}")
+        return cls(raw, False, None, status)
+
+
+@dataclass(frozen=True)
+class OncoClassificationPanelStateProjection:
+    raw: dict[str, Any]
+    marker: str
+    state: OncoMarkerObservationProjection
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClassificationPanelStateProjection":
+        raw = _route_mapping("oncology panel state", value)
+        marker = _route_text("oncology panel marker", raw.get("marker"))
+        if marker not in ONCO_CLASSIFICATION_MARKERS:
+            raise ArgumentError(f"unknown oncology panel marker: {marker!r}")
+        return cls(raw, marker, OncoMarkerObservationProjection.from_wire(raw.get("state")))
+
+
+@dataclass(frozen=True)
+class OncoClassificationObligationProjection:
+    raw: dict[str, Any]
+    marker: str
+    role: str
+    state: OncoMarkerObservationProjection
+    discriminates: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClassificationObligationProjection":
+        raw = _route_mapping("oncology classification obligation", value)
+        marker = _route_text("oncology obligation marker", raw.get("marker"))
+        role = _route_text("oncology obligation role", raw.get("role"))
+        if marker not in ONCO_CLASSIFICATION_MARKERS or role not in ONCO_CLASSIFICATION_ROLES:
+            raise ArgumentError("oncology obligation marker or role is outside the classification vocabulary")
+        return cls(
+            raw,
+            marker,
+            role,
+            OncoMarkerObservationProjection.from_wire(raw.get("state")),
+            _route_count("oncology obligation discriminates", raw.get("discriminates")),
+        )
+
+
+@dataclass(frozen=True)
+class OncoClassificationSatisfiedEvidenceProjection:
+    raw: dict[str, Any]
+    marker: str
+    role: str
+    call: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClassificationSatisfiedEvidenceProjection":
+        raw = _route_mapping("oncology satisfied evidence", value)
+        marker = _route_text("oncology satisfied evidence marker", raw.get("marker"))
+        role = _route_text("oncology satisfied evidence role", raw.get("role"))
+        call = _route_text("oncology satisfied evidence call", raw.get("call"))
+        if marker not in ONCO_CLASSIFICATION_MARKERS or role not in ONCO_CLASSIFICATION_ROLES or call not in ONCO_CLASSIFICATION_CALLS:
+            raise ArgumentError("oncology satisfied evidence is outside the classification vocabulary")
+        return cls(raw, marker, role, call)
+
+
+@dataclass(frozen=True)
+class OncoClassificationResolutionProjection:
+    """The mutually exclusive classification state and its evidence obligations."""
+
+    raw: dict[str, Any]
+    kind: str
+    entity: str | None
+    candidate: str | None
+    candidates: tuple[str, ...]
+    excluded: tuple[str, ...]
+    histology: str | None
+    grade: dict[str, Any] | None
+    evidence: tuple[OncoClassificationSatisfiedEvidenceProjection, ...]
+    obligations: tuple[OncoClassificationObligationProjection, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClassificationResolutionProjection":
+        raw = _route_mapping("oncology classification resolution", value)
+        kind = _route_text("oncology classification resolution kind", raw.get("resolution"))
+        if kind not in ONCO_CLASSIFICATION_RESOLUTION_KINDS:
+            raise ArgumentError(f"unknown oncology classification resolution kind: {kind!r}")
+        entity = None if raw.get("entity") is None else _route_text("oncology classification entity", raw.get("entity"))
+        candidate = None if raw.get("candidate") is None else _route_text("oncology classification candidate", raw.get("candidate"))
+        candidates = _route_strings("oncology classification candidates", raw.get("candidates", []))
+        excluded = _route_strings("oncology classification excluded", raw.get("excluded", []))
+        histology = None if raw.get("histology") is None else _route_text("oncology classification resolution histology", raw.get("histology"))
+        grade_value = raw.get("grade")
+        grade = None if grade_value is None else _route_mapping("oncology classification grade", grade_value)
+        evidence = tuple(OncoClassificationSatisfiedEvidenceProjection.from_wire(item) for item in _array("oncology classification evidence", raw.get("evidence", [])))
+        obligations = tuple(OncoClassificationObligationProjection.from_wire(item) for item in _array("oncology classification obligations", raw.get("obligations", [])))
+        if kind == "integrated" and (entity is None or not evidence or candidate is not None or candidates or obligations):
+            raise ArgumentError("integrated oncology classification must carry entity/evidence only")
+        if kind == "provisional" and (candidate is None or not obligations or entity is not None or candidates):
+            raise ArgumentError("provisional oncology classification must carry one candidate and obligations")
+        if kind == "unresolved" and (not candidates or not obligations or entity is not None or candidate is not None):
+            raise ArgumentError("unresolved oncology classification must carry candidates and obligations")
+        if kind == "mixed" and (not candidates or entity is not None or candidate is not None or obligations):
+            raise ArgumentError("mixed oncology classification must carry candidates without obligations")
+        if kind == "not_otherwise_resolved" and (histology is None or not excluded or entity is not None or candidate is not None or candidates or obligations):
+            raise ArgumentError("not-otherwise-resolved classification must carry histology and exclusions")
+        return cls(raw, kind, entity, candidate, candidates, excluded, histology, grade, evidence, obligations)
+
+    @property
+    def is_integrated(self) -> bool:
+        return self.kind == "integrated"
+
+
 @dataclass(frozen=True)
 class OncoClassificationReport:
     raw: dict[str, Any]
@@ -568,12 +707,25 @@ class OncoClassificationReport:
     panel_states: tuple[dict[str, Any], ...]
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    resolution_kind: str | None = None
+    resolution_record: OncoClassificationResolutionProjection | None = None
+    obligation_records: tuple[OncoClassificationObligationProjection, ...] = ()
+    panel_state_records: tuple[OncoClassificationPanelStateProjection, ...] = ()
+    obligation_count: int | None = None
+    panel_state_count: int | None = None
+    observed_panel_state_count: int | None = None
+    unobserved_panel_state_count: int | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoClassificationReport":
         raw = _projection_payload(value, description="oncology classification", direct_keys=("resolution", "panel_states"))
         if not _bool("oncology classification ok", raw.get("ok")):
             raise ArgumentError("oncology classification is not successful")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("oncology classification schema", schema_value)
+        if schema is not None and schema != ONCO_CLASSIFICATION_SCHEMA:
+            raise ArgumentError(f"unknown oncology classification schema: {schema!r}")
         integrated = _bool("oncology classification is_integrated", raw.get("is_integrated"))
         entity_value = raw.get("entity")
         entity = None if entity_value is None else _route_text("oncology classification entity", entity_value)
@@ -581,6 +733,20 @@ class OncoClassificationReport:
             raise ArgumentError("integrated classification and entity do not reconcile")
         obligations = tuple(_route_mapping("oncology classification obligation", item) for item in _array("oncology classification obligations", raw.get("obligations")))
         states = tuple(_route_mapping("oncology panel state", item) for item in _array("oncology classification panel_states", raw.get("panel_states")))
+        resolution_record = OncoClassificationResolutionProjection.from_wire(raw.get("resolution"))
+        resolution_kind = _route_text("oncology classification resolution_kind", raw.get("resolution_kind"))
+        if resolution_kind != resolution_record.kind or integrated != resolution_record.is_integrated or entity != resolution_record.entity:
+            raise ArgumentError("oncology classification summary does not reconcile with its resolution record")
+        obligation_records = tuple(OncoClassificationObligationProjection.from_wire(item) for item in obligations)
+        if tuple(item.raw for item in obligation_records) != obligations or tuple(item.raw for item in resolution_record.obligations) != obligations:
+            raise ArgumentError("oncology classification obligations do not reconcile with the resolution")
+        panel_state_records = tuple(OncoClassificationPanelStateProjection.from_wire(item) for item in states)
+        obligation_count = _route_count("oncology obligation_count", raw.get("obligation_count"))
+        panel_state_count = _route_count("oncology panel_state_count", raw.get("panel_state_count"))
+        observed_panel_state_count = _route_count("oncology observed_panel_state_count", raw.get("observed_panel_state_count"))
+        unobserved_panel_state_count = _route_count("oncology unobserved_panel_state_count", raw.get("unobserved_panel_state_count"))
+        if obligation_count != len(obligations) or panel_state_count != len(states) or observed_panel_state_count + unobserved_panel_state_count != panel_state_count or observed_panel_state_count != sum(item.state.observed for item in panel_state_records):
+            raise ArgumentError("oncology classification counts do not reconcile")
         return cls(
             raw,
             True,
@@ -592,6 +758,15 @@ class OncoClassificationReport:
             states,
             _route_strings("oncology classification guarantees", raw.get("guarantees")),
             _route_strings("oncology classification limitations", raw.get("limitations")),
+            schema=schema,
+            resolution_kind=resolution_kind,
+            resolution_record=resolution_record,
+            obligation_records=obligation_records,
+            panel_state_records=panel_state_records,
+            obligation_count=obligation_count,
+            panel_state_count=panel_state_count,
+            observed_panel_state_count=observed_panel_state_count,
+            unobserved_panel_state_count=unobserved_panel_state_count,
         )
 
     @property
@@ -1102,7 +1277,18 @@ __all__ = [
     "ONCO_DISPOSITIONS",
     "ONCO_ANALYSIS_UNITS",
     "ONCO_BIAS_FLAGS",
+    "ONCO_CLASSIFICATION_CALLS",
+    "ONCO_CLASSIFICATION_MARKERS",
+    "ONCO_CLASSIFICATION_RESOLUTION_KINDS",
+    "ONCO_CLASSIFICATION_ROLES",
+    "ONCO_CLASSIFICATION_SCHEMA",
+    "ONCO_CLASSIFICATION_STATUSES",
     "ONCO_OUTPUT_USES",
+    "ONCO_OUTCOME_CENSORING_REASONS",
+    "ONCO_OUTCOME_ENDPOINTS",
+    "ONCO_OUTCOME_EVENT_KINDS",
+    "ONCO_OUTCOME_POPULATIONS",
+    "ONCO_OUTCOME_SCHEMA",
     "ONCO_TERMINAL_ACTIONS",
     "ONCO_WORLDLINE_CLOCK_AXES",
     "ONCO_WORLDLINE_SCHEMA",
@@ -1110,11 +1296,19 @@ __all__ = [
     "OncoBoundaryArgs",
     "OncoBoundaryDispositionReport",
     "OncoBoundaryReport",
+    "OncoAnalysisOutcomeProjection",
+    "OncoAnalysisRecordProjection",
     "OncoClassificationArgs",
+    "OncoClassificationObligationProjection",
+    "OncoClassificationPanelStateProjection",
     "OncoClassificationReport",
+    "OncoClassificationResolutionProjection",
+    "OncoClassificationSatisfiedEvidenceProjection",
+    "OncoEstimandProjection",
     "OncoEscalationReport",
     "OncoIdentityJoinArgs",
     "OncoIdentityJoinReport",
+    "OncoMarkerObservationProjection",
     "OncoOutcomeAnalyzeArgs",
     "OncoOutcomeReport",
     "OncoResponseAssessArgs",

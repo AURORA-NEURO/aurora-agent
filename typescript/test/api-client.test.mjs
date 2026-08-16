@@ -744,7 +744,23 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
-      if (path === "/v1/tools/onco_classification_check") return jsonResponse({ ok: true, tool: "onco_classification_check", request_id: "r34", mcp: { result: { structuredContent: { ok: true, is_integrated: false, obligations: [{ marker: "idh_mutation" }] } } } });
+      if (path === "/v1/tools/onco_classification_check") return jsonResponse({ ok: true, tool: "onco_classification_check", request_id: "r34", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/onco-classification-check/0.1",
+        histology: "diffuse_glioma",
+        resolution: { resolution: "unresolved", candidates: ["astrocytoma_idh_mutant", "oligodendroglioma_idh_mutant1p19q_codeleted"], obligations: [{ marker: "idh_mutation", role: "required", state: { unobserved: "not_collected" }, discriminates: 2 }] },
+        resolution_kind: "unresolved",
+        is_integrated: false,
+        entity: null,
+        obligations: [{ marker: "idh_mutation", role: "required", state: { unobserved: "not_collected" }, discriminates: 2 }],
+        obligation_count: 1,
+        panel_states: [{ marker: "idh_mutation", state: { unobserved: "not_collected" } }],
+        panel_state_count: 1,
+        observed_panel_state_count: 0,
+        unobserved_panel_state_count: 1,
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/oncoworlds_identity_join") return jsonResponse({ ok: true, tool: "oncoworlds_identity_join", request_id: "r35", mcp: { result: { structuredContent: { ok: true, joinable: false, bridge_declared: false } } } });
       if (path === "/v1/tools/onco_outcome_analyze") return jsonResponse({ ok: true, tool: "onco_outcome_analyze", request_id: "r36", mcp: { result: { structuredContent: {
         ok: true,
@@ -1264,6 +1280,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(worldline.mcp.result.structuredContent.timepoints[0].clocks.visible, "2026-01-01T00:00:00Z");
   assert.equal(worldline.mcp.result.structuredContent.visibility_partition.visible_count, 1);
   assert.equal(classification.mcp.result.structuredContent.is_integrated, false);
+  assert.equal(classification.mcp.result.structuredContent.schema, "bioprism-mcp/onco-classification-check/0.1");
+  assert.equal(classification.mcp.result.structuredContent.resolution_kind, "unresolved");
+  assert.equal(classification.mcp.result.structuredContent.unobserved_panel_state_count, 1);
   assert.equal(identity.mcp.result.structuredContent.joinable, false);
   assert.equal(outcome.mcp.result.structuredContent.censoring_reason, "lost_to_follow_up");
   assert.equal(outcome.mcp.result.structuredContent.schema, "bioprism-mcp/onco-outcome-analyze/0.1");

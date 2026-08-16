@@ -4041,14 +4041,57 @@ export interface OncoClassificationArgs extends JsonObject {
   panel: JsonObject;
 }
 
+export type OncoClassificationResolutionKind = "integrated" | "provisional" | "unresolved" | "mixed" | "not_otherwise_resolved";
+
+export type OncoClassificationMarker = "idh_mutation" | "codeletion1p19q" | "tert_promoter_mutation" | "egfr_amplification" | "chromosome7_gain10_loss" | "cdkn2a_cdkn2b_homozygous_deletion" | "h3k27_alteration" | "h3g34_mutation";
+
+export type OncoClassificationMarkerCall = "present" | "absent";
+
+export type OncoClassificationObservationStatus = "missing" | "not_collected" | "technically_failed" | "below_detection" | "not_applicable" | "redacted";
+
+export type OncoClassificationMarkerObservationResult =
+  | ({ value: OncoClassificationMarkerCall } & JsonObject)
+  | ({ unobserved: OncoClassificationObservationStatus } & JsonObject);
+
+export interface OncoClassificationPanelStateResult extends JsonObject {
+  marker: OncoClassificationMarker;
+  state: OncoClassificationMarkerObservationResult;
+}
+
+export interface OncoClassificationObligationResult extends JsonObject {
+  marker: OncoClassificationMarker;
+  role: "required" | "supportive" | "exclusionary";
+  state: OncoClassificationMarkerObservationResult;
+  discriminates: number;
+}
+
+export interface OncoClassificationSatisfiedEvidenceResult extends JsonObject {
+  marker: OncoClassificationMarker;
+  role: "required" | "supportive" | "exclusionary";
+  call: OncoClassificationMarkerCall;
+}
+
+export type OncoClassificationResolutionResult =
+  | ({ resolution: "integrated"; entity: string; grade: OncoClassificationMarkerObservationResult; evidence: OncoClassificationSatisfiedEvidenceResult[] } & JsonObject)
+  | ({ resolution: "provisional"; candidate: string; obligations: OncoClassificationObligationResult[] } & JsonObject)
+  | ({ resolution: "unresolved"; candidates: string[]; obligations: OncoClassificationObligationResult[] } & JsonObject)
+  | ({ resolution: "mixed"; candidates: string[] } & JsonObject)
+  | ({ resolution: "not_otherwise_resolved"; histology: "diffuse_glioma" | "outside_implemented_scope"; excluded: string[] } & JsonObject);
+
 export interface OncoClassificationResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/onco-classification-check/0.1";
   histology?: JsonValue;
-  resolution?: JsonObject;
+  resolution?: OncoClassificationResolutionResult;
+  resolution_kind?: OncoClassificationResolutionKind;
   is_integrated?: boolean;
   entity?: string | null;
-  obligations?: JsonObject[];
-  panel_states?: JsonObject[];
+  obligations?: OncoClassificationObligationResult[];
+  obligation_count?: number;
+  panel_states?: OncoClassificationPanelStateResult[];
+  panel_state_count?: number;
+  observed_panel_state_count?: number;
+  unobserved_panel_state_count?: number;
   guarantees?: string[];
   limitations?: string[];
 }

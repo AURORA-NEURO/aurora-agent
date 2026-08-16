@@ -410,17 +410,40 @@ class LabAndOncoReportTests(unittest.TestCase):
     def test_classification_identity_and_outcome_reports_keep_negative_states_typed(self) -> None:
         classification = onco_classification_report({
             "ok": True,
+            "schema": "bioprism-mcp/onco-classification-check/0.1",
             "histology": "diffuse_glioma",
-            "resolution": {"resolution": "unresolved"},
+            "resolution": {
+                "resolution": "unresolved",
+                "candidates": ["astrocytoma_idh_mutant", "oligodendroglioma_idh_mutant1p19q_codeleted"],
+                "obligations": [{
+                    "marker": "idh_mutation",
+                    "role": "required",
+                    "state": {"unobserved": "not_collected"},
+                    "discriminates": 2,
+                }],
+            },
+            "resolution_kind": "unresolved",
             "is_integrated": False,
             "entity": None,
-            "obligations": [{"marker": "idh_mutation", "priority": 1}],
-            "panel_states": [{"marker": "idh_mutation", "state": "not_collected"}],
+            "obligations": [{
+                "marker": "idh_mutation",
+                "role": "required",
+                "state": {"unobserved": "not_collected"},
+                "discriminates": 2,
+            }],
+            "obligation_count": 1,
+            "panel_states": [{"marker": "idh_mutation", "state": {"unobserved": "not_collected"}}],
+            "panel_state_count": 1,
+            "observed_panel_state_count": 0,
+            "unobserved_panel_state_count": 1,
             "guarantees": ["unresolved"],
             "limitations": ["bounded criteria"],
         })
         self.assertTrue(classification.unresolved)
         self.assertEqual(len(classification.obligations), 1)
+        self.assertEqual(classification.resolution_record.kind, "unresolved")
+        self.assertEqual(classification.obligation_records[0].discriminates, 2)
+        self.assertEqual(classification.unobserved_panel_state_count, 1)
         identity = onco_identity_join_report({
             "ok": True,
             "joinable": False,
