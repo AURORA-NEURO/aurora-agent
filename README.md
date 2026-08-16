@@ -614,6 +614,10 @@ exposure, and complete versus informative bias flags; see [`docs/ONCO_OUTCOME_AN
 `oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and keeps
 multiple compatible histories as typed ambiguity rather than selecting one; its versioned projection
 retains per-candidate refusal kinds and candidate accounting (see [`docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md`](docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md)).
+`oncoworlds_entity_world_check` composes provenance-selection, alteration-mechanism, rare-class
+benchmark, lesion-clustering, and competing-event safeguards. Requested sections retain separate
+admissibility and refusal evidence, while the top-level report reconciles only the requested
+sections; see [`docs/ONCOWORLDS_ENTITY_WORLDS.md`](docs/ONCOWORLDS_ENTITY_WORLDS.md).
 The Python and TypeScript SDKs expose the OncoWorlds workflows as typed MCP and HTTP projections,
 retaining domain refusals, QC abstention, version-conditioned disagreement, transport assumptions,
 clonal ambiguity, era/site comparability, resource absence, descriptor boundaries, and subgroup

@@ -7,6 +7,7 @@ from prism_sdk import (
     OncoWorldsClonalHistoryCheckArgs,
     OncoWorldsEraShiftCheckArgs,
     OncoWorldsEquityCheckArgs,
+    OncoWorldsEntityWorldCheckArgs,
     OncoWorldsMethylationClassifyArgs,
     OncoWorldsMethylationCompareReport,
     OncoWorldsModelTransportReport,
@@ -14,6 +15,7 @@ from prism_sdk import (
     oncoworlds_clonal_history_check_report,
     oncoworlds_era_shift_check_report,
     oncoworlds_equity_check_report,
+    oncoworlds_entity_world_check_report,
     oncoworlds_methylation_classify_report,
     oncoworlds_methylation_compare_report,
     oncoworlds_model_transport_report,
@@ -321,6 +323,27 @@ class OncoWorldsReportTests(unittest.TestCase):
         self.assertFalse(refused_equity.ok)
         self.assertEqual(refused_equity.refusal_kind, "unquantified_subgroup")
 
+        entity = oncoworlds_entity_world_check_report({
+            "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-entity-world-check/0.1",
+            "outcome_kind": "report",
+            "all_admissible": False,
+            "check_count": 2,
+            "refusal_count": 1,
+            "checks": {
+                "provenance": {"left": "diagnostic_biopsy", "right": "postmortem", "selection_modelled": False, "allowed": False, "refusal": {"refusal": "unmodelled_provenance_selection"}, "refusal_kind": "unmodelled_provenance_selection", "refusal_text": "selection"},
+                "benchmark": {"macro_score": 0.88, "per_class_counts": {"common": 300, "rare": 3}, "class_count": 2, "zero_case_classes": [], "report": {}, "allowed": True, "published": {}, "feasibility": {"feasibility": "feasible"}, "feasibility_kind": "feasible", "refusal": None, "refusal_kind": None},
+            },
+            "guarantees": [],
+            "limitations": [],
+        })
+        self.assertFalse(entity.all_admissible)
+        self.assertEqual(entity.refusal_count, 1)
+        self.assertEqual(entity.checks["provenance"].refusal_kind, "unmodelled_provenance_selection")
+        self.assertEqual(entity.checks["benchmark"].feasibility_kind, "feasible")
+        entity_args = OncoWorldsEntityWorldCheckArgs(provenance={"left": "diagnostic_biopsy", "right": "postmortem", "selection_modelled": True})
+        self.assertIn("provenance", entity_args.to_mcp_arguments())
+
     def test_oncoworlds_requests_enforce_bounded_transport_shape(self) -> None:
         args = OncoWorldsClonalHistoryCheckArgs({"subclones": []}, [{"edges": []}])
         self.assertEqual(args.to_mcp_arguments()["candidates"], [{"edges": []}])
@@ -328,6 +351,8 @@ class OncoWorldsReportTests(unittest.TestCase):
         self.assertEqual(len(era_args.to_mcp_arguments()["assay_contexts"]), 1)
         equity_args = OncoWorldsEquityCheckArgs({"value": 0.9, "subgroups": []})
         self.assertEqual(equity_args.to_mcp_arguments()["pooled"]["value"], 0.9)
+        with self.assertRaises(ArgumentError):
+            OncoWorldsEntityWorldCheckArgs()
         with self.assertRaises(ArgumentError):
             OncoWorldsMethylationClassifyArgs({}, {str(index): {} for index in range(10_001)}, {})
 

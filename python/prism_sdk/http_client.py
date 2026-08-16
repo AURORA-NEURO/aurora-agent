@@ -156,6 +156,8 @@ from .oncoworlds import (
     OncoWorldsEraShiftCheckReport,
     OncoWorldsEquityCheckArgs,
     OncoWorldsEquityCheckReport,
+    OncoWorldsEntityWorldCheckArgs,
+    OncoWorldsEntityWorldCheckReport,
     OncoWorldsMethylationClassifyArgs,
     OncoWorldsMethylationClassifyReport,
     OncoWorldsMethylationCompareArgs,
@@ -167,6 +169,7 @@ from .oncoworlds import (
     oncoworlds_clonal_history_check_report,
     oncoworlds_era_shift_check_report,
     oncoworlds_equity_check_report,
+    oncoworlds_entity_world_check_report,
     oncoworlds_methylation_classify_report,
     oncoworlds_methylation_compare_report,
     oncoworlds_model_transport_report,
@@ -1965,6 +1968,19 @@ class ApiClient:
         request: OncoWorldsEquityCheckArgs | Mapping[str, Any],
     ) -> OncoWorldsEquityCheckReport:
         return oncoworlds_equity_check_report(self.oncoworlds_equity_check(request))
+
+    def oncoworlds_entity_world_check(
+        self,
+        request: OncoWorldsEntityWorldCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsEntityWorldCheckArgs) else OncoWorldsEntityWorldCheckArgs.from_wire(request)
+        return self.call_tool("oncoworlds_entity_world_check", normalized.to_mcp_arguments())
+
+    def oncoworlds_entity_world_check_report(
+        self,
+        request: OncoWorldsEntityWorldCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsEntityWorldCheckReport:
+        return oncoworlds_entity_world_check_report(self.oncoworlds_entity_world_check(request))
 
     def stress_profile(
         self,
@@ -4000,6 +4016,19 @@ class AsyncApiClient:
         request: OncoWorldsEquityCheckArgs | Mapping[str, Any],
     ) -> OncoWorldsEquityCheckReport:
         return oncoworlds_equity_check_report(await self.oncoworlds_equity_check(request))
+
+    async def oncoworlds_entity_world_check(
+        self,
+        request: OncoWorldsEntityWorldCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsEntityWorldCheckArgs) else OncoWorldsEntityWorldCheckArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_entity_world_check", normalized.to_mcp_arguments())
+
+    async def oncoworlds_entity_world_check_report(
+        self,
+        request: OncoWorldsEntityWorldCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsEntityWorldCheckReport:
+        return oncoworlds_entity_world_check_report(await self.oncoworlds_entity_world_check(request))
 
     async def stress_profile(
         self,

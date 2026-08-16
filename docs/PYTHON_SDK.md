@@ -224,6 +224,10 @@ invent defaults:
   `oncoworlds_equity_check_report(...)` require complete subgroup intervals before releasing an
   equity projection and preserve pooled-only, empty, and unquantified refusals. See
   `docs/ONCOWORLDS_SHIFT_EQUITY.md`.
+- `OncoWorldsEntityWorldCheckArgs`/`oncoworlds_entity_world_check_report(...)` compose provenance,
+  alteration-mechanism, rare-class benchmark, lesion-clustering, and competing-event safeguards.
+  Each requested section keeps its own admissibility/refusal result and the top-level counts are
+  reconciled from those sections. See `docs/ONCOWORLDS_ENTITY_WORLDS.md`.
 - `OncoIdentityJoinArgs`/`onco_identity_join_report(...)` preserve the tagged join decision,
   refusal kind, identity-link count, epoch bridge warrant, and ordered checked dimensions. A
   declined join remains a typed domain result. See `docs/ONCOWORLDS_IDENTITY_JOIN.md`.

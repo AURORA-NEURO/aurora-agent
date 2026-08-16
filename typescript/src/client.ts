@@ -78,6 +78,8 @@ import type {
   OncoWorldsEraShiftCheckResult,
   OncoWorldsEquityCheckArgs,
   OncoWorldsEquityCheckResult,
+  OncoWorldsEntityWorldCheckArgs,
+  OncoWorldsEntityWorldCheckResult,
   StressProfileArgs,
   StressProfileToolResult,
   StressReportArgs,
@@ -646,6 +648,10 @@ export class ApiClient {
 
   async oncoworldsEquityCheck(args: OncoWorldsEquityCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsEquityCheckResult>> {
     return this.callTool<OncoWorldsEquityCheckResult>("oncoworlds_equity_check", args, options);
+  }
+
+  async oncoworldsEntityWorldCheck(args: OncoWorldsEntityWorldCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsEntityWorldCheckResult>> {
+    return this.callTool<OncoWorldsEntityWorldCheckResult>("oncoworlds_entity_world_check", args, options);
   }
 
   async stressProfile(args: StressProfileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<StressProfileToolResult>> {

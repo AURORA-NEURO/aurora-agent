@@ -5475,6 +5475,50 @@ export interface OncoWorldsEquityCheckResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface OncoWorldsEntityWorldCheckArgs extends JsonObject {
+  provenance?: JsonObject;
+  alterations?: JsonObject;
+  benchmark?: JsonObject;
+  lesion_analysis?: JsonObject;
+}
+
+export type OncoWorldsEntityWorldRefusalKind =
+  | "unmodelled_provenance_selection"
+  | "mechanism_collapse"
+  | "macro_score_without_counts"
+  | "undeclared_cluster"
+  | "competing_event_as_censoring";
+
+export interface OncoEntityWorldSectionResult extends JsonObject {
+  allowed: boolean;
+  refusal?: JsonObject | null;
+  refusal_kind?: OncoWorldsEntityWorldRefusalKind | null;
+  refusal_text?: string;
+  cluster_refusal?: JsonObject | null;
+  cluster_refusal_kind?: "undeclared_cluster" | null;
+  event_refusal?: JsonObject | null;
+  event_refusal_kind?: "competing_event_as_censoring" | null;
+  feasibility?: JsonObject;
+  feasibility_kind?: "feasible" | "infeasible_for_classes";
+}
+
+export interface OncoWorldsEntityWorldCheckResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-entity-world-check/0.1";
+  outcome_kind?: "report";
+  all_admissible: boolean;
+  check_count: number;
+  refusal_count: number;
+  checks: {
+    provenance?: OncoEntityWorldSectionResult;
+    alterations?: OncoEntityWorldSectionResult;
+    benchmark?: OncoEntityWorldSectionResult;
+    lesion_analysis?: OncoEntityWorldSectionResult;
+  } & JsonObject;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface StressProfileArgs extends JsonObject {
   cohort: JsonObject;
   stress: JsonObject;

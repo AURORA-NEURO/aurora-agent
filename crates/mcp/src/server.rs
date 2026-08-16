@@ -145,6 +145,12 @@ use bioprism_oncoworlds::{
     RadiogenomicClaim, SampleContext, SiteAssayContext, TumourPopulation,
     use_descriptor as onco_use_descriptor, VersionedResult,
 };
+use bioprism_oncoworlds::entities::{
+    declare_cluster as onco_declare_cluster, handle_event as onco_handle_event,
+    pool_alterations as onco_pool_alterations, pool_provenance as onco_pool_provenance,
+    AlterationMechanism, EventHandling, FollowUpEvent, LesionEndpoint, LesionSet,
+    RarePerformanceReport, TissueProvenance,
+};
 use bioprism_oncoworlds::models::REQUIRED_ASSUMPTIONS as MODEL_REQUIRED_ASSUMPTIONS;
 use bioprism_oncoworlds::radiogenomics::{MECHANISM_STRATA, REQUIRED_ASSUMPTIONS};
 use bioprism_ops::{
@@ -1289,6 +1295,7 @@ impl Server {
             "oncoworlds_clonal_history_check" => self.oncoworlds_clonal_history_check(&arguments),
             "oncoworlds_era_shift_check" => self.oncoworlds_era_shift_check(&arguments),
             "oncoworlds_equity_check" => self.oncoworlds_equity_check(&arguments),
+            "oncoworlds_entity_world_check" => self.oncoworlds_entity_world_check(&arguments),
             "stress_profile" => self.stress_profile(&arguments),
             "stress_report" => self.stress_report(&arguments),
             "bundle_verify" => self.bundle_verify(&arguments),
@@ -10993,6 +11000,256 @@ impl Server {
         }
     }
 
+    fn oncoworlds_entity_world_check(&self, arguments: &Value) -> Result<Value, String> {
+        let mut checks = serde_json::Map::new();
+
+        if let Some(value) = arguments.get("provenance") {
+            let object = value
+                .as_object()
+                .ok_or("provenance must be an object")?;
+            let left: TissueProvenance = serde_json::from_value(
+                object
+                    .get("left")
+                    .cloned()
+                    .ok_or("provenance.left is required")?,
+            )
+            .map_err(|error| format!("invalid left tissue provenance: {error}"))?;
+            let right: TissueProvenance = serde_json::from_value(
+                object
+                    .get("right")
+                    .cloned()
+                    .ok_or("provenance.right is required")?,
+            )
+            .map_err(|error| format!("invalid right tissue provenance: {error}"))?;
+            let selection_modelled = object
+                .get("selection_modelled")
+                .and_then(Value::as_bool)
+                .ok_or("provenance.selection_modelled must be a boolean")?;
+            let result = onco_pool_provenance(left, right, selection_modelled);
+            let mut projection = json!({
+                "left": left,
+                "right": right,
+                "left_label": left.as_str(),
+                "right_label": right.as_str(),
+                "selection_modelled": selection_modelled,
+                "allowed": result.is_ok()
+            });
+            if let Err(refusal) = result {
+                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                projection["refusal"] = refusal_value.clone();
+                projection["refusal_kind"] = refusal_value["refusal"].clone();
+                projection["refusal_text"] = json!(refusal.to_string());
+            } else {
+                projection["refusal"] = Value::Null;
+                projection["refusal_kind"] = Value::Null;
+            }
+            checks.insert("provenance".into(), projection);
+        }
+
+        if let Some(value) = arguments.get("alterations") {
+            let object = value
+                .as_object()
+                .ok_or("alterations must be an object")?;
+            let left: AlterationMechanism = serde_json::from_value(
+                object
+                    .get("left")
+                    .cloned()
+                    .ok_or("alterations.left is required")?,
+            )
+            .map_err(|error| format!("invalid left alteration mechanism: {error}"))?;
+            let right: AlterationMechanism = serde_json::from_value(
+                object
+                    .get("right")
+                    .cloned()
+                    .ok_or("alterations.right is required")?,
+            )
+            .map_err(|error| format!("invalid right alteration mechanism: {error}"))?;
+            let estimand = object.get("estimand").and_then(Value::as_str);
+            let result = onco_pool_alterations(left, right, estimand);
+            let mut projection = json!({
+                "left": left,
+                "right": right,
+                "left_label": left.as_str(),
+                "right_label": right.as_str(),
+                "estimand": estimand,
+                "estimand_declared": estimand.is_some_and(|text| !text.trim().is_empty()),
+                "allowed": result.is_ok()
+            });
+            if let Err(refusal) = result {
+                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                projection["refusal"] = refusal_value.clone();
+                projection["refusal_kind"] = refusal_value["refusal"].clone();
+                projection["refusal_text"] = json!(refusal.to_string());
+            } else {
+                projection["refusal"] = Value::Null;
+                projection["refusal_kind"] = Value::Null;
+            }
+            checks.insert("alterations".into(), projection);
+        }
+
+        if let Some(value) = arguments.get("benchmark") {
+            let object = value
+                .as_object()
+                .ok_or("benchmark must be an object")?;
+            let macro_score = object
+                .get("macro_score")
+                .and_then(Value::as_f64)
+                .ok_or("benchmark.macro_score must be a number")?;
+            let counts: std::collections::BTreeMap<String, usize> = serde_json::from_value(
+                object
+                    .get("per_class_counts")
+                    .cloned()
+                    .ok_or("benchmark.per_class_counts is required")?,
+            )
+            .map_err(|error| format!("invalid per-class counts: {error}"))?;
+            if counts.len() > 10_000 {
+                return Err("benchmark class counts exceed the 10000-class safety bound".into());
+            }
+            let report = RarePerformanceReport {
+                macro_score,
+                per_class_counts: counts.clone(),
+            };
+            let report_value = serde_json::to_value(&report).map_err(|error| error.to_string())?;
+            let mut projection = json!({
+                "macro_score": macro_score,
+                "per_class_counts": counts,
+                "class_count": report.per_class_counts.len(),
+                "zero_case_classes": report.per_class_counts.iter().filter_map(|(class, count)| (*count == 0).then_some(class)).collect::<Vec<_>>(),
+                "report": report_value,
+                "allowed": false,
+                "published": Value::Null
+            });
+            match report.publish() {
+                Ok(published) => {
+                    let feasibility = serde_json::to_value(published.feasibility())
+                        .map_err(|error| error.to_string())?;
+                    projection["allowed"] = json!(true);
+                    projection["published"] = serde_json::to_value(&published)
+                        .map_err(|error| error.to_string())?;
+                    projection["feasibility"] = feasibility.clone();
+                    projection["feasibility_kind"] = feasibility["feasibility"].clone();
+                    projection["refusal"] = Value::Null;
+                    projection["refusal_kind"] = Value::Null;
+                }
+                Err(refusal) => {
+                    let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                    projection["refusal"] = refusal_value.clone();
+                    projection["refusal_kind"] = refusal_value["refusal"].clone();
+                    projection["refusal_text"] = json!(refusal.to_string());
+                }
+            }
+            checks.insert("benchmark".into(), projection);
+        }
+
+        if let Some(value) = arguments.get("lesion_analysis") {
+            let object = value
+                .as_object()
+                .ok_or("lesion_analysis must be an object")?;
+            let set = LesionSet {
+                lesions: object
+                    .get("lesions")
+                    .and_then(Value::as_u64)
+                    .ok_or("lesion_analysis.lesions must be a non-negative integer")?
+                    as usize,
+                participants: object
+                    .get("participants")
+                    .and_then(Value::as_u64)
+                    .ok_or("lesion_analysis.participants must be a non-negative integer")?
+                    as usize,
+            };
+            if set.lesions > 1_000_000 || set.participants > 1_000_000 {
+                return Err("lesion analysis counts exceed the 1000000-subject safety bound".into());
+            }
+            let cluster_declared = object
+                .get("cluster_declared")
+                .and_then(Value::as_bool)
+                .ok_or("lesion_analysis.cluster_declared must be a boolean")?;
+            let endpoint: LesionEndpoint = serde_json::from_value(
+                object
+                    .get("endpoint")
+                    .cloned()
+                    .ok_or("lesion_analysis.endpoint is required")?,
+            )
+            .map_err(|error| format!("invalid lesion endpoint: {error}"))?;
+            let event: FollowUpEvent = serde_json::from_value(
+                object
+                    .get("event")
+                    .cloned()
+                    .ok_or("lesion_analysis.event is required")?,
+            )
+            .map_err(|error| format!("invalid follow-up event: {error}"))?;
+            let handling: EventHandling = serde_json::from_value(
+                object
+                    .get("handling")
+                    .cloned()
+                    .ok_or("lesion_analysis.handling is required")?,
+            )
+            .map_err(|error| format!("invalid event handling: {error}"))?;
+            let cluster_result = onco_declare_cluster(set, cluster_declared);
+            let event_result = onco_handle_event(endpoint, event, handling);
+            let mut projection = json!({
+                "lesions": set.lesions,
+                "participants": set.participants,
+                "cluster_declared": cluster_declared,
+                "cluster_allowed": cluster_result.is_ok(),
+                "endpoint": endpoint,
+                "event": event,
+                "handling": handling,
+                "event_allowed": event_result.is_ok(),
+                "allowed": cluster_result.is_ok() && event_result.is_ok()
+            });
+            if let Err(refusal) = cluster_result {
+                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                projection["cluster_refusal"] = refusal_value.clone();
+                projection["cluster_refusal_kind"] = refusal_value["refusal"].clone();
+                projection["cluster_refusal_text"] = json!(refusal.to_string());
+            } else {
+                projection["cluster_refusal"] = Value::Null;
+                projection["cluster_refusal_kind"] = Value::Null;
+            }
+            if let Err(refusal) = event_result {
+                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                projection["event_refusal"] = refusal_value.clone();
+                projection["event_refusal_kind"] = refusal_value["refusal"].clone();
+                projection["event_refusal_text"] = json!(refusal.to_string());
+            } else {
+                projection["event_refusal"] = Value::Null;
+                projection["event_refusal_kind"] = Value::Null;
+            }
+            checks.insert("lesion_analysis".into(), projection);
+        }
+
+        if checks.is_empty() {
+            return Err("at least one entity-world check section is required".into());
+        }
+        if checks.len() > 4 {
+            return Err("entity-world checks may contain at most four sections".into());
+        }
+        let refusal_count = checks
+            .values()
+            .filter(|value| value.get("allowed") == Some(&json!(false)))
+            .count();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/oncoworlds-entity-world-check/0.1",
+            "outcome_kind": "report",
+            "all_admissible": refusal_count == 0,
+            "check_count": checks.len(),
+            "refusal_count": refusal_count,
+            "checks": checks,
+            "guarantees": [
+                "provenance selection is explicit before diagnostic, recurrence, and postmortem material is pooled",
+                "different alteration mechanisms require a stated estimand rather than pathway-level collapse",
+                "rare-class macro performance retains per-class counts and zero-case feasibility findings",
+                "lesion analyses declare participant clustering and systemic death is not silently censored for local control"
+            ],
+            "limitations": [
+                "the tool checks declared evidence and does not estimate effect sizes, survival, competing-risk curves, or fairness metrics",
+                "a permitted section is a structural admissibility result, not biological truth or clinical authorization"
+            ]
+        }))
+    }
+
     fn stress_profile(&self, arguments: &Value) -> Result<Value, String> {
         let cohort: Cohort = serde_json::from_value(
             arguments
@@ -16869,7 +17126,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "biological_domains",
             "domains": ["BioIR", "oncology", "modalities", "specimen lineage", "reference worlds"],
             "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
-            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check"],
+            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -16917,7 +17174,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "oncoworlds_shift_and_equity",
             "domains": ["classification-era mapping", "site resource absence", "population descriptors", "subgroup equity evidence"],
             "crates": ["bioprism-oncoworlds", "bioprism-onco"],
-            "mcp_tools": ["oncoworlds_era_shift_check", "oncoworlds_equity_check"],
+            "mcp_tools": ["oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18241,6 +18498,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "pooled": { "type": "object", "description": "Serialized PooledScore with value and per-subgroup results." }
                 },
                 "required": ["pooled"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_entity_world_check",
+            "description": "Compose OncoWorlds entity-world safeguards for provenance pooling, alteration-mechanism pooling, rare-class benchmark feasibility, lesion clustering, and competing-event handling. Each requested section retains its own typed admissibility or refusal evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provenance": { "type": "object", "description": "Optional {left, right, selection_modelled} TissueProvenance check." },
+                    "alterations": { "type": "object", "description": "Optional {left, right, estimand} AlterationMechanism check." },
+                    "benchmark": { "type": "object", "description": "Optional {macro_score, per_class_counts} RarePerformanceReport publication check." },
+                    "lesion_analysis": { "type": "object", "description": "Optional lesion/participant and endpoint event handling check: lesions, participants, cluster_declared, endpoint, event, handling." }
+                },
+                "required": []
             }
         }),
         json!({

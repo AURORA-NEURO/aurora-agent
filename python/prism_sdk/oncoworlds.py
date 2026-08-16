@@ -41,6 +41,9 @@ ONCOWORLDS_ERA_REFUSAL_KINDS = frozenset({"unmapped_classification_change", "inc
 ONCOWORLDS_EQUITY_SCHEMA = "bioprism-mcp/oncoworlds-equity-check/0.1"
 ONCOWORLDS_EQUITY_OUTCOME_KINDS = frozenset({"equity_report", "refused"})
 ONCOWORLDS_EQUITY_REFUSAL_KINDS = frozenset({"pooled_score_only", "unquantified_subgroup", "empty_subgroup"})
+ONCOWORLDS_ENTITY_SCHEMA = "bioprism-mcp/oncoworlds-entity-world-check/0.1"
+ONCOWORLDS_ENTITY_OUTCOME_KINDS = frozenset({"report"})
+ONCOWORLDS_ENTITY_REFUSAL_KINDS = frozenset({"unmodelled_provenance_selection", "mechanism_collapse", "macro_score_without_counts", "undeclared_cluster", "competing_event_as_censoring"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -178,6 +181,41 @@ class OncoWorldsEquityCheckArgs:
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         return {"pooled": dict(self.pooled)}
+
+
+@dataclass(frozen=True)
+class OncoWorldsEntityWorldCheckArgs:
+    provenance: Mapping[str, Any] | None = None
+    alterations: Mapping[str, Any] | None = None
+    benchmark: Mapping[str, Any] | None = None
+    lesion_analysis: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        sections = {
+            "provenance": _optional_mapping("entity-world provenance", self.provenance),
+            "alterations": _optional_mapping("entity-world alterations", self.alterations),
+            "benchmark": _optional_mapping("entity-world benchmark", self.benchmark),
+            "lesion_analysis": _optional_mapping("entity-world lesion analysis", self.lesion_analysis),
+        }
+        if not any(value is not None for value in sections.values()):
+            raise ArgumentError("at least one entity-world check section is required")
+        object.__setattr__(self, "provenance", sections["provenance"])
+        object.__setattr__(self, "alterations", sections["alterations"])
+        object.__setattr__(self, "benchmark", sections["benchmark"])
+        object.__setattr__(self, "lesion_analysis", sections["lesion_analysis"])
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsEntityWorldCheckArgs":
+        raw = _object("OncoWorlds entity-world arguments", value)
+        return cls(raw.get("provenance"), raw.get("alterations"), raw.get("benchmark"), raw.get("lesion_analysis"))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for name in ("provenance", "alterations", "benchmark", "lesion_analysis"):
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = dict(value)
+        return result
 
 
 @dataclass(frozen=True)
@@ -1265,6 +1303,87 @@ class OncoWorldsEquityCheckReport:
         return cls(raw, True, True, pooled_value, subgroups, subgroup_count, interval_count, all_intervals_present, _route_strings("OncoWorlds equity guarantees", raw.get("guarantees")), _route_strings("OncoWorlds equity limitations", raw.get("limitations")), schema, outcome_kind, None, None, None, False, report)
 
 
+@dataclass(frozen=True)
+class OncoEntityWorldCheckProjection:
+    raw: dict[str, Any]
+    section: str
+    allowed: bool
+    refusal_kind: str | None
+    refusal: dict[str, Any] | None
+    cluster_refusal_kind: str | None = None
+    event_refusal_kind: str | None = None
+    feasibility_kind: str | None = None
+
+    @classmethod
+    def from_wire(cls, section: str, value: Mapping[str, Any]) -> "OncoEntityWorldCheckProjection":
+        raw = _object(f"OncoWorlds entity-world {section} check", value)
+        allowed = _bool(f"OncoWorlds entity-world {section} allowed", raw.get("allowed"))
+        refusal_value = raw.get("refusal")
+        refusal = None if refusal_value is None else _object(f"OncoWorlds entity-world {section} refusal", refusal_value)
+        refusal_kind_value = raw.get("refusal_kind")
+        refusal_kind = None if refusal_kind_value is None else _route_text(f"OncoWorlds entity-world {section} refusal kind", refusal_kind_value)
+        cluster_refusal_kind = None if raw.get("cluster_refusal_kind") is None else _route_text("OncoWorlds cluster refusal kind", raw.get("cluster_refusal_kind"))
+        event_refusal_kind = None if raw.get("event_refusal_kind") is None else _route_text("OncoWorlds event refusal kind", raw.get("event_refusal_kind"))
+        feasibility = raw.get("feasibility_kind")
+        feasibility_kind = None if feasibility is None else _route_text("OncoWorlds feasibility kind", feasibility)
+        if section == "provenance" and refusal_kind not in {None, "unmodelled_provenance_selection"}:
+            raise ArgumentError("unexpected provenance refusal kind")
+        if section == "alterations" and refusal_kind not in {None, "mechanism_collapse"}:
+            raise ArgumentError("unexpected alteration refusal kind")
+        if section == "benchmark" and refusal_kind not in {None, "macro_score_without_counts"}:
+            raise ArgumentError("unexpected benchmark refusal kind")
+        if section == "lesion_analysis":
+            if cluster_refusal_kind not in {None, "undeclared_cluster"} or event_refusal_kind not in {None, "competing_event_as_censoring"}:
+                raise ArgumentError("unexpected lesion-analysis refusal kind")
+        if allowed and (refusal is not None or refusal_kind is not None or cluster_refusal_kind is not None or event_refusal_kind is not None):
+            raise ArgumentError(f"allowed {section} checks cannot carry refusal evidence")
+        if not allowed and refusal is None and cluster_refusal_kind is None and event_refusal_kind is None:
+            raise ArgumentError(f"refused {section} checks must carry typed refusal evidence")
+        return cls(raw, section, allowed, refusal_kind, refusal, cluster_refusal_kind, event_refusal_kind, feasibility_kind)
+
+
+@dataclass(frozen=True)
+class OncoWorldsEntityWorldCheckReport:
+    raw: dict[str, Any]
+    ok: bool
+    all_admissible: bool
+    check_count: int
+    refusal_count: int
+    checks: dict[str, OncoEntityWorldCheckProjection]
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsEntityWorldCheckReport":
+        raw = _payload(value, label="OncoWorlds entity-world check", direct_keys=("checks",))
+        ok = _bool("OncoWorlds entity-world check ok", raw.get("ok"))
+        if not ok:
+            raise ArgumentError("entity-world check transport projection must be successful")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("OncoWorlds entity-world schema", schema_value)
+        if schema is not None and schema != ONCOWORLDS_ENTITY_SCHEMA:
+            raise ArgumentError(f"unknown OncoWorlds entity-world schema: {schema!r}")
+        outcome_kind = _route_text("OncoWorlds entity-world outcome kind", raw.get("outcome_kind", "report"))
+        if outcome_kind not in ONCOWORLDS_ENTITY_OUTCOME_KINDS:
+            raise ArgumentError(f"unknown OncoWorlds entity-world outcome kind: {outcome_kind!r}")
+        raw_checks = _route_mapping("OncoWorlds entity-world checks", raw.get("checks"))
+        checks = {section: OncoEntityWorldCheckProjection.from_wire(section, check) for section, check in raw_checks.items()}
+        if not checks or any(section not in {"provenance", "alterations", "benchmark", "lesion_analysis"} for section in checks):
+            raise ArgumentError("OncoWorlds entity-world checks contain an unknown section")
+        check_count = _route_count("OncoWorlds entity-world check count", raw.get("check_count", len(checks)))
+        refusal_count = _route_count("OncoWorlds entity-world refusal count", raw.get("refusal_count", sum(not check.allowed for check in checks.values())))
+        if check_count != len(checks) or refusal_count != sum(not check.allowed for check in checks.values()):
+            raise ArgumentError("OncoWorlds entity-world counts do not reconcile")
+        all_admissible = _bool("OncoWorlds all entity-world checks admissible", raw.get("all_admissible", refusal_count == 0))
+        if all_admissible != (refusal_count == 0):
+            raise ArgumentError("OncoWorlds entity-world admissibility does not reconcile")
+        if schema is not None and ("check_count" not in raw or "refusal_count" not in raw or "all_admissible" not in raw):
+            raise ArgumentError("versioned OncoWorlds entity-world reports require section accounting")
+        return cls(raw, True, all_admissible, check_count, refusal_count, checks, _route_strings("OncoWorlds entity-world guarantees", raw.get("guarantees")), _route_strings("OncoWorlds entity-world limitations", raw.get("limitations")), schema, outcome_kind)
+
+
 def oncoworlds_model_transport_report(value: Mapping[str, Any]) -> OncoWorldsModelTransportReport:
     return OncoWorldsModelTransportReport.from_wire(value)
 
@@ -1293,6 +1412,10 @@ def oncoworlds_equity_check_report(value: Mapping[str, Any]) -> OncoWorldsEquity
     return OncoWorldsEquityCheckReport.from_wire(value)
 
 
+def oncoworlds_entity_world_check_report(value: Mapping[str, Any]) -> OncoWorldsEntityWorldCheckReport:
+    return OncoWorldsEntityWorldCheckReport.from_wire(value)
+
+
 __all__ = [
     "METHYLATION_DIVERGENCES",
     "METHYLATION_CLASSIFY_SCHEMA",
@@ -1318,6 +1441,9 @@ __all__ = [
     "ONCOWORLDS_EQUITY_OUTCOME_KINDS",
     "ONCOWORLDS_EQUITY_REFUSAL_KINDS",
     "ONCOWORLDS_EQUITY_SCHEMA",
+    "ONCOWORLDS_ENTITY_OUTCOME_KINDS",
+    "ONCOWORLDS_ENTITY_REFUSAL_KINDS",
+    "ONCOWORLDS_ENTITY_SCHEMA",
     "OncoClonalHistoryProjection",
     "OncoClonalRejectedHistoryProjection",
     "OncoClonalUniqueHistoryProjection",
@@ -1349,9 +1475,13 @@ __all__ = [
     "OncoWorldsEquityCheckArgs",
     "OncoEquitySubgroupProjection",
     "OncoWorldsEquityCheckReport",
+    "OncoWorldsEntityWorldCheckArgs",
+    "OncoEntityWorldCheckProjection",
+    "OncoWorldsEntityWorldCheckReport",
     "oncoworlds_clonal_history_check_report",
     "oncoworlds_era_shift_check_report",
     "oncoworlds_equity_check_report",
+    "oncoworlds_entity_world_check_report",
     "oncoworlds_methylation_classify_report",
     "oncoworlds_methylation_compare_report",
     "oncoworlds_model_transport_report",

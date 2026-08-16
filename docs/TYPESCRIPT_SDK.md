@@ -365,6 +365,10 @@ evidence; `oncoworldsEquityCheck` keeps pooled-only and incomplete-interval resu
 retaining every subgroup. These methods are projections only: they do not perform clinical
 classification, patient transport, era harmonisation, or equity estimation. See
 `docs/ONCOWORLDS_SHIFT_EQUITY.md`.
+`oncoworldsEntityWorldCheck` composes provenance-selection, alteration-mechanism, rare-class
+benchmark, lesion-clustering, and competing-event safeguards. Its result preserves independent
+section outcomes and reconciled refusal counts; it does not estimate biology, survival, fairness,
+or treatment effect. See `docs/ONCOWORLDS_ENTITY_WORLDS.md`.
 `stressProfile` and `stressReport` add the biological-stress boundary with typed family identity,
 identifiability, intensity-ladder sweep points, effective sample size, unresolved measurements,
 required-versus-probed findings, generator defects, and a nullable guarded worst-family projection.

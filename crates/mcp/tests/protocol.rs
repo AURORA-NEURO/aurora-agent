@@ -302,7 +302,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 124);
+    assert_eq!(tools.len(), 125);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3919,12 +3919,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(124));
-    assert_eq!(result["advertised_tool_count"], json!(124));
+    assert_eq!(result["unique_catalog_tools"], json!(125));
+    assert_eq!(result["advertised_tool_count"], json!(125));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(124));
-    assert_eq!(result["schema_quality"]["valid"], json!(124));
+    assert_eq!(result["schema_quality"]["checked"], json!(125));
+    assert_eq!(result["schema_quality"]["valid"], json!(125));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6329,6 +6329,46 @@ fn oncoworlds_era_shift_and_equity_checks_preserve_mapping_resource_and_interval
     assert_eq!(pooled_only["ok"], json!(false));
     assert_eq!(pooled_only["refusal_kind"], json!("pooled_score_only"));
     assert_eq!(pooled_only["fail_closed"], json!(true));
+}
+
+#[test]
+fn oncoworlds_entity_world_check_keeps_independent_selection_and_event_refusals_visible() {
+    let admissible = call(
+        &mut server(),
+        "oncoworlds_entity_world_check",
+        json!({
+            "provenance": { "left": "diagnostic_biopsy", "right": "postmortem", "selection_modelled": true },
+            "alterations": { "left": "fusion", "right": "sequence_variant", "estimand": "time to next systemic therapy" },
+            "benchmark": { "macro_score": 0.88, "per_class_counts": { "common": 300, "rare": 3 } },
+            "lesion_analysis": { "lesions": 12, "participants": 12, "cluster_declared": false, "endpoint": "overall_survival", "event": "systemic_death", "handling": "event" }
+        }),
+    );
+    assert_eq!(admissible["ok"], json!(true));
+    assert_eq!(admissible["schema"], json!("bioprism-mcp/oncoworlds-entity-world-check/0.1"));
+    assert_eq!(admissible["outcome_kind"], json!("report"));
+    assert_eq!(admissible["all_admissible"], json!(true));
+    assert_eq!(admissible["check_count"], json!(4));
+    assert_eq!(admissible["refusal_count"], json!(0));
+    assert_eq!(admissible["checks"]["benchmark"]["feasibility_kind"], json!("feasible"));
+    assert_eq!(admissible["checks"]["lesion_analysis"]["event_allowed"], json!(true));
+
+    let refused = call(
+        &mut server(),
+        "oncoworlds_entity_world_check",
+        json!({
+            "provenance": { "left": "diagnostic_biopsy", "right": "postmortem", "selection_modelled": false },
+            "alterations": { "left": "fusion", "right": "sequence_variant" },
+            "benchmark": { "macro_score": 0.88, "per_class_counts": {} },
+            "lesion_analysis": { "lesions": 41, "participants": 12, "cluster_declared": false, "endpoint": "local_control", "event": "systemic_death", "handling": "censoring" }
+        }),
+    );
+    assert_eq!(refused["all_admissible"], json!(false));
+    assert_eq!(refused["refusal_count"], json!(4));
+    assert_eq!(refused["checks"]["provenance"]["refusal_kind"], json!("unmodelled_provenance_selection"));
+    assert_eq!(refused["checks"]["alterations"]["refusal_kind"], json!("mechanism_collapse"));
+    assert_eq!(refused["checks"]["benchmark"]["refusal_kind"], json!("macro_score_without_counts"));
+    assert_eq!(refused["checks"]["lesion_analysis"]["cluster_refusal_kind"], json!("undeclared_cluster"));
+    assert_eq!(refused["checks"]["lesion_analysis"]["event_refusal_kind"], json!("competing_event_as_censoring"));
 }
 
 #[test]
