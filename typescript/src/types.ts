@@ -855,6 +855,142 @@ export interface EpistemicVoiResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface BenchmarkTraceEventArgs extends JsonObject {
+  step: number;
+  kind: "goal" | "observation" | "choice" | "action" | "result" | "claim" | "termination";
+  payload: JsonObject;
+  caused_by?: number;
+  visible?: string[];
+}
+
+export interface BenchmarkTraceArgs extends JsonObject {
+  trace_id: string;
+  events: BenchmarkTraceEventArgs[];
+  succeeded: boolean;
+}
+
+export interface BenchmarkTraceAnalyzeArgs extends JsonObject {
+  failing: BenchmarkTraceArgs;
+  reference?: BenchmarkTraceArgs;
+}
+
+export interface BenchmarkCandidateScoreResult extends JsonObject {
+  alternatives: number;
+  newly_visible: number;
+  downstream_steps: number;
+  is_divergence: boolean;
+  total: number;
+}
+
+export interface BenchmarkCausalCandidateResult extends JsonObject {
+  step: number;
+  kind: string;
+  summary: string;
+  score: BenchmarkCausalScoreResult;
+  upstream_unresolved?: number;
+}
+
+export interface BenchmarkCausalScoreResult extends JsonObject {
+  necessity: number;
+  counterfactual_effect: number;
+  irreversibility: number;
+  explanatory_simplicity: number;
+  total: number;
+  irreversibility_declared: boolean;
+}
+
+export interface BenchmarkDivergenceResult extends JsonObject {
+  kind: "identical" | "early_termination" | "diverged";
+  at_step?: number;
+  shorter?: string;
+  longer_continued_for?: number;
+  failing_step?: number;
+  passing_step?: number;
+  common_prefix?: number;
+  failing_did?: string;
+  passing_did?: string;
+  visibility_gap?: string[];
+}
+
+export interface BenchmarkCausalVerdictResult extends JsonObject {
+  verdict: "first_causal" | "conjunction" | "environment_divergence" | "no_divergence" | "unlocalizable";
+  step?: number;
+  score?: number;
+  steps?: number[];
+  at_step?: number;
+  kind?: string;
+  nearest_controlled_ancestor?: number;
+  reason?: string;
+}
+
+export interface BenchmarkCausalAnalysisResult extends JsonObject {
+  trace_id: string;
+  textual: BenchmarkDivergenceResult;
+  textual_is_actionable: boolean;
+  reference?: string;
+  terminal_step: number;
+  ancestry: number[];
+  candidates: BenchmarkCausalCandidateResult[];
+  verdict: BenchmarkCausalVerdictResult;
+}
+
+export interface BenchmarkReversibilityResult extends JsonObject {
+  source: "declared" | "assumed";
+  irreversible: boolean;
+  basis?: string;
+}
+
+export interface BenchmarkBoundaryResult extends JsonObject {
+  step: number;
+  summary: string;
+  decision_type: string;
+  type_evidence: string;
+  reversibility: BenchmarkReversibilityResult;
+  rank: BenchmarkCandidateScoreResult;
+  no_op_reason?: string;
+}
+
+export interface BenchmarkEpisodeResult extends JsonObject {
+  index: number;
+  goal_step?: number;
+  label: string;
+  steps: number[];
+}
+
+export interface BenchmarkRepetitionResult extends JsonObject {
+  summary: string;
+  steps: number[];
+  classification: {
+    kind: "iterative_refinement" | "stuck";
+    evidence_gained?: string[];
+    repeats?: number;
+  };
+}
+
+export interface BenchmarkTraceSummaryResult extends JsonObject {
+  episode_count: number;
+  boundary_count: number;
+  extractable_boundaries: number;
+  repetition_groups: number;
+}
+
+export interface BenchmarkTraceAnalysisResult extends JsonObject {
+  ok: boolean;
+  trace_id?: string;
+  succeeded?: boolean;
+  event_count?: number;
+  reference_trace_id?: string;
+  analysis?: BenchmarkCausalAnalysisResult;
+  episodes?: BenchmarkEpisodeResult[];
+  boundaries?: BenchmarkBoundaryResult[];
+  repetitions?: BenchmarkRepetitionResult[];
+  summary?: BenchmarkTraceSummaryResult;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

@@ -158,6 +158,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         complementarity: null,
         guarantees: ["gross risk reduction and declared acquisition cost remain separate"],
       } } } });
+      if (path === "/v1/tools/benchmark_trace_analyze") return jsonResponse({ ok: true, tool: "benchmark_trace_analyze", request_id: "r20", mcp: { result: { structuredContent: {
+        ok: true,
+        trace_id: "failed-run",
+        succeeded: false,
+        event_count: 3,
+        reference_trace_id: "reference-run",
+        analysis: { trace_id: "failed-run", textual: { kind: "diverged", failing_step: 1, passing_step: 1, common_prefix: 1, failing_did: "choice route", passing_did: "choice safe", visibility_gap: [] }, textual_is_actionable: true, reference: "reference-run", terminal_step: 2, ancestry: [1], candidates: [], verdict: { verdict: "first_causal", step: 1, score: 0.7 } },
+        episodes: [],
+        boundaries: [],
+        repetitions: [],
+        summary: { episode_count: 0, boundary_count: 0, extractable_boundaries: 0, repetition_groups: 0 },
+        guarantees: ["causal ranking remains separate"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -604,6 +617,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(voi.mcp.result.structuredContent.value.gross, 4);
   assert.equal(voi.mcp.result.structuredContent.value.net, 3.9);
   assert.deepEqual(voi.mcp.result.structuredContent.actions.after, ["treat", "abstain"]);
+  const traceAnalysis = await client.benchmarkTraceAnalyze({
+    failing: {
+      trace_id: "failed-run",
+      succeeded: false,
+      events: [{ step: 0, kind: "goal", payload: { summary: "solve" } }],
+    },
+    reference: {
+      trace_id: "reference-run",
+      succeeded: true,
+      events: [{ step: 0, kind: "goal", payload: { summary: "solve" } }],
+    },
+  });
+  assert.equal(traceAnalysis.mcp.result.structuredContent.analysis.verdict.verdict, "first_causal");
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

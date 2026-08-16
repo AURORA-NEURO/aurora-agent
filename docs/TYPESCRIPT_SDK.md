@@ -171,6 +171,11 @@ action changes, and complementarity for bounded non-adaptive bundles. The reques
 explicit row-major losses and per-model likelihood vectors; the result keeps structured
 fail-closed refusals visible and does not invent an adaptive policy, hidden prior, causal effect,
 or execution step.
+`benchmarkTraceAnalyze` returns typed `BenchmarkTraceAnalysisResult` evidence for causal
+candidate scores, textual divergence, decision-boundary ranks, reversibility basis, goal-anchored
+episodes, repeated-action progress, and reconciled summary counts. Causal verdicts remain distinct
+from boundary ranking, environment-produced divergence is not assigned to an agent, and a
+fail-closed refusal does not become a benchmark cell or replay claim.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

@@ -98,6 +98,14 @@ invent defaults:
   joint-versus-singleton excess for explicitly non-adaptive bundles. Improper partitions and
   exhaustive-cap failures remain typed fail-closed refusals rather than being rounded into a
   negative result or silently treated as an adaptive policy.
+- `BenchmarkTraceAnalyzeArgs` and `benchmark_trace_analysis_report(...)` expose the benchmark
+  compiler's causal, divergence, boundary, episode, and repetition layers through sync MCP, async
+  MCP, and HTTP. `BenchmarkTraceEventArgs` preserves event kind, payload, causal parent, and
+  visibility; `BenchmarkCausalScoreReport` keeps necessity, observed reference effect,
+  irreversibility, and explanatory simplicity distinct from `BenchmarkCandidateScoreReport`'s
+  boundary-ranking arithmetic. Typed verdicts preserve first-causal, conjunction,
+  environment-divergence, no-divergence, and unlocalizable outcomes, while structured refusals
+  remain fail-closed and never become fabricated blame or executable benchmark cells.
 - `WorldClaimCheckRequest`, `LabPlanRequest`, and `RoutingDecisionRequest` expose typed envelope
   helpers for world support checks, no-execution acquisition planning, and unseen-task routing over
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and

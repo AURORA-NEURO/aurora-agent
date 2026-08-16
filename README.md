@@ -439,7 +439,9 @@ reduction, declared cost, net value, action changes, complementarity, and exhaus
 the Python and TypeScript SDKs expose the same boundary with typed problem, belief, acquisition,
 value, bundle, action-identity, and fail-closed refusal projections;
 `benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
-repetition analysis; and `pack_catalogue` exposes the agent and biological pack portfolio without
+repetition analysis; the Python and TypeScript SDKs expose typed trace events, causal score
+components, divergence/verdict variants, boundaries, episodes, repetitions, and fail-closed
+refusals; and `pack_catalogue` exposes the agent and biological pack portfolio without
 turning declarations into measured scores.
 `pack_health_assess` runs the typed pack-health gate over observed calibration, trivial baselines,
 contamination, oracle posture, and materialization, binding every finding to the pack digest and

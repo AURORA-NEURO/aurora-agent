@@ -181,6 +181,7 @@ from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_regi
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
+from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -729,6 +730,23 @@ class ApiClient:
         """Return typed HTTP value-of-information evidence."""
 
         return epistemic_voi_report(self.epistemic_voi(request))
+
+    def benchmark_trace_analyze(
+        self,
+        request: BenchmarkTraceAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Analyze serialized failing/reference traces through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BenchmarkTraceAnalyzeArgs) else BenchmarkTraceAnalyzeArgs.from_wire(request)
+        return self.call_tool("benchmark_trace_analyze", normalized.to_mcp_arguments())
+
+    def benchmark_trace_analysis_report(
+        self,
+        request: BenchmarkTraceAnalyzeArgs | Mapping[str, Any],
+    ) -> BenchmarkTraceAnalysisReport:
+        """Return typed HTTP benchmark compiler evidence."""
+
+        return benchmark_trace_analysis_report(self.benchmark_trace_analyze(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2391,6 +2409,23 @@ class AsyncApiClient:
         """Return async typed HTTP value-of-information evidence."""
 
         return epistemic_voi_report(await self.epistemic_voi(request))
+
+    async def benchmark_trace_analyze(
+        self,
+        request: BenchmarkTraceAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP benchmark trace analysis."""
+
+        normalized = request if isinstance(request, BenchmarkTraceAnalyzeArgs) else BenchmarkTraceAnalyzeArgs.from_wire(request)
+        return await self.call_tool("benchmark_trace_analyze", normalized.to_mcp_arguments())
+
+    async def benchmark_trace_analysis_report(
+        self,
+        request: BenchmarkTraceAnalyzeArgs | Mapping[str, Any],
+    ) -> BenchmarkTraceAnalysisReport:
+        """Return async typed HTTP benchmark compiler evidence."""
+
+        return benchmark_trace_analysis_report(await self.benchmark_trace_analyze(request))
 
     async def developer_delivery_audit_report(
         self,

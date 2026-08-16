@@ -218,6 +218,7 @@ from .token_context import (
 )
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
+from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -1619,6 +1620,26 @@ class Workspace:
         """Return typed gross/cost/net, action-change, bundle, and refusal evidence."""
 
         return epistemic_voi_report(self.epistemic_voi(request))
+
+    def benchmark_trace_analyze(
+        self,
+        request: BenchmarkTraceAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Analyze a failing trace without replaying tools or assigning fabricated blame."""
+
+        normalized = request if isinstance(request, BenchmarkTraceAnalyzeArgs) else BenchmarkTraceAnalyzeArgs.from_wire(request)
+        result = self.client.call_tool("benchmark_trace_analyze", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def benchmark_trace_analysis_report(
+        self,
+        request: BenchmarkTraceAnalyzeArgs | Mapping[str, Any],
+    ) -> BenchmarkTraceAnalysisReport:
+        """Return typed causal, boundary, episode, repetition, and refusal evidence."""
+
+        return benchmark_trace_analysis_report(self.benchmark_trace_analyze(request))
 
     def developer_delivery_audit_report(
         self,
@@ -3261,6 +3282,26 @@ class AsyncWorkspace:
         """Return async typed value-of-information evidence."""
 
         return epistemic_voi_report(await self.epistemic_voi(request))
+
+    async def benchmark_trace_analyze(
+        self,
+        request: BenchmarkTraceAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async benchmark trace analysis with structured fail-closed refusals."""
+
+        normalized = request if isinstance(request, BenchmarkTraceAnalyzeArgs) else BenchmarkTraceAnalyzeArgs.from_wire(request)
+        result = await self.client.call_tool("benchmark_trace_analyze", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def benchmark_trace_analysis_report(
+        self,
+        request: BenchmarkTraceAnalyzeArgs | Mapping[str, Any],
+    ) -> BenchmarkTraceAnalysisReport:
+        """Return async typed benchmark compiler evidence."""
+
+        return benchmark_trace_analysis_report(await self.benchmark_trace_analyze(request))
 
     async def developer_delivery_audit_report(
         self,
