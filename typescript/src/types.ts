@@ -5366,6 +5366,43 @@ export interface OncoWorldsClonalHistoryCheckResult extends JsonObject {
   limitations: string[];
 }
 
+export interface OncoClonalEvidenceCheckArgs extends JsonObject {
+  promotion?: JsonObject;
+  resistance?: JsonObject;
+  attribution?: JsonObject;
+}
+
+export type OncoClonalEvidenceRefusalKind =
+  | "undeclared_sensitivity"
+  | "no_region_sampled"
+  | "not_an_absence"
+  | "copy_number_unknown"
+  | "ambiguous"
+  | "unsupported_directionality";
+
+export interface OncoClonalEvidenceSectionResult extends JsonObject {
+  allowed: boolean;
+  outcome_kind: string;
+  refusal?: JsonObject | null;
+  refusal_kind?: OncoClonalEvidenceRefusalKind | null;
+  refusal_text?: string;
+  unique_explanation?: string;
+  tumour_claim?: JsonObject;
+  de_novo_emergence_survives?: boolean;
+}
+
+export interface OncoWorldsClonalEvidenceCheckResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-clonal-evidence-check/0.1";
+  outcome_kind: "report";
+  all_admissible: boolean;
+  check_count: number;
+  refusal_count: number;
+  checks: Record<string, OncoClonalEvidenceSectionResult>;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface OncoWorldsEraShiftCheckArgs extends JsonObject {
   left: JsonObject;
   right: JsonObject;

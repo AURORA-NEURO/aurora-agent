@@ -25,6 +25,9 @@ METHYLATION_REFUSAL_KINDS = frozenset({"undeclared_threshold", "score_out_of_ran
 ONCOWORLDS_CLONAL_SCHEMA = "bioprism-mcp/oncoworlds-clonal-history-check/0.1"
 ONCOWORLDS_CLONAL_REFUSAL_KINDS = frozenset({"fractions_exceed_whole", "child_exceeds_parent", "cyclic", "unknown_subclone", "ambiguous", "unsupported_directionality"})
 ONCOWORLDS_CLONAL_UNIQUE_STATUSES = frozenset({"unique", "ambiguous", "refused"})
+ONCOWORLDS_CLONAL_EVIDENCE_SCHEMA = "bioprism-mcp/oncoworlds-clonal-evidence-check/0.1"
+ONCOWORLDS_CLONAL_EVIDENCE_OUTCOME_KINDS = frozenset({"report"})
+ONCOWORLDS_CLONAL_EVIDENCE_REFUSAL_KINDS = frozenset({"undeclared_sensitivity", "no_region_sampled", "not_an_absence", "copy_number_unknown", "ambiguous", "unsupported_directionality"})
 ONCOWORLDS_RADIOGENOMIC_SCHEMA = "bioprism-mcp/oncoworlds-radiogenomic-check/0.1"
 ONCOWORLDS_RADIOGENOMIC_TARGETS = frozenset({"association", "mechanism"})
 ONCOWORLDS_RADIOGENOMIC_SPLIT_UNITS = frozenset({"image", "imaging_series", "specimen", "participant", "site"})
@@ -640,6 +643,38 @@ class OncoWorldsClonalHistoryCheckArgs:
 
 
 @dataclass(frozen=True)
+class OncoClonalEvidenceCheckArgs:
+    promotion: Mapping[str, Any] | None = None
+    resistance: Mapping[str, Any] | None = None
+    attribution: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        sections = {
+            "promotion": _optional_mapping("clonal promotion", self.promotion),
+            "resistance": _optional_mapping("clonal resistance", self.resistance),
+            "attribution": _optional_mapping("clonal attribution", self.attribution),
+        }
+        if not any(value is not None for value in sections.values()):
+            raise ArgumentError("at least one clonal evidence section is required")
+        object.__setattr__(self, "promotion", sections["promotion"])
+        object.__setattr__(self, "resistance", sections["resistance"])
+        object.__setattr__(self, "attribution", sections["attribution"])
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClonalEvidenceCheckArgs":
+        raw = _object("clonal evidence arguments", value)
+        return cls(raw.get("promotion"), raw.get("resistance"), raw.get("attribution"))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for name in ("promotion", "resistance", "attribution"):
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = dict(value)
+        return result
+
+
+@dataclass(frozen=True)
 class OncoClonalHistoryProjection:
     raw: dict[str, Any]
     edges: tuple[tuple[str, str], ...]
@@ -1123,6 +1158,86 @@ class OncoWorldsClonalHistoryCheckReport:
 
 
 @dataclass(frozen=True)
+class OncoClonalEvidenceCheckProjection:
+    raw: dict[str, Any]
+    section: str
+    allowed: bool
+    outcome_kind: str
+    refusal_kind: str | None
+    refusal: dict[str, Any] | None
+    unique_explanation: str | None = None
+
+    @classmethod
+    def from_wire(cls, section: str, value: Mapping[str, Any]) -> "OncoClonalEvidenceCheckProjection":
+        raw = _object(f"clonal evidence {section} check", value)
+        allowed = _bool(f"clonal evidence {section} allowed", raw.get("allowed"))
+        outcome_kind = _route_text(f"clonal evidence {section} outcome kind", raw.get("outcome_kind"))
+        refusal_value = raw.get("refusal")
+        refusal = None if refusal_value is None else _object(f"clonal evidence {section} refusal", refusal_value)
+        refusal_kind_value = raw.get("refusal_kind")
+        refusal_kind = None if refusal_kind_value is None else _route_text(f"clonal evidence {section} refusal kind", refusal_kind_value)
+        if refusal is not None:
+            typed_kind = _route_text(f"clonal evidence {section} typed refusal", refusal.get("refusal"))
+            if refusal_kind != typed_kind or typed_kind not in ONCOWORLDS_CLONAL_EVIDENCE_REFUSAL_KINDS:
+                raise ArgumentError(f"clonal evidence {section} refusal kind does not reconcile")
+        if section == "promotion" and not allowed and refusal_kind not in {"undeclared_sensitivity", "no_region_sampled", "not_an_absence", "copy_number_unknown"}:
+            raise ArgumentError("unexpected clonal promotion refusal kind")
+        if section == "resistance" and not allowed and refusal_kind != "ambiguous":
+            raise ArgumentError("unexpected clonal resistance refusal kind")
+        if section == "attribution" and not allowed and refusal_kind != "unsupported_directionality":
+            raise ArgumentError("unexpected clonal attribution refusal kind")
+        if allowed and (refusal is not None or refusal_kind is not None):
+            raise ArgumentError(f"allowed clonal evidence {section} checks cannot carry refusal evidence")
+        if not allowed and refusal is None:
+            raise ArgumentError(f"refused clonal evidence {section} checks must carry typed refusal evidence")
+        unique_value = raw.get("unique_explanation")
+        unique_explanation = None if unique_value is None else _route_text(f"clonal evidence {section} unique explanation", unique_value)
+        return cls(raw, section, allowed, outcome_kind, refusal_kind, refusal, unique_explanation)
+
+
+@dataclass(frozen=True)
+class OncoWorldsClonalEvidenceCheckReport:
+    raw: dict[str, Any]
+    ok: bool
+    all_admissible: bool
+    check_count: int
+    refusal_count: int
+    checks: dict[str, OncoClonalEvidenceCheckProjection]
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsClonalEvidenceCheckReport":
+        raw = _payload(value, label="oncoworlds clonal evidence check", direct_keys=("checks",))
+        ok = _bool("clonal evidence check ok", raw.get("ok"))
+        if not ok:
+            raise ArgumentError("clonal evidence check transport projection is not successful")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("clonal evidence schema", schema_value)
+        if schema is not None and schema != ONCOWORLDS_CLONAL_EVIDENCE_SCHEMA:
+            raise ArgumentError(f"unknown clonal evidence schema: {schema!r}")
+        outcome_kind = _route_text("clonal evidence outcome kind", raw.get("outcome_kind", "report"))
+        if outcome_kind not in ONCOWORLDS_CLONAL_EVIDENCE_OUTCOME_KINDS:
+            raise ArgumentError(f"unknown clonal evidence outcome kind: {outcome_kind!r}")
+        raw_checks = _route_mapping("clonal evidence checks", raw.get("checks"))
+        if not raw_checks or any(section not in {"promotion", "resistance", "attribution"} for section in raw_checks):
+            raise ArgumentError("clonal evidence checks contain an unknown section")
+        checks = {section: OncoClonalEvidenceCheckProjection.from_wire(section, check) for section, check in raw_checks.items()}
+        check_count = _route_count("clonal evidence check count", raw.get("check_count", len(checks)))
+        refusal_count = _route_count("clonal evidence refusal count", raw.get("refusal_count", sum(not check.allowed for check in checks.values())))
+        if check_count != len(checks) or refusal_count != sum(not check.allowed for check in checks.values()):
+            raise ArgumentError("clonal evidence counts do not reconcile")
+        all_admissible = _bool("all clonal evidence checks admissible", raw.get("all_admissible", refusal_count == 0))
+        if all_admissible != (refusal_count == 0):
+            raise ArgumentError("clonal evidence admissibility does not reconcile")
+        if schema is not None and any(field not in raw for field in ("check_count", "refusal_count", "all_admissible")):
+            raise ArgumentError("versioned clonal evidence reports require section accounting")
+        return cls(raw, True, all_admissible, check_count, refusal_count, checks, _route_strings("clonal evidence guarantees", raw.get("guarantees")), _route_strings("clonal evidence limitations", raw.get("limitations")), schema, outcome_kind)
+
+
+@dataclass(frozen=True)
 class OncoWorldsEraShiftCheckReport:
     raw: dict[str, Any]
     ok: bool
@@ -1404,6 +1519,10 @@ def oncoworlds_clonal_history_check_report(value: Mapping[str, Any]) -> OncoWorl
     return OncoWorldsClonalHistoryCheckReport.from_wire(value)
 
 
+def oncoworlds_clonal_evidence_check_report(value: Mapping[str, Any]) -> OncoWorldsClonalEvidenceCheckReport:
+    return OncoWorldsClonalEvidenceCheckReport.from_wire(value)
+
+
 def oncoworlds_era_shift_check_report(value: Mapping[str, Any]) -> OncoWorldsEraShiftCheckReport:
     return OncoWorldsEraShiftCheckReport.from_wire(value)
 
@@ -1425,6 +1544,9 @@ __all__ = [
     "ONCOWORLDS_CLONAL_REFUSAL_KINDS",
     "ONCOWORLDS_CLONAL_SCHEMA",
     "ONCOWORLDS_CLONAL_UNIQUE_STATUSES",
+    "ONCOWORLDS_CLONAL_EVIDENCE_SCHEMA",
+    "ONCOWORLDS_CLONAL_EVIDENCE_OUTCOME_KINDS",
+    "ONCOWORLDS_CLONAL_EVIDENCE_REFUSAL_KINDS",
     "ONCOWORLDS_RADIOGENOMIC_FEATURE_PROVENANCE",
     "ONCOWORLDS_RADIOGENOMIC_OUTCOME_KINDS",
     "ONCOWORLDS_RADIOGENOMIC_REFUSAL_KINDS",
@@ -1449,6 +1571,9 @@ __all__ = [
     "OncoClonalUniqueHistoryProjection",
     "OncoWorldsClonalHistoryCheckArgs",
     "OncoWorldsClonalHistoryCheckReport",
+    "OncoClonalEvidenceCheckArgs",
+    "OncoClonalEvidenceCheckProjection",
+    "OncoWorldsClonalEvidenceCheckReport",
     "OncoWorldsMethylationClassifyArgs",
     "OncoWorldsMethylationClassifyReport",
     "OncoWorldsMethylationCompareArgs",
@@ -1479,6 +1604,7 @@ __all__ = [
     "OncoEntityWorldCheckProjection",
     "OncoWorldsEntityWorldCheckReport",
     "oncoworlds_clonal_history_check_report",
+    "oncoworlds_clonal_evidence_check_report",
     "oncoworlds_era_shift_check_report",
     "oncoworlds_equity_check_report",
     "oncoworlds_entity_world_check_report",

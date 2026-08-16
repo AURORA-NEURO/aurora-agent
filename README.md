@@ -614,6 +614,11 @@ exposure, and complete versus informative bias flags; see [`docs/ONCO_OUTCOME_AN
 `oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and keeps
 multiple compatible histories as typed ambiguity rather than selecting one; its versioned projection
 retains per-candidate refusal kinds and candidate accounting (see [`docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md`](docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md)).
+`oncoworlds_clonal_evidence_check` extends that boundary to specimen promotion, recurrence-
+resistance explanation sets, assay sensitivity, declared copy-number conversion, and treatment
+attribution. It preserves sampled-region bounds and temporal-causation refusal rather than
+inventing a single phylogeny or treatment mechanism; see
+[`docs/ONCOWORLDS_CLONAL_EVIDENCE.md`](docs/ONCOWORLDS_CLONAL_EVIDENCE.md).
 `oncoworlds_entity_world_check` composes provenance-selection, alteration-mechanism, rare-class
 benchmark, lesion-clustering, and competing-event safeguards. Requested sections retain separate
 admissibility and refusal evidence, while the top-level report reconciles only the requested

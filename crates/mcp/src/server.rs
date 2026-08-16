@@ -127,22 +127,25 @@ use bioprism_mutation::{
 use bioprism_onco::{
     assess as onco_assess, classify as onco_classify, AcquisitionTime, AvailabilityTime,
     BoundaryRequest, ClinicalObservation, Estimand, FollowUp, Histology, ImagingObservation,
-    MarkerPanel, ProgressionEvidence, ResearchBoundary, ResponseCriterion, ResponseRequest,
-    Timepoint, TreatmentContext, TumourWorldline,
+    MarkerPanel, MolecularMarker, ProgressionEvidence, ResearchBoundary,
+    ResponseCriterion, ResponseRequest, Timepoint, TreatmentContext, TumourWorldline,
 };
 use bioprism_oncoworlds::{
+    attribute_to_treatment as onco_attribute_to_treatment,
     as_negative_call as onco_as_negative_call,
     assert_claim as onco_assert_radiogenomic_claim,
     classify as onco_classify_methylation,
     compatible_histories as onco_compatible_histories, joinable_with_bridge,
     comparable_cohorts as onco_comparable_cohorts,
+    explain_new_alteration as onco_explain_new_alteration,
     equity_report as onco_equity_report,
     reconcile_versions as onco_reconcile_methylation,
     transport_to_patients as onco_transport_model, AnalysisUnit, Artifact, ClassifierVersion,
-    ClonalHistory, Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse, EntityMapping, EpochBridge,
-    EstablishmentCohort, EvaluationDesign, FidelityEvidence, IdentityEvidence, JoinReport,
-    JoinVerdict, MethylationClass, ModelResult, PopulationDescriptor, PooledScore,
-    RadiogenomicClaim, SampleContext, SiteAssayContext, TumourPopulation,
+    CausalDesign, ClonalHistory, Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse,
+    EntityMapping, EpochBridge, EstablishmentCohort, EvaluationDesign, FidelityEvidence,
+    IdentityEvidence, JoinReport, JoinVerdict, MethylationClass, ModelResult,
+    PopulationDescriptor, PooledScore, RadiogenomicClaim, SampleContext, SiteAssayContext,
+    SpecimenObservation, TumourPopulation,
     use_descriptor as onco_use_descriptor, VersionedResult,
 };
 use bioprism_oncoworlds::entities::{
@@ -1293,6 +1296,7 @@ impl Server {
             "oncoworlds_methylation_compare" => self.oncoworlds_methylation_compare(&arguments),
             "oncoworlds_radiogenomic_check" => self.oncoworlds_radiogenomic_check(&arguments),
             "oncoworlds_clonal_history_check" => self.oncoworlds_clonal_history_check(&arguments),
+            "oncoworlds_clonal_evidence_check" => self.oncoworlds_clonal_evidence_check(&arguments),
             "oncoworlds_era_shift_check" => self.oncoworlds_era_shift_check(&arguments),
             "oncoworlds_equity_check" => self.oncoworlds_equity_check(&arguments),
             "oncoworlds_entity_world_check" => self.oncoworlds_entity_world_check(&arguments),
@@ -10747,6 +10751,176 @@ impl Server {
         }))
     }
 
+    fn oncoworlds_clonal_evidence_check(&self, arguments: &Value) -> Result<Value, String> {
+        let mut checks = serde_json::Map::new();
+
+        if let Some(value) = arguments.get("promotion") {
+            let object = value
+                .as_object()
+                .ok_or("promotion must be an object")?;
+            let observation: SpecimenObservation = serde_json::from_value(
+                object
+                    .get("observation")
+                    .cloned()
+                    .ok_or("promotion.observation is required")?,
+            )
+            .map_err(|error| format!("invalid promotion specimen observation: {error}"))?;
+            let observation_value =
+                serde_json::to_value(&observation).map_err(|error| error.to_string())?;
+            let marker_value =
+                serde_json::to_value(observation.marker).map_err(|error| error.to_string())?;
+            let mut projection = json!({
+                "observation": observation_value,
+                "marker": marker_value,
+                "allowed": false
+            });
+            match observation.as_tumour_claim() {
+                Ok(claim) => {
+                    let claim_value =
+                        serde_json::to_value(&claim).map_err(|error| error.to_string())?;
+                    projection["allowed"] = json!(true);
+                    projection["outcome_kind"] = claim_value
+                        .get("tumour_claim")
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    projection["tumour_claim"] = claim_value;
+                    projection["refusal"] = Value::Null;
+                    projection["refusal_kind"] = Value::Null;
+                }
+                Err(refusal) => {
+                    let refusal_value =
+                        serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                    projection["outcome_kind"] = json!("refused");
+                    projection["refusal"] = refusal_value.clone();
+                    projection["refusal_kind"] = refusal_value["refusal"].clone();
+                    projection["refusal_text"] = json!(refusal.to_string());
+                }
+            }
+            checks.insert("promotion".into(), projection);
+        }
+
+        if let Some(value) = arguments.get("resistance") {
+            let object = value
+                .as_object()
+                .ok_or("resistance must be an object")?;
+            let diagnosis: SpecimenObservation = serde_json::from_value(
+                object
+                    .get("diagnosis")
+                    .cloned()
+                    .ok_or("resistance.diagnosis is required")?,
+            )
+            .map_err(|error| format!("invalid resistance diagnosis observation: {error}"))?;
+            let recurrence: SpecimenObservation = serde_json::from_value(
+                object
+                    .get("recurrence")
+                    .cloned()
+                    .ok_or("resistance.recurrence is required")?,
+            )
+            .map_err(|error| format!("invalid resistance recurrence observation: {error}"))?;
+            let explanations = onco_explain_new_alteration(&diagnosis, &recurrence);
+            let sole = explanations.sole();
+            let mut projection = json!({
+                "diagnosis": serde_json::to_value(&diagnosis).map_err(|error| error.to_string())?,
+                "recurrence": serde_json::to_value(&recurrence).map_err(|error| error.to_string())?,
+                "not_excluded": serde_json::to_value(&explanations.not_excluded).map_err(|error| error.to_string())?,
+                "excluded": explanations.excluded,
+                "de_novo_emergence_survives": explanations.contains(
+                    bioprism_oncoworlds::ResistanceExplanation::DeNovoEmergence
+                ),
+                "allowed": sole.is_ok(),
+                "outcome_kind": if sole.is_ok() { "unique" } else { "ambiguous" }
+            });
+            match sole {
+                Ok(explanation) => {
+                    projection["unique_explanation"] = serde_json::to_value(explanation)
+                        .map_err(|error| error.to_string())?;
+                    projection["refusal"] = Value::Null;
+                    projection["refusal_kind"] = Value::Null;
+                }
+                Err(refusal) => {
+                    let refusal_value =
+                        serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                    projection["refusal"] = refusal_value.clone();
+                    projection["refusal_kind"] = refusal_value["refusal"].clone();
+                    projection["refusal_text"] = json!(refusal.to_string());
+                }
+            }
+            checks.insert("resistance".into(), projection);
+        }
+
+        if let Some(value) = arguments.get("attribution") {
+            let object = value
+                .as_object()
+                .ok_or("attribution must be an object")?;
+            let treatment = object
+                .get("treatment")
+                .and_then(Value::as_str)
+                .ok_or("attribution.treatment must be a string")?;
+            if treatment.len() > 10_000 {
+                return Err("attribution treatment exceeds the 10000-byte safety bound".into());
+            }
+            let alteration: MolecularMarker = serde_json::from_value(
+                object
+                    .get("alteration")
+                    .cloned()
+                    .ok_or("attribution.alteration is required")?,
+            )
+            .map_err(|error| format!("invalid treatment-attribution alteration: {error}"))?;
+            let design: CausalDesign = serde_json::from_value(
+                object
+                    .get("design")
+                    .cloned()
+                    .ok_or("attribution.design is required")?,
+            )
+            .map_err(|error| format!("invalid treatment-attribution design: {error}"))?;
+            let result = onco_attribute_to_treatment(treatment, alteration, design);
+            let mut projection = json!({
+                "treatment": treatment,
+                "alteration": alteration,
+                "alteration_label": alteration.describe(),
+                "design": design,
+                "allowed": result.is_ok()
+            });
+            let refusal = result.expect_err("temporal-attribution design is always refused");
+            let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+            projection["refusal"] = refusal_value.clone();
+            projection["refusal_kind"] = refusal_value["refusal"].clone();
+            projection["refusal_text"] = json!(refusal.to_string());
+            checks.insert("attribution".into(), projection);
+        }
+
+        if checks.is_empty() {
+            return Err("at least one clonal evidence section is required".into());
+        }
+        if checks.len() > 3 {
+            return Err("clonal evidence checks may contain at most three sections".into());
+        }
+        let refusal_count = checks
+            .values()
+            .filter(|value| value.get("allowed") == Some(&json!(false)))
+            .count();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/oncoworlds-clonal-evidence-check/0.1",
+            "outcome_kind": "report",
+            "all_admissible": refusal_count == 0,
+            "check_count": checks.len(),
+            "refusal_count": refusal_count,
+            "checks": checks,
+            "guarantees": [
+                "specimen presence promotes only to a claim over sampled tumour material",
+                "negative and below-detection observations retain their assay limit and sampled regions",
+                "resistance explanations remain set-valued and recurrence selection is not rewritten as de novo biology",
+                "temporal association is never upgraded to treatment causation"
+            ],
+            "limitations": [
+                "no phylogeny is inferred, no allele-fraction conversion is performed, and no causal effect is estimated",
+                "a unique explanation would still be an arithmetic survivor, not proof of biological history",
+                "these checks do not diagnose, classify, or recommend treatment"
+            ]
+        }))
+    }
+
     fn oncoworlds_era_shift_check(&self, arguments: &Value) -> Result<Value, String> {
         let left: OncoShiftCohort = serde_json::from_value(
             arguments
@@ -17166,7 +17340,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "oncoworlds_clonal_evolution",
             "domains": ["clonal populations", "phylogeny compatibility", "resistance hypotheses"],
             "crates": ["bioprism-oncoworlds", "bioprism-onco"],
-            "mcp_tools": ["oncoworlds_clonal_history_check"],
+            "mcp_tools": ["oncoworlds_clonal_history_check", "oncoworlds_clonal_evidence_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18472,6 +18646,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "candidates": { "type": "array", "maxItems": 10000, "description": "Candidate serialized ClonalHistory values." }
                 },
                 "required": ["population", "candidates"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_clonal_evidence_check",
+            "description": "Audit serialized OncoWorlds specimen promotion, recurrence-resistance explanations, and treatment-attribution boundaries. It keeps sampled-region tumour claims, set-valued explanations, assay sensitivity, copy-number conversion, and temporal-causation refusals explicit instead of selecting a phylogeny or causal story.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "promotion": { "type": "object", "description": "Optional {observation} SpecimenObservation promotion check." },
+                    "resistance": { "type": "object", "description": "Optional {diagnosis, recurrence} SpecimenObservation explanation check." },
+                    "attribution": { "type": "object", "description": "Optional {treatment, alteration, design} treatment-causation check; temporal_association_only is refused." }
+                },
+                "required": []
             }
         }),
         json!({

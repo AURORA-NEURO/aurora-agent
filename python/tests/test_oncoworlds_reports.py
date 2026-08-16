@@ -4,6 +4,7 @@ import unittest
 
 from prism_sdk import (
     ArgumentError,
+    OncoClonalEvidenceCheckArgs,
     OncoWorldsClonalHistoryCheckArgs,
     OncoWorldsEraShiftCheckArgs,
     OncoWorldsEquityCheckArgs,
@@ -13,6 +14,7 @@ from prism_sdk import (
     OncoWorldsModelTransportReport,
     OncoWorldsRadiogenomicCheckReport,
     oncoworlds_clonal_history_check_report,
+    oncoworlds_clonal_evidence_check_report,
     oncoworlds_era_shift_check_report,
     oncoworlds_equity_check_report,
     oncoworlds_entity_world_check_report,
@@ -343,6 +345,27 @@ class OncoWorldsReportTests(unittest.TestCase):
         self.assertEqual(entity.checks["benchmark"].feasibility_kind, "feasible")
         entity_args = OncoWorldsEntityWorldCheckArgs(provenance={"left": "diagnostic_biopsy", "right": "postmortem", "selection_modelled": True})
         self.assertIn("provenance", entity_args.to_mcp_arguments())
+        clonal = oncoworlds_clonal_evidence_check_report({
+            "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-clonal-evidence-check/0.1",
+            "outcome_kind": "report",
+            "all_admissible": False,
+            "check_count": 3,
+            "refusal_count": 2,
+            "checks": {
+                "promotion": {"allowed": True, "outcome_kind": "present_in_sampled_regions", "refusal": None, "refusal_kind": None},
+                "resistance": {"allowed": False, "outcome_kind": "ambiguous", "refusal": {"refusal": "ambiguous", "count": 2}, "refusal_kind": "ambiguous"},
+                "attribution": {"allowed": False, "outcome_kind": "refused", "refusal": {"refusal": "unsupported_directionality", "treatment": "temozolomide", "alteration": "EGFR amplification"}, "refusal_kind": "unsupported_directionality"},
+            },
+            "guarantees": [],
+            "limitations": [],
+        })
+        self.assertFalse(clonal.all_admissible)
+        self.assertEqual(clonal.refusal_count, 2)
+        self.assertEqual(clonal.checks["resistance"].refusal_kind, "ambiguous")
+        self.assertEqual(clonal.checks["attribution"].refusal_kind, "unsupported_directionality")
+        clonal_args = OncoClonalEvidenceCheckArgs(promotion={"observation": {"call": {"value": "present"}}})
+        self.assertIn("promotion", clonal_args.to_mcp_arguments())
 
     def test_oncoworlds_requests_enforce_bounded_transport_shape(self) -> None:
         args = OncoWorldsClonalHistoryCheckArgs({"subclones": []}, [{"edges": []}])
@@ -353,6 +376,8 @@ class OncoWorldsReportTests(unittest.TestCase):
         self.assertEqual(equity_args.to_mcp_arguments()["pooled"]["value"], 0.9)
         with self.assertRaises(ArgumentError):
             OncoWorldsEntityWorldCheckArgs()
+        with self.assertRaises(ArgumentError):
+            OncoClonalEvidenceCheckArgs()
         with self.assertRaises(ArgumentError):
             OncoWorldsMethylationClassifyArgs({}, {str(index): {} for index in range(10_001)}, {})
 

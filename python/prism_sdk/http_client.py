@@ -150,6 +150,8 @@ from .oncology import (
     onco_worldline_report,
 )
 from .oncoworlds import (
+    OncoClonalEvidenceCheckArgs,
+    OncoWorldsClonalEvidenceCheckReport,
     OncoWorldsClonalHistoryCheckArgs,
     OncoWorldsClonalHistoryCheckReport,
     OncoWorldsEraShiftCheckArgs,
@@ -166,6 +168,7 @@ from .oncoworlds import (
     OncoWorldsModelTransportReport,
     OncoWorldsRadiogenomicCheckArgs,
     OncoWorldsRadiogenomicCheckReport,
+    oncoworlds_clonal_evidence_check_report,
     oncoworlds_clonal_history_check_report,
     oncoworlds_era_shift_check_report,
     oncoworlds_equity_check_report,
@@ -1942,6 +1945,19 @@ class ApiClient:
         request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
     ) -> OncoWorldsClonalHistoryCheckReport:
         return oncoworlds_clonal_history_check_report(self.oncoworlds_clonal_history_check(request))
+
+    def oncoworlds_clonal_evidence_check(
+        self,
+        request: OncoClonalEvidenceCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoClonalEvidenceCheckArgs) else OncoClonalEvidenceCheckArgs.from_wire(request)
+        return self.call_tool("oncoworlds_clonal_evidence_check", normalized.to_mcp_arguments())
+
+    def oncoworlds_clonal_evidence_check_report(
+        self,
+        request: OncoClonalEvidenceCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsClonalEvidenceCheckReport:
+        return oncoworlds_clonal_evidence_check_report(self.oncoworlds_clonal_evidence_check(request))
 
     def oncoworlds_era_shift_check(
         self,
@@ -3990,6 +4006,19 @@ class AsyncApiClient:
         request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
     ) -> OncoWorldsClonalHistoryCheckReport:
         return oncoworlds_clonal_history_check_report(await self.oncoworlds_clonal_history_check(request))
+
+    async def oncoworlds_clonal_evidence_check(
+        self,
+        request: OncoClonalEvidenceCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoClonalEvidenceCheckArgs) else OncoClonalEvidenceCheckArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_clonal_evidence_check", normalized.to_mcp_arguments())
+
+    async def oncoworlds_clonal_evidence_check_report(
+        self,
+        request: OncoClonalEvidenceCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsClonalEvidenceCheckReport:
+        return oncoworlds_clonal_evidence_check_report(await self.oncoworlds_clonal_evidence_check(request))
 
     async def oncoworlds_era_shift_check(
         self,

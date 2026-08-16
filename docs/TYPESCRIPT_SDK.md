@@ -360,6 +360,9 @@ change, and version-conditioned disagreement explicit.
 mechanism strata, and transport assumptions, plus a versioned support/refusal state, blocked claim,
 design summary, refusal kind, and typed supported-claim envelope; `oncoworldsClonalHistoryCheck` returns compatible and
 rejected histories with typed reasons and preserves ambiguity when more than one history survives.
+`oncoworldsClonalEvidenceCheck` adds specimen-to-tumour promotion, recurrence explanation sets,
+declared assay sensitivity/copy-number provenance, and an explicit refusal for temporal treatment
+causation. It keeps each check section independent and does not infer a phylogeny or effect.
 `oncoworldsEraShiftCheck` adds versioned cohort mapping, site-resource, and population-descriptor
 evidence; `oncoworldsEquityCheck` keeps pooled-only and incomplete-interval results refused while
 retaining every subgroup. These methods are projections only: they do not perform clinical

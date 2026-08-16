@@ -74,6 +74,8 @@ import type {
   OncoWorldsRadiogenomicCheckResult,
   OncoWorldsClonalHistoryCheckArgs,
   OncoWorldsClonalHistoryCheckResult,
+  OncoClonalEvidenceCheckArgs,
+  OncoWorldsClonalEvidenceCheckResult,
   OncoWorldsEraShiftCheckArgs,
   OncoWorldsEraShiftCheckResult,
   OncoWorldsEquityCheckArgs,
@@ -640,6 +642,10 @@ export class ApiClient {
 
   async oncoworldsClonalHistoryCheck(args: OncoWorldsClonalHistoryCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsClonalHistoryCheckResult>> {
     return this.callTool<OncoWorldsClonalHistoryCheckResult>("oncoworlds_clonal_history_check", args, options);
+  }
+
+  async oncoworldsClonalEvidenceCheck(args: OncoClonalEvidenceCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsClonalEvidenceCheckResult>> {
+    return this.callTool<OncoWorldsClonalEvidenceCheckResult>("oncoworlds_clonal_evidence_check", args, options);
   }
 
   async oncoworldsEraShiftCheck(args: OncoWorldsEraShiftCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsEraShiftCheckResult>> {

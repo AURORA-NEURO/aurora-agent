@@ -1647,6 +1647,20 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
           limitations: [],
         },
         oncoworlds_clonal_history_check: { ok: true, schema: "bioprism-mcp/oncoworlds-clonal-history-check/0.1", compatible_count: 1, rejected_count: 0, candidate_count: 1, compatible: [{ edges: [] }], rejected: [], rejected_records: [], unique_history: { ok: true, history: { edges: [] } }, unique_status: "unique", guarantees: [], limitations: [] },
+        oncoworlds_clonal_evidence_check: {
+          ok: true,
+          schema: "bioprism-mcp/oncoworlds-clonal-evidence-check/0.1",
+          outcome_kind: "report",
+          all_admissible: false,
+          check_count: 2,
+          refusal_count: 1,
+          checks: {
+            promotion: { allowed: true, outcome_kind: "present_in_sampled_regions", refusal: null, refusal_kind: null },
+            attribution: { allowed: false, outcome_kind: "refused", refusal: { refusal: "unsupported_directionality" }, refusal_kind: "unsupported_directionality" },
+          },
+          guarantees: [],
+          limitations: [],
+        },
         oncoworlds_era_shift_check: {
           ok: true,
           schema: "bioprism-mcp/oncoworlds-era-shift-check/0.1",
@@ -1707,6 +1721,7 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
   const compare = await client.oncoworldsMethylationCompare({ left: {}, right: {} });
   const radiogenomic = await client.oncoworldsRadiogenomicCheck({ claim: {}, design: {}, observation: {}, transport: {} });
   const clonal = await client.oncoworldsClonalHistoryCheck({ population: {}, candidates: [] });
+  const clonalEvidence = await client.oncoworldsClonalEvidenceCheck({ promotion: {} });
   const eraShift = await client.oncoworldsEraShiftCheck({ left: {}, right: {} });
   const equity = await client.oncoworldsEquityCheck({ pooled: {} });
   const entityWorld = await client.oncoworldsEntityWorldCheck({ provenance: {} });
@@ -1727,6 +1742,8 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
   assert.equal(clonal.mcp.result.structuredContent.unique_history.ok, true);
   assert.equal(clonal.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-clonal-history-check/0.1");
   assert.equal(clonal.mcp.result.structuredContent.unique_status, "unique");
+  assert.equal(clonalEvidence.mcp.result.structuredContent.checks.attribution.refusal_kind, "unsupported_directionality");
+  assert.equal(clonalEvidence.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-clonal-evidence-check/0.1");
   assert.equal(eraShift.mcp.result.structuredContent.evidence.mapping_fate_count, 1);
   assert.equal(eraShift.mcp.result.structuredContent.evidence.assay_contexts[0].negative_call_supported, false);
   assert.equal(eraShift.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-era-shift-check/0.1");
@@ -1741,6 +1758,7 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
     "oncoworlds_methylation_compare",
     "oncoworlds_radiogenomic_check",
     "oncoworlds_clonal_history_check",
+    "oncoworlds_clonal_evidence_check",
     "oncoworlds_era_shift_check",
     "oncoworlds_equity_check",
     "oncoworlds_entity_world_check",

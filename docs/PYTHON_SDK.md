@@ -218,6 +218,10 @@ invent defaults:
 - `OncoWorldsClonalHistoryCheckArgs`/`oncoworlds_clonal_history_check_report(...)` preserve typed
   compatible histories, per-candidate refusal kinds, candidate accounting, and unique versus
   ambiguous history status. See `docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md`.
+- `OncoClonalEvidenceCheckArgs`/`oncoworlds_clonal_evidence_check_report(...)` preserve asymmetric
+  specimen-to-tumour promotion, set-valued recurrence explanations, declared sensitivity and
+  copy-number provenance, and temporal treatment-causation refusals. See
+  `docs/ONCOWORLDS_CLONAL_EVIDENCE.md`.
 - `OncoWorldsEraShiftCheckArgs`/`oncoworlds_era_shift_check_report(...)` type classification-era
   mappings, site assay availability, not-collected evidence, administrative descriptor use, and
   cross-version comparability refusals. `OncoWorldsEquityCheckArgs`/

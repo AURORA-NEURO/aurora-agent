@@ -65,12 +65,12 @@ use bioprism_onco::{
 };
 use bioprism_oncoworlds::{
     Artifact as OncoArtifact, ArtifactLevel, Calibration, CellularFraction, ClaimTarget,
-    ClassifierVersion, ClonalHistory, CohortSelection, DeclaredTransport, DiseaseEpoch,
-    EstablishmentCohort, EvaluationDesign, FidelityAxis, FidelityEvidence, MethylationClass,
-    MethylationOutcome, ModelIdentity, ModelResult, ModelSystem, Pseudonym, QcOutcome,
-    RadiogenomicClaim, RawScore, RegionId, ReplicateStructure, SampleContext, ScoreValue,
-    SpecimenObservation, SpecimenSampling, SplitUnit, Subclone, SubcloneId, TumourPopulation,
-    VersionedResult,
+    ClassifierVersion, ClonalHistory, CohortSelection, DeclaredTransport, DetectionSensitivity,
+    DiseaseEpoch, EstablishmentCohort, EvaluationDesign, FidelityAxis, FidelityEvidence,
+    FractionDerivation, FractionEvidence, MethylationClass, MethylationOutcome, ModelIdentity,
+    ModelResult, ModelSystem, Pseudonym, QcOutcome, RadiogenomicClaim, RawScore, RegionId,
+    ReplicateStructure, SampleContext, ScoreValue, SpecimenObservation, SpecimenSampling,
+    SplitUnit, Subclone, SubcloneId, TumourPopulation, VersionedResult,
 };
 use bioprism_ops::{
     ArtifactHandling, Assumption, Bound, CapacityModel, Concession, DegradationPlan, Demand,
@@ -302,7 +302,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 125);
+    assert_eq!(tools.len(), 126);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3919,12 +3919,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(125));
-    assert_eq!(result["advertised_tool_count"], json!(125));
+    assert_eq!(result["unique_catalog_tools"], json!(126));
+    assert_eq!(result["advertised_tool_count"], json!(126));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(125));
-    assert_eq!(result["schema_quality"]["valid"], json!(125));
+    assert_eq!(result["schema_quality"]["checked"], json!(126));
+    assert_eq!(result["schema_quality"]["valid"], json!(126));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6256,6 +6256,76 @@ fn oncoworlds_clonal_history_check_preserves_rejected_and_ambiguous_histories() 
     assert_eq!(result["rejected_count"], json!(1));
     assert_eq!(result["rejected"][0][1]["refusal"], json!("cyclic"));
     assert_eq!(result["unique_history"]["ok"], json!(true));
+}
+
+#[test]
+fn oncoworlds_clonal_evidence_check_preserves_sampling_bounds_and_causal_refusal() {
+    let core = RegionId::new("enhancing-core");
+    let cellular = |parts| {
+        FractionEvidence::Cellular {
+            fraction: CellularFraction::from_parts_per_ten_thousand(parts).unwrap(),
+            derivation: FractionDerivation {
+                purity: CellularFraction::from_parts_per_ten_thousand(8_000).unwrap(),
+                local_copy_number: 2,
+                multiplicity: 1,
+                derived_by: "caller-copy-number-model-v1".into(),
+            },
+        }
+    };
+    let diagnosis = SpecimenObservation::new(
+        MolecularMarker::EgfrAmplification,
+        SpecimenSampling::new("diagnostic-core")
+            .sampling(core.clone())
+            .detecting_down_to(DetectionSensitivity {
+                smallest_detectable_fraction: CellularFraction::from_parts_per_ten_thousand(500)
+                    .unwrap(),
+                declared_by: "assay-validation-v1".into(),
+            }),
+        OncoObserved::Value(MarkerCall::Absent),
+    )
+    .at_fraction(cellular(500));
+    let recurrence = SpecimenObservation::new(
+        MolecularMarker::EgfrAmplification,
+        SpecimenSampling::new("recurrence-core").sampling(core),
+        OncoObserved::Value(MarkerCall::Present),
+    )
+    .at_fraction(cellular(2_000));
+    let result = call(
+        &mut server(),
+        "oncoworlds_clonal_evidence_check",
+        json!({
+            "promotion": { "observation": serde_json::to_value(&recurrence).unwrap() },
+            "resistance": { "diagnosis": serde_json::to_value(&diagnosis).unwrap(), "recurrence": serde_json::to_value(&recurrence).unwrap() },
+            "attribution": { "treatment": "temozolomide", "alteration": "egfr_amplification", "design": "temporal_association_only" }
+        }),
+    );
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/oncoworlds-clonal-evidence-check/0.1"));
+    assert_eq!(result["outcome_kind"], json!("report"));
+    assert_eq!(result["check_count"], json!(3));
+    assert_eq!(result["refusal_count"], json!(1));
+    assert_eq!(result["checks"]["promotion"]["allowed"], json!(true));
+    assert_eq!(result["checks"]["promotion"]["outcome_kind"], json!("present_in_sampled_regions"));
+    assert_eq!(result["checks"]["resistance"]["allowed"], json!(true));
+    assert_eq!(result["checks"]["resistance"]["unique_explanation"], json!("de_novo_emergence"));
+    assert_eq!(result["checks"]["resistance"]["de_novo_emergence_survives"], json!(true));
+    assert_eq!(result["checks"]["attribution"]["allowed"], json!(false));
+    assert_eq!(result["checks"]["attribution"]["refusal_kind"], json!("unsupported_directionality"));
+
+    let missing = call(
+        &mut server(),
+        "oncoworlds_clonal_evidence_check",
+        json!({
+            "promotion": { "observation": {
+                "marker": "egfr_amplification",
+                "sampling": { "specimen": "diagnostic-core", "regions": ["enhancing-core"] },
+                "call": { "unobserved": "not_collected" }
+            } }
+        }),
+    );
+    assert_eq!(missing["all_admissible"], json!(false));
+    assert_eq!(missing["refusal_count"], json!(1));
+    assert_eq!(missing["checks"]["promotion"]["refusal_kind"], json!("not_an_absence"));
 }
 
 #[test]
