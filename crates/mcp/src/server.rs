@@ -77,6 +77,11 @@ use bioprism_bioevalx::evaluator::{
 use bioprism_bioevalx::plane::{
     Cell as BioevalCell, FoldPolicy as BioevalFoldPolicy, ScorePlane as BioevalScorePlane,
 };
+use bioprism_bioevalx::metamorphic::{
+    verdict as bioeval_metamorphic_verdict, Family as BioevalMetamorphicFamily,
+    Relation as BioevalMetamorphicRelation, Suite as BioevalMetamorphicSuite,
+    Trial as BioevalMetamorphicTrial, TrialVerdict as BioevalTrialVerdict,
+};
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
@@ -1366,6 +1371,7 @@ impl Server {
             "bioeval_estimand_audit" => self.bioeval_estimand_audit(&arguments),
             "bioeval_evaluator_audit" => self.bioeval_evaluator_audit(&arguments),
             "bioeval_plane_audit" => self.bioeval_plane_audit(&arguments),
+            "bioeval_metamorphic_audit" => self.bioeval_metamorphic_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -14671,6 +14677,258 @@ impl Server {
         }))
     }
 
+    fn bioeval_metamorphic_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-metamorphic-audit/0.1";
+        const MAX_FAMILIES: usize = 1_024;
+        const MAX_TRIALS: usize = 4_096;
+        const MAX_ID_BYTES: usize = 256;
+
+        let raw_families = arguments
+            .get("families")
+            .and_then(Value::as_array)
+            .ok_or("families is required and must be an array of serialized metamorphic Family values")?;
+        if raw_families.is_empty() || raw_families.len() > MAX_FAMILIES {
+            return Err("families must contain 1 to 1024 family rows".into());
+        }
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure metamorphic audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("metamorphic audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_metamorphic_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "false sensitivity, false invariance, wrong direction, and undetermined remain distinct",
+                    "undetermined trials never become consistent trials",
+                    "a family relation mismatch or duplicate trial cannot be averaged into a suite result",
+                ],
+                "limitations": [
+                    "the route audits caller-supplied trial responses and does not generate mutations or run a system",
+                    "the route does not infer mutation-family coverage from a registry",
+                ],
+            })
+        };
+        let bounded_ids = |ids: &BTreeSet<String>| {
+            json!({
+                "ids": ids.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": ids.len(),
+                "omitted": ids.len().saturating_sub(max_items),
+            })
+        };
+
+        let mut suite = BioevalMetamorphicSuite::new();
+        let mut families = Vec::with_capacity(raw_families.len());
+        let mut family_ids = BTreeSet::new();
+        let mut trial_total = 0usize;
+        for (index, raw) in raw_families.iter().enumerate() {
+            let parsed: BioevalMetamorphicFamily = match serde_json::from_value(raw.clone()) {
+                Ok(family) => family,
+                Err(error) => {
+                    return Ok(refusal(
+                        "family_deserialization",
+                        format!("families[{index}] is not a valid metamorphic Family: {error}"),
+                    ));
+                }
+            };
+            if parsed.id.trim().is_empty() || parsed.id.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "family_validation",
+                    format!("families[{index}].id must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            if !family_ids.insert(parsed.id.clone()) {
+                return Ok(refusal(
+                    "family_validation",
+                    format!("family {:?} appears more than once", parsed.id),
+                ));
+            }
+            if parsed.trials().is_empty() || parsed.trials().len() > MAX_TRIALS {
+                return Ok(refusal(
+                    "family_validation",
+                    format!("family {:?} must contain 1 to {MAX_TRIALS} trials", parsed.id),
+                ));
+            }
+            trial_total = trial_total.saturating_add(parsed.trials().len());
+            if trial_total > MAX_TRIALS {
+                return Ok(refusal(
+                    "suite_validation",
+                    format!("suite trials are bounded at {MAX_TRIALS} rows"),
+                ));
+            }
+            let mut normalized = BioevalMetamorphicFamily::declaring(&parsed.id, parsed.relation);
+            for trial in parsed.trials() {
+                if trial.id.trim().is_empty() || trial.id.len() > MAX_ID_BYTES {
+                    return Ok(refusal(
+                        "trial_validation",
+                        format!("family {:?} contains a trial id outside the 1 to {MAX_ID_BYTES}-byte bound", parsed.id),
+                    ));
+                }
+                if let Err(error) = normalized.record(trial.clone()) {
+                    return Ok(refusal("trial_validation", error.to_string()));
+                }
+            }
+            suite.add(normalized.clone());
+            families.push(normalized);
+        }
+
+        let reports = match suite.reports() {
+            Ok(reports) => reports,
+            Err(error) => return Ok(refusal("family_report", error.to_string())),
+        };
+        let has_invariant = suite
+            .relations_covered()
+            .contains(&BioevalMetamorphicRelation::Invariant);
+        let has_directional = suite
+            .relations_covered()
+            .iter()
+            .any(|relation| matches!(relation, BioevalMetamorphicRelation::DirectionalChange { .. }));
+        if arguments
+            .get("require_both_relations")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && !(has_invariant && has_directional)
+        {
+            return Ok(refusal(
+                "relation_coverage",
+                "require_both_relations was true but the suite does not cover invariant and directional-change families".into(),
+            ));
+        }
+
+        let mut rows = Vec::with_capacity(families.len());
+        let mut failing_families = BTreeSet::new();
+        let mut undetermined_families = BTreeSet::new();
+        let mut false_sensitivity_trials = BTreeSet::new();
+        let mut false_invariance_trials = BTreeSet::new();
+        let mut wrong_direction_trials = BTreeSet::new();
+        let mut undetermined_count = 0usize;
+        for (family, report) in families.iter().zip(reports.iter()) {
+            if !report.witnesses.is_empty() {
+                failing_families.insert(family.id.clone());
+            }
+            if report.undetermined > 0 {
+                undetermined_families.insert(family.id.clone());
+                undetermined_count += report.undetermined;
+            }
+            for trial in family.trials() {
+                match bioeval_metamorphic_verdict(trial.relation, trial.response) {
+                    BioevalTrialVerdict::FalseSensitivity => {
+                        false_sensitivity_trials.insert(trial.id.clone());
+                    }
+                    BioevalTrialVerdict::FalseInvariance => {
+                        false_invariance_trials.insert(trial.id.clone());
+                    }
+                    BioevalTrialVerdict::WrongDirection => {
+                        wrong_direction_trials.insert(trial.id.clone());
+                    }
+                    BioevalTrialVerdict::Consistent | BioevalTrialVerdict::Undetermined => {}
+                }
+            }
+            let trial_rows = family
+                .trials()
+                .iter()
+                .take(max_items)
+                .map(|trial: &BioevalMetamorphicTrial| {
+                    json!({
+                        "id": trial.id,
+                        "relation": trial.relation,
+                        "response": trial.response,
+                        "verdict": bioeval_metamorphic_verdict(trial.relation, trial.response),
+                        "evidence": bioeval_metamorphic_verdict(trial.relation, trial.response).is_evidence(),
+                        "consistent": bioeval_metamorphic_verdict(trial.relation, trial.response).is_consistent(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            rows.push(json!({
+                "id": family.id,
+                "relation": family.relation,
+                "trial_count": family.trials().len(),
+                "trials": {
+                    "rows": trial_rows,
+                    "returned": family.trials().len().min(max_items),
+                    "total": family.trials().len(),
+                    "omitted": family.trials().len().saturating_sub(max_items),
+                },
+                "consistent": report.consistent,
+                "false_sensitivity": report.false_sensitivity,
+                "false_invariance": report.false_invariance,
+                "wrong_direction": report.wrong_direction,
+                "undetermined": report.undetermined,
+                "evidential": report.evidential(),
+                "consistency": report.consistency(),
+                "witnesses": bounded_ids(&report.witnesses.iter().cloned().collect()),
+            }));
+        }
+        if arguments
+            .get("fail_on_undetermined")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && undetermined_count > 0
+        {
+            return Ok(refusal(
+                "oracle_quality",
+                format!("fail_on_undetermined refused {undetermined_count} trial(s) without comparable responses"),
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_metamorphic_audit",
+            "suite": {
+                "family_count": families.len(),
+                "trial_count": trial_total,
+                "relation_coverage": {
+                    "invariant": has_invariant,
+                    "directional_change": has_directional,
+                    "complete": has_invariant && has_directional,
+                },
+                "failing_family_count": failing_families.len(),
+                "undetermined_trial_count": undetermined_count,
+                "has_suite_wide_consistency": false,
+            },
+            "families": {
+                "rows": rows.into_iter().take(max_items).collect::<Vec<_>>(),
+                "returned": families.len().min(max_items),
+                "total": families.len(),
+                "omitted": families.len().saturating_sub(max_items),
+            },
+            "findings": {
+                "failing_families": bounded_ids(&failing_families),
+                "undetermined_families": bounded_ids(&undetermined_families),
+                "false_sensitivity_trials": bounded_ids(&false_sensitivity_trials),
+                "false_invariance_trials": bounded_ids(&false_invariance_trials),
+                "wrong_direction_trials": bounded_ids(&wrong_direction_trials),
+            },
+            "guarantees": [
+                "false sensitivity and false invariance remain separate failure directions",
+                "wrong direction is distinct from a response that did not move",
+                "incomparable responses become undetermined and never enter the consistency denominator",
+                "consistency is reported per family over evidential trials only",
+                "the suite never emits a single cross-family consistency percentage",
+                "bounded family, trial, witness, and finding projections retain total and omitted counts",
+            ],
+            "limitations": [
+                "the route does not generate mutations, execute a system, or verify that the declared biology changed",
+                "trial responses and direction labels are caller-supplied records",
+                "family identifiers do not establish independent biological evidence; registry lineage remains external",
+                "a consistent metamorphic response is robustness evidence, not biological or clinical validity",
+            ],
+        }))
+    }
+
     fn bioeval_plane_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-plane-audit/0.1";
         const MAX_DIMENSIONS: usize = 4_096;
@@ -23484,7 +23742,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -23514,9 +23772,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -24873,6 +25131,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "require_fold": { "type": "boolean", "description": "Fail closed when the real fold policy cannot produce a value because dimensions remain unscored or empty." }
                 },
                 "required": ["plane"]
+            }
+        }),
+        json!({
+            "name": "bioeval_metamorphic_audit",
+            "description": "Audit serialized bioevalx metamorphic families while keeping false sensitivity, false invariance, wrong direction, and undetermined trials separate. It invokes the real family and suite reports, refuses duplicate or relation-mismatched trials, never emits a suite-wide consistency percentage, and provides optional fail-closed relation-coverage and oracle-quality policies.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "families": { "type": "array", "minItems": 1, "maxItems": 1024, "description": "Serialized Family values containing one relation and bounded Trial values." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum family rows, trial rows, witnesses, and trial finding identifiers returned." },
+                    "require_both_relations": { "type": "boolean", "description": "Fail closed unless the suite covers both invariant and directional-change relations." },
+                    "fail_on_undetermined": { "type": "boolean", "description": "Fail closed when any trial is incomparable and therefore cannot contribute evidence." }
+                },
+                "required": ["families"]
             }
         }),
         json!({

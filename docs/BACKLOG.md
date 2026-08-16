@@ -409,5 +409,8 @@ estimand/identification kernels through `bioeval_grounding_audit`, `bioeval_acqu
 `bioeval_evaluator_audit`, preserving harness failures as unscored rather than task failures;
 the 26.17 scoring-plane kernel is exposed through `bioeval_plane_audit`, preserving unscored and
 inapplicable dimensions rather than manufacturing zeros;
+the metamorphic-response kernel is exposed through `bioeval_metamorphic_audit`, preserving false
+sensitivity, false invariance, wrong-direction, and undetermined trials rather than flattening
+them into a single pass rate;
 the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
-evaluator-health, or scoring-plane wrapper.
+evaluator-health, scoring-plane, or metamorphic wrapper.

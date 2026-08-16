@@ -255,6 +255,7 @@ from .bioeval_grounding import BioevalGroundingAuditArgs, BioevalGroundingAuditR
 from .bioeval_estimand import BioevalEstimandAuditArgs, BioevalEstimandAuditReport, bioeval_estimand_audit_report
 from .bioeval_evaluator import BioevalEvaluatorAuditArgs, BioevalEvaluatorAuditReport, bioeval_evaluator_audit_report
 from .bioeval_plane import BioevalPlaneAuditArgs, BioevalPlaneAuditReport, bioeval_plane_audit_report
+from .bioeval_metamorphic import BioevalMetamorphicAuditArgs, BioevalMetamorphicAuditReport, bioeval_metamorphic_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1972,6 +1973,26 @@ class Workspace:
         """Return typed fold posture and scoring-plane findings."""
 
         return bioeval_plane_audit_report(self.bioeval_plane_audit(request))
+
+    def bioeval_metamorphic_audit(
+        self,
+        request: BioevalMetamorphicAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit mutation-response families through workspace MCP."""
+
+        normalized = request if isinstance(request, BioevalMetamorphicAuditArgs) else BioevalMetamorphicAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioeval_metamorphic_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioeval_metamorphic_audit_report(
+        self,
+        request: BioevalMetamorphicAuditArgs | Mapping[str, Any],
+    ) -> BioevalMetamorphicAuditReport:
+        """Return typed metamorphic failure directions and oracle-quality findings."""
+
+        return bioeval_metamorphic_audit_report(self.bioeval_metamorphic_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4501,6 +4522,26 @@ class AsyncWorkspace:
         """Return async typed scoring-plane and fold evidence."""
 
         return bioeval_plane_audit_report(await self.bioeval_plane_audit(request))
+
+    async def bioeval_metamorphic_audit(
+        self,
+        request: BioevalMetamorphicAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async metamorphic-response audit with explicit oracle policies."""
+
+        normalized = request if isinstance(request, BioevalMetamorphicAuditArgs) else BioevalMetamorphicAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioeval_metamorphic_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioeval_metamorphic_audit_report(
+        self,
+        request: BioevalMetamorphicAuditArgs | Mapping[str, Any],
+    ) -> BioevalMetamorphicAuditReport:
+        """Return async typed metamorphic-response evidence."""
+
+        return bioeval_metamorphic_audit_report(await self.bioeval_metamorphic_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

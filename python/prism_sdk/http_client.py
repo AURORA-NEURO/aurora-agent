@@ -211,6 +211,7 @@ from .bioeval_grounding import BioevalGroundingAuditArgs, BioevalGroundingAuditR
 from .bioeval_estimand import BioevalEstimandAuditArgs, BioevalEstimandAuditReport, bioeval_estimand_audit_report
 from .bioeval_evaluator import BioevalEvaluatorAuditArgs, BioevalEvaluatorAuditReport, bioeval_evaluator_audit_report
 from .bioeval_plane import BioevalPlaneAuditArgs, BioevalPlaneAuditReport, bioeval_plane_audit_report
+from .bioeval_metamorphic import BioevalMetamorphicAuditArgs, BioevalMetamorphicAuditReport, bioeval_metamorphic_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1831,6 +1832,23 @@ class ApiClient:
         """Return typed HTTP scoring-plane and fold evidence."""
 
         return bioeval_plane_audit_report(self.bioeval_plane_audit(request))
+
+    def bioeval_metamorphic_audit(
+        self,
+        request: BioevalMetamorphicAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit metamorphic-response families through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BioevalMetamorphicAuditArgs) else BioevalMetamorphicAuditArgs.from_wire(request)
+        return self.call_tool("bioeval_metamorphic_audit", normalized.to_mcp_arguments())
+
+    def bioeval_metamorphic_audit_report(
+        self,
+        request: BioevalMetamorphicAuditArgs | Mapping[str, Any],
+    ) -> BioevalMetamorphicAuditReport:
+        """Return typed HTTP metamorphic-response evidence."""
+
+        return bioeval_metamorphic_audit_report(self.bioeval_metamorphic_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4320,6 +4338,23 @@ class AsyncApiClient:
         """Return async typed HTTP scoring-plane evidence."""
 
         return bioeval_plane_audit_report(await self.bioeval_plane_audit(request))
+
+    async def bioeval_metamorphic_audit(
+        self,
+        request: BioevalMetamorphicAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP metamorphic-response audit."""
+
+        normalized = request if isinstance(request, BioevalMetamorphicAuditArgs) else BioevalMetamorphicAuditArgs.from_wire(request)
+        return await self.call_tool("bioeval_metamorphic_audit", normalized.to_mcp_arguments())
+
+    async def bioeval_metamorphic_audit_report(
+        self,
+        request: BioevalMetamorphicAuditArgs | Mapping[str, Any],
+    ) -> BioevalMetamorphicAuditReport:
+        """Return async typed HTTP metamorphic-response evidence."""
+
+        return bioeval_metamorphic_audit_report(await self.bioeval_metamorphic_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

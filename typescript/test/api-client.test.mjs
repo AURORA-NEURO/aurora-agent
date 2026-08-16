@@ -2820,3 +2820,56 @@ test("client exposes scoring-plane cells and fold refusal posture", async () => 
   assert.equal(result.mcp.result.structuredContent.fold.folded, true);
   assert.equal(result.mcp.result.structuredContent.findings.fold_blocked, false);
 });
+
+test("client exposes metamorphic response directions and undetermined posture", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_metamorphic_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.families[0].trials[0].response.response, "unchanged");
+      assert.equal(body.families[1].relation.directional_change.expected, "increase");
+      return jsonResponse({ ok: true, tool: "bioeval_metamorphic_audit", request_id: "metamorphic-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-metamorphic-audit/0.1",
+        workflow: "bioeval_metamorphic_audit",
+        suite: { family_count: 2, trial_count: 5, relation_coverage: { invariant: true, directional_change: true, complete: true }, undetermined_trial_count: 1, has_suite_wide_consistency: false },
+        families: { rows: [], returned: 0, total: 2, omitted: 2 },
+        findings: {
+          false_sensitivity_trials: { ids: ["shortcut"], total: 1, omitted: 0 },
+          false_invariance_trials: { ids: ["blind-spot"], total: 1, omitted: 0 },
+          wrong_direction_trials: { ids: [], total: 0, omitted: 0 },
+        },
+        guarantees: ["incomparable responses remain undetermined"],
+        limitations: ["no suite-wide consistency percentage"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalMetamorphicAudit({
+    families: [
+      {
+        id: "invariance",
+        relation: "invariant",
+        trials: [
+          { id: "same", relation: "invariant", response: { response: "unchanged" } },
+          { id: "shortcut", relation: "invariant", response: { response: "moved", direction: "increase" } },
+          { id: "undetermined", relation: "invariant", response: { response: "incomparable" } },
+        ],
+      },
+      {
+        id: "direction",
+        relation: { directional_change: { expected: "increase" } },
+        trials: [
+          { id: "expected", relation: { directional_change: { expected: "increase" } }, response: { response: "moved", direction: "increase" } },
+          { id: "blind-spot", relation: { directional_change: { expected: "increase" } }, response: { response: "unchanged" } },
+        ],
+      },
+    ],
+    require_both_relations: true,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-metamorphic-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.suite.relation_coverage.complete, true);
+  assert.equal(result.mcp.result.structuredContent.suite.has_suite_wide_consistency, false);
+  assert.equal(result.mcp.result.structuredContent.findings.false_sensitivity_trials.ids[0], "shortcut");
+  assert.equal(result.mcp.result.structuredContent.findings.false_invariance_trials.ids[0], "blind-spot");
+});

@@ -974,6 +974,12 @@ inapplicable cells, capability-tier metadata, weighted fold inclusion/exclusion,
 and bounded dimension omission counts. The typed `BioevalScorePlaneArgs` validates cell/tier
 consistency before transport; `require_fold` makes an unresolved fold fail closed. See
 [`docs/BIOEVAL_PLANE_AUDIT.md`](BIOEVAL_PLANE_AUDIT.md).
+`BioevalMetamorphicAuditArgs` / `bioeval_metamorphic_audit_report(...)` preserve invariant and
+directional-change families, internally tagged unchanged/moved/incomparable responses, false
+sensitivity, false invariance, wrong-direction, and undetermined findings. Family consistency
+uses only the evidential denominator, while suite-wide consistency is intentionally absent.
+`require_both_relations` and `fail_on_undetermined` are explicit fail-closed policies. See
+[`docs/BIOEVAL_METAMORPHIC_AUDIT.md`](BIOEVAL_METAMORPHIC_AUDIT.md).
 
 ## Biological stress profiling
 

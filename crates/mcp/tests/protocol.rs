@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 152);
+    assert_eq!(tools.len(), 153);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(152));
-    assert_eq!(result["advertised_tool_count"], json!(152));
+    assert_eq!(result["unique_catalog_tools"], json!(153));
+    assert_eq!(result["advertised_tool_count"], json!(153));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(152));
-    assert_eq!(result["schema_quality"]["valid"], json!(152));
+    assert_eq!(result["schema_quality"]["checked"], json!(153));
+    assert_eq!(result["schema_quality"]["valid"], json!(153));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6261,6 +6261,84 @@ fn bioeval_plane_audit_keeps_unscored_and_inapplicable_out_of_the_fold() {
     assert!((folded["fold"]["value"].as_f64().unwrap() - 0.8).abs() < 1e-12);
     assert_eq!(folded["fold"]["included"], json!(["accuracy", "workflow"]));
     assert_eq!(folded["fold"]["excluded"][0]["id"], json!("agent-action"));
+}
+
+#[test]
+fn bioeval_metamorphic_audit_separates_failure_directions_and_undetermined_trials() {
+    let result = call(
+        &mut server(),
+        "bioeval_metamorphic_audit",
+        json!({
+            "families": [
+                {
+                    "id": "formatting",
+                    "relation": "invariant",
+                    "trials": [
+                        { "id": "same", "relation": "invariant", "response": { "response": "unchanged" } },
+                        { "id": "filename-shortcut", "relation": "invariant", "response": { "response": "moved", "direction": "increase" } },
+                        { "id": "incomparable-format", "relation": "invariant", "response": { "response": "incomparable" } }
+                    ]
+                },
+                {
+                    "id": "biology-change",
+                    "relation": { "directional_change": { "expected": "increase" } },
+                    "trials": [
+                        { "id": "expected-change", "relation": { "directional_change": { "expected": "increase" } }, "response": { "response": "moved", "direction": "increase" } },
+                        { "id": "blind-spot", "relation": { "directional_change": { "expected": "increase" } }, "response": { "response": "unchanged" } },
+                        { "id": "wrong-way", "relation": { "directional_change": { "expected": "increase" } }, "response": { "response": "moved", "direction": "decrease" } }
+                    ]
+                }
+            ],
+            "max_items": 2,
+            "require_both_relations": true
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-metamorphic-audit/0.1"));
+    assert_eq!(result["suite"]["family_count"], json!(2));
+    assert_eq!(result["suite"]["trial_count"], json!(6));
+    assert_eq!(result["suite"]["relation_coverage"]["complete"], json!(true));
+    assert_eq!(result["suite"]["failing_family_count"], json!(2));
+    assert_eq!(result["suite"]["undetermined_trial_count"], json!(1));
+    assert_eq!(result["suite"]["has_suite_wide_consistency"], json!(false));
+    assert_eq!(result["findings"]["false_sensitivity_trials"]["ids"], json!(["filename-shortcut"]));
+    assert_eq!(result["findings"]["false_invariance_trials"]["ids"], json!(["blind-spot"]));
+    assert_eq!(result["findings"]["wrong_direction_trials"]["ids"], json!(["wrong-way"]));
+    assert_eq!(result["findings"]["undetermined_families"]["ids"], json!(["formatting"]));
+    assert_eq!(result["families"]["rows"][0]["trials"]["omitted"], json!(1));
+
+    let undetermined_refusal = call(
+        &mut server(),
+        "bioeval_metamorphic_audit",
+        json!({
+            "families": [{
+                "id": "oracle-gap",
+                "relation": "invariant",
+                "trials": [{ "id": "unknown", "relation": "invariant", "response": { "response": "incomparable" } }]
+            }],
+            "fail_on_undetermined": true
+        }),
+    );
+    assert_eq!(undetermined_refusal["ok"], json!(false));
+    assert_eq!(undetermined_refusal["stage"], json!("oracle_quality"));
+    assert_eq!(undetermined_refusal["fail_closed"], json!(true));
+
+    let coverage_refusal = call(
+        &mut server(),
+        "bioeval_metamorphic_audit",
+        json!({
+            "families": [{
+                "id": "only-invariant",
+                "relation": "invariant",
+                "trials": [{ "id": "same", "relation": "invariant", "response": { "response": "unchanged" } }]
+            }],
+            "require_both_relations": true
+        }),
+    );
+    assert_eq!(coverage_refusal["ok"], json!(false));
+    assert_eq!(coverage_refusal["stage"], json!("relation_coverage"));
+    assert_eq!(coverage_refusal["fail_closed"], json!(true));
 }
 
 #[test]

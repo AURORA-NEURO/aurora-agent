@@ -530,6 +530,11 @@ cells, weighted fold projections, fold blockers, and bounded omission metadata. 
 dimension that was not measured distinct from a capability the system could not be asked to
 perform, and preserves the explicit `require_fold` refusal posture. See
 [`docs/BIOEVAL_PLANE_AUDIT.md`](../docs/BIOEVAL_PLANE_AUDIT.md).
+`bioevalMetamorphicAudit` types invariant and directional-change relations, internally tagged
+`unchanged`/`moved`/`incomparable` responses, family verdicts, false-sensitivity, false-invariance,
+wrong-direction, and undetermined findings. It exposes relation coverage and keeps suite-wide
+consistency absent; `require_both_relations` and `fail_on_undetermined` remain explicit policy
+gates. See [`docs/BIOEVAL_METAMORPHIC_AUDIT.md`](../docs/BIOEVAL_METAMORPHIC_AUDIT.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

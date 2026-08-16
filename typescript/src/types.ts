@@ -5176,6 +5176,47 @@ export interface BioevalPlaneAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export type BioevalMetamorphicDirection = "increase" | "decrease";
+export type BioevalMetamorphicRelationArgs = "invariant" | { directional_change: { expected: BioevalMetamorphicDirection } };
+
+export interface BioevalMetamorphicResponseArgs extends JsonObject {
+  response: "unchanged" | "moved" | "incomparable";
+  direction?: BioevalMetamorphicDirection;
+}
+
+export interface BioevalMetamorphicTrialArgs extends JsonObject {
+  id: string;
+  relation: BioevalMetamorphicRelationArgs;
+  response: BioevalMetamorphicResponseArgs;
+}
+
+export interface BioevalMetamorphicFamilyArgs extends JsonObject {
+  id: string;
+  relation: BioevalMetamorphicRelationArgs;
+  trials: BioevalMetamorphicTrialArgs[];
+}
+
+export interface BioevalMetamorphicAuditArgs extends JsonObject {
+  families: BioevalMetamorphicFamilyArgs[];
+  max_items?: number;
+  require_both_relations?: boolean;
+  fail_on_undetermined?: boolean;
+}
+
+export interface BioevalMetamorphicAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-metamorphic-audit/0.1";
+  workflow?: "bioeval_metamorphic_audit";
+  suite?: JsonObject;
+  families?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;
