@@ -189,6 +189,7 @@ from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
 from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateArgs, factory_lifecycle_report
 from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateArgs, storage_lifecycle_report
+from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimulateArgs, registry_lifecycle_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -884,6 +885,23 @@ class ApiClient:
         """Return typed storage tiering and quota evidence through the HTTP gateway."""
 
         return storage_lifecycle_report(self.storage_lifecycle_simulate(request))
+
+    def registry_lifecycle_simulate(
+        self,
+        request: RegistryLifecycleSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Replay the registry lifecycle through the HTTP gateway."""
+
+        normalized = RegistryLifecycleSimulateArgs() if request is None else request if isinstance(request, RegistryLifecycleSimulateArgs) else RegistryLifecycleSimulateArgs.from_wire(request)
+        return self.call_tool("registry_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    def registry_lifecycle_simulate_report(
+        self,
+        request: RegistryLifecycleSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> RegistryLifecycleReport:
+        """Return typed registry lifecycle evidence through the HTTP gateway."""
+
+        return registry_lifecycle_report(self.registry_lifecycle_simulate(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2693,6 +2711,23 @@ class AsyncApiClient:
         """Return async typed storage lifecycle evidence."""
 
         return storage_lifecycle_report(await self.storage_lifecycle_simulate(request))
+
+    async def registry_lifecycle_simulate(
+        self,
+        request: RegistryLifecycleSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async registry lifecycle replay through the HTTP gateway."""
+
+        normalized = RegistryLifecycleSimulateArgs() if request is None else request if isinstance(request, RegistryLifecycleSimulateArgs) else RegistryLifecycleSimulateArgs.from_wire(request)
+        return await self.call_tool("registry_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    async def registry_lifecycle_simulate_report(
+        self,
+        request: RegistryLifecycleSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> RegistryLifecycleReport:
+        """Return async typed registry lifecycle evidence."""
+
+        return registry_lifecycle_report(await self.registry_lifecycle_simulate(request))
 
     async def developer_delivery_audit_report(
         self,

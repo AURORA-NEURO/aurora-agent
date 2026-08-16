@@ -275,6 +275,22 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["tiering is planned against a caller-supplied logical epoch, so the same records and policy replay to the same transitions"],
         limitations: ["this is a deterministic in-memory lifecycle projection; it does not move bytes, run a scheduler, or persist an audit event"],
       } } } });
+      if (path === "/v1/tools/registry_lifecycle_simulate") return jsonResponse({ ok: true, tool: "registry_lifecycle_simulate", request_id: "r27", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/registry-lifecycle/0.1",
+        policy: { minimum_tier: "unranked" },
+        packs: [{ index: 0, valid: false, refusal: "invalid attested pack", fail_closed: true }],
+        initial_integrity: { artifact_count: 0, log_count: 0, broken_count: 0, broken: [], operations_allowed: true },
+        actions: [
+          { index: 0, op: "publish", ok: false, refusal: "pack 0 is unavailable", fail_closed: true },
+          { index: 1, op: "resolve", ok: true, result: { name: "missing@0.1.0", found: false, digest: null, core_digest: null } },
+          { index: 2, op: "verify_all", ok: true, result: { clean: true, broken_count: 0, broken: [] } },
+        ],
+        final: { artifact_count: 0, log_count: 0, broken_count: 0, integrity_clean: true, verification: [], log: [] },
+        registry: { artifacts: {}, core_digests: {}, tiers: {}, statuses: {}, names: {}, latest_artifact: {}, log: [] },
+        guarantees: ["failed actions are typed refusals and do not abort independent later actions"],
+        limitations: ["this is a local deterministic registry projection; it does not provide network transport, signatures, federation, moderation, quarantine, or authentication"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -768,6 +784,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(storage.mcp.result.structuredContent.schema, "bioprism-mcp/storage-lifecycle/0.1");
   assert.equal(storage.mcp.result.structuredContent.tiering.plan.transitions[0].reason.HeldByPin.epochs, 20);
   assert.equal(storage.mcp.result.structuredContent.quota.remaining_for_ingest, 900);
+  const registry = await client.registryLifecycleSimulate({
+    packs: [{ not: "an attested pack" }],
+    actions: [{ op: "publish", pack_index: 0, tier: "exploratory" }, { op: "verify_all" }],
+    include_index: true,
+  });
+  assert.equal(registry.mcp.result.structuredContent.schema, "bioprism-mcp/registry-lifecycle/0.1");
+  assert.equal(registry.mcp.result.structuredContent.actions[0].fail_closed, true);
+  assert.equal(registry.mcp.result.structuredContent.actions[2].result.clean, true);
+  assert.equal(Object.hasOwn(registry.mcp.result.structuredContent, "registry"), true);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

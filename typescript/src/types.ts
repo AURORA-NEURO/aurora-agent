@@ -1584,6 +1584,73 @@ export interface StorageLifecycleResult extends JsonObject {
   limitations: string[];
 }
 
+export type RegistryTrustTier = "unranked" | "exploratory" | "validated" | "trusted";
+export type RegistryOperation = "publish" | "promote" | "reassess" | "supersede" | "withdraw" | "resolve" | "history" | "inspect" | "revisions" | "verify_all";
+
+export interface RegistryLifecycleSimulateArgs extends JsonObject {
+  packs?: JsonValue[];
+  index?: JsonObject;
+  policy?: JsonObject;
+  actions?: JsonValue[];
+  include_index?: boolean;
+}
+
+export interface RegistryPackPreflightResult extends JsonObject {
+  index: number;
+  valid: boolean;
+  name?: string;
+  artifact_digest?: string | null;
+  core_digest?: string | null;
+  publisher?: string;
+  instance_count?: number;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RegistryBrokenArtifactResult extends JsonObject {
+  digest: string;
+  attestation: string;
+}
+
+export interface RegistryIntegrityResult extends JsonObject {
+  artifact_count: number;
+  log_count: number;
+  broken_count: number;
+  broken: RegistryBrokenArtifactResult[];
+  operations_allowed?: boolean;
+}
+
+export interface RegistryActionResult extends JsonObject {
+  index: number;
+  op?: RegistryOperation;
+  ok: boolean;
+  result?: JsonValue;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RegistryFinalResult extends JsonObject {
+  artifact_count: number;
+  log_count: number;
+  broken_count: number;
+  integrity_clean: boolean;
+  verification: RegistryBrokenArtifactResult[];
+  log: JsonObject[];
+}
+
+export interface RegistryLifecycleResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/registry-lifecycle/0.1";
+  policy: JsonObject;
+  packs: RegistryPackPreflightResult[];
+  initial_integrity: RegistryIntegrityResult;
+  actions: RegistryActionResult[];
+  final: RegistryFinalResult;
+  registry?: JsonObject | null;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

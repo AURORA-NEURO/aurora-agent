@@ -214,6 +214,12 @@ planning, application, pin protection, skipped moves, and truncation separate; `
 keeps reserve-protected purpose allowances, raw class charges, independent row refusals, and
 non-copyable child delegation visible. The Fetch client does not move bytes, schedule jobs, or
 authorize writes in an external storage backend.
+`registryLifecycleSimulate` accepts optional attested pack documents, a serialized continuation
+index, a tier policy, and bounded lifecycle actions, returning `RegistryLifecycleResult`. The
+interfaces keep pack preflight validity, initial/final integrity, action-level refusal, lookup and
+verification results, append-only log events, and the optional continuation index separate. It is
+an in-memory local registry projection; typed transport evidence does not imply signatures,
+publisher identity, federation, moderation, authentication, or network publication.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

@@ -418,6 +418,15 @@ invent defaults:
   refusals distinct. Request bounds mirror Rust: 20 MB, 1000 records/actions, 100 delegated
   children, and max-item truncation. This is a deterministic in-memory projection; it does not
   move bytes, persist an audit log, enforce a backend write, or create tenant isolation.
+- `RegistryLifecycleSimulateArgs` and `registry_lifecycle_report(...)` type the local benchmark
+  registry state machine across sync MCP, async MCP, and HTTP. `RegistryPackPreflightReport` keeps
+  invalid attested documents as fail-closed rows; `RegistryIntegrityReport` types the pre-mutation
+  serialized-index check; `RegistryActionReport` preserves publish, promote, reassess, supersede,
+  withdraw, resolve, history, inspect, revisions, and verify-all results/refusals; and
+  `RegistryFinalReport` retains artifact counts, append-only events, and verification rows. A
+  returned serialized index remains explicit continuation state rather than an implicit durable
+  registry, and the report preserves the nonclaims about signatures, identity, federation,
+  moderation, authentication, and network transport.
 - `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
   across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit

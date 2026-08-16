@@ -226,6 +226,7 @@ from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
 from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateArgs, factory_lifecycle_report
 from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateArgs, storage_lifecycle_report
+from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimulateArgs, registry_lifecycle_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -400,6 +401,25 @@ class Workspace:
         normalized = request if isinstance(request, StorageLifecycleSimulateArgs) else StorageLifecycleSimulateArgs.from_wire(request)
         result = self.client.call_tool("storage_lifecycle_simulate", normalized.to_mcp_arguments())
         return storage_lifecycle_report(result.require_object())
+
+    def registry_lifecycle_simulate(
+        self,
+        request: RegistryLifecycleSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Replay the bounded content-addressed registry lifecycle."""
+
+        normalized = RegistryLifecycleSimulateArgs() if request is None else request if isinstance(request, RegistryLifecycleSimulateArgs) else RegistryLifecycleSimulateArgs.from_wire(request)
+        return self.tool("registry_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    def registry_lifecycle_simulate_report(
+        self,
+        request: RegistryLifecycleSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> RegistryLifecycleReport:
+        """Return typed pack preflight, integrity, append-only action, and continuation evidence."""
+
+        normalized = RegistryLifecycleSimulateArgs() if request is None else request if isinstance(request, RegistryLifecycleSimulateArgs) else RegistryLifecycleSimulateArgs.from_wire(request)
+        result = self.client.call_tool("registry_lifecycle_simulate", normalized.to_mcp_arguments())
+        return registry_lifecycle_report(result.require_object())
 
     def pack_catalogue_report(
         self,
@@ -2205,6 +2225,25 @@ class AsyncWorkspace:
         normalized = request if isinstance(request, StorageLifecycleSimulateArgs) else StorageLifecycleSimulateArgs.from_wire(request)
         result = await self.client.call_tool("storage_lifecycle_simulate", normalized.to_mcp_arguments())
         return storage_lifecycle_report(result.require_object())
+
+    async def registry_lifecycle_simulate(
+        self,
+        request: RegistryLifecycleSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.registry_lifecycle_simulate`."""
+
+        normalized = RegistryLifecycleSimulateArgs() if request is None else request if isinstance(request, RegistryLifecycleSimulateArgs) else RegistryLifecycleSimulateArgs.from_wire(request)
+        return await self.tool("registry_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    async def registry_lifecycle_simulate_report(
+        self,
+        request: RegistryLifecycleSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> RegistryLifecycleReport:
+        """Async typed registry lifecycle evidence."""
+
+        normalized = RegistryLifecycleSimulateArgs() if request is None else request if isinstance(request, RegistryLifecycleSimulateArgs) else RegistryLifecycleSimulateArgs.from_wire(request)
+        result = await self.client.call_tool("registry_lifecycle_simulate", normalized.to_mcp_arguments())
+        return registry_lifecycle_report(result.require_object())
 
     async def pack_catalogue_report(
         self,

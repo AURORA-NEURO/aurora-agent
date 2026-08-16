@@ -477,6 +477,10 @@ async, MCP, and HTTP facades.
 plans, pinned-object protection, skipped-tier witnesses, explicit dry-run/application accounting,
 reserve-aware quota charges, releases, non-copyable delegation/absorption, and raw reconstructible
 class attribution remain inspectable without moving bytes or creating a scheduler.
+`registry_lifecycle_simulate` carries the same evidence discipline into benchmark publication:
+attested pack preflight, serialized-index integrity, publish/promote/reassess/supersede/withdraw,
+lookup/history/revision/verification actions, append-only log state, and continuation indexes are
+typed while invalid packs and failed operations remain independent fail-closed rows.
 `runtime_execution_simulate` runs bounded serialized effect programs against the deterministic
 in-process world, returns policy and budget evidence, proves complete replay, and can open a forked
 suffix with observable state and divergence comparison. The Python and TypeScript SDKs expose typed

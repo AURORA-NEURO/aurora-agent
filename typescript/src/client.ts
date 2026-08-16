@@ -132,6 +132,8 @@ import type {
   FactoryLifecycleResult,
   StorageLifecycleSimulateArgs,
   StorageLifecycleResult,
+  RegistryLifecycleSimulateArgs,
+  RegistryLifecycleResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -426,6 +428,10 @@ export class ApiClient {
 
   async storageLifecycleSimulate(args: StorageLifecycleSimulateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<StorageLifecycleResult>> {
     return this.callTool<StorageLifecycleResult>("storage_lifecycle_simulate", args, options);
+  }
+
+  async registryLifecycleSimulate(args: RegistryLifecycleSimulateArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<RegistryLifecycleResult>> {
+    return this.callTool<RegistryLifecycleResult>("registry_lifecycle_simulate", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {
