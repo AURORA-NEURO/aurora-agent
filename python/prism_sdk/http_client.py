@@ -214,6 +214,7 @@ from .bioeval_plane import BioevalPlaneAuditArgs, BioevalPlaneAuditReport, bioev
 from .bioeval_metamorphic import BioevalMetamorphicAuditArgs, BioevalMetamorphicAuditReport, bioeval_metamorphic_audit_report
 from .bioeval_waiver import BioevalWaiverAuditArgs, BioevalWaiverAuditReport, bioeval_waiver_audit_report
 from .bioeval_design import BioevalDesignAuditArgs, BioevalDesignAuditReport, bioeval_design_audit_report
+from .bioeval_mesh import BioevalMeshAuditArgs, BioevalMeshAuditReport, bioeval_mesh_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1885,6 +1886,23 @@ class ApiClient:
         """Return typed HTTP factorial-design evidence."""
 
         return bioeval_design_audit_report(self.bioeval_design_audit(request))
+
+    def bioeval_mesh_audit(
+        self,
+        request: BioevalMeshAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit evaluator-mesh independence through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BioevalMeshAuditArgs) else BioevalMeshAuditArgs.from_wire(request)
+        return self.call_tool("bioeval_mesh_audit", normalized.to_mcp_arguments())
+
+    def bioeval_mesh_audit_report(
+        self,
+        request: BioevalMeshAuditArgs | Mapping[str, Any],
+    ) -> BioevalMeshAuditReport:
+        """Return typed HTTP evaluator-mesh evidence."""
+
+        return bioeval_mesh_audit_report(self.bioeval_mesh_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4425,6 +4443,23 @@ class AsyncApiClient:
         """Return async typed HTTP factorial-design evidence."""
 
         return bioeval_design_audit_report(await self.bioeval_design_audit(request))
+
+    async def bioeval_mesh_audit(
+        self,
+        request: BioevalMeshAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP evaluator-mesh audit."""
+
+        normalized = request if isinstance(request, BioevalMeshAuditArgs) else BioevalMeshAuditArgs.from_wire(request)
+        return await self.call_tool("bioeval_mesh_audit", normalized.to_mcp_arguments())
+
+    async def bioeval_mesh_audit_report(
+        self,
+        request: BioevalMeshAuditArgs | Mapping[str, Any],
+    ) -> BioevalMeshAuditReport:
+        """Return async typed HTTP evaluator-mesh evidence."""
+
+        return bioeval_mesh_audit_report(await self.bioeval_mesh_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

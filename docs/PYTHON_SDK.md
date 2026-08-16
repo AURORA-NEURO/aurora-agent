@@ -995,6 +995,14 @@ was independently verified. See [`docs/BIOEVAL_DESIGN_AUDIT.md`](BIOEVAL_DESIGN_
 
 ## Biological stress profiling
 
+BioevalMeshEvaluatorArgs, BioevalMeshVerdictArgs, BioevalMeshAuditArgs, and
+bioeval_mesh_audit_report(...) type evaluator kinds, consumed versus derived artifacts, transitive
+shared-input classes, within-class and across-class disagreement witnesses, abstentions,
+class-collapsed ratings, and optional ladder contributions. The typed layer keeps evaluator count
+distinct from independent-class count and exposes require_independence and
+require_independent_ratings as explicit fail-closed policies. See
+[docs/BIOEVAL_MESH_AUDIT.md](BIOEVAL_MESH_AUDIT.md).
+
 `StressProfileArgs` / `stress_profile_report(...)` and `StressReportArgs` /
 `stress_report_projection(...)` expose the biological-stress engine without pretending that a
 single robustness score is meaningful. The typed reports retain family, blueprint module, stress

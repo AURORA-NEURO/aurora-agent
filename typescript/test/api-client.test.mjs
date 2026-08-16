@@ -2964,3 +2964,49 @@ test("client exposes factorial contrasts and interaction coverage", async () => 
   assert.equal(result.mcp.result.structuredContent.interactions.missing_count, 0);
   assert.equal(result.mcp.result.structuredContent.findings.unattributable_arms.ids[0], "both");
 });
+
+test("client exposes evaluator mesh independence classes and disagreement posture", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_mesh_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.evaluators[0].inputs[0], "report-77");
+      assert.equal(body.verdicts[0].position, "progression");
+      return jsonResponse({ ok: true, tool: "bioeval_mesh_audit", request_id: "mesh-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-mesh-audit/0.1",
+        workflow: "bioeval_mesh_audit",
+        mesh: { evaluator_count: 3, independent_class_count: 2, non_model_class_count: 2, independence_verified: true, kinds_present: ["expert_review", "executable_analysis"], inputs_undeclared: [] },
+        evaluators: { rows: [], returned: 0, total: 3, omitted: 3 },
+        classes: { rows: [], returned: 0, total: 2, omitted: 2 },
+        verdicts: { rows: [], returned: 0, total: 3, omitted: 3 },
+        disagreements: { rows: [], returned: 0, total: 1, omitted: 1, within_class_count: 0, across_class_count: 1 },
+        independent_ratings: { status: "accepted", rows: [], refusal: null },
+        contributions: { status: "accepted", expected: "progression", rows: [], refusal: null },
+        findings: { inputs_undeclared: { ids: [], total: 0, omitted: 0 }, unreported_evaluators: { ids: [], total: 0, omitted: 0 }, abstaining_evaluators: { ids: [], total: 0, omitted: 0 }, within_class_disagreement_count: 0, across_class_disagreement_count: 1, rating_projection_refused: false },
+        guarantees: ["shared inputs collapse into classes"],
+        limitations: ["no adjudication"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalMeshAudit({
+    system_artifacts: ["system-weights"],
+    evaluators: [
+      { id: "reader-a", kind: "expert_review", inputs: ["report-77"] },
+      { id: "reader-b", kind: "expert_review", inputs: ["report-77"] },
+      { id: "molecular", kind: "executable_analysis", inputs: ["panel-9"] },
+    ],
+    verdicts: [
+      { evaluator: "reader-a", position: "progression" },
+      { evaluator: "reader-b", position: "progression" },
+      { evaluator: "molecular", position: "pseudoprogression" },
+    ],
+    expected: "progression",
+    require_independence: true,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-mesh-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.mesh.independent_class_count, 2);
+  assert.equal(result.mcp.result.structuredContent.disagreements.across_class_count, 1);
+  assert.equal(result.mcp.result.structuredContent.findings.rating_projection_refused, false);
+});

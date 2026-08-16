@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 155);
+    assert_eq!(tools.len(), 156);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(155));
-    assert_eq!(result["advertised_tool_count"], json!(155));
+    assert_eq!(result["unique_catalog_tools"], json!(156));
+    assert_eq!(result["advertised_tool_count"], json!(156));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(155));
-    assert_eq!(result["schema_quality"]["valid"], json!(155));
+    assert_eq!(result["schema_quality"]["checked"], json!(156));
+    assert_eq!(result["schema_quality"]["valid"], json!(156));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6502,6 +6502,70 @@ fn bioeval_design_audit_keeps_single_factor_contrasts_and_interaction_holes_visi
     let contrast_refusal = call(&mut server(), "bioeval_design_audit", no_contrast);
     assert_eq!(contrast_refusal["ok"], json!(false));
     assert_eq!(contrast_refusal["stage"], json!("contrast_coverage"));
+}
+
+#[test]
+fn bioeval_mesh_audit_collapses_shared_inputs_and_separates_disagreement_kinds() {
+    let result = call(
+        &mut server(),
+        "bioeval_mesh_audit",
+        json!({
+            "system_artifacts": ["system-weights"],
+            "evaluators": [
+                { "id": "reader-a", "kind": "expert_review", "inputs": ["report-77"] },
+                { "id": "reader-b", "kind": "expert_review", "inputs": ["report-77"] },
+                { "id": "imaging", "kind": "expert_review", "inputs": ["mri-4"] },
+                { "id": "molecular", "kind": "executable_analysis", "inputs": ["panel-9"] },
+                { "id": "silent", "kind": "statistical_reference", "inputs": ["reference-3"] }
+            ],
+            "verdicts": [
+                { "evaluator": "reader-a", "position": "progression" },
+                { "evaluator": "reader-b", "position": "treatment-effect" },
+                { "evaluator": "imaging", "position": "progression" },
+                { "evaluator": "molecular", "position": "pseudoprogression" },
+                { "evaluator": "silent", "position": "", "abstained": true }
+            ],
+            "expected": "progression",
+            "max_items": 3
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-mesh-audit/0.1"));
+    assert_eq!(result["mesh"]["evaluator_count"], json!(5));
+    assert_eq!(result["mesh"]["independent_class_count"], json!(4));
+    assert_eq!(result["mesh"]["independence_verified"], json!(true));
+    assert_eq!(result["disagreements"]["within_class_count"], json!(1));
+    assert_eq!(result["disagreements"]["across_class_count"], json!(4));
+    assert_eq!(result["findings"]["abstaining_evaluators"]["ids"], json!(["silent"]));
+    assert_eq!(result["independent_ratings"]["status"], json!("refused"));
+    assert_eq!(result["findings"]["rating_projection_refused"], json!(true));
+    assert_eq!(result["contributions"]["status"], json!("accepted"));
+    assert!(result["contributions"]["rows"].as_array().unwrap().iter().any(|row| row["conclusion"] == json!("unknown")));
+    assert_eq!(result["classes"]["rows"][0]["size"], json!(2));
+
+    let circular_refusal = call(
+        &mut server(),
+        "bioeval_mesh_audit",
+        json!({
+            "system_artifacts": ["system-weights"],
+            "evaluators": [{ "id": "distilled", "kind": "calibrated_model_judge", "inputs": ["answer"], "derived_from": ["system-weights"] }]
+        }),
+    );
+    assert_eq!(circular_refusal["ok"], json!(false));
+    assert_eq!(circular_refusal["stage"], json!("evaluator_admission"));
+    assert_eq!(circular_refusal["fail_closed"], json!(true));
+
+    let independence_refusal = call(
+        &mut server(),
+        "bioeval_mesh_audit",
+        json!({
+            "evaluators": [{ "id": "silent", "kind": "expert_review", "inputs": [] }],
+            "require_independence": true
+        }),
+    );
+    assert_eq!(independence_refusal["ok"], json!(false));
+    assert_eq!(independence_refusal["stage"], json!("independence_policy"));
 }
 
 #[test]

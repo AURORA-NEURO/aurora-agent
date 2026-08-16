@@ -418,5 +418,8 @@ non-waivable safety-veto rule rather than turning an exception into an untraceab
 the factorial-design kernel is exposed through `bioeval_design_audit`, preserving explicit
 baselines, one-factor contrasts, unattributable multi-factor arms, and missing interaction cells
 rather than manufacturing component effects from unmatched arms;
+the evaluator-mesh kernel is also exposed through bioeval_mesh_audit, preserving transitive
+shared-input classes, circular-oracle refusals, within-class versus across-class witnesses, and
+abstentions rather than counting correlated evaluators as independent votes;
 the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
-evaluator-health, scoring-plane, metamorphic, waiver, or design wrapper.
+evaluator-health, scoring-plane, metamorphic, waiver, design, or mesh wrapper.

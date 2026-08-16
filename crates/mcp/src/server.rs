@@ -88,6 +88,10 @@ use bioprism_bioevalx::waiver::{
 };
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_bioevalx::design::{Arm as BioevalDesignArm, FactorialDesign as BioevalFactorialDesign};
+use bioprism_bioevalx::mesh::{
+    Disagreement as BioevalDisagreement, EvaluatorDecl as BioevalEvaluatorDecl,
+    EvaluatorVerdict as BioevalEvaluatorVerdict, Mesh as BioevalMesh,
+};
 use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
@@ -1380,6 +1384,7 @@ impl Server {
             "bioeval_metamorphic_audit" => self.bioeval_metamorphic_audit(&arguments),
             "bioeval_waiver_audit" => self.bioeval_waiver_audit(&arguments),
             "bioeval_design_audit" => self.bioeval_design_audit(&arguments),
+            "bioeval_mesh_audit" => self.bioeval_mesh_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -15569,6 +15574,376 @@ impl Server {
         }))
     }
 
+    fn bioeval_mesh_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-mesh-audit/0.1";
+        const MAX_EVALUATORS: usize = 1_024;
+        const MAX_VERDICTS: usize = 1_024;
+        const MAX_ID_BYTES: usize = 256;
+
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_mesh_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "evaluators derived from system artifacts are refused before scoring",
+                    "shared-input evaluators are counted by independence class rather than evaluator count",
+                    "within-class disagreement remains distinct from across-class disagreement",
+                    "abstentions remain explicit and never become failures or dissent pairs",
+                ],
+                "limitations": [
+                    "the route audits declarations and verdicts without authenticating evaluators or checking their artifacts",
+                    "the route does not choose a biological truth, majority-vote a split, calibrate a judge, or adjudicate a disagreement",
+                    "input independence is verified only when evaluators declare their consumed artifacts",
+                ],
+            })
+        };
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure mesh audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("mesh audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let parse_strings = |name: &str, raw: Option<&Value>| -> Result<Vec<String>, String> {
+            let Some(raw) = raw else { return Ok(Vec::new()) };
+            let values = raw
+                .as_array()
+                .ok_or_else(|| format!("{name} must be an array of strings"))?;
+            let mut output = Vec::with_capacity(values.len());
+            for (index, value) in values.iter().enumerate() {
+                let item = value
+                    .as_str()
+                    .ok_or_else(|| format!("{name}[{index}] must be a string"))?;
+                if item.trim().is_empty() || item.len() > MAX_ID_BYTES {
+                    return Err(format!(
+                        "{name}[{index}] must contain 1 to {MAX_ID_BYTES} bytes"
+                    ));
+                }
+                output.push(item.to_string());
+            }
+            Ok(output)
+        };
+        let system_artifacts = match parse_strings(
+            "system_artifacts",
+            arguments.get("system_artifacts"),
+        ) {
+            Ok(values) => {
+                let mut seen = BTreeSet::new();
+                if values.iter().any(|value| !seen.insert(value.clone())) {
+                    return Ok(refusal(
+                        "mesh_validation",
+                        "system_artifacts must be unique".into(),
+                    ));
+                }
+                values
+            }
+            Err(error) => return Ok(refusal("mesh_validation", error)),
+        };
+        let raw_evaluators = arguments
+            .get("evaluators")
+            .and_then(Value::as_array)
+            .ok_or("evaluators is required and must be an array of serialized EvaluatorDecl values")?;
+        if raw_evaluators.is_empty() || raw_evaluators.len() > MAX_EVALUATORS {
+            return Err("evaluators must contain 1 to 1024 rows".into());
+        }
+        let raw_verdicts = arguments
+            .get("verdicts")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if raw_verdicts.len() > MAX_VERDICTS {
+            return Err("verdicts are bounded at 1024 rows".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let expected = match arguments.get("expected") {
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .ok_or("expected must be a string when supplied")?,
+            ),
+            None => None,
+        };
+        let require_independence = arguments
+            .get("require_independence")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let require_ratings = arguments
+            .get("require_independent_ratings")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let mut mesh = BioevalMesh::for_system(system_artifacts.clone());
+        let mut evaluator_ids = BTreeSet::new();
+        for (index, raw) in raw_evaluators.iter().enumerate() {
+            let evaluator: BioevalEvaluatorDecl = match serde_json::from_value(raw.clone()) {
+                Ok(evaluator) => evaluator,
+                Err(error) => {
+                    return Ok(refusal(
+                        "evaluator_deserialization",
+                        format!("evaluators[{index}] is not a valid EvaluatorDecl: {error}"),
+                    ))
+                }
+            };
+            if evaluator.id.trim().is_empty() || evaluator.id.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "evaluator_validation",
+                    format!("evaluators[{index}].id must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            if !evaluator_ids.insert(evaluator.id.clone()) {
+                return Ok(refusal(
+                    "evaluator_validation",
+                    format!("evaluator {:?} appears more than once", evaluator.id),
+                ));
+            }
+            if evaluator.inputs.iter().any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
+                || evaluator.derived_from.iter().any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
+            {
+                return Ok(refusal(
+                    "evaluator_validation",
+                    format!("evaluators[{index}] contains an artifact outside the {MAX_ID_BYTES}-byte bound"),
+                ));
+            }
+            if let Err(error) = mesh.admit(evaluator) {
+                return Ok(refusal("evaluator_admission", error.to_string()));
+            }
+        }
+
+        let mut verdicts = Vec::with_capacity(raw_verdicts.len());
+        let mut verdict_ids = BTreeSet::new();
+        for (index, raw) in raw_verdicts.iter().enumerate() {
+            let verdict: BioevalEvaluatorVerdict = match serde_json::from_value(raw.clone()) {
+                Ok(verdict) => verdict,
+                Err(error) => {
+                    return Ok(refusal(
+                        "verdict_deserialization",
+                        format!("verdicts[{index}] is not a valid EvaluatorVerdict: {error}"),
+                    ))
+                }
+            };
+            if verdict.evaluator.trim().is_empty() || verdict.evaluator.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "verdict_validation",
+                    format!("verdicts[{index}].evaluator must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            if !verdict_ids.insert(verdict.evaluator.clone()) {
+                return Ok(refusal(
+                    "verdict_validation",
+                    format!("verdicts contain more than one row for evaluator {:?}", verdict.evaluator),
+                ));
+            }
+            if !verdict.abstained && (verdict.position.trim().is_empty() || verdict.position.len() > MAX_ID_BYTES) {
+                return Ok(refusal(
+                    "verdict_validation",
+                    format!("verdicts[{index}].position must contain 1 to {MAX_ID_BYTES} bytes for a called evaluator"),
+                ));
+            }
+            verdicts.push(verdict);
+        }
+
+        let census = match mesh.census() {
+            Ok(census) => census,
+            Err(error) => return Ok(refusal("mesh_validation", error.to_string())),
+        };
+        if require_independence && !census.independence_verified() {
+            return Ok(refusal(
+                "independence_policy",
+                "require_independence was true but one or more evaluators declared no inputs".into(),
+            ));
+        }
+        let classes = mesh.independence_classes();
+        let disagreements = match mesh.disagreements(&verdicts) {
+            Ok(disagreements) => disagreements,
+            Err(error) => return Ok(refusal("disagreement_analysis", error.to_string())),
+        };
+        let within_count = disagreements
+            .iter()
+            .filter(|disagreement| matches!(disagreement, BioevalDisagreement::WithinClass(_)))
+            .count();
+        let across_count = disagreements
+            .iter()
+            .filter(|disagreement| matches!(disagreement, BioevalDisagreement::AcrossClasses(_)))
+            .count();
+        let disagreement_rows = disagreements
+            .iter()
+            .take(max_items)
+            .map(|disagreement| {
+                json!({
+                    "disagreement": disagreement,
+                    "about_case": disagreement.is_about_the_case(),
+                    "witness": disagreement.witness(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let (rating_status, rating_rows, rating_refusal) = match mesh.independent_ratings(&verdicts) {
+            Ok(ratings) => (
+                "accepted",
+                serde_json::to_value(ratings).expect("ratings serialize"),
+                Value::Null,
+            ),
+            Err(error) => ("refused", json!([]), json!(error.to_string())),
+        };
+        if require_ratings && rating_status != "accepted" {
+            return Ok(refusal(
+                "rating_projection",
+                format!(
+                    "require_independent_ratings was true but the class-collapsed rating projection was refused: {}",
+                    rating_refusal.as_str().unwrap_or("unknown refusal")
+                ),
+            ));
+        }
+        let (contribution_status, contribution_rows, contribution_refusal) = match expected {
+            Some(expected) => match mesh.contributions(&verdicts, expected) {
+                Ok(contributions) => (
+                    "accepted",
+                    serde_json::to_value(contributions).expect("contributions serialize"),
+                    Value::Null,
+                ),
+                Err(error) => ("refused", json!([]), json!(error.to_string())),
+            },
+            None => ("not_requested", json!([]), Value::Null),
+        };
+        let reported_ids = verdicts
+            .iter()
+            .map(|verdict| verdict.evaluator.clone())
+            .collect::<BTreeSet<_>>();
+        let unreported = evaluator_ids
+            .difference(&reported_ids)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let abstentions = verdicts
+            .iter()
+            .filter(|verdict| verdict.abstained)
+            .map(|verdict| verdict.evaluator.clone())
+            .collect::<BTreeSet<_>>();
+        let bounded_ids = |ids: &BTreeSet<String>| {
+            json!({
+                "ids": ids.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": ids.len(),
+                "omitted": ids.len().saturating_sub(max_items),
+            })
+        };
+        let class_rows = classes
+            .iter()
+            .take(max_items)
+            .map(|class| {
+                json!({
+                    "members": class,
+                    "size": class.len(),
+                    "inputs_declared": class.iter().all(|id| mesh.evaluators().iter().find(|e| e.id == *id).is_some_and(|e| !e.inputs.is_empty())),
+                })
+            })
+            .collect::<Vec<_>>();
+        let evaluator_rows = mesh
+            .evaluators()
+            .iter()
+            .take(max_items)
+            .map(|evaluator| {
+                json!({
+                    "id": evaluator.id,
+                    "kind": evaluator.kind,
+                    "tier": evaluator.kind.tier(),
+                    "inputs": evaluator.inputs,
+                    "derived_from": evaluator.derived_from,
+                    "model_judge": evaluator.kind.is_model_judge(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let verdict_rows = verdicts
+            .iter()
+            .take(max_items)
+            .map(|verdict| {
+                json!({
+                    "evaluator": verdict.evaluator,
+                    "position": verdict.position,
+                    "abstained": verdict.abstained,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_mesh_audit",
+            "mesh": {
+                "system_artifacts": system_artifacts,
+                "evaluator_count": census.evaluators,
+                "independent_class_count": census.independent_classes,
+                "non_model_class_count": census.non_model_classes,
+                "independence_verified": census.independence_verified(),
+                "kinds_present": census.kinds_present,
+                "inputs_undeclared": census.inputs_undeclared,
+            },
+            "evaluators": {
+                "rows": evaluator_rows,
+                "returned": census.evaluators.min(max_items),
+                "total": census.evaluators,
+                "omitted": census.evaluators.saturating_sub(max_items),
+            },
+            "classes": {
+                "rows": class_rows,
+                "returned": classes.len().min(max_items),
+                "total": classes.len(),
+                "omitted": classes.len().saturating_sub(max_items),
+            },
+            "verdicts": {
+                "rows": verdict_rows,
+                "returned": verdicts.len().min(max_items),
+                "total": verdicts.len(),
+                "omitted": verdicts.len().saturating_sub(max_items),
+            },
+            "disagreements": {
+                "rows": disagreement_rows,
+                "returned": disagreements.len().min(max_items),
+                "total": disagreements.len(),
+                "omitted": disagreements.len().saturating_sub(max_items),
+                "within_class_count": within_count,
+                "across_class_count": across_count,
+            },
+            "independent_ratings": {
+                "status": rating_status,
+                "rows": rating_rows,
+                "refusal": rating_refusal,
+            },
+            "contributions": {
+                "status": contribution_status,
+                "expected": expected,
+                "rows": contribution_rows,
+                "refusal": contribution_refusal,
+            },
+            "findings": {
+                "inputs_undeclared": bounded_ids(&census.inputs_undeclared.iter().cloned().collect()),
+                "unreported_evaluators": bounded_ids(&unreported),
+                "abstaining_evaluators": bounded_ids(&abstentions),
+                "within_class_disagreement_count": within_count,
+                "across_class_disagreement_count": across_count,
+                "rating_projection_refused": rating_status == "refused",
+            },
+            "guarantees": [
+                "shared inputs collapse evaluators into transitive independence classes",
+                "same-class disagreement is an evaluator defect witness, not a hard-case consensus split",
+                "across-class disagreement remains a case-level unresolved finding",
+                "abstentions are retained and become unknown contributions only when contribution projection is requested",
+                "independent ratings contribute at most one rating per input class and refuse internally split classes",
+                "bounded evaluator, class, verdict, disagreement, and finding projections retain total and omitted counts",
+            ],
+            "limitations": [
+                "declared inputs are not independently inspected and an empty input set makes independence unverified",
+                "the route does not adjudicate disagreements, calibrate judges, or select a consensus policy",
+                "contributions are typed evidence for a downstream ladder and do not themselves choose biological truth",
+            ],
+        }))
+    }
+
     fn bioeval_plane_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-plane-audit/0.1";
         const MAX_DIMENSIONS: usize = 4_096;
@@ -24380,9 +24755,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "evaluation_and_baselines",
-            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage"],
+            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -24412,9 +24787,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluator independence", "shared-input classes", "disagreement witnesses", "abstention preservation", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -25821,6 +26196,23 @@ pub fn tool_definitions() -> Vec<Value> {
                     "require_attribution": { "type": "boolean", "description": "Fail closed when a generated one-factor fork is refused by the real attribution kernel." }
                 },
                 "required": ["cell_id", "factors", "baseline", "arms"]
+            }
+        }),
+        json!({
+            "name": "bioeval_mesh_audit",
+            "description": "Audit a serialized bioevalx evaluator mesh while preserving circular-oracle refusals, transitive shared-input independence classes, within-class versus across-class disagreement witnesses, abstentions, class-collapsed ratings, and optional ladder contributions. It never majority-votes or adjudicates a split.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "system_artifacts": { "type": "array", "maxItems": 1024, "description": "Artifacts constituting the evaluated system; evaluators derived from them are refused." },
+                    "evaluators": { "type": "array", "minItems": 1, "maxItems": 1024, "description": "Serialized EvaluatorDecl values with id, evaluator kind, consumed inputs, and optional derived_from artifacts." },
+                    "verdicts": { "type": "array", "maxItems": 1024, "description": "Optional serialized EvaluatorVerdict rows. Abstentions are explicit and not treated as failures." },
+                    "expected": { "type": "string", "description": "Optional expected position for typed ladder Contribution projection." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum evaluator, class, verdict, disagreement, and finding rows returned." },
+                    "require_independence": { "type": "boolean", "description": "Fail closed when any evaluator declares no consumed inputs, making independence unverified." },
+                    "require_independent_ratings": { "type": "boolean", "description": "Fail closed when a shared-input class disagrees internally and cannot be collapsed to one rating." }
+                },
+                "required": ["evaluators"]
             }
         }),
         json!({

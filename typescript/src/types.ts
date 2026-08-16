@@ -5322,6 +5322,57 @@ export interface BioevalDesignAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export type BioevalMeshEvaluatorKind =
+  | "deterministic_property"
+  | "executable_analysis"
+  | "metamorphic_relation"
+  | "statistical_reference"
+  | "prospective_reveal"
+  | "expert_review"
+  | "calibrated_model_judge";
+
+export interface BioevalMeshEvaluatorArgs extends JsonObject {
+  id: string;
+  kind: BioevalMeshEvaluatorKind;
+  inputs?: string[];
+  derived_from?: string[];
+}
+
+export interface BioevalMeshVerdictArgs extends JsonObject {
+  evaluator: string;
+  position?: string;
+  abstained?: boolean;
+}
+
+export interface BioevalMeshAuditArgs extends JsonObject {
+  system_artifacts?: string[];
+  evaluators: BioevalMeshEvaluatorArgs[];
+  verdicts?: BioevalMeshVerdictArgs[];
+  expected?: string;
+  max_items?: number;
+  require_independence?: boolean;
+  require_independent_ratings?: boolean;
+}
+
+export interface BioevalMeshAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-mesh-audit/0.1";
+  workflow?: "bioeval_mesh_audit";
+  mesh?: JsonObject;
+  evaluators?: JsonObject;
+  classes?: JsonObject;
+  verdicts?: JsonObject;
+  disagreements?: JsonObject;
+  independent_ratings?: JsonObject;
+  contributions?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;
