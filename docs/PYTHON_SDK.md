@@ -242,6 +242,11 @@ invent defaults:
   `trace_otel_ingest_report(...)` additionally type the normalized Event IR preview, source-to-IR
   mapping counts, every loss category, and the explicit no-export/no-clock limitation across
   sync/async MCP and HTTP.
+- `QualityGateRunArgs` and `quality_gate_run_report(...)` expose the serialized in-memory quality
+  gate across sync/async MCP and HTTP. The typed report keeps examined-value counts, concrete
+  row/column witnesses, all four not-runnable reasons, check-level outcomes, and the three-way
+  passed/failed/indeterminate verdict with failed and obstructed check names separate. A Python
+  `passed` value is never a score and never includes an indeterminate run.
 - `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,

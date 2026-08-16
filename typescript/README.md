@@ -49,6 +49,8 @@ if (result.mcp.result?.isError) {
   coarsened loss, and the supported-versus-refused metric union typed in the REST/MCP envelope.
 - `traceOtelIngest` returns a typed normalized Event IR preview, OTLP mapping counts, loss-category
   ledger, and compilation-readiness state; it never implies OTLP export or collector connectivity.
+- `qualityGateRun` returns typed serialized quality check unions, concrete failure witnesses,
+  not-runnable reasons, and the distinct passed/failed/indeterminate verdict structure.
 - `ledgerIngest` keeps recorded, duplicate, and quarantined admission unions, causal releases,
   chain/clock evidence, temporal cuts, and digest-only latest-by-subject projections typed without
   turning the Fetch client into a durable event store.

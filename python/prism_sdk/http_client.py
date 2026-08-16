@@ -258,6 +258,7 @@ from .repository_requests import (
 from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry_project_report
 from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledger_ingest_report
 from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
+from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
 from .tooling import ToolCallPlan, ToolCatalogue
 
 
@@ -2189,6 +2190,17 @@ class ApiClient:
         """Return typed OTLP mapping, semantic-loss, and readiness evidence through HTTP."""
 
         return trace_otel_ingest_report(self.trace_otel_ingest(request))
+
+    def quality_gate_run(self, request: QualityGateRunArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Run a serialized bounded quality gate through the HTTP gateway."""
+
+        normalized = request if isinstance(request, QualityGateRunArgs) else QualityGateRunArgs.from_wire(request)
+        return self.call_tool("quality_gate_run", normalized.to_mcp_arguments())
+
+    def quality_gate_run_report(self, request: QualityGateRunArgs | Mapping[str, Any]) -> QualityGateRunReport:
+        """Return typed quality verdicts, witnesses, and run obstructions through HTTP."""
+
+        return quality_gate_run_report(self.quality_gate_run(request))
 
     def fiber_compile(
         self,
@@ -4154,6 +4166,17 @@ class AsyncApiClient:
         """Return async typed OTLP ingestion evidence through HTTP."""
 
         return trace_otel_ingest_report(await self.trace_otel_ingest(request))
+
+    async def quality_gate_run(self, request: QualityGateRunArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async bounded quality gate through the HTTP gateway."""
+
+        normalized = request if isinstance(request, QualityGateRunArgs) else QualityGateRunArgs.from_wire(request)
+        return await self.call_tool("quality_gate_run", normalized.to_mcp_arguments())
+
+    async def quality_gate_run_report(self, request: QualityGateRunArgs | Mapping[str, Any]) -> QualityGateRunReport:
+        """Return async typed quality evidence through HTTP."""
+
+        return quality_gate_run_report(await self.quality_gate_run(request))
 
     async def fiber_compile(
         self,

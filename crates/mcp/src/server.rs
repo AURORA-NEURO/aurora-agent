@@ -6760,6 +6760,7 @@ impl Server {
         let report = gate.run(&dataset, &references);
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/quality-gate/0.1",
             "verdict": report.verdict.name(),
             "passed": report.verdict.is_passed(),
             "dataset": report.dataset,

@@ -586,6 +586,79 @@ export interface LedgerIngestRefusalResult extends JsonObject {
 
 export type LedgerIngestResult = LedgerIngestSuccessResult | LedgerIngestRefusalResult;
 
+export type QualityCheckArgs =
+  | { NotNull: { column: string } }
+  | { Unique: { column: string } }
+  | { InRange: { column: string; min: number; max: number } }
+  | { OneOf: { column: string; allowed: string[] } }
+  | { RowCountAtLeast: { rows: number } }
+  | { NonDecreasing: { column: string } }
+  | { ForeignKey: { column: string; reference: string } };
+
+export interface QualityDatasetArgs extends JsonObject {
+  name: string;
+  columns: Record<string, JsonValue[]>;
+  rows: number;
+}
+
+export interface QualityGateArgs extends JsonObject {
+  name: string;
+  checks: Record<string, QualityCheckArgs>;
+}
+
+export interface QualityReferenceSetsArgs extends JsonObject {
+  sets: Record<string, string[]>;
+}
+
+export interface QualityGateRunArgs extends JsonObject {
+  dataset: QualityDatasetArgs;
+  gate: QualityGateArgs;
+  references?: QualityReferenceSetsArgs;
+}
+
+export interface QualityWitnessResult extends JsonObject {
+  row: number;
+  column: string;
+  found: string;
+  expected: string;
+}
+
+export type QualityNotRunnableResult =
+  | { MissingColumn: { column: string } }
+  | { AllValuesNull: { column: string } }
+  | { NotComparable: { column: string; row: number; found: string } }
+  | { MissingReferenceSet: { reference: string } };
+
+export type QualityOutcomeResult =
+  | { Pass: { examined: number } }
+  | { Fail: { witness: QualityWitnessResult } }
+  | { NotRunnable: { reason: QualityNotRunnableResult } };
+
+export type QualityVerdictResult =
+  | { Passed: { checks: number } }
+  | { Failed: { failing: string[]; not_runnable: string[] } }
+  | { Indeterminate: { not_runnable: string[] } };
+
+export interface QualityGateReportResult extends JsonObject {
+  gate: string;
+  dataset: string;
+  rows: number;
+  outcomes: Record<string, QualityOutcomeResult>;
+  verdict: QualityVerdictResult;
+}
+
+export interface QualityGateRunResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-mcp/quality-gate/0.1";
+  verdict: "passed" | "failed" | "indeterminate";
+  passed: boolean;
+  dataset: string;
+  rows: number;
+  check_count: number;
+  report: QualityGateReportResult;
+  guarantees: string[];
+}
+
 export interface MetricsProfileAuditArgs extends JsonObject {
   vectors: JsonValue[];
   waived_dimensions?: string[];

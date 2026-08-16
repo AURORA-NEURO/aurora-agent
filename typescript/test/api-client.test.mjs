@@ -423,6 +423,27 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         cut: { requested: { as_of_record: "2024-06-01T00:00:00Z" }, count: 1, entries: [{ seq: 0, id: "evt-0", class: "material", kind: "specimen.collected", subject: "patient-7/specimen-1", valid: "2025-01-01T00:00:00Z", record: "2025-01-01T00:00:00Z", release: "2025-01-01T00:00:00Z" }], omitted: 0 },
         guarantees: ["payload bodies are not returned by default; projections carry digests rather than copied payloads", "no durable storage, clock reading, network, or external side effect occurs"],
       } } } });
+      if (path === "/v1/tools/quality_gate_run") return jsonResponse({ ok: true, tool: "quality_gate_run", request_id: "r15b", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/quality-gate/0.1",
+        verdict: "failed",
+        passed: false,
+        dataset: "release-quality",
+        rows: 2,
+        check_count: 3,
+        report: {
+          gate: "release-gate",
+          dataset: "release-quality",
+          rows: 2,
+          outcomes: {
+            age_range: { Pass: { examined: 2 } },
+            subject_unique: { Fail: { witness: { row: 1, column: "subject", found: "s-1", expected: "a value not already seen at row 0" } } },
+            foreign_site: { NotRunnable: { reason: { MissingReferenceSet: { reference: "sites" } } } },
+          },
+          verdict: { Failed: { failing: ["subject_unique"], not_runnable: ["foreign_site"] } },
+        },
+        guarantees: ["pass requires every named check to run and hold", "failed checks carry a concrete row and expected value witness"],
+      } } } });
       if (path === "/v1/tools/trace_otel_ingest") return jsonResponse({ ok: true, tool: "trace_otel_ingest", request_id: "r16", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/trace-otel-ingest/0.1",
@@ -810,6 +831,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const impact = await client.repositoryImpact({ changed: "docs/README", route: { id: "route-ts" } });
   const telemetry = await client.telemetryProject({ event: { kind: "tool.completed" }, policy: { treatments: {} }, trace: "trace-ts" });
   const ledger = await client.ledgerIngest({ events: [{ class: "material" }], include_receipts: false, max_items: 5 });
+  const quality = await client.qualityGateRun({
+    dataset: { name: "release-quality", columns: { age: [41, 42], subject: ["s-1", "s-1"] }, rows: 2 },
+    gate: { name: "release-gate", checks: { age_range: { InRange: { column: "age", min: 0, max: 120 } } } },
+  });
   const otel = await client.traceOtelIngest({ trace_id: "otel-ts", otlp_json: '{"resourceSpans":[]}', include_events: true });
   assert.equal(catalog.mcp.result.structuredContent.workflow, "repository_catalog");
   assert.equal(bundle.mcp.result.structuredContent.policy, "exhaustive");
@@ -820,6 +845,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(ledger.mcp.result.structuredContent.schema, "bioprism-mcp/ledger-ingest/0.1");
   assert.equal(ledger.mcp.result.structuredContent.chain.status, "intact");
   assert.equal(ledger.mcp.result.structuredContent.latest_by_subject.items[0].payload_digest, "payload-digest");
+  assert.equal(quality.mcp.result.structuredContent.schema, "bioprism-mcp/quality-gate/0.1");
+  assert.equal(quality.mcp.result.structuredContent.report.outcomes.subject_unique.Fail.witness.row, 1);
+  assert.equal(quality.mcp.result.structuredContent.report.outcomes.foreign_site.NotRunnable.reason.MissingReferenceSet.reference, "sites");
   assert.equal(otel.mcp.result.structuredContent.schema, "bioprism-mcp/trace-otel-ingest/0.1");
   assert.equal(otel.mcp.result.structuredContent.mapping.accepted_span_count, 1);
   assert.equal(otel.mcp.result.structuredContent.events[0].kind, "goal");

@@ -425,7 +425,10 @@ that runtime execution occurred or that unmeasured capabilities are safe.
 `scale_family_split_verify` verifies imported benchmark tiers against lineage roots and refuses
 family straddles; `stewardship_review_check` concludes evaluator reviews only when mandatory
 dimensions, corpus support, and independence hold, keeping unreviewed dimensions explicit.
-`quality_gate_run` preserves pass, fail-with-witness, and not-runnable data-quality outcomes;
+`quality_gate_run` preserves pass, fail-with-witness, and not-runnable data-quality outcomes; the
+Python SDK exposes typed witnesses, not-runnable reasons, check-level outcomes, and the separate
+failed-versus-obstructed verdict sets, while TypeScript preserves the serialized gate/check union
+and report shape without turning an indeterminate run into a pass;
 `ledger_ingest` appends bitemporal events while exposing quarantine, idempotency, causal release,
 hash-chain, clock-anomaly, temporal-cut, and digest-only projection state; the Python and
 TypeScript SDKs preserve those admission, release, and projection witnesses without implying

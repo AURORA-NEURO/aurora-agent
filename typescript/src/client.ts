@@ -197,6 +197,8 @@ import type {
   TelemetryProjectionResult,
   LedgerIngestArgs,
   LedgerIngestResult,
+  QualityGateRunArgs,
+  QualityGateRunResult,
   ToolCallPlan,
   ToolArguments,
   ToolsResponse,
@@ -394,6 +396,10 @@ export class ApiClient {
 
   async ledgerIngest(args: LedgerIngestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LedgerIngestResult>> {
     return this.callTool<LedgerIngestResult>("ledger_ingest", args, options);
+  }
+
+  async qualityGateRun(args: QualityGateRunArgs, options?: ClientRequestOptions): Promise<RestToolResponse<QualityGateRunResult>> {
+    return this.callTool<QualityGateRunResult>("quality_gate_run", args, options);
   }
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {

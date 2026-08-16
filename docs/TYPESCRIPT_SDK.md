@@ -78,6 +78,10 @@ Convenience methods currently cover:
 
 - `traceOtelIngest`: bounded OTLP JSON import with typed normalized events, source-to-IR mapping,
   semantic-loss categories, and compilation-readiness reporting;
+- `qualityGateRun`: typed serialized Dataset/Gate/ReferenceSets with externally tagged check
+  outcome and verdict unions. `Pass` keeps examined counts, `Fail` keeps a concrete witness,
+  `NotRunnable` keeps missing-column/null-only/type/reference reasons, and `Failed` retains its
+  separate `not_runnable` set; the client never promotes an indeterminate run to pass;
 - `metricsProfileAudit` and `metricsAnalyticsAudit`: missingness-aware capability profiles plus
   bounded scalar, paired-contrast, cost/latency, replicate, and calibration analytics;
 - `telemetryProject`: canonical-event redaction with a typed `TelemetryProjectionResult`; its

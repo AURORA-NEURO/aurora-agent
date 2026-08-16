@@ -6707,6 +6707,7 @@ fn quality_gate_run_keeps_failures_and_unrunnable_checks_separate() {
         }),
     );
     assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["schema"], json!("bioprism-mcp/quality-gate/0.1"));
     assert_eq!(result["verdict"], json!("failed"));
     assert_eq!(result["passed"], json!(false));
     assert_eq!(

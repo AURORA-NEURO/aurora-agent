@@ -75,6 +75,7 @@ from .repository_requests import (
 from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry_project_report
 from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledger_ingest_report
 from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
+from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
 from .tooling import ToolCallPlan, ToolCatalogue
 from .oracle import (
     EvidenceTier,
@@ -2233,6 +2234,18 @@ class Workspace:
         normalized = request if isinstance(request, TraceOtelIngestArgs) else TraceOtelIngestArgs.from_wire(request)
         return trace_otel_ingest_report(self.tool("trace_otel_ingest", normalized.to_mcp_arguments()))
 
+    def quality_gate_run(self, request: QualityGateRunArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Run a serialized bounded data-quality gate through MCP."""
+
+        normalized = request if isinstance(request, QualityGateRunArgs) else QualityGateRunArgs.from_wire(request)
+        return self.tool("quality_gate_run", normalized.to_mcp_arguments())
+
+    def quality_gate_run_report(self, request: QualityGateRunArgs | Mapping[str, Any]) -> QualityGateRunReport:
+        """Return typed pass, witness, and not-runnable quality evidence."""
+
+        normalized = request if isinstance(request, QualityGateRunArgs) else QualityGateRunArgs.from_wire(request)
+        return quality_gate_run_report(self.tool("quality_gate_run", normalized.to_mcp_arguments()))
+
 
 class AsyncWorkspace:
     """Async convenience facade mirroring :class:`Workspace`."""
@@ -4174,6 +4187,18 @@ class AsyncWorkspace:
 
         normalized = request if isinstance(request, TraceOtelIngestArgs) else TraceOtelIngestArgs.from_wire(request)
         return trace_otel_ingest_report((await self.client.call_tool("trace_otel_ingest", normalized.to_mcp_arguments())).require_ok())
+
+    async def quality_gate_run(self, request: QualityGateRunArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.quality_gate_run`."""
+
+        normalized = request if isinstance(request, QualityGateRunArgs) else QualityGateRunArgs.from_wire(request)
+        return (await self.client.call_tool("quality_gate_run", normalized.to_mcp_arguments())).require_ok()
+
+    async def quality_gate_run_report(self, request: QualityGateRunArgs | Mapping[str, Any]) -> QualityGateRunReport:
+        """Async counterpart to :meth:`Workspace.quality_gate_run_report`."""
+
+        normalized = request if isinstance(request, QualityGateRunArgs) else QualityGateRunArgs.from_wire(request)
+        return quality_gate_run_report((await self.client.call_tool("quality_gate_run", normalized.to_mcp_arguments())).require_ok())
 
 
 def _developer_delivery_arguments(kwargs: Mapping[str, Any]) -> dict[str, Any]:
