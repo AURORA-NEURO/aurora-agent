@@ -5905,6 +5905,18 @@ fn oncoworlds_model_transport_keeps_model_and_patient_claims_separate() {
         }),
     );
     assert_eq!(accepted["ok"], json!(true));
+    assert_eq!(
+        accepted["schema"],
+        json!("bioprism-mcp/oncoworlds-model-transport/0.1")
+    );
+    assert_eq!(accepted["supported"], json!(true));
+    assert_eq!(accepted["outcome_kind"], json!("supported"));
+    assert_eq!(accepted["model_identity"]["verified_against_source"], json!(true));
+    assert_eq!(accepted["fidelity_axes"][0]["axis"], json!("genomic"));
+    assert_eq!(accepted["establishment"]["selected"], json!(false));
+    assert_eq!(accepted["replicates"]["effective_biological_n"], json!(3));
+    assert_eq!(accepted["replicates"]["claimed_n"], json!(3));
+    assert_eq!(accepted["transport_assumption_names"].as_array().unwrap().len(), 3);
     assert_eq!(accepted["effective_biological_n"], json!(3));
     assert!(accepted["patient_relevant_claim"].is_object());
     assert!(accepted["model_statement"]
@@ -5927,6 +5939,14 @@ fn oncoworlds_model_transport_keeps_model_and_patient_claims_separate() {
         }),
     );
     assert_eq!(refused["ok"], json!(false));
+    assert_eq!(
+        refused["schema"],
+        json!("bioprism-mcp/oncoworlds-model-transport/0.1")
+    );
+    assert_eq!(refused["supported"], json!(false));
+    assert_eq!(refused["outcome_kind"], json!("refused"));
+    assert_eq!(refused["refusal_kind"], json!("unverified_model_identity"));
+    assert_eq!(refused["model_identity"]["verified_against_source"], json!(false));
     assert_eq!(
         refused["refusal"]["refusal"],
         json!("unverified_model_identity")

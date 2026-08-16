@@ -139,6 +139,7 @@ use bioprism_oncoworlds::{
     FidelityEvidence, IdentityEvidence, JoinReport, JoinVerdict, MethylationClass, ModelResult,
     RadiogenomicClaim, SampleContext, TumourPopulation, VersionedResult,
 };
+use bioprism_oncoworlds::models::REQUIRED_ASSUMPTIONS as MODEL_REQUIRED_ASSUMPTIONS;
 use bioprism_oncoworlds::radiogenomics::{MECHANISM_STRATA, REQUIRED_ASSUMPTIONS};
 use bioprism_ops::{
     audit_statement as telemetry_audit_statement, CapacityModel, DegradationPlan, Demand,
@@ -10299,10 +10300,56 @@ impl Server {
         )
         .map_err(|error| format!("invalid declared transport: {error}"))?;
 
+        let fidelity_axes: Vec<Value> = result
+            .rests_on
+            .iter()
+            .map(|axis| {
+                json!({
+                    "axis": axis,
+                    "passage": result.model.passage,
+                    "measured": fidelity.covers(*axis, result.model.passage)
+                })
+            })
+            .collect();
+        let transport_assumption_names: Vec<String> = transport
+            .assumption_names()
+            .map(str::to_owned)
+            .collect();
+        let model_identity = json!({
+            "model": result.model.model,
+            "system": result.model.system,
+            "source_specimen": result.model.source_specimen,
+            "passage": result.model.passage,
+            "verified_against_source": result.model.verified_against_source
+        });
+        let replicate_summary = json!({
+            "technical_wells": result.replicates.technical_wells,
+            "biological_replicates": result.replicates.biological_replicates,
+            "effective_biological_n": result.replicates.effective_n(),
+            "claimed_n": claimed_n
+        });
+        let establishment_summary = json!({
+            "attempted": cohort.attempted,
+            "established": cohort.established,
+            "selected": cohort.is_selected(),
+            "selection_modelled": cohort.selection_modelled
+        });
+
         match onco_transport_model(&result, &fidelity, cohort, claimed_n as usize, &transport) {
             Ok(claim) => Ok(json!({
                 "ok": true,
+                "schema": "bioprism-mcp/oncoworlds-model-transport/0.1",
+                "supported": true,
+                "outcome_kind": "supported",
                 "model_statement": result.as_stated(),
+                "effect": result.effect,
+                "model_identity": model_identity,
+                "rests_on": result.rests_on,
+                "fidelity_axes": fidelity_axes,
+                "establishment": establishment_summary,
+                "replicates": replicate_summary,
+                "transport_assumption_names": transport_assumption_names,
+                "required_assumptions": MODEL_REQUIRED_ASSUMPTIONS,
                 "effective_biological_n": result.replicates.effective_n(),
                 "patient_relevant_claim": claim,
                 "guarantees": [
@@ -10316,15 +10363,30 @@ impl Server {
                     "a supported patient-relevant claim is still a research transport, not a clinical treatment recommendation"
                 ]
             })),
-            Err(refusal) => Ok(json!({
-                "ok": false,
-                "stage": "model_to_patient_transport",
-                "refusal": serde_json::to_value(&refusal).map_err(|error| error.to_string())?,
-                "refusal_text": refusal.to_string(),
-                "fail_closed": true,
-                "model_statement": result.as_stated(),
-                "guarantee": "a model-system effect is never relabelled as patient evidence when an identity, fidelity, selection, replication, loss, or assumption boundary is missing"
-            })),
+            Err(refusal) => {
+                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/oncoworlds-model-transport/0.1",
+                    "supported": false,
+                    "outcome_kind": "refused",
+                    "refusal_kind": refusal_value["refusal"],
+                    "stage": "model_to_patient_transport",
+                    "refusal": refusal_value,
+                    "refusal_text": refusal.to_string(),
+                    "fail_closed": true,
+                    "model_statement": result.as_stated(),
+                    "effect": result.effect,
+                    "model_identity": model_identity,
+                    "rests_on": result.rests_on,
+                    "fidelity_axes": fidelity_axes,
+                    "establishment": establishment_summary,
+                    "replicates": replicate_summary,
+                    "transport_assumption_names": transport_assumption_names,
+                    "required_assumptions": MODEL_REQUIRED_ASSUMPTIONS,
+                    "guarantee": "a model-system effect is never relabelled as patient evidence when an identity, fidelity, selection, replication, loss, or assumption boundary is missing"
+                }))
+            }
         }
     }
 

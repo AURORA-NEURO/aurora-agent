@@ -5114,13 +5114,72 @@ export interface OncoWorldsModelTransportArgs extends JsonObject {
   transport: JsonObject;
 }
 
+export type OncoWorldsModelOutcomeKind = "supported" | "refused";
+
+export type OncoWorldsModelRefusalKind =
+  | "unverified_model_identity"
+  | "unmeasured_fidelity"
+  | "unmodelled_establishment_selection"
+  | "technical_replicates_as_biological"
+  | "undeclared_loss"
+  | "unstated_assumption";
+
+export type OncoWorldsModelFidelityAxis = "genomic" | "epigenetic" | "transcriptomic" | "phenotypic" | "histologic";
+
+export interface OncoWorldsModelIdentityResult extends JsonObject {
+  model: string;
+  system: "organoid" | "patient_derived_xenograft";
+  source_specimen: string;
+  passage: number;
+  verified_against_source: boolean;
+}
+
+export interface OncoWorldsModelFidelityResult extends JsonObject {
+  axis: OncoWorldsModelFidelityAxis;
+  passage: number;
+  measured: boolean;
+}
+
+export interface OncoWorldsModelEstablishmentResult extends JsonObject {
+  attempted: number;
+  established: number;
+  selected: boolean;
+  selection_modelled: boolean;
+}
+
+export interface OncoWorldsModelReplicateResult extends JsonObject {
+  technical_wells: number;
+  biological_replicates: number;
+  effective_biological_n: number;
+  claimed_n: number;
+}
+
+export interface OncoWorldsPatientRelevantClaimResult extends JsonObject {
+  result: JsonObject;
+  cohort: JsonObject;
+  transport: JsonObject;
+  claimed_n: number;
+}
+
 export interface OncoWorldsModelTransportResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-model-transport/0.1";
+  supported: boolean;
+  outcome_kind: OncoWorldsModelOutcomeKind;
   model_statement?: string;
+  effect?: string;
+  model_identity?: OncoWorldsModelIdentityResult;
+  rests_on?: OncoWorldsModelFidelityAxis[];
+  fidelity_axes?: OncoWorldsModelFidelityResult[];
+  establishment?: OncoWorldsModelEstablishmentResult;
+  replicates?: OncoWorldsModelReplicateResult;
+  transport_assumption_names?: string[];
+  required_assumptions?: string[];
   effective_biological_n?: number;
-  patient_relevant_claim?: JsonObject;
+  patient_relevant_claim?: OncoWorldsPatientRelevantClaimResult;
   stage?: string;
   refusal?: JsonObject;
+  refusal_kind?: OncoWorldsModelRefusalKind;
   refusal_text?: string;
   fail_closed?: boolean;
   guarantee?: string;

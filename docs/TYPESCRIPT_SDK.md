@@ -348,7 +348,9 @@ censoring, delayed entry, and informative-bias fields distinct. Nested domain re
 `JsonObject` values so the Rust oncology crate remains the serialization authority, while the
 top-level invariants and contradictions are checked by the SDK.
 `oncoworldsModelTransport` preserves model-system fidelity, establishment, declared sample size,
-transport assumptions, and typed fail-closed patient-transport refusals. The methylation pair
+transport assumptions, and typed fail-closed patient-transport refusals. Its versioned result
+also carries model identity, passage-specific fidelity, establishment selection, replication
+accounting, and refusal kinds. The methylation pair
 (`oncoworldsMethylationClassify` and `oncoworldsMethylationCompare`) keeps QC abstention,
 threshold/calibration/tumour-content caveats, and classifier-version disagreement explicit.
 `oncoworldsRadiogenomicCheck` retains participant-safe split, training-only fitting, target scope,

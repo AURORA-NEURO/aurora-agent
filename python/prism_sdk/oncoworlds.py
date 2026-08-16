@@ -26,6 +26,10 @@ ONCOWORLDS_RADIOGENOMIC_SPLIT_UNITS = frozenset({"image", "imaging_series", "spe
 ONCOWORLDS_RADIOGENOMIC_FEATURE_PROVENANCE = frozenset({"fitted_on_training_split_only", "fitted_on_all_data"})
 ONCOWORLDS_RADIOGENOMIC_REFUSAL_KINDS = frozenset({"undeclared_loss", "unstated_assumption", "leaky_split", "unstratified_claim", "specimen_scoped_target", "post_hoc_cohort_selection"})
 ONCOWORLDS_RADIOGENOMIC_OUTCOME_KINDS = frozenset({"supported", "refused"})
+ONCOWORLDS_MODEL_SCHEMA = "bioprism-mcp/oncoworlds-model-transport/0.1"
+ONCOWORLDS_MODEL_OUTCOME_KINDS = frozenset({"supported", "refused"})
+ONCOWORLDS_MODEL_REFUSAL_KINDS = frozenset({"unverified_model_identity", "unmeasured_fidelity", "unmodelled_establishment_selection", "technical_replicates_as_biological", "undeclared_loss", "unstated_assumption"})
+ONCOWORLDS_MODEL_FIDELITY_AXES = frozenset({"genomic", "epigenetic", "transcriptomic", "phenotypic", "histologic"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -127,6 +131,104 @@ class OncoWorldsModelTransportArgs:
         if self.fidelity is not None:
             result["fidelity"] = dict(self.fidelity)
         return result
+
+
+@dataclass(frozen=True)
+class OncoModelIdentityProjection:
+    raw: dict[str, Any]
+    model: str
+    system: str
+    source_specimen: str
+    passage: int
+    verified_against_source: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoModelIdentityProjection":
+        raw = _object("model identity", value)
+        return cls(
+            raw,
+            _route_text("model identity model", raw.get("model")),
+            _route_text("model identity system", raw.get("system")),
+            _route_text("model identity source specimen", raw.get("source_specimen")),
+            _route_count("model identity passage", raw.get("passage")),
+            _bool("model identity verification", raw.get("verified_against_source")),
+        )
+
+
+@dataclass(frozen=True)
+class OncoModelFidelityProjection:
+    raw: dict[str, Any]
+    axis: str
+    passage: int
+    measured: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoModelFidelityProjection":
+        raw = _object("model fidelity axis", value)
+        axis = _route_text("model fidelity axis name", raw.get("axis"))
+        if axis not in ONCOWORLDS_MODEL_FIDELITY_AXES:
+            raise ArgumentError(f"unknown model fidelity axis: {axis!r}")
+        return cls(raw, axis, _route_count("model fidelity passage", raw.get("passage")), _bool("model fidelity measured", raw.get("measured")))
+
+
+@dataclass(frozen=True)
+class OncoModelEstablishmentProjection:
+    raw: dict[str, Any]
+    attempted: int
+    established: int
+    selected: bool
+    selection_modelled: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoModelEstablishmentProjection":
+        raw = _object("model establishment", value)
+        attempted = _route_count("model establishment attempted", raw.get("attempted"))
+        established = _route_count("model establishment established", raw.get("established"))
+        if established > attempted:
+            raise ArgumentError("model establishment cannot exceed attempted specimens")
+        selected = _bool("model establishment selected", raw.get("selected"))
+        if selected != (established < attempted):
+            raise ArgumentError("model establishment selected state does not reconcile with counts")
+        return cls(raw, attempted, established, selected, _bool("model establishment selection modelled", raw.get("selection_modelled")))
+
+
+@dataclass(frozen=True)
+class OncoModelReplicateProjection:
+    raw: dict[str, Any]
+    technical_wells: int
+    biological_replicates: int
+    effective_biological_n: int
+    claimed_n: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoModelReplicateProjection":
+        raw = _object("model replicates", value)
+        technical_wells = _route_count("model technical wells", raw.get("technical_wells"))
+        biological_replicates = _route_count("model biological replicates", raw.get("biological_replicates"))
+        effective_biological_n = _route_count("model effective biological n", raw.get("effective_biological_n"))
+        if effective_biological_n != biological_replicates:
+            raise ArgumentError("model effective biological n must equal biological replicates")
+        return cls(raw, technical_wells, biological_replicates, effective_biological_n, _route_count("model claimed n", raw.get("claimed_n")))
+
+
+@dataclass(frozen=True)
+class OncoPatientRelevantClaimProjection:
+    raw: dict[str, Any]
+    result: dict[str, Any]
+    cohort: dict[str, Any]
+    transport: dict[str, Any]
+    claimed_n: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoPatientRelevantClaimProjection":
+        raw = _object("patient-relevant model claim", value)
+        return cls(
+            raw,
+            _object("patient-relevant model result", raw.get("result")),
+            _object("patient-relevant establishment cohort", raw.get("cohort")),
+            _object("patient-relevant transport", raw.get("transport")),
+            _route_count("patient-relevant claimed n", raw.get("claimed_n")),
+        )
 
 
 @dataclass(frozen=True)
@@ -355,17 +457,79 @@ class OncoWorldsModelTransportReport:
     guarantee: str | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+    refusal_kind: str | None = None
+    model_identity: OncoModelIdentityProjection | None = None
+    effect: str | None = None
+    rests_on: tuple[str, ...] = ()
+    fidelity_axes: tuple[OncoModelFidelityProjection, ...] = ()
+    establishment: OncoModelEstablishmentProjection | None = None
+    replicates: OncoModelReplicateProjection | None = None
+    transport_assumption_names: tuple[str, ...] = ()
+    required_assumptions: tuple[str, ...] = ()
+    patient_relevant_claim_record: OncoPatientRelevantClaimProjection | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsModelTransportReport":
         raw = _payload(value, label="oncoworlds model transport", direct_keys=("patient_relevant_claim", "refusal"))
         ok = _bool("oncoworlds model transport ok", raw.get("ok"))
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("model transport schema", schema_value)
+        if schema is not None and schema != ONCOWORLDS_MODEL_SCHEMA:
+            raise ArgumentError(f"unknown model transport schema: {schema!r}")
+        patient_claim_value = raw.get("patient_relevant_claim")
+        supported = _bool("model transport supported", raw.get("supported", ok and patient_claim_value is not None))
+        if supported != ok:
+            raise ArgumentError("model transport supported does not reconcile with transport success")
+        outcome_kind_value = raw.get("outcome_kind")
+        outcome_kind = "supported" if supported else "refused"
+        if outcome_kind_value is not None:
+            outcome_kind = _route_text("model transport outcome kind", outcome_kind_value)
+            if outcome_kind not in ONCOWORLDS_MODEL_OUTCOME_KINDS or outcome_kind != ("supported" if supported else "refused"):
+                raise ArgumentError("model transport outcome kind does not reconcile with support state")
+        model_identity_value = raw.get("model_identity")
+        model_identity = None if model_identity_value is None else OncoModelIdentityProjection.from_wire(model_identity_value)
+        effect = None if raw.get("effect") is None else _route_text("model transport effect", raw.get("effect"))
+        rests_on = _route_strings("model transport rests_on", raw.get("rests_on", []))
+        if any(axis not in ONCOWORLDS_MODEL_FIDELITY_AXES for axis in rests_on):
+            raise ArgumentError("model transport rests_on contains an unknown fidelity axis")
+        fidelity_axes = tuple(OncoModelFidelityProjection.from_wire(item) for item in _array("model transport fidelity_axes", raw.get("fidelity_axes", [])))
+        establishment_value = raw.get("establishment")
+        establishment = None if establishment_value is None else OncoModelEstablishmentProjection.from_wire(establishment_value)
+        replicates_value = raw.get("replicates")
+        replicates = None if replicates_value is None else OncoModelReplicateProjection.from_wire(replicates_value)
+        transport_assumption_names = _route_strings("model transport assumptions", raw.get("transport_assumption_names", []))
+        required_assumptions = _route_strings("model transport required assumptions", raw.get("required_assumptions", []))
+        patient_relevant_claim_record = None
+        if isinstance(patient_claim_value, Mapping) and (schema is not None or "result" in patient_claim_value):
+            patient_relevant_claim_record = OncoPatientRelevantClaimProjection.from_wire(patient_claim_value)
+        if schema is not None:
+            if "supported" not in raw or "outcome_kind" not in raw:
+                raise ArgumentError("versioned model transport projections require support and outcome fields")
+            if model_identity is None or effect is None or establishment is None or replicates is None:
+                raise ArgumentError("versioned model transport projections require identity, replication, and establishment evidence")
+            if "fidelity_axes" not in raw or "transport_assumption_names" not in raw or "required_assumptions" not in raw:
+                raise ArgumentError("versioned model transport projections require fidelity and assumption accounting")
+            if supported != (patient_relevant_claim_record is not None):
+                raise ArgumentError("versioned model transport support does not reconcile with its claim record")
+        refusal_value = raw.get("refusal")
+        refusal_kind = None
+        if refusal_value is not None:
+            refusal_kind = _route_text("model transport refusal kind", _object("model transport refusal", refusal_value).get("refusal"))
+            if refusal_kind not in ONCOWORLDS_MODEL_REFUSAL_KINDS:
+                raise ArgumentError(f"unknown model transport refusal kind: {refusal_kind!r}")
+        refusal_kind_value = raw.get("refusal_kind")
+        if refusal_kind_value is not None and _route_text("model transport refusal_kind", refusal_kind_value) != refusal_kind:
+            raise ArgumentError("model transport refusal_kind does not reconcile with typed refusal")
         if not ok:
             stage, refusal, refusal_text, fail_closed, guarantee = _domain_refusal(raw, "oncoworlds model transport")
-            return cls(raw, False, _optional_text("model statement", raw.get("model_statement")), None, None, stage, refusal, refusal_text, fail_closed, guarantee, (), ())
+            if schema is not None and refusal_kind is None:
+                raise ArgumentError("versioned model transport refusals require refusal_kind")
+            return cls(raw, False, _optional_text("model statement", raw.get("model_statement")), None, None, stage, refusal, refusal_text, fail_closed, guarantee, (), (), schema, outcome_kind, refusal_kind, model_identity, effect, rests_on, fidelity_axes, establishment, replicates, transport_assumption_names, required_assumptions, None)
         if raw.get("refusal") is not None or raw.get("stage") is not None or raw.get("fail_closed", False):
             raise ArgumentError("successful model transport cannot carry refusal evidence")
-        return cls(raw, True, _route_text("model statement", raw.get("model_statement")), _route_count("effective biological n", raw.get("effective_biological_n")), _route_mapping("patient relevant claim", raw.get("patient_relevant_claim")), None, None, None, False, None, _route_strings("model transport guarantees", raw.get("guarantees")), _route_strings("model transport limitations", raw.get("limitations")))
+        return cls(raw, True, _route_text("model statement", raw.get("model_statement")), _route_count("effective biological n", raw.get("effective_biological_n")), _route_mapping("patient relevant claim", raw.get("patient_relevant_claim")), None, None, None, False, None, _route_strings("model transport guarantees", raw.get("guarantees")), _route_strings("model transport limitations", raw.get("limitations")), schema, outcome_kind, None, model_identity, effect, rests_on, fidelity_axes, establishment, replicates, transport_assumption_names, required_assumptions, patient_relevant_claim_record)
 
     @property
     def supported(self) -> bool:
@@ -624,6 +788,10 @@ __all__ = [
     "ONCOWORLDS_RADIOGENOMIC_SCHEMA",
     "ONCOWORLDS_RADIOGENOMIC_SPLIT_UNITS",
     "ONCOWORLDS_RADIOGENOMIC_TARGETS",
+    "ONCOWORLDS_MODEL_FIDELITY_AXES",
+    "ONCOWORLDS_MODEL_OUTCOME_KINDS",
+    "ONCOWORLDS_MODEL_REFUSAL_KINDS",
+    "ONCOWORLDS_MODEL_SCHEMA",
     "OncoClonalHistoryProjection",
     "OncoClonalRejectedHistoryProjection",
     "OncoClonalUniqueHistoryProjection",
@@ -635,6 +803,11 @@ __all__ = [
     "OncoWorldsMethylationCompareReport",
     "OncoWorldsModelTransportArgs",
     "OncoWorldsModelTransportReport",
+    "OncoModelEstablishmentProjection",
+    "OncoModelFidelityProjection",
+    "OncoModelIdentityProjection",
+    "OncoModelReplicateProjection",
+    "OncoPatientRelevantClaimProjection",
     "OncoRadiogenomicDesignProjection",
     "OncoRadiogenomicSupportedClaimProjection",
     "OncoWorldsRadiogenomicCheckArgs",

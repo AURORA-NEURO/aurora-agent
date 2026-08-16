@@ -1523,7 +1523,25 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
       const tool = path.split("/").pop();
       calls.push({ tool, body: JSON.parse(init.body) });
       const projections = {
-        oncoworlds_model_transport: { ok: true, model_statement: "effect", effective_biological_n: 3, patient_relevant_claim: { claim: "bounded" }, guarantees: [], limitations: [] },
+        oncoworlds_model_transport: {
+          ok: true,
+          schema: "bioprism-mcp/oncoworlds-model-transport/0.1",
+          supported: true,
+          outcome_kind: "supported",
+          model_statement: "effect",
+          effect: "the compound reduced viability",
+          model_identity: { model: "ORG-1", system: "organoid", source_specimen: "S-1", passage: 3, verified_against_source: true },
+          rests_on: ["genomic"],
+          fidelity_axes: [{ axis: "genomic", passage: 3, measured: true }],
+          establishment: { attempted: 3, established: 3, selected: false, selection_modelled: false },
+          replicates: { technical_wells: 6, biological_replicates: 3, effective_biological_n: 3, claimed_n: 3 },
+          transport_assumption_names: [],
+          required_assumptions: [],
+          effective_biological_n: 3,
+          patient_relevant_claim: { result: {}, cohort: {}, transport: {}, claimed_n: 3 },
+          guarantees: [],
+          limitations: [],
+        },
         oncoworlds_methylation_classify: { ok: true, classified: false, class: null, report: { outcome: "unclassifiable" }, guarantees: [], limitations: [] },
         oncoworlds_methylation_compare: { ok: true, comparison: { divergence: { divergence: "version_conditioned" } }, left_classifier: {}, right_classifier: {}, guarantees: [], limitations: [] },
         oncoworlds_radiogenomic_check: {
@@ -1562,7 +1580,10 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
   const compare = await client.oncoworldsMethylationCompare({ left: {}, right: {} });
   const radiogenomic = await client.oncoworldsRadiogenomicCheck({ claim: {}, design: {}, observation: {}, transport: {} });
   const clonal = await client.oncoworldsClonalHistoryCheck({ population: {}, candidates: [] });
-  assert.equal(model.mcp.result.structuredContent.patient_relevant_claim.claim, "bounded");
+  assert.equal(model.mcp.result.structuredContent.patient_relevant_claim.claimed_n, 3);
+  assert.equal(model.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-model-transport/0.1");
+  assert.equal(model.mcp.result.structuredContent.model_identity.verified_against_source, true);
+  assert.equal(model.mcp.result.structuredContent.replicates.effective_biological_n, 3);
   assert.equal(classify.mcp.result.structuredContent.classified, false);
   assert.equal(compare.mcp.result.structuredContent.comparison.divergence.divergence, "version_conditioned");
   assert.equal(radiogenomic.mcp.result.structuredContent.supported_claim.claim.statement, "supported");

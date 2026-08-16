@@ -590,7 +590,10 @@ lesion, specimen, disease-epoch, relation, and permissible-use boundaries and re
 decision record with typed join refusals, evidence counts, and bridge warrants rather than silently
 discarding cross-modal mismatches; see [`docs/ONCOWORLDS_IDENTITY_JOIN.md`](docs/ONCOWORLDS_IDENTITY_JOIN.md).
 `oncoworlds_model_transport` checks whether a model-system result can carry a declared, lossy
-research claim toward patients. `oncoworlds_methylation_classify` preserves QC abstention,
+research claim toward patients and returns a versioned projection of model identity, passage-specific
+fidelity, establishment selection, technical/biological replication, transport assumptions, and
+typed fail-closed refusal kinds; see [`docs/ONCOWORLDS_MODEL_TRANSPORT.md`](docs/ONCOWORLDS_MODEL_TRANSPORT.md).
+`oncoworlds_methylation_classify` preserves QC abstention,
 threshold, calibration, and tumour-content caveats, while `oncoworlds_methylation_compare` keeps
 classifier-version disagreement version-conditioned. `oncoworlds_radiogenomic_check` checks
 participant-safe splits, training-only feature fitting, specimen-versus-tumour target scope,

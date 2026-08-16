@@ -21,24 +21,54 @@ class OncoWorldsReportTests(unittest.TestCase):
     def test_model_transport_preserves_supported_claim_and_typed_refusal(self) -> None:
         accepted = oncoworlds_model_transport_report({
             "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-model-transport/0.1",
+            "supported": True,
+            "outcome_kind": "supported",
             "model_statement": "the organoid response",
+            "effect": "the compound reduced viability",
+            "model_identity": {"model": "ORG-1", "system": "organoid", "source_specimen": "S-1", "passage": 3, "verified_against_source": True},
+            "rests_on": ["genomic"],
+            "fidelity_axes": [{"axis": "genomic", "passage": 3, "measured": True}],
+            "establishment": {"attempted": 3, "established": 3, "selected": False, "selection_modelled": False},
+            "replicates": {"technical_wells": 6, "biological_replicates": 3, "effective_biological_n": 3, "claimed_n": 3},
+            "transport_assumption_names": ["culture stated"],
+            "required_assumptions": ["culture stated"],
             "effective_biological_n": 3,
-            "patient_relevant_claim": {"claim": "bounded research transport"},
+            "patient_relevant_claim": {"result": {}, "cohort": {}, "transport": {}, "claimed_n": 3},
             "guarantees": ["loss ledger"],
             "limitations": ["caller supplied"],
         })
         self.assertIsInstance(accepted, OncoWorldsModelTransportReport)
         self.assertTrue(accepted.supported)
+        self.assertEqual(accepted.outcome_kind, "supported")
+        self.assertTrue(accepted.model_identity.verified_against_source)
+        self.assertEqual(accepted.fidelity_axes[0].axis, "genomic")
+        self.assertEqual(accepted.replicates.effective_biological_n, 3)
+        self.assertEqual(accepted.patient_relevant_claim_record.claimed_n, 3)
         refused = oncoworlds_model_transport_report({
             "ok": False,
+            "schema": "bioprism-mcp/oncoworlds-model-transport/0.1",
+            "supported": False,
+            "outcome_kind": "refused",
+            "refusal_kind": "unverified_model_identity",
             "stage": "model_to_patient_transport",
             "refusal": {"refusal": "unverified_model_identity", "model": "m", "specimen": "s"},
             "refusal_text": "model identity was not verified",
             "fail_closed": True,
             "model_statement": "effect",
+            "effect": "effect",
+            "model_identity": {"model": "m", "system": "organoid", "source_specimen": "s", "passage": 1, "verified_against_source": False},
+            "rests_on": [],
+            "fidelity_axes": [],
+            "establishment": {"attempted": 1, "established": 1, "selected": False, "selection_modelled": False},
+            "replicates": {"technical_wells": 1, "biological_replicates": 1, "effective_biological_n": 1, "claimed_n": 1},
+            "transport_assumption_names": [],
+            "required_assumptions": [],
         })
         self.assertFalse(refused.ok)
         self.assertEqual(refused.refusal["refusal"], "unverified_model_identity")
+        self.assertEqual(refused.refusal_kind, "unverified_model_identity")
+        self.assertFalse(refused.model_identity.verified_against_source)
         self.assertTrue(refused.fail_closed)
 
     def test_methylation_classification_and_version_conditioning_are_not_collapsed(self) -> None:

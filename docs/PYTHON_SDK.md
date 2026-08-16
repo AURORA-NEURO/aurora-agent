@@ -201,6 +201,9 @@ invent defaults:
 - `OncoWorldsModelTransportArgs`/`oncoworlds_model_transport_report(...)` preserve model-system
   fidelity, establishment, declared sample size, transport assumptions, and the distinction
   between a supported patient-relevant research claim and a typed fail-closed transport refusal.
+  The report exposes model identity, passage-specific fidelity, selection state, replication
+  accounting, refusal kind, and a nested supported-claim projection. See
+  `docs/ONCOWORLDS_MODEL_TRANSPORT.md`.
   `OncoWorldsMethylationClassifyArgs`/`oncoworlds_methylation_classify_report(...)` retain QC,
   calibration, threshold, and tumour-content caveats while treating an abstention as an explicit
   unclassifiable result. `OncoWorldsMethylationCompareArgs`/
