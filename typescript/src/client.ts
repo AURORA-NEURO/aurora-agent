@@ -124,6 +124,8 @@ import type {
   OracleMissingnessResult,
   BioevalReferenceAuditArgs,
   BioevalReferenceAuditResult,
+  BioevalAcquisitionAuditArgs,
+  BioevalAcquisitionAuditResult,
   EvaluationWorldlineArgs,
   EvaluationWorldlineResult,
   EvaluationReproductionArgs,
@@ -824,6 +826,10 @@ export class ApiClient {
 
   async bioevalReferenceAudit(args: BioevalReferenceAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalReferenceAuditResult>> {
     return this.callTool<BioevalReferenceAuditResult>("bioeval_reference_audit", args, options);
+  }
+
+  async bioevalAcquisitionAudit(args: BioevalAcquisitionAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalAcquisitionAuditResult>> {
+    return this.callTool<BioevalAcquisitionAuditResult>("bioeval_acquisition_audit", args, options);
   }
 
   async evaluationWorldlineAudit(args: EvaluationWorldlineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EvaluationWorldlineResult>> {

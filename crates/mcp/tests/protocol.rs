@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 147);
+    assert_eq!(tools.len(), 148);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(147));
-    assert_eq!(result["advertised_tool_count"], json!(147));
+    assert_eq!(result["unique_catalog_tools"], json!(148));
+    assert_eq!(result["advertised_tool_count"], json!(148));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(147));
-    assert_eq!(result["schema_quality"]["valid"], json!(147));
+    assert_eq!(result["schema_quality"]["checked"], json!(148));
+    assert_eq!(result["schema_quality"]["valid"], json!(148));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5913,6 +5913,53 @@ fn bioeval_reference_audit_validates_mass_and_preserves_distributed_truth() {
     );
     assert_eq!(invalid["__isError"], json!(true));
     assert!(invalid["error"].is_string());
+}
+
+#[test]
+fn bioeval_acquisition_audit_preserves_obligation_stopping_and_named_regret() {
+    let result = call(
+        &mut server(),
+        "bioeval_acquisition_audit",
+        json!({
+            "obligations": [
+                { "id": "subtype", "required": true },
+                { "id": "context", "required": false }
+            ],
+            "actions": [
+                { "id": "read-notes", "kind": "metadata", "cost": 2, "closes": ["context"] },
+                { "id": "search", "kind": "retrieval", "cost": 5, "closes": [] },
+                { "id": "panel", "kind": "assay", "cost": 40, "closes": ["subtype"] },
+                { "id": "extra", "kind": "analysis", "cost": 1, "closes": [] }
+            ],
+            "stopped_after": true,
+            "reference_policy": { "name": "random-acquisition", "cost": 30, "admissible": false }
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-acquisition-audit/0.1"));
+    assert_eq!(result["status"], json!("admissible"));
+    assert_eq!(result["required_open_count"], json!(0));
+    assert_eq!(result["cost"], json!(48));
+    assert_eq!(result["findings"]["deferred_decisive_cost"], json!(7));
+    assert_eq!(result["findings"]["redundant_action_ids"], json!(["extra", "search"]));
+    assert_eq!(result["findings"]["unnecessary_action_ids"], json!(["extra"]));
+    assert_eq!(result["regret"]["cost_difference"], json!(18));
+    assert_eq!(result["regret"]["like_for_like"], json!(false));
+
+    let missing_reference = call(
+        &mut server(),
+        "bioeval_acquisition_audit",
+        json!({
+            "obligations": [],
+            "actions": [],
+            "require_reference": true
+        }),
+    );
+    assert_eq!(missing_reference["__isError"], json!(false));
+    assert_eq!(missing_reference["ok"], json!(false));
+    assert_eq!(missing_reference["stage"], json!("reference_policy"));
+    assert_eq!(missing_reference["fail_closed"], json!(true));
 }
 
 #[test]

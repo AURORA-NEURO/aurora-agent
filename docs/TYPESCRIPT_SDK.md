@@ -509,6 +509,10 @@ biological-validity refusal, keeping reproducibility separate from biological va
 `evaluationTrajectoryCheck` types step/property ledgers, non-vacuous property outcomes, recovery
 transitions, and bounded suffix completeness; see
 [`docs/EVALUATION_TRAJECTORY_CHECK.md`](../docs/EVALUATION_TRAJECTORY_CHECK.md).
+`bioevalAcquisitionAudit` types ordered acquisition-trace obligations, action kinds, stopping,
+redundancy, deferred decisive cost, and named-policy regret. It preserves the no-execution
+boundary and does not turn an admissible trace into biological validity. See
+[`docs/BIOEVAL_ACQUISITION_AUDIT.md`](../docs/BIOEVAL_ACQUISITION_AUDIT.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

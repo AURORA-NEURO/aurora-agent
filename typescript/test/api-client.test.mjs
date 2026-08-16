@@ -2627,3 +2627,38 @@ test("client exposes epistemic selection guarantee and exactness posture", async
   assert.equal(result.mcp.result.structuredContent.greedy.guarantee.applicability, "applies");
   assert.equal(result.mcp.result.structuredContent.comparisons.exact_optimum.status, "evaluated");
 });
+
+test("client exposes bioeval acquisition stopping and named regret evidence", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_acquisition_audit");
+      return jsonResponse({ ok: true, tool: "bioeval_acquisition_audit", request_id: "acquisition-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-acquisition-audit/0.1",
+        workflow: "bioeval_acquisition_audit",
+        status: "admissible",
+        stopped_after: true,
+        admissible: true,
+        obligations: [{ id: "subtype", required: true, closed: true }],
+        open_obligations: [],
+        actions: [{ id: "panel", kind: "assay", cost: 40 }],
+        cost: 42,
+        findings: { deferred_decisive_cost: 2, redundant_action_ids: [], unnecessary_action_ids: [] },
+        reference_policy: { name: "random", cost: 30, admissible: true },
+        regret: { cost_difference: 12, like_for_like: true },
+        guarantees: ["required obligations gate admissibility"],
+        limitations: ["no acquisition executed"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalAcquisitionAudit({
+    obligations: [{ id: "subtype", required: true }],
+    actions: [{ id: "panel", kind: "assay", cost: 40, closes: ["subtype"] }],
+    stopped_after: true,
+    reference_policy: { name: "random", cost: 30, admissible: true },
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-acquisition-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.status, "admissible");
+  assert.equal(result.mcp.result.structuredContent.regret.like_for_like, true);
+});

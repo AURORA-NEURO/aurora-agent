@@ -37,8 +37,10 @@ The same transport now exposes patient-derived-model transport, methylation clas
 version reconciliation, and radiogenomic design/target checks; those calls execute existing
 in-tree invariants but do not supply classifiers, image models, identity or contamination oracles,
 or clinical inference.
-The transport also exposes a validated bioevaluation reference-standard audit; it reports the
-uncertainty shape but does not score predictions, run an oracle, or provide ontology graph distance.
+The transport also exposes validated bioevaluation reference-standard and acquisition-trace audits;
+they report uncertainty shape, obligation closure, stopping posture, redundancy, deferred decisive
+cost, and named-policy regret but do not score predictions, run an oracle, execute acquisitions, or
+provide ontology graph distance.
 The transport also exposes the endpoint-agnostic oncology outcome/estimand record and clonal
 history compatibility checks; these preserve typed censoring and phylogeny ambiguity but do not
 estimate cohort survival or infer a phylogenetic tree.

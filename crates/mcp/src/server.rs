@@ -56,6 +56,10 @@ use bioprism_bioethics::representation::{
 };
 use bioprism_bioethics::validation::ValidationDossier;
 use bioprism_bioeval::{Dispersion, ReferenceDistribution, ReferenceStandard};
+use bioprism_bioevalx::acquisition::{
+    Action as AcquisitionTraceAction, AcquisitionKind, Obligation as AcquisitionObligation,
+    ReferencePolicy as AcquisitionReferencePolicy, Trace as AcquisitionTrace,
+};
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
@@ -1340,6 +1344,7 @@ impl Server {
             "evaluation_reproduction_check" => self.evaluation_reproduction_check(&arguments),
             "evaluation_trajectory_check" => self.evaluation_trajectory_check(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
+            "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -13523,6 +13528,272 @@ impl Server {
         }))
     }
 
+    fn bioeval_acquisition_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-acquisition-audit/0.1";
+        let raw_obligations = arguments
+            .get("obligations")
+            .and_then(Value::as_array)
+            .ok_or("obligations is required and must be an array")?;
+        let raw_actions = arguments
+            .get("actions")
+            .and_then(Value::as_array)
+            .ok_or("actions is required and must be an array")?;
+        if raw_obligations.len() > 512 || raw_actions.len() > 512 {
+            return Err("obligations and actions are each bounded at 512 rows".into());
+        }
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure acquisition audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("acquisition audit input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let mut obligations = Vec::with_capacity(raw_obligations.len());
+        let mut obligation_ids = BTreeSet::new();
+        for (index, raw) in raw_obligations.iter().enumerate() {
+            let id = raw
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("obligations[{index}] requires an id"))?;
+            if id.trim().is_empty() || id.len() > 256 {
+                return Err(format!("obligations[{index}] ids must contain 1 to 256 bytes"));
+            }
+            if !obligation_ids.insert(id.to_string()) {
+                return Err(format!("obligations[{index}] duplicates id {id:?}"));
+            }
+            let required = raw
+                .get("required")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| format!("obligations[{index}] requires boolean required"))?;
+            obligations.push(if required {
+                AcquisitionObligation::required(id)
+            } else {
+                AcquisitionObligation::optional(id)
+            });
+        }
+
+        let mut trace = AcquisitionTrace::against(obligations);
+        for (index, raw) in raw_actions.iter().enumerate() {
+            let id = raw
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("actions[{index}] requires an id"))?;
+            if id.trim().is_empty() || id.len() > 256 {
+                return Err(format!("actions[{index}] ids must contain 1 to 256 bytes"));
+            }
+            let kind: AcquisitionKind = serde_json::from_value(
+                raw.get("kind")
+                    .cloned()
+                    .ok_or_else(|| format!("actions[{index}] requires kind"))?,
+            )
+            .map_err(|error| format!("actions[{index}] has an invalid acquisition kind: {error}"))?;
+            let cost = raw
+                .get("cost")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| format!("actions[{index}] requires a non-negative integer cost"))?;
+            let raw_closes: &[Value] = raw
+                .get("closes")
+                .map(|value| {
+                    value
+                        .as_array()
+                        .ok_or_else(|| format!("actions[{index}].closes must be an array"))
+                })
+                .transpose()?
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if raw_closes.len() > 512 {
+                return Err(format!("actions[{index}].closes is bounded at 512 obligations"));
+            }
+            let mut closes = BTreeSet::new();
+            let mut action = AcquisitionTraceAction::new(id, kind, cost);
+            for (close_index, close) in raw_closes.iter().enumerate() {
+                let obligation = close.as_str().ok_or_else(|| {
+                    format!("actions[{index}].closes[{close_index}] must be a string")
+                })?;
+                if !closes.insert(obligation.to_string()) {
+                    return Err(format!(
+                        "actions[{index}].closes duplicates obligation {obligation:?}"
+                    ));
+                }
+                action = action.closing(obligation);
+            }
+            if let Err(error) = trace.perform(action) {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": SCHEMA,
+                    "stage": "trace_validation",
+                    "action_index": index,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "duplicate action identifiers and unopened obligations cannot be credited as successful acquisition work",
+                        "a domain-invalid trace is not projected as an admissible or clean run",
+                    ],
+                }));
+            }
+        }
+
+        let stopped_after = arguments
+            .get("stopped_after")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if stopped_after {
+            trace = trace.stopping();
+        }
+
+        let reference = match arguments.get("reference_policy") {
+            None | Some(Value::Null) => None,
+            Some(raw) => {
+                let name = raw
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or("reference_policy requires name")?;
+                if name.trim().is_empty() || name.len() > 256 {
+                    return Err("reference_policy name must contain 1 to 256 bytes".into());
+                }
+                let cost = raw
+                    .get("cost")
+                    .and_then(Value::as_u64)
+                    .ok_or("reference_policy requires a non-negative integer cost")?;
+                let admissible = raw
+                    .get("admissible")
+                    .and_then(Value::as_bool)
+                    .ok_or("reference_policy requires boolean admissible")?;
+                Some(AcquisitionReferencePolicy::new(name, cost, admissible))
+            }
+        };
+        if arguments
+            .get("require_reference")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && reference.is_none()
+        {
+            return Ok(json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "stage": "reference_policy",
+                "refusal": "a named reference_policy is required before regret can be computed",
+                "fail_closed": true,
+                "guarantees": [
+                    "regret is never measured against an unnamed or hidden acquisition baseline"
+                ],
+            }));
+        }
+
+        let open = trace.open();
+        let open_ids: BTreeSet<&str> = open.iter().map(|obligation| obligation.id.as_str()).collect();
+        let redundant: BTreeSet<&str> = trace
+            .redundant()
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect();
+        let unnecessary: BTreeSet<&str> = trace
+            .unnecessary()
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect();
+        let kind_name = |kind: AcquisitionKind| match kind {
+            AcquisitionKind::Retrieval => "retrieval",
+            AcquisitionKind::Assay => "assay",
+            AcquisitionKind::Metadata => "metadata",
+            AcquisitionKind::Expert => "expert",
+            AcquisitionKind::Analysis => "analysis",
+        };
+        let obligations_projection = trace
+            .obligations()
+            .iter()
+            .map(|obligation| {
+                json!({
+                    "id": obligation.id,
+                    "required": obligation.required,
+                    "closed": !open_ids.contains(obligation.id.as_str()),
+                    "open": open_ids.contains(obligation.id.as_str()),
+                })
+            })
+            .collect::<Vec<_>>();
+        let action_projection = trace
+            .actions()
+            .iter()
+            .enumerate()
+            .map(|(index, action)| {
+                json!({
+                    "index": index,
+                    "id": action.id,
+                    "kind": kind_name(action.kind),
+                    "cost": action.cost,
+                    "closes": action.closes,
+                    "redundant": redundant.contains(action.id.as_str()),
+                    "unnecessary": unnecessary.contains(action.id.as_str()),
+                })
+            })
+            .collect::<Vec<_>>();
+        let cost_by_kind = AcquisitionKind::ALL
+            .iter()
+            .map(|kind| {
+                json!({
+                    "kind": kind_name(*kind),
+                    "cost": trace.cost_by_kind().get(kind).copied().unwrap_or(0),
+                })
+            })
+            .collect::<Vec<_>>();
+        let regret = reference
+            .as_ref()
+            .map(|policy| trace.regret_against(Some(policy)).map_err(|error| error.to_string()))
+            .transpose()?;
+        let reference_projection = reference.as_ref().map(|policy| {
+            json!({
+                "name": policy.name,
+                "cost": policy.cost,
+                "admissible": policy.admissible,
+            })
+        });
+        let status = if trace.admissible() {
+            "admissible"
+        } else if trace.stopped_after {
+            "stopped_inadmissible"
+        } else {
+            "open"
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_acquisition_audit",
+            "status": status,
+            "stopped_after": trace.stopped_after,
+            "admissible": trace.admissible(),
+            "obligations": obligations_projection,
+            "open_obligations": open.iter().map(|obligation| json!({"id": obligation.id, "required": obligation.required})).collect::<Vec<_>>(),
+            "required_open_count": open.iter().filter(|obligation| obligation.required).count(),
+            "optional_open_count": open.iter().filter(|obligation| !obligation.required).count(),
+            "actions": action_projection,
+            "action_count": trace.actions().len(),
+            "cost": trace.cost(),
+            "cost_by_kind": cost_by_kind,
+            "findings": {
+                "redundant_action_ids": redundant.into_iter().collect::<Vec<_>>(),
+                "unnecessary_action_ids": unnecessary.into_iter().collect::<Vec<_>>(),
+                "deferred_decisive_cost": trace.deferred_decisive(),
+            },
+            "reference_policy": reference_projection,
+            "regret": regret.as_ref().map(|value| json!({
+                "policy": value.policy,
+                "cost_difference": value.cost_difference,
+                "this_admissible": value.this_admissible,
+                "reference_admissible": value.reference_admissible,
+                "like_for_like": value.like_for_like(),
+            })),
+            "guarantees": [
+                "required and optional obligations remain separate; optional closure cannot make a required decision admissible",
+                "redundant, unnecessary, and deferred-decisive findings are derived from action order and declared closures",
+                "regret is a named cost comparison and like_for_like remains visible when either policy is inadmissible",
+            ],
+            "limitations": [
+                "the route audits a caller-supplied trace and does not execute retrieval, assays, analyses, tools, or expert consultations",
+                "information gain, downstream decision improvement, adaptive acquisition optimality, and biological truth are not estimated",
+                "costs remain in the caller's unit and are not converted across acquisition kinds",
+            ],
+        }))
+    }
+
     fn bioeval_reference_audit(&self, arguments: &Value) -> Result<Value, String> {
         let raw = arguments
             .get("reference")
@@ -21844,7 +22115,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -23157,6 +23428,21 @@ pub fn tool_definitions() -> Vec<Value> {
                     "state": { "type": "string", "description": "Optional reference state to query without treating an omitted state as zero mass." }
                 },
                 "required": ["reference"]
+            }
+        }),
+        json!({
+            "name": "bioeval_acquisition_audit",
+            "description": "Audit a serialized bioevalx acquisition trace against declared required/optional obligations. It preserves admissibility, voluntary stopping, redundant and unnecessary actions, deferred decisive cost, per-kind cost, and named-policy regret without executing any retrieval, assay, analysis, or expert action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "obligations": { "type": "array", "maxItems": 512, "description": "Declared obligations [{id, required}]. Required obligations gate admissibility; optional obligations do not." },
+                    "actions": { "type": "array", "maxItems": 512, "description": "Ordered performed actions [{id, kind, cost, closes}]. Kinds are retrieval, assay, metadata, expert, or analysis." },
+                    "stopped_after": { "type": "boolean", "description": "Whether the agent voluntarily stopped rather than merely exhausting a budget; defaults false." },
+                    "reference_policy": { "type": ["object", "null"], "description": "Optional named baseline {name, cost, admissible}; regret is never computed against an unnamed policy." },
+                    "require_reference": { "type": "boolean", "description": "When true, refuse unless reference_policy is supplied." }
+                },
+                "required": ["obligations", "actions"]
             }
         }),
         json!({

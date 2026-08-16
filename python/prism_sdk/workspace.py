@@ -250,6 +250,7 @@ from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_c
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .epistemic_context import EpistemicContextAuditArgs, EpistemicContextAuditReport, epistemic_context_audit_report
 from .epistemic_selection import EpistemicSelectionAuditArgs, EpistemicSelectionAuditReport, epistemic_selection_audit_report
+from .bioeval_acquisition import BioevalAcquisitionAuditArgs, BioevalAcquisitionAuditReport, bioeval_acquisition_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1867,6 +1868,26 @@ class Workspace:
         self, reference: Mapping[str, Any], *, state: str | None = None
     ) -> BioevalReferenceAuditReport:
         return bioeval_reference_audit_report(self.bioeval_reference_audit(reference, state=state))
+
+    def bioeval_acquisition_audit(
+        self,
+        request: BioevalAcquisitionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit a declared acquisition trace through workspace MCP."""
+
+        normalized = request if isinstance(request, BioevalAcquisitionAuditArgs) else BioevalAcquisitionAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioeval_acquisition_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioeval_acquisition_audit_report(
+        self,
+        request: BioevalAcquisitionAuditArgs | Mapping[str, Any],
+    ) -> BioevalAcquisitionAuditReport:
+        """Return typed obligation, stopping, redundancy, and named-regret evidence."""
+
+        return bioeval_acquisition_audit_report(self.bioeval_acquisition_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4296,6 +4317,26 @@ class AsyncWorkspace:
         self, reference: Mapping[str, Any], *, state: str | None = None
     ) -> BioevalReferenceAuditReport:
         return bioeval_reference_audit_report(await self.bioeval_reference_audit(reference, state=state))
+
+    async def bioeval_acquisition_audit(
+        self,
+        request: BioevalAcquisitionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async acquisition-trace audit with structured domain refusals."""
+
+        normalized = request if isinstance(request, BioevalAcquisitionAuditArgs) else BioevalAcquisitionAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioeval_acquisition_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioeval_acquisition_audit_report(
+        self,
+        request: BioevalAcquisitionAuditArgs | Mapping[str, Any],
+    ) -> BioevalAcquisitionAuditReport:
+        """Return async typed acquisition-trace evidence."""
+
+        return bioeval_acquisition_audit_report(await self.bioeval_acquisition_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

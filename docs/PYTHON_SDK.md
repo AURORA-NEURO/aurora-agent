@@ -949,6 +949,11 @@ refusal; see [`docs/EVALUATION_REPRODUCTION_CHECK.md`](EVALUATION_REPRODUCTION_C
 `EvaluationTrajectoryReport` additionally types step records, named path-property declarations,
 held/violated/vacuous outcomes, recovery transitions, and bounded-suffix completeness; see
 [`docs/EVALUATION_TRAJECTORY_CHECK.md`](EVALUATION_TRAJECTORY_CHECK.md).
+`BioevalAcquisitionAuditArgs` / `bioeval_acquisition_audit_report(...)` audit ordered acquisition
+traces with typed required/optional obligations, action kinds, voluntary stopping, redundancy,
+deferred decisive cost, and named-policy regret. The report never treats obligation closure as
+proof that a retrieval or assay executed. See
+[`docs/BIOEVAL_ACQUISITION_AUDIT.md`](BIOEVAL_ACQUISITION_AUDIT.md).
 
 ## Biological stress profiling
 

@@ -4897,6 +4897,57 @@ export interface BioevalReferenceAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface BioevalAcquisitionObligationArgs extends JsonObject {
+  id: string;
+  required: boolean;
+}
+
+export type BioevalAcquisitionKind = "retrieval" | "assay" | "metadata" | "expert" | "analysis";
+
+export interface BioevalAcquisitionActionArgs extends JsonObject {
+  id: string;
+  kind: BioevalAcquisitionKind;
+  cost: number;
+  closes?: string[];
+}
+
+export interface BioevalAcquisitionReferencePolicyArgs extends JsonObject {
+  name: string;
+  cost: number;
+  admissible: boolean;
+}
+
+export interface BioevalAcquisitionAuditArgs extends JsonObject {
+  obligations: BioevalAcquisitionObligationArgs[];
+  actions: BioevalAcquisitionActionArgs[];
+  stopped_after?: boolean;
+  reference_policy?: BioevalAcquisitionReferencePolicyArgs | null;
+  require_reference?: boolean;
+}
+
+export interface BioevalAcquisitionAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-acquisition-audit/0.1";
+  workflow?: "bioeval_acquisition_audit";
+  status?: "admissible" | "stopped_inadmissible" | "open";
+  stopped_after?: boolean;
+  admissible?: boolean;
+  obligations?: JsonObject[];
+  open_obligations?: JsonObject[];
+  actions?: JsonObject[];
+  action_count?: number;
+  cost?: number;
+  cost_by_kind?: JsonObject[];
+  findings?: JsonObject;
+  reference_policy?: JsonObject | null;
+  regret?: JsonObject | null;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;
