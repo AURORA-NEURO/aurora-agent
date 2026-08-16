@@ -970,3 +970,24 @@ test("client exposes provider gate states and differential indeterminacy", async
   assert.equal(result.mcp.result.structuredContent.gate.outcome, "blocked");
   assert.equal(result.mcp.result.structuredContent.differential.HostEscape.drift, "indeterminate");
 });
+
+test("client exposes SDK registry fail-closed admission results", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/sdk_registry_check");
+      return jsonResponse({ ok: true, tool: "sdk_registry_check", request_id: "registry-1", mcp: { result: { structuredContent: {
+        ok: false,
+        stage: "manifest_validation",
+        manifests: [{ index: 0, valid: false, refusal: "invalid plugin manifest" }],
+        registry: null,
+        fail_closed: true,
+        guarantees: ["no partial registry"],
+      } } } });
+    },
+  });
+  const result = await client.sdkRegistryCheck({ manifests: [{ id: "plugin" }] });
+  assert.equal(result.mcp.result.structuredContent.stage, "manifest_validation");
+  assert.equal(result.mcp.result.structuredContent.registry, null);
+  assert.equal(result.mcp.result.structuredContent.fail_closed, true);
+});

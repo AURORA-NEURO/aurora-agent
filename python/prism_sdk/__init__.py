@@ -310,6 +310,7 @@ from .provider import (
     ProviderCapabilityGateReport,
     provider_capability_gate_report,
 )
+from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .bioethics import (
     ENGAGEMENT_KINDS,
     MISUSE_SURFACES,

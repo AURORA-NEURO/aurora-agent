@@ -542,6 +542,9 @@ audit and declared change-impact surfaces while keeping foreign SDK/CI artifacts
 `sdk_registry_check` validates serialized plugin manifests, computes whole/core digests, reports
 attributed trust evidence, and attempts deterministic registry admission under an explicit host
 policy; invalid declarations and capability conflicts return no partial resolution.
+The Python and TypeScript SDKs expose both refusal stages and the successful digest/trust/
+registration projection without implying dynamic loading, signatures, isolation, or plugin
+execution.
 `developer_delivery_audit` composes those local platform and repository contracts with optional
 impact, SDK admission, conformance, provider, governance-document, and release evidence. It
 requires explicit readiness targets, keeps missing foreign SDK/CI artifacts visible, and never

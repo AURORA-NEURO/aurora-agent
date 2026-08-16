@@ -205,6 +205,7 @@ from .stress import (
 from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_analysis_report
 from .routing import RoutingDecisionReport, routing_decision_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
+from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -718,6 +719,22 @@ class Workspace:
         request: ProviderCapabilityGateArgs | Mapping[str, Any],
     ) -> ProviderCapabilityGateReport:
         return provider_capability_gate_report(self.provider_capability_gate(request))
+
+    def sdk_registry_check(
+        self,
+        request: SdkRegistryCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, SdkRegistryCheckArgs) else SdkRegistryCheckArgs.from_wire(request)
+        result = self.client.call_tool("sdk_registry_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def sdk_registry_check_report(
+        self,
+        request: SdkRegistryCheckArgs | Mapping[str, Any],
+    ) -> SdkRegistryCheckReport:
+        return sdk_registry_check_report(self.sdk_registry_check(request))
 
     def lab_plan(
         self,
@@ -2259,6 +2276,22 @@ class AsyncWorkspace:
         request: ProviderCapabilityGateArgs | Mapping[str, Any],
     ) -> ProviderCapabilityGateReport:
         return provider_capability_gate_report(await self.provider_capability_gate(request))
+
+    async def sdk_registry_check(
+        self,
+        request: SdkRegistryCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, SdkRegistryCheckArgs) else SdkRegistryCheckArgs.from_wire(request)
+        result = await self.client.call_tool("sdk_registry_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def sdk_registry_check_report(
+        self,
+        request: SdkRegistryCheckArgs | Mapping[str, Any],
+    ) -> SdkRegistryCheckReport:
+        return sdk_registry_check_report(await self.sdk_registry_check(request))
 
     async def lab_plan(
         self,

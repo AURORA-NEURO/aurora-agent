@@ -2881,4 +2881,49 @@ export interface ProviderCapabilityGateResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface SdkRegistryCheckArgs extends JsonObject {
+  manifests: JsonObject[];
+  policy?: JsonObject;
+}
+
+export interface SdkRegistryManifestRowResult extends JsonObject {
+  index: number;
+  valid: boolean;
+  id?: string;
+  refusal?: string;
+  validation_error?: string | null;
+  digest?: string | null;
+  core_digest?: string | null;
+  capability_kinds?: string[];
+  trust?: JsonObject | null;
+}
+
+export interface SdkRegistryRegistrationResult extends JsonObject {
+  id: string;
+  digest: string;
+  core_digest: string;
+  negotiated: JsonObject;
+  trust: JsonObject;
+  load_bearing_selectable: boolean;
+}
+
+export interface SdkRegistryBodyResult extends JsonObject {
+  registration_count: number;
+  resolution: { [kind: string]: JsonObject };
+  registrations: SdkRegistryRegistrationResult[];
+  policy: JsonObject;
+}
+
+export interface SdkRegistryCheckResult extends JsonObject {
+  ok: boolean;
+  stage?: "manifest_validation" | "registry_registration";
+  refusal?: string;
+  fail_closed?: boolean;
+  manifest_count?: number;
+  manifests: SdkRegistryManifestRowResult[];
+  registry: SdkRegistryBodyResult | null;
+  conformance_note?: string;
+  guarantees: string[];
+}
+
 export type ToolArguments = JsonObject;

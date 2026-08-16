@@ -655,6 +655,13 @@ witnesses, keeps performance measurements as measurements, and preserves per-che
 states including indeterminate comparisons when either provider is untested. `cleared` means the
 declared required checks passed; it does not execute a provider or establish general runtime
 correctness.
+`SdkRegistryCheckArgs` / `sdk_registry_check_report(...)` preserve plugin-manifest admission as a
+two-stage fail-closed workflow: malformed declarations stop at `manifest_validation`, while valid
+but conflicting or policy-incompatible sets stop at `registry_registration`; neither returns a
+partial registry. Successful reports retain per-manifest whole/core digests, validation status,
+capability kinds, trust evidence, normalized resolution, negotiated registrations, policy, and
+load-bearing selection. Registration is evidence and deterministic resolution only; it does not
+dynamically load, sign, sandbox, or execute a plugin.
 
 ## Runtime and bioethics safety workflows
 

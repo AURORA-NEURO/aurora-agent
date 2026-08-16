@@ -256,6 +256,9 @@ a routed win.
 `providerCapabilityGate` preserves untested/failed/passed provider states, conjunctive gate
 outcomes, measurement counts, reproducible run evidence, and indeterminate cross-provider drift;
 performance observations remain measurements rather than invented pass/fail claims.
+`sdkRegistryCheck` preserves manifest-validation versus registry-registration refusal stages,
+whole/core digests, capability kinds, trust evidence, deterministic resolution, and the invariant
+that a refused set has no partial registry.
 `oracleCombine` retains tiered decisions, underdetermination, suppressed overrides, inadmissible
 and withheld ledgers, and nullable deciding/confidence evidence. `oracleReferencePanel` and
 `oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and

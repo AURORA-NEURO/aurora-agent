@@ -84,6 +84,8 @@ import type {
   RoutingToolResult,
   ProviderCapabilityGateArgs,
   ProviderCapabilityGateResult,
+  SdkRegistryCheckArgs,
+  SdkRegistryCheckResult,
   OracleCombineArgs,
   OracleCombineResult,
   OracleReferencePanelArgs,
@@ -508,6 +510,10 @@ export class ApiClient {
 
   async providerCapabilityGate(args: ProviderCapabilityGateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ProviderCapabilityGateResult>> {
     return this.callTool<ProviderCapabilityGateResult>("provider_capability_gate", args, options);
+  }
+
+  async sdkRegistryCheck(args: SdkRegistryCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<SdkRegistryCheckResult>> {
+    return this.callTool<SdkRegistryCheckResult>("sdk_registry_check", args, options);
   }
 
   async oracleCombine(args: OracleCombineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleCombineResult>> {
