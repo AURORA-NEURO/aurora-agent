@@ -5169,11 +5169,51 @@ export interface OncoWorldsRadiogenomicCheckArgs extends JsonObject {
   transport: JsonObject;
 }
 
+export type OncoWorldsRadiogenomicTarget = "association" | "mechanism";
+
+export type OncoWorldsRadiogenomicOutcomeKind = "supported" | "refused";
+
+export type OncoWorldsRadiogenomicRefusalKind =
+  | "undeclared_loss"
+  | "unstated_assumption"
+  | "leaky_split"
+  | "unstratified_claim"
+  | "specimen_scoped_target"
+  | "post_hoc_cohort_selection";
+
+export interface OncoWorldsRadiogenomicDesignResult extends JsonObject {
+  split_unit: "image" | "imaging_series" | "specimen" | "participant" | "site";
+  feature_provenance: "fitted_on_training_split_only" | "fitted_on_all_data";
+  feature_version: string;
+  external_cohort: JsonObject | null;
+  strata: string[];
+  mechanism_strata_present: boolean;
+}
+
+export interface OncoWorldsRadiogenomicSupportedClaimResult extends JsonObject {
+  claim: {
+    target: OncoWorldsRadiogenomicTarget;
+    statement: string;
+  } & JsonObject;
+  label: JsonObject;
+  strata: string[];
+  transport: JsonObject;
+}
+
 export interface OncoWorldsRadiogenomicCheckResult extends JsonObject {
   ok: boolean;
-  supported_claim?: JsonObject;
+  schema?: "bioprism-mcp/oncoworlds-radiogenomic-check/0.1";
+  supported: boolean;
+  outcome_kind: OncoWorldsRadiogenomicOutcomeKind;
+  claim_target?: OncoWorldsRadiogenomicTarget;
+  claim_statement?: string;
+  design: OncoWorldsRadiogenomicDesignResult;
+  transport_assumption_names: string[];
+  required_assumptions: string[];
+  supported_claim?: OncoWorldsRadiogenomicSupportedClaimResult;
   stage?: string;
   refusal?: JsonObject;
+  refusal_kind?: OncoWorldsRadiogenomicRefusalKind;
   refusal_text?: string;
   fail_closed?: boolean;
   guarantee?: string;

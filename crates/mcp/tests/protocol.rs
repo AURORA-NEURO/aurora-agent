@@ -6048,6 +6048,19 @@ fn oncoworlds_radiogenomic_check_refuses_leaky_splits_before_claims() {
         }),
     );
     assert_eq!(refused["ok"], json!(false));
+    assert_eq!(
+        refused["schema"],
+        json!("bioprism-mcp/oncoworlds-radiogenomic-check/0.1")
+    );
+    assert_eq!(refused["supported"], json!(false));
+    assert_eq!(refused["outcome_kind"], json!("refused"));
+    assert_eq!(refused["claim_target"], json!("mechanism"));
+    assert_eq!(refused["design"]["split_unit"], json!("image"));
+    assert_eq!(
+        refused["design"]["mechanism_strata_present"],
+        json!(false)
+    );
+    assert_eq!(refused["refusal_kind"], json!("leaky_split"));
     assert_eq!(refused["refusal"]["refusal"], json!("leaky_split"));
 
     let mut transport = DeclaredTransport::new(
@@ -6077,6 +6090,13 @@ fn oncoworlds_radiogenomic_check_refuses_leaky_splits_before_claims() {
         }),
     );
     assert_eq!(accepted["ok"], json!(true));
+    assert_eq!(accepted["supported"], json!(true));
+    assert_eq!(accepted["outcome_kind"], json!("supported"));
+    assert_eq!(accepted["design"]["split_unit"], json!("participant"));
+    assert_eq!(accepted["design"]["feature_provenance"], json!("fitted_on_training_split_only"));
+    assert_eq!(accepted["design"]["mechanism_strata_present"], json!(true));
+    assert_eq!(accepted["claim_target"], json!("mechanism"));
+    assert_eq!(accepted["transport_assumption_names"].as_array().unwrap().len(), 3);
     assert!(accepted["supported_claim"].is_object());
 }
 

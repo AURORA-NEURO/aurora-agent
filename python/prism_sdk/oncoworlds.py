@@ -20,6 +20,12 @@ METHYLATION_DIVERGENCES = frozenset({"agree", "both_unclassifiable", "version_co
 ONCOWORLDS_CLONAL_SCHEMA = "bioprism-mcp/oncoworlds-clonal-history-check/0.1"
 ONCOWORLDS_CLONAL_REFUSAL_KINDS = frozenset({"fractions_exceed_whole", "child_exceeds_parent", "cyclic", "unknown_subclone", "ambiguous", "unsupported_directionality"})
 ONCOWORLDS_CLONAL_UNIQUE_STATUSES = frozenset({"unique", "ambiguous", "refused"})
+ONCOWORLDS_RADIOGENOMIC_SCHEMA = "bioprism-mcp/oncoworlds-radiogenomic-check/0.1"
+ONCOWORLDS_RADIOGENOMIC_TARGETS = frozenset({"association", "mechanism"})
+ONCOWORLDS_RADIOGENOMIC_SPLIT_UNITS = frozenset({"image", "imaging_series", "specimen", "participant", "site"})
+ONCOWORLDS_RADIOGENOMIC_FEATURE_PROVENANCE = frozenset({"fitted_on_training_split_only", "fitted_on_all_data"})
+ONCOWORLDS_RADIOGENOMIC_REFUSAL_KINDS = frozenset({"undeclared_loss", "unstated_assumption", "leaky_split", "unstratified_claim", "specimen_scoped_target", "post_hoc_cohort_selection"})
+ONCOWORLDS_RADIOGENOMIC_OUTCOME_KINDS = frozenset({"supported", "refused"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -181,6 +187,66 @@ class OncoWorldsRadiogenomicCheckArgs:
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         return {"claim": dict(self.claim), "design": dict(self.design), "observation": dict(self.observation), "transport": dict(self.transport)}
+
+
+@dataclass(frozen=True)
+class OncoRadiogenomicDesignProjection:
+    raw: dict[str, Any]
+    split_unit: str
+    feature_provenance: str
+    feature_version: str
+    external_cohort: dict[str, Any] | None
+    strata: tuple[str, ...]
+    mechanism_strata_present: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoRadiogenomicDesignProjection":
+        raw = _object("radiogenomic design projection", value)
+        split_unit = _route_text("radiogenomic split unit", raw.get("split_unit"))
+        if split_unit not in ONCOWORLDS_RADIOGENOMIC_SPLIT_UNITS:
+            raise ArgumentError(f"unknown radiogenomic split unit: {split_unit!r}")
+        feature_provenance = _route_text("radiogenomic feature provenance", raw.get("feature_provenance"))
+        if feature_provenance not in ONCOWORLDS_RADIOGENOMIC_FEATURE_PROVENANCE:
+            raise ArgumentError(f"unknown radiogenomic feature provenance: {feature_provenance!r}")
+        strata = _route_strings("radiogenomic strata", raw.get("strata"))
+        mechanism_strata_present = _bool("radiogenomic mechanism strata presence", raw.get("mechanism_strata_present"))
+        if mechanism_strata_present != all(stratum in strata for stratum in ("site", "scanner")):
+            raise ArgumentError("radiogenomic mechanism strata presence does not reconcile with strata")
+        return cls(
+            raw,
+            split_unit,
+            feature_provenance,
+            _route_text("radiogenomic feature version", raw.get("feature_version")),
+            _optional_mapping("radiogenomic external cohort", raw.get("external_cohort")),
+            strata,
+            mechanism_strata_present,
+        )
+
+
+@dataclass(frozen=True)
+class OncoRadiogenomicSupportedClaimProjection:
+    raw: dict[str, Any]
+    target: str
+    statement: str
+    label: dict[str, Any]
+    strata: tuple[str, ...]
+    transport: dict[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoRadiogenomicSupportedClaimProjection":
+        raw = _object("supported radiogenomic claim", value)
+        claim = _object("supported radiogenomic claim body", raw.get("claim"))
+        target = _route_text("radiogenomic claim target", claim.get("target"))
+        if target not in ONCOWORLDS_RADIOGENOMIC_TARGETS:
+            raise ArgumentError(f"unknown radiogenomic claim target: {target!r}")
+        return cls(
+            raw,
+            target,
+            _route_text("radiogenomic claim statement", claim.get("statement")),
+            _object("radiogenomic tumour label", raw.get("label")),
+            _route_strings("supported radiogenomic strata", raw.get("strata")),
+            _object("radiogenomic transport", raw.get("transport")),
+        )
 
 
 @dataclass(frozen=True)
@@ -380,17 +446,77 @@ class OncoWorldsRadiogenomicCheckReport:
     guarantee: str | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+    refusal_kind: str | None = None
+    claim_target: str | None = None
+    claim_statement: str | None = None
+    design: OncoRadiogenomicDesignProjection | None = None
+    transport_assumption_names: tuple[str, ...] = ()
+    required_assumptions: tuple[str, ...] = ()
+    supported_claim_record: OncoRadiogenomicSupportedClaimProjection | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsRadiogenomicCheckReport":
         raw = _payload(value, label="oncoworlds radiogenomic check", direct_keys=("supported_claim", "refusal"))
         ok = _bool("radiogenomic check ok", raw.get("ok"))
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("radiogenomic schema", schema_value)
+        if schema is not None and schema != ONCOWORLDS_RADIOGENOMIC_SCHEMA:
+            raise ArgumentError(f"unknown radiogenomic schema: {schema!r}")
+        supported = _bool("radiogenomic supported", raw.get("supported", ok and raw.get("supported_claim") is not None))
+        if supported != ok:
+            raise ArgumentError("radiogenomic supported does not reconcile with transport success")
+        outcome_kind_value = raw.get("outcome_kind")
+        outcome_kind = "supported" if supported else "refused"
+        if outcome_kind_value is not None:
+            outcome_kind = _route_text("radiogenomic outcome kind", outcome_kind_value)
+            if outcome_kind not in ONCOWORLDS_RADIOGENOMIC_OUTCOME_KINDS or outcome_kind != ("supported" if supported else "refused"):
+                raise ArgumentError("radiogenomic outcome kind does not reconcile with support state")
+        claim_target_value = raw.get("claim_target")
+        claim_target = None if claim_target_value is None else _route_text("radiogenomic claim target", claim_target_value)
+        if claim_target is not None and claim_target not in ONCOWORLDS_RADIOGENOMIC_TARGETS:
+            raise ArgumentError(f"unknown radiogenomic claim target: {claim_target!r}")
+        claim_statement = None if raw.get("claim_statement") is None else _route_text("radiogenomic claim statement", raw.get("claim_statement"))
+        design_value = raw.get("design")
+        design = None if design_value is None else OncoRadiogenomicDesignProjection.from_wire(design_value)
+        transport_assumption_names = _route_strings("radiogenomic transport assumptions", raw.get("transport_assumption_names", []))
+        required_assumptions = _route_strings("radiogenomic required assumptions", raw.get("required_assumptions", []))
+        supported_claim_value = raw.get("supported_claim")
+        supported_claim_record = None
+        if isinstance(supported_claim_value, Mapping) and (schema is not None or "claim" in supported_claim_value):
+            supported_claim_record = OncoRadiogenomicSupportedClaimProjection.from_wire(supported_claim_value)
+        if schema is not None and supported != (supported_claim_record is not None):
+            raise ArgumentError("radiogenomic support state does not reconcile with supported claim")
+        if supported_claim_record is not None:
+            if claim_target is not None and claim_target != supported_claim_record.target:
+                raise ArgumentError("radiogenomic claim target does not reconcile with supported claim")
+            if claim_statement is not None and claim_statement != supported_claim_record.statement:
+                raise ArgumentError("radiogenomic claim statement does not reconcile with supported claim")
+        refusal_value = raw.get("refusal")
+        refusal_kind = None
+        if refusal_value is not None:
+            refusal_kind = _route_text("radiogenomic refusal kind", _object("radiogenomic refusal", refusal_value).get("refusal"))
+            if refusal_kind not in ONCOWORLDS_RADIOGENOMIC_REFUSAL_KINDS:
+                raise ArgumentError(f"unknown radiogenomic refusal kind: {refusal_kind!r}")
+        refusal_kind_value = raw.get("refusal_kind")
+        if refusal_kind_value is not None and _route_text("radiogenomic refusal_kind", refusal_kind_value) != refusal_kind:
+            raise ArgumentError("radiogenomic refusal_kind does not reconcile with typed refusal")
+        if schema is not None:
+            if "supported" not in raw or "outcome_kind" not in raw:
+                raise ArgumentError("versioned radiogenomic projections require support and outcome fields")
+            if design is None or claim_target is None or claim_statement is None:
+                raise ArgumentError("versioned radiogenomic projections require claim and design evidence")
+            if "transport_assumption_names" not in raw or "required_assumptions" not in raw:
+                raise ArgumentError("versioned radiogenomic projections require assumption accounting")
         if not ok:
             stage, refusal, refusal_text, fail_closed, guarantee = _domain_refusal(raw, "radiogenomic check")
-            return cls(raw, False, None, stage, refusal, refusal_text, fail_closed, guarantee, (), ())
+            if schema is not None and refusal_kind is None:
+                raise ArgumentError("versioned radiogenomic refusals require refusal_kind")
+            return cls(raw, False, None, stage, refusal, refusal_text, fail_closed, guarantee, (), (), schema, outcome_kind, refusal_kind, claim_target, claim_statement, design, transport_assumption_names, required_assumptions, None)
         if raw.get("refusal") is not None or raw.get("stage") is not None or raw.get("fail_closed", False):
             raise ArgumentError("successful radiogenomic checks cannot carry refusal evidence")
-        return cls(raw, True, _route_mapping("supported radiogenomic claim", raw.get("supported_claim")), None, None, None, False, None, _route_strings("radiogenomic guarantees", raw.get("guarantees")), _route_strings("radiogenomic limitations", raw.get("limitations")))
+        return cls(raw, True, _route_mapping("supported radiogenomic claim", raw.get("supported_claim")), None, None, None, False, None, _route_strings("radiogenomic guarantees", raw.get("guarantees")), _route_strings("radiogenomic limitations", raw.get("limitations")), schema, outcome_kind, None, claim_target, claim_statement, design, transport_assumption_names, required_assumptions, supported_claim_record)
 
     @property
     def supported(self) -> bool:
@@ -492,6 +618,12 @@ __all__ = [
     "ONCOWORLDS_CLONAL_REFUSAL_KINDS",
     "ONCOWORLDS_CLONAL_SCHEMA",
     "ONCOWORLDS_CLONAL_UNIQUE_STATUSES",
+    "ONCOWORLDS_RADIOGENOMIC_FEATURE_PROVENANCE",
+    "ONCOWORLDS_RADIOGENOMIC_OUTCOME_KINDS",
+    "ONCOWORLDS_RADIOGENOMIC_REFUSAL_KINDS",
+    "ONCOWORLDS_RADIOGENOMIC_SCHEMA",
+    "ONCOWORLDS_RADIOGENOMIC_SPLIT_UNITS",
+    "ONCOWORLDS_RADIOGENOMIC_TARGETS",
     "OncoClonalHistoryProjection",
     "OncoClonalRejectedHistoryProjection",
     "OncoClonalUniqueHistoryProjection",
@@ -503,6 +635,8 @@ __all__ = [
     "OncoWorldsMethylationCompareReport",
     "OncoWorldsModelTransportArgs",
     "OncoWorldsModelTransportReport",
+    "OncoRadiogenomicDesignProjection",
+    "OncoRadiogenomicSupportedClaimProjection",
     "OncoWorldsRadiogenomicCheckArgs",
     "OncoWorldsRadiogenomicCheckReport",
     "oncoworlds_clonal_history_check_report",

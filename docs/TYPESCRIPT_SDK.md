@@ -352,7 +352,8 @@ transport assumptions, and typed fail-closed patient-transport refusals. The met
 (`oncoworldsMethylationClassify` and `oncoworldsMethylationCompare`) keeps QC abstention,
 threshold/calibration/tumour-content caveats, and classifier-version disagreement explicit.
 `oncoworldsRadiogenomicCheck` retains participant-safe split, training-only fitting, target scope,
-mechanism strata, and transport assumptions; `oncoworldsClonalHistoryCheck` returns compatible and
+mechanism strata, and transport assumptions, plus a versioned support/refusal state, blocked claim,
+design summary, refusal kind, and typed supported-claim envelope; `oncoworldsClonalHistoryCheck` returns compatible and
 rejected histories with typed reasons and preserves ambiguity when more than one history survives.
 These methods are projections only: they do not perform clinical classification, patient transport,
 or clonal-history selection.

@@ -139,6 +139,7 @@ use bioprism_oncoworlds::{
     FidelityEvidence, IdentityEvidence, JoinReport, JoinVerdict, MethylationClass, ModelResult,
     RadiogenomicClaim, SampleContext, TumourPopulation, VersionedResult,
 };
+use bioprism_oncoworlds::radiogenomics::{MECHANISM_STRATA, REQUIRED_ASSUMPTIONS};
 use bioprism_ops::{
     audit_statement as telemetry_audit_statement, CapacityModel, DegradationPlan, Demand,
     DomainEvent, MetricDefinition, Observations as TelemetryObservations, RedactionPolicy, TraceId,
@@ -10447,9 +10448,31 @@ impl Server {
                 .ok_or("transport is required and must be a DeclaredTransport")?,
         )
         .map_err(|error| format!("invalid declared transport: {error}"))?;
+        let claim_target = serde_json::to_value(claim.target).map_err(|error| error.to_string())?;
+        let claim_statement = claim.statement.clone();
+        let design_summary = json!({
+            "split_unit": design.split_unit,
+            "feature_provenance": design.feature_provenance,
+            "feature_version": design.feature_version,
+            "external_cohort": design.external_cohort,
+            "strata": design.strata,
+            "mechanism_strata_present": MECHANISM_STRATA.iter().all(|stratum| design.strata.contains(*stratum))
+        });
+        let transport_assumption_names: Vec<String> = transport
+            .assumption_names()
+            .map(str::to_owned)
+            .collect();
         match onco_assert_radiogenomic_claim(claim, &design, &observation, &transport) {
             Ok(supported) => Ok(json!({
                 "ok": true,
+                "schema": "bioprism-mcp/oncoworlds-radiogenomic-check/0.1",
+                "supported": true,
+                "outcome_kind": "supported",
+                "claim_target": claim_target,
+                "claim_statement": claim_statement,
+                "design": design_summary,
+                "transport_assumption_names": transport_assumption_names,
+                "required_assumptions": REQUIRED_ASSUMPTIONS,
                 "supported_claim": supported,
                 "guarantees": [
                     "participant-safe splitting, training-only feature fitting, and pre-specified external cohorts are checked before claim scope",
@@ -10464,6 +10487,16 @@ impl Server {
             })),
             Err(refusal) => Ok(json!({
                 "ok": false,
+                "schema": "bioprism-mcp/oncoworlds-radiogenomic-check/0.1",
+                "supported": false,
+                "outcome_kind": "refused",
+                "claim_target": claim_target,
+                "claim_statement": claim_statement,
+                "design": design_summary,
+                "transport_assumption_names": transport_assumption_names,
+                "required_assumptions": REQUIRED_ASSUMPTIONS,
+                "refusal_kind": serde_json::to_value(&refusal)
+                    .map_err(|error| error.to_string())?["refusal"].clone(),
                 "stage": "radiogenomic_claim",
                 "refusal": serde_json::to_value(&refusal).map_err(|error| error.to_string())?,
                 "refusal_text": refusal.to_string(),

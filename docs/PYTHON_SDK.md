@@ -214,7 +214,9 @@ invent defaults:
   declined join remains a typed domain result. See `docs/ONCOWORLDS_IDENTITY_JOIN.md`.
 - `OncoWorldsRadiogenomicCheckArgs`/`oncoworlds_radiogenomic_check_report(...)` preserve split,
   feature-fitting, target-scope, mechanism-stratum, and transport assumptions before admitting a
-  cross-modal claim. `OncoWorldsClonalHistoryCheckArgs`/
+  cross-modal claim. The typed report retains the versioned support/refusal state, blocked claim
+  sentence, design projection, refusal kind, and nested supported claim. See
+  `docs/ONCOWORLDS_RADIOGENOMIC_CHECK.md`. `OncoWorldsClonalHistoryCheckArgs`/
   `oncoworlds_clonal_history_check_report(...)` reconcile candidate histories against cellular
   fractions, preserve per-candidate typed rejection reasons, and represent multiple compatible
   histories as ambiguity rather than selecting one. All five OncoWorlds workflows are available on

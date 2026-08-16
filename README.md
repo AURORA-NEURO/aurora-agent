@@ -594,7 +594,10 @@ research claim toward patients. `oncoworlds_methylation_classify` preserves QC a
 threshold, calibration, and tumour-content caveats, while `oncoworlds_methylation_compare` keeps
 classifier-version disagreement version-conditioned. `oncoworlds_radiogenomic_check` checks
 participant-safe splits, training-only feature fitting, specimen-versus-tumour target scope,
-mechanism strata, and declared transport assumptions before admitting a cross-modal claim.
+mechanism strata, and declared transport assumptions before admitting a cross-modal claim. Its
+versioned projection retains the blocked sentence, design summary, required/declared transport
+assumptions, and refusal taxonomy even when support is denied; see
+[`docs/ONCOWORLDS_RADIOGENOMIC_CHECK.md`](docs/ONCOWORLDS_RADIOGENOMIC_CHECK.md).
 `onco_outcome_analyze` requires an explicit estimand before interpreting one subject’s follow-up,
 keeps loss to follow-up and competing death as censoring distinctions, and reports delayed-entry
 bias. Its versioned typed projection binds endpoint strategy, event/censoring tags, delayed-entry

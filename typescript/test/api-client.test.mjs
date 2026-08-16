@@ -1526,7 +1526,32 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
         oncoworlds_model_transport: { ok: true, model_statement: "effect", effective_biological_n: 3, patient_relevant_claim: { claim: "bounded" }, guarantees: [], limitations: [] },
         oncoworlds_methylation_classify: { ok: true, classified: false, class: null, report: { outcome: "unclassifiable" }, guarantees: [], limitations: [] },
         oncoworlds_methylation_compare: { ok: true, comparison: { divergence: { divergence: "version_conditioned" } }, left_classifier: {}, right_classifier: {}, guarantees: [], limitations: [] },
-        oncoworlds_radiogenomic_check: { ok: true, supported_claim: { statement: "supported" }, guarantees: [], limitations: [] },
+        oncoworlds_radiogenomic_check: {
+          ok: true,
+          schema: "bioprism-mcp/oncoworlds-radiogenomic-check/0.1",
+          supported: true,
+          outcome_kind: "supported",
+          claim_target: "association",
+          claim_statement: "supported",
+          design: {
+            split_unit: "participant",
+            feature_provenance: "fitted_on_training_split_only",
+            feature_version: "features-v1",
+            external_cohort: null,
+            strata: [],
+            mechanism_strata_present: false,
+          },
+          transport_assumption_names: [],
+          required_assumptions: [],
+          supported_claim: {
+            claim: { target: "association", statement: "supported" },
+            label: { marker: "idh_mutation" },
+            strata: [],
+            transport: {},
+          },
+          guarantees: [],
+          limitations: [],
+        },
         oncoworlds_clonal_history_check: { ok: true, schema: "bioprism-mcp/oncoworlds-clonal-history-check/0.1", compatible_count: 1, rejected_count: 0, candidate_count: 1, compatible: [{ edges: [] }], rejected: [], rejected_records: [], unique_history: { ok: true, history: { edges: [] } }, unique_status: "unique", guarantees: [], limitations: [] },
       }[tool];
       return jsonResponse({ ok: true, tool, request_id: "oncoworlds-1", mcp: { result: { structuredContent: projections } }, guarantee: "bounded" });
@@ -1540,7 +1565,10 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
   assert.equal(model.mcp.result.structuredContent.patient_relevant_claim.claim, "bounded");
   assert.equal(classify.mcp.result.structuredContent.classified, false);
   assert.equal(compare.mcp.result.structuredContent.comparison.divergence.divergence, "version_conditioned");
-  assert.equal(radiogenomic.mcp.result.structuredContent.supported_claim.statement, "supported");
+  assert.equal(radiogenomic.mcp.result.structuredContent.supported_claim.claim.statement, "supported");
+  assert.equal(radiogenomic.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-radiogenomic-check/0.1");
+  assert.equal(radiogenomic.mcp.result.structuredContent.outcome_kind, "supported");
+  assert.equal(radiogenomic.mcp.result.structuredContent.design.split_unit, "participant");
   assert.equal(clonal.mcp.result.structuredContent.unique_history.ok, true);
   assert.equal(clonal.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-clonal-history-check/0.1");
   assert.equal(clonal.mcp.result.structuredContent.unique_status, "unique");

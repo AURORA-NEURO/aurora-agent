@@ -72,8 +72,61 @@ class OncoWorldsReportTests(unittest.TestCase):
         self.assertTrue(comparison.version_conditioned)
 
     def test_radiogenomic_refusal_and_clonal_ambiguity_remain_visible(self) -> None:
+        accepted = oncoworlds_radiogenomic_check_report({
+            "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-radiogenomic-check/0.1",
+            "supported": True,
+            "outcome_kind": "supported",
+            "claim_target": "association",
+            "claim_statement": "imaging carries molecular information in this cohort",
+            "design": {
+                "split_unit": "participant",
+                "feature_provenance": "fitted_on_training_split_only",
+                "feature_version": "features-v1",
+                "external_cohort": None,
+                "strata": ["site"],
+                "mechanism_strata_present": False,
+            },
+            "transport_assumption_names": ["same epoch"],
+            "required_assumptions": ["same epoch"],
+            "supported_claim": {
+                "claim": {
+                    "target": "association",
+                    "statement": "imaging carries molecular information in this cohort",
+                },
+                "label": {"marker": "idh_mutation", "basis": "detected in region(s) core"},
+                "strata": ["site"],
+                "transport": {"loss": {"discarded": ["heterogeneity"]}},
+            },
+            "guarantees": [],
+            "limitations": [],
+        })
+        self.assertTrue(accepted.supported)
+        self.assertEqual(accepted.outcome_kind, "supported")
+        self.assertEqual(accepted.supported_claim_record.target, "association")
+        self.assertEqual(accepted.design.feature_provenance, "fitted_on_training_split_only")
         refused = oncoworlds_radiogenomic_check_report({
             "ok": False,
+            "schema": "bioprism-mcp/oncoworlds-radiogenomic-check/0.1",
+            "supported": False,
+            "outcome_kind": "refused",
+            "claim_target": "association",
+            "claim_statement": "imaging predicts molecular state",
+            "design": {
+                "split_unit": "image",
+                "feature_provenance": "fitted_on_training_split_only",
+                "feature_version": "features-v1",
+                "external_cohort": None,
+                "strata": [],
+                "mechanism_strata_present": False,
+            },
+            "transport_assumption_names": [],
+            "required_assumptions": [
+                "imaging and specimen describe the same disease epoch",
+                "the molecular target is defined at the scope the model predicts",
+                "the feature representation version is fixed across train and test",
+            ],
+            "refusal_kind": "leaky_split",
             "stage": "radiogenomic_claim",
             "refusal": {"refusal": "leaky_split", "unit": "image"},
             "refusal_text": "leaky split",
@@ -81,6 +134,10 @@ class OncoWorldsReportTests(unittest.TestCase):
         })
         self.assertIsInstance(refused, OncoWorldsRadiogenomicCheckReport)
         self.assertFalse(refused.supported)
+        self.assertEqual(refused.schema, "bioprism-mcp/oncoworlds-radiogenomic-check/0.1")
+        self.assertEqual(refused.outcome_kind, "refused")
+        self.assertEqual(refused.refusal_kind, "leaky_split")
+        self.assertEqual(refused.design.split_unit, "image")
         clonal = oncoworlds_clonal_history_check_report({
             "ok": True,
             "schema": "bioprism-mcp/oncoworlds-clonal-history-check/0.1",
