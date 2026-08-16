@@ -114,6 +114,8 @@ import type {
   DeveloperDeliveryAuditResult,
   DeveloperPlatformStatusArgs,
   DeveloperPlatformStatusResult,
+  EpistemicVoiArgs,
+  EpistemicVoiResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -372,6 +374,10 @@ export class ApiClient {
 
   async weavelangCompile(args: WeaveLangCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WeaveLangCompileResult>> {
     return this.callTool<WeaveLangCompileResult>("weavelang_compile", args, options);
+  }
+
+  async epistemicVoi(args: EpistemicVoiArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicVoiResult>> {
+    return this.callTool<EpistemicVoiResult>("epistemic_voi", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

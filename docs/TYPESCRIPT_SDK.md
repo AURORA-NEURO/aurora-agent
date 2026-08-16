@@ -165,6 +165,12 @@ different types of evidence; the client does not promote any of them to measured
 state/liveness/invariant evidence, optional IR, and explicit local execution status. Replay,
 completed, and refused outcomes stay separate, and the TypeScript surface does not imply that a
 local semantic trace called a network, model, or tool.
+`epistemicVoi` returns typed `EpistemicVoiResult` evidence for explicit decision problems and
+beliefs, preserving gross value, declared acquisition cost, net value, outcome probabilities,
+action changes, and complementarity for bounded non-adaptive bundles. The request types require
+explicit row-major losses and per-model likelihood vectors; the result keeps structured
+fail-closed refusals visible and does not invent an adaptive policy, hidden prior, causal effect,
+or execution step.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

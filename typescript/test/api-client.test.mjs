@@ -150,6 +150,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         ir: null,
         guarantees: ["execution is a local semantic trace; it performs no network, model, or tool call"],
       } } } });
+      if (path === "/v1/tools/epistemic_voi") return jsonResponse({ ok: true, tool: "epistemic_voi", request_id: "r19", mcp: { result: { structuredContent: {
+        ok: true,
+        mode: "single",
+        value: { gross: 4, cost: 0.1, net: 3.9, outcome_probabilities: [0.5, 0.5], action_without: 0, action_after: [0, 1] },
+        actions: { without: "treat", after: ["treat", "abstain"] },
+        complementarity: null,
+        guarantees: ["gross risk reduction and declared acquisition cost remain separate"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -581,6 +589,21 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const weave = await client.weavelangCompile({ source: "package demo", execute: false, mode: "replay" });
   assert.equal(weave.mcp.result.structuredContent.execution.mode, "replay");
   assert.equal(weave.mcp.result.structuredContent.program.semantic_digest.length, 64);
+  const voi = await client.epistemicVoi({
+    problem: { actions: ["treat", "abstain"], models: ["responsive", "resistant"], loss: [0, 10, 10, 0] },
+    belief: { mass: [0.5, 0.5] },
+    acquisition: {
+      id: "assay",
+      cost: 0.1,
+      outcomes: [
+        { label: "positive", likelihood: [0.9, 0.1] },
+        { label: "negative", likelihood: [0.1, 0.9] },
+      ],
+    },
+  });
+  assert.equal(voi.mcp.result.structuredContent.value.gross, 4);
+  assert.equal(voi.mcp.result.structuredContent.value.net, 3.9);
+  assert.deepEqual(voi.mcp.result.structuredContent.actions.after, ["treat", "abstain"]);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

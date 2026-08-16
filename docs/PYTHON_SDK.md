@@ -89,6 +89,15 @@ invent defaults:
   completed, and fail-closed refused states, local liveness holes, invariant violations, event
   counts, and optional trace digests without presenting replay as production execution or liveness
   inspection as a universal proof.
+- `EpistemicVoiArgs` and `epistemic_voi_report(...)` expose explicit decision-relative information
+  pricing through sync MCP, async MCP, and HTTP. `EpistemicDecisionProblemArgs`,
+  `EpistemicBeliefArgs`, `EpistemicAcquisitionArgs`, and `EpistemicOutcomeArgs` keep actions,
+  models, row-major losses, normalizable beliefs, assay costs, and per-model likelihood partitions
+  explicit. `EpistemicValueReport` keeps gross risk reduction, declared cost, net value, outcome
+  probabilities, and action identities separate; `EpistemicComplementarityReport` exposes the
+  joint-versus-singleton excess for explicitly non-adaptive bundles. Improper partitions and
+  exhaustive-cap failures remain typed fail-closed refusals rather than being rounded into a
+  negative result or silently treated as an adaptive policy.
 - `WorldClaimCheckRequest`, `LabPlanRequest`, and `RoutingDecisionRequest` expose typed envelope
   helpers for world support checks, no-execution acquisition planning, and unseen-task routing over
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and

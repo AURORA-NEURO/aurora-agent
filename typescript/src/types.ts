@@ -787,6 +787,74 @@ export interface WeaveLangCompileResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface EpistemicDecisionProblemArgs extends JsonObject {
+  actions: string[];
+  models: string[];
+  loss: number[];
+}
+
+export interface EpistemicBeliefArgs extends JsonObject {
+  mass: number[];
+}
+
+export interface EpistemicOutcomeArgs extends JsonObject {
+  label: string;
+  likelihood: number[];
+}
+
+export interface EpistemicAcquisitionArgs extends JsonObject {
+  id: string;
+  cost: number;
+  outcomes: EpistemicOutcomeArgs[];
+}
+
+export interface EpistemicVoiArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisition?: EpistemicAcquisitionArgs;
+  acquisitions?: EpistemicAcquisitionArgs[];
+}
+
+export interface EpistemicValueResult extends JsonObject {
+  gross: number;
+  cost: number;
+  net: number;
+  outcome_probabilities: number[];
+  action_without: number;
+  action_after: number[];
+}
+
+export interface EpistemicActionsResult extends JsonObject {
+  without: string;
+  after: string[];
+}
+
+export interface EpistemicComplementarityResult extends JsonObject {
+  joint_gross: number;
+  sum_of_singletons: number;
+  excess: number;
+}
+
+export interface EpistemicRefusalResult extends JsonObject {
+  ok: false;
+  stage?: string;
+  refusal: string;
+  fail_closed: true;
+  guarantees: string[];
+}
+
+export interface EpistemicVoiResult extends JsonObject {
+  ok: boolean;
+  mode?: "single" | "non_adaptive_joint_bundle";
+  value?: EpistemicValueResult;
+  actions?: EpistemicActionsResult;
+  complementarity?: EpistemicComplementarityResult | EpistemicRefusalResult | null;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

@@ -180,6 +180,7 @@ from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, 
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
+from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -711,6 +712,23 @@ class ApiClient:
         """Return typed HTTP WeaveLang compilation and replay evidence."""
 
         return weavelang_compile_report(self.weavelang_compile(request))
+
+    def epistemic_voi(
+        self,
+        request: EpistemicVoiArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Price explicit evidence through the HTTP gateway, preserving domain refusals."""
+
+        normalized = request if isinstance(request, EpistemicVoiArgs) else EpistemicVoiArgs.from_wire(request)
+        return self.call_tool("epistemic_voi", normalized.to_mcp_arguments())
+
+    def epistemic_voi_report(
+        self,
+        request: EpistemicVoiArgs | Mapping[str, Any],
+    ) -> EpistemicVoiReport:
+        """Return typed HTTP value-of-information evidence."""
+
+        return epistemic_voi_report(self.epistemic_voi(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2356,6 +2374,23 @@ class AsyncApiClient:
         """Return async typed HTTP WeaveLang compilation and replay evidence."""
 
         return weavelang_compile_report(await self.weavelang_compile(request))
+
+    async def epistemic_voi(
+        self,
+        request: EpistemicVoiArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP value-of-information pricing."""
+
+        normalized = request if isinstance(request, EpistemicVoiArgs) else EpistemicVoiArgs.from_wire(request)
+        return await self.call_tool("epistemic_voi", normalized.to_mcp_arguments())
+
+    async def epistemic_voi_report(
+        self,
+        request: EpistemicVoiArgs | Mapping[str, Any],
+    ) -> EpistemicVoiReport:
+        """Return async typed HTTP value-of-information evidence."""
+
+        return epistemic_voi_report(await self.epistemic_voi(request))
 
     async def developer_delivery_audit_report(
         self,

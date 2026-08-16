@@ -436,6 +436,8 @@ deliverables from the typed catalogue, keeping specification inventory separate 
 availability.
 `epistemic_voi` prices explicit evidence actions and non-adaptive bundles while keeping gross risk
 reduction, declared cost, net value, action changes, complementarity, and exhaustive limits visible;
+the Python and TypeScript SDKs expose the same boundary with typed problem, belief, acquisition,
+value, bundle, action-identity, and fail-closed refusal projections;
 `benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
 repetition analysis; and `pack_catalogue` exposes the agent and biological pack portfolio without
 turning declarations into measured scores.

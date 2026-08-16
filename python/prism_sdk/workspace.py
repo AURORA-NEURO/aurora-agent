@@ -217,6 +217,7 @@ from .token_context import (
     token_context_plan_report,
 )
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
+from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -1594,6 +1595,30 @@ class Workspace:
         """Return typed IR identity, replay posture, liveness, and invariant evidence."""
 
         return weavelang_compile_report(self.weavelang_compile(request))
+
+    def epistemic_voi(
+        self,
+        request: EpistemicVoiArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Price one explicit acquisition or a bounded non-adaptive bundle.
+
+        A structured ``ok=false`` value-of-information refusal is returned as data so callers can
+        inspect the fail-closed reason; transport-level MCP errors still raise normally.
+        """
+
+        normalized = request if isinstance(request, EpistemicVoiArgs) else EpistemicVoiArgs.from_wire(request)
+        result = self.client.call_tool("epistemic_voi", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def epistemic_voi_report(
+        self,
+        request: EpistemicVoiArgs | Mapping[str, Any],
+    ) -> EpistemicVoiReport:
+        """Return typed gross/cost/net, action-change, bundle, and refusal evidence."""
+
+        return epistemic_voi_report(self.epistemic_voi(request))
 
     def developer_delivery_audit_report(
         self,
@@ -3216,6 +3241,26 @@ class AsyncWorkspace:
         """Async typed WeaveLang compilation and replay evidence."""
 
         return weavelang_compile_report(await self.weavelang_compile(request))
+
+    async def epistemic_voi(
+        self,
+        request: EpistemicVoiArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async value-of-information pricing with structured fail-closed refusals."""
+
+        normalized = request if isinstance(request, EpistemicVoiArgs) else EpistemicVoiArgs.from_wire(request)
+        result = await self.client.call_tool("epistemic_voi", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def epistemic_voi_report(
+        self,
+        request: EpistemicVoiArgs | Mapping[str, Any],
+    ) -> EpistemicVoiReport:
+        """Return async typed value-of-information evidence."""
+
+        return epistemic_voi_report(await self.epistemic_voi(request))
 
     async def developer_delivery_audit_report(
         self,
