@@ -5479,6 +5479,76 @@ export interface BioevalRevealAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export type BioevalBoundaryChannel =
+  | "final_output"
+  | "tool_arguments"
+  | "external_queries"
+  | "inter_agent_messages"
+  | "shared_memory"
+  | "logs"
+  | "artifacts"
+  | "environment_writes"
+  | "network_destinations";
+
+export type BioevalBoundaryEffectKind = "materialized" | "proposed" | "bypass_attempted";
+
+export interface BioevalBoundaryEffectArgs extends JsonObject {
+  effect: BioevalBoundaryEffectKind;
+  denied_by?: string;
+  detail?: string;
+}
+
+export interface BioevalBoundaryPolicyArgs extends JsonObject {
+  id: string;
+  transmission_principle: string;
+  sender?: string;
+  subject?: string;
+  recipient?: string;
+  information_type?: string;
+  purpose?: string;
+  channels?: BioevalBoundaryChannel[];
+}
+
+export interface BioevalBoundaryFlowArgs extends JsonObject {
+  id: string;
+  sender: string;
+  subject: string;
+  recipient: string;
+  information_type: string;
+  purpose: string;
+  transmission_principle: string;
+  channel: BioevalBoundaryChannel;
+  effect?: BioevalBoundaryEffectArgs;
+  irreversible?: boolean;
+}
+
+export interface BioevalBoundaryAuditArgs extends JsonObject {
+  policies?: BioevalBoundaryPolicyArgs[];
+  flows: BioevalBoundaryFlowArgs[];
+  utility?: number;
+  max_items?: number;
+  require_no_violations?: boolean;
+  require_no_vetoes?: boolean;
+}
+
+export interface BioevalBoundaryAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-boundary-audit/0.1";
+  workflow?: "bioeval_boundary_audit";
+  boundary?: JsonObject;
+  policies?: JsonObject;
+  flows?: JsonObject;
+  violations_by_channel?: JsonObject;
+  pareto?: JsonObject | null;
+  composite?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;

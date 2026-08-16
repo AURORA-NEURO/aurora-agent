@@ -3093,3 +3093,55 @@ test("client exposes prospective reveal locks and rubric digest policy", async (
   assert.equal(result.mcp.result.structuredContent.scoring.complete, false);
   assert.equal(result.mcp.result.structuredContent.findings.selective_publication, true);
 });
+
+test("client exposes contextual-integrity verdicts and Pareto safety posture", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_boundary_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.flows[0].channel, "inter_agent_messages");
+      assert.equal(body.policies[0].transmission_principle, "consent");
+      return jsonResponse({ ok: true, tool: "bioeval_boundary_audit", request_id: "boundary-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-boundary-audit/0.1",
+        workflow: "bioeval_boundary_audit",
+        boundary: { policy_count: 1, flow_count: 5, authorised_count: 1, compliant_count: 1, violation_count: 3, veto_count: 2 },
+        policies: { rows: [], returned: 0, total: 1, omitted: 1 },
+        flows: { rows: [], returned: 0, total: 5, omitted: 5 },
+        violations_by_channel: { final_output: 1, external_queries: 1, logs: 1 },
+        pareto: { utility: 0.8, violations: 3 },
+        composite: { status: "refused", value: null, refusal: "composite refused" },
+        findings: { violating_flows: { ids: ["violation"], total: 3, omitted: 0 }, veto_flows: { ids: ["veto", "bypass"], total: 2, omitted: 0 }, composite_refused: true },
+        guarantees: ["utility and safety remain separate"],
+        limitations: ["no payload detector"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalBoundaryAudit({
+    policies: [{
+      id: "consent-study",
+      recipient: "evaluator",
+      information_type: "deidentified",
+      purpose: "study",
+      transmission_principle: "consent",
+      channels: ["inter_agent_messages"],
+    }],
+    flows: [{
+      id: "authorized",
+      sender: "agent",
+      subject: "participant-1",
+      recipient: "evaluator",
+      information_type: "deidentified",
+      purpose: "study",
+      transmission_principle: "consent",
+      channel: "inter_agent_messages",
+      effect: { effect: "materialized" },
+    }],
+    utility: 0.8,
+    require_no_vetoes: true,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-boundary-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.boundary.violation_count, 3);
+  assert.equal(result.mcp.result.structuredContent.composite.status, "refused");
+});

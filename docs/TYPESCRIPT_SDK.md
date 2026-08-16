@@ -565,6 +565,12 @@ selective publication. It preserves require_scoring, require_rubric_match, and r
 explicit fail-closed policies. See
 [docs/BIOEVAL_REVEAL_AUDIT.md](../docs/BIOEVAL_REVEAL_AUDIT.md).
 
+bioevalBoundaryAudit types contextual-integrity five-tuples, closed channels, authorized and
+compliant-denial effects, violations, vetoes, bypasses, channel exposure, Pareto points, and
+guarded composite refusals. It preserves require_no_violations and require_no_vetoes as explicit
+fail-closed policies. See
+[docs/BIOEVAL_BOUNDARY_AUDIT.md](../docs/BIOEVAL_BOUNDARY_AUDIT.md).
+
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

@@ -217,6 +217,7 @@ from .bioeval_design import BioevalDesignAuditArgs, BioevalDesignAuditReport, bi
 from .bioeval_mesh import BioevalMeshAuditArgs, BioevalMeshAuditReport, bioeval_mesh_audit_report
 from .bioeval_burden import BioevalBurdenAuditArgs, BioevalBurdenAuditReport, bioeval_burden_audit_report
 from .bioeval_reveal import BioevalRevealAuditArgs, BioevalRevealAuditReport, bioeval_reveal_audit_report
+from .bioeval_boundary import BioevalBoundaryAuditArgs, BioevalBoundaryAuditReport, bioeval_boundary_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1939,6 +1940,23 @@ class ApiClient:
         """Return typed HTTP seal/reveal evidence."""
 
         return bioeval_reveal_audit_report(self.bioeval_reveal_audit(request))
+
+    def bioeval_boundary_audit(
+        self,
+        request: BioevalBoundaryAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit contextual-integrity flows through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BioevalBoundaryAuditArgs) else BioevalBoundaryAuditArgs.from_wire(request)
+        return self.call_tool("bioeval_boundary_audit", normalized.to_mcp_arguments())
+
+    def bioeval_boundary_audit_report(
+        self,
+        request: BioevalBoundaryAuditArgs | Mapping[str, Any],
+    ) -> BioevalBoundaryAuditReport:
+        """Return typed HTTP boundary, veto, and Pareto evidence."""
+
+        return bioeval_boundary_audit_report(self.bioeval_boundary_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4530,6 +4548,23 @@ class AsyncApiClient:
         """Return async typed seal/reveal evidence."""
 
         return bioeval_reveal_audit_report(await self.bioeval_reveal_audit(request))
+
+    async def bioeval_boundary_audit(
+        self,
+        request: BioevalBoundaryAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP contextual-integrity audit."""
+
+        normalized = request if isinstance(request, BioevalBoundaryAuditArgs) else BioevalBoundaryAuditArgs.from_wire(request)
+        return await self.call_tool("bioeval_boundary_audit", normalized.to_mcp_arguments())
+
+    async def bioeval_boundary_audit_report(
+        self,
+        request: BioevalBoundaryAuditArgs | Mapping[str, Any],
+    ) -> BioevalBoundaryAuditReport:
+        """Return async typed boundary evidence."""
+
+        return bioeval_boundary_audit_report(await self.bioeval_boundary_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

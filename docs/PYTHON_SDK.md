@@ -1017,6 +1017,13 @@ unrevealed commitments, and selective publication. The typed layer exposes requi
 require_rubric_match, and require_complete as explicit fail-closed policies. See
 [docs/BIOEVAL_REVEAL_AUDIT.md](BIOEVAL_REVEAL_AUDIT.md).
 
+BioevalBoundaryEffectArgs, BioevalBoundaryPolicyArgs, BioevalBoundaryFlowArgs,
+BioevalBoundaryAuditArgs, and bioeval_boundary_audit_report(...) type contextual-integrity
+five-tuples, closed channels, authorized and compliant-denial effects, violations, vetoes,
+bypasses, channel exposure, Pareto points, and guarded composite refusals. The typed layer exposes
+require_no_violations and require_no_vetoes as explicit fail-closed policies. See
+[docs/BIOEVAL_BOUNDARY_AUDIT.md](BIOEVAL_BOUNDARY_AUDIT.md).
+
 `StressProfileArgs` / `stress_profile_report(...)` and `StressReportArgs` /
 `stress_report_projection(...)` expose the biological-stress engine without pretending that a
 single robustness score is meaningful. The typed reports retain family, blueprint module, stress

@@ -426,5 +426,8 @@ inherited residuals, exact-unit draws, failed-action waste, and fork double-spen
 the prospective seal/reveal kernel is also exposed through bioeval_reveal_audit, preserving
 rubric and commitment digests, one-shot state locks, uncommitted outcomes, and selective
 publication rather than treating a partial reveal as a complete score;
+the contextual-integrity kernel is also exposed through bioeval_boundary_audit, preserving
+authorized flow, respected denial, violation, irreversible veto, bypass, channel exposure, and
+Pareto-separated utility/safety rather than manufacturing a combined privacy score;
 the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
-evaluator-health, scoring-plane, metamorphic, waiver, design, mesh, burden, or reveal wrapper.
+evaluator-health, scoring-plane, metamorphic, waiver, design, mesh, burden, reveal, or boundary wrapper.

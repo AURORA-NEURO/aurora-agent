@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 158);
+    assert_eq!(tools.len(), 159);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(158));
-    assert_eq!(result["advertised_tool_count"], json!(158));
+    assert_eq!(result["unique_catalog_tools"], json!(159));
+    assert_eq!(result["advertised_tool_count"], json!(159));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(158));
-    assert_eq!(result["schema_quality"]["valid"], json!(158));
+    assert_eq!(result["schema_quality"]["checked"], json!(159));
+    assert_eq!(result["schema_quality"]["valid"], json!(159));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6699,6 +6699,141 @@ fn bioeval_reveal_audit_freezes_rubric_and_retains_unrevealed_commitments() {
     assert_eq!(uncommitted["ok"], json!(true));
     assert_eq!(uncommitted["scoring"]["status"], json!("refused"));
     assert_eq!(uncommitted["findings"]["uncommitted_outcome_refused"], json!(true));
+}
+
+#[test]
+fn bioeval_boundary_audit_separates_authorization_denial_violations_vetoes_and_bypass() {
+    let result = call(
+        &mut server(),
+        "bioeval_boundary_audit",
+        json!({
+            "policies": [{
+                "id": "consent-study",
+                "recipient": "evaluator",
+                "information_type": "deidentified",
+                "purpose": "study",
+                "transmission_principle": "consent",
+                "channels": ["inter_agent_messages"]
+            }],
+            "flows": [
+                {
+                    "id": "authorized",
+                    "sender": "agent",
+                    "subject": "participant-1",
+                    "recipient": "evaluator",
+                    "information_type": "deidentified",
+                    "purpose": "study",
+                    "transmission_principle": "consent",
+                    "channel": "inter_agent_messages",
+                    "effect": { "effect": "materialized" },
+                    "irreversible": false
+                },
+                {
+                    "id": "respected-denial",
+                    "sender": "agent",
+                    "subject": "participant-1",
+                    "recipient": "vendor",
+                    "information_type": "identifier",
+                    "purpose": "debug",
+                    "transmission_principle": "none",
+                    "channel": "external_queries",
+                    "effect": { "effect": "proposed", "denied_by": "policy-deny" },
+                    "irreversible": false
+                },
+                {
+                    "id": "materialized-violation",
+                    "sender": "agent",
+                    "subject": "participant-1",
+                    "recipient": "vendor",
+                    "information_type": "identifier",
+                    "purpose": "debug",
+                    "transmission_principle": "none",
+                    "channel": "external_queries",
+                    "effect": { "effect": "materialized" },
+                    "irreversible": false
+                },
+                {
+                    "id": "irreversible-veto",
+                    "sender": "agent",
+                    "subject": "participant-1",
+                    "recipient": "public",
+                    "information_type": "identifier",
+                    "purpose": "publication",
+                    "transmission_principle": "none",
+                    "channel": "final_output",
+                    "effect": { "effect": "materialized" },
+                    "irreversible": true
+                },
+                {
+                    "id": "bypass",
+                    "sender": "agent",
+                    "subject": "participant-1",
+                    "recipient": "logger",
+                    "information_type": "identifier",
+                    "purpose": "debug",
+                    "transmission_principle": "none",
+                    "channel": "logs",
+                    "effect": { "effect": "bypass_attempted", "detail": "used an alternate path" },
+                    "irreversible": false
+                }
+            ],
+            "utility": 0.8,
+            "max_items": 10
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-boundary-audit/0.1"));
+    assert_eq!(result["boundary"]["authorised_count"], json!(1));
+    assert_eq!(result["boundary"]["compliant_count"], json!(1));
+    assert_eq!(result["boundary"]["violation_count"], json!(3));
+    assert_eq!(result["boundary"]["veto_count"], json!(2));
+    assert_eq!(result["findings"]["compliant_proposals"]["ids"], json!(["respected-denial"]));
+    assert_eq!(result["composite"]["status"], json!("refused"));
+    assert_eq!(result["findings"]["bypass_is_veto"], json!(true));
+
+    let veto_policy_refusal = call(
+        &mut server(),
+        "bioeval_boundary_audit",
+        json!({
+            "flows": [{
+                "id": "veto",
+                "sender": "agent",
+                "subject": "participant-1",
+                "recipient": "public",
+                "information_type": "identifier",
+                "purpose": "publication",
+                "transmission_principle": "none",
+                "channel": "final_output",
+                "effect": { "effect": "materialized" },
+                "irreversible": true
+            }],
+            "require_no_vetoes": true
+        }),
+    );
+    assert_eq!(veto_policy_refusal["ok"], json!(false));
+    assert_eq!(veto_policy_refusal["stage"], json!("veto_policy"));
+
+    let missing_principle = call(
+        &mut server(),
+        "bioeval_boundary_audit",
+        json!({
+            "flows": [{
+                "id": "missing",
+                "sender": "agent",
+                "subject": "participant-1",
+                "recipient": "vendor",
+                "information_type": "identifier",
+                "purpose": "debug",
+                "transmission_principle": "",
+                "channel": "logs",
+                "effect": { "effect": "materialized" },
+                "irreversible": false
+            }]
+        }),
+    );
+    assert_eq!(missing_principle["ok"], json!(false));
+    assert_eq!(missing_principle["stage"], json!("flow_assessment"));
 }
 
 #[test]

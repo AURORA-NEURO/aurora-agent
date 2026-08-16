@@ -261,6 +261,7 @@ from .bioeval_design import BioevalDesignAuditArgs, BioevalDesignAuditReport, bi
 from .bioeval_mesh import BioevalMeshAuditArgs, BioevalMeshAuditReport, bioeval_mesh_audit_report
 from .bioeval_burden import BioevalBurdenAuditArgs, BioevalBurdenAuditReport, bioeval_burden_audit_report
 from .bioeval_reveal import BioevalRevealAuditArgs, BioevalRevealAuditReport, bioeval_reveal_audit_report
+from .bioeval_boundary import BioevalBoundaryAuditArgs, BioevalBoundaryAuditReport, bioeval_boundary_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -2098,6 +2099,26 @@ class Workspace:
         """Return typed prospective evaluation evidence."""
 
         return bioeval_reveal_audit_report(self.bioeval_reveal_audit(request))
+
+    def bioeval_boundary_audit(
+        self,
+        request: BioevalBoundaryAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit contextual-integrity authorization, denial, violation, and veto states."""
+
+        normalized = request if isinstance(request, BioevalBoundaryAuditArgs) else BioevalBoundaryAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioeval_boundary_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioeval_boundary_audit_report(
+        self,
+        request: BioevalBoundaryAuditArgs | Mapping[str, Any],
+    ) -> BioevalBoundaryAuditReport:
+        """Return typed flow verdicts, channel exposure, and Pareto posture."""
+
+        return bioeval_boundary_audit_report(self.bioeval_boundary_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4747,6 +4768,26 @@ class AsyncWorkspace:
         """Return async typed prospective reveal evidence."""
 
         return bioeval_reveal_audit_report(await self.bioeval_reveal_audit(request))
+
+    async def bioeval_boundary_audit(
+        self,
+        request: BioevalBoundaryAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async contextual-integrity audit with explicit safety policies."""
+
+        normalized = request if isinstance(request, BioevalBoundaryAuditArgs) else BioevalBoundaryAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioeval_boundary_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioeval_boundary_audit_report(
+        self,
+        request: BioevalBoundaryAuditArgs | Mapping[str, Any],
+    ) -> BioevalBoundaryAuditReport:
+        """Return async typed boundary evidence."""
+
+        return bioeval_boundary_audit_report(await self.bioeval_boundary_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

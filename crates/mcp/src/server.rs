@@ -64,6 +64,10 @@ use bioprism_bioevalx::burden::{
     BranchLedger as BioevalBranchLedger, Draw as BioevalDraw, Ledger as BioevalLedger,
     Resource as BioevalResource,
 };
+use bioprism_bioevalx::boundary::{
+    Assessment as BioevalBoundaryAssessment, Flow as BioevalFlow,
+    Policy as BioevalBoundaryPolicy,
+};
 use bioprism_bioevalx::grounding::{
     ClaimState as GroundingClaimState, EdgeKind as GroundingEdgeKind,
     Evidence as GroundingEvidence, Grounding,
@@ -1394,6 +1398,7 @@ impl Server {
             "bioeval_mesh_audit" => self.bioeval_mesh_audit(&arguments),
             "bioeval_burden_audit" => self.bioeval_burden_audit(&arguments),
             "bioeval_reveal_audit" => self.bioeval_reveal_audit(&arguments),
+            "bioeval_boundary_audit" => self.bioeval_boundary_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -16679,6 +16684,325 @@ impl Server {
         }))
     }
 
+    fn bioeval_boundary_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-boundary-audit/0.1";
+        const MAX_POLICIES: usize = 4_096;
+        const MAX_FLOWS: usize = 8_192;
+        const MAX_TEXT_BYTES: usize = 4_096;
+        const MAX_INPUT_BYTES: usize = 20_000_000;
+
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_boundary_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "authorized, compliant, violating, veto, and bypass verdicts remain distinct",
+                    "materialized forbidden irreversible flows remain vetoes",
+                    "channel exposure is reported without a combined utility-safety score",
+                    "missing transmission principles are instrumentation refusals rather than default violations",
+                ],
+                "limitations": [
+                    "flows and policies are caller-labeled and no payload detector is executed",
+                    "the route does not infer necessity, minimize disclosure, or choose a Pareto point",
+                    "a permitted flow is authorization evidence, not proof that a transfer occurred",
+                ],
+            })
+        };
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure boundary audit input: {error}"))?;
+        if encoded.len() > MAX_INPUT_BYTES {
+            return Err(format!(
+                "boundary audit input exceeds the {MAX_INPUT_BYTES}-byte safety bound"
+            ));
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let policy = |name: &str| -> Result<bool, String> {
+            match arguments.get(name) {
+                None => Ok(false),
+                Some(value) => value
+                    .as_bool()
+                    .ok_or_else(|| format!("{name} must be a boolean")),
+            }
+        };
+        let require_clean = policy("require_no_violations")?;
+        let require_no_veto = policy("require_no_vetoes")?;
+        let utility = match arguments.get("utility") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let utility = value.as_f64().ok_or("utility must be a finite number")?;
+                if !utility.is_finite() {
+                    return Err("utility must be a finite number".into());
+                }
+                Some(utility)
+            }
+        };
+        let raw_policies = arguments
+            .get("policies")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if raw_policies.len() > MAX_POLICIES {
+            return Err("policies are bounded at 4096 rows".into());
+        }
+        let raw_flows = arguments
+            .get("flows")
+            .and_then(Value::as_array)
+            .ok_or("flows is required and must be an array")?;
+        if raw_flows.is_empty() || raw_flows.len() > MAX_FLOWS {
+            return Err("flows must contain 1 to 8192 rows".into());
+        }
+        let mut assessment = BioevalBoundaryAssessment::new();
+        let mut policy_ids = BTreeSet::new();
+        let mut policies = Vec::with_capacity(raw_policies.len());
+        for (index, raw) in raw_policies.iter().enumerate() {
+            let policy: BioevalBoundaryPolicy = match serde_json::from_value(raw.clone()) {
+                Ok(policy) => policy,
+                Err(error) => {
+                    return Ok(refusal(
+                        "policy_deserialization",
+                        format!("policies[{index}] is not a valid Policy: {error}"),
+                    ))
+                }
+            };
+            if policy.id.trim().is_empty()
+                || policy.id.len() > MAX_TEXT_BYTES
+                || policy.transmission_principle.trim().is_empty()
+                || policy.transmission_principle.len() > MAX_TEXT_BYTES
+            {
+                return Ok(refusal(
+                    "policy_validation",
+                    format!("policies[{index}] id and transmission_principle must be bounded strings"),
+                ));
+            }
+            if !policy_ids.insert(policy.id.clone()) {
+                return Ok(refusal(
+                    "policy_admission",
+                    format!("policy {:?} appears more than once", policy.id),
+                ));
+            }
+            if let Err(error) = assessment.allow(policy.clone()) {
+                return Ok(refusal("policy_admission", error.to_string()));
+            }
+            policies.push(policy);
+        }
+        let mut flow_ids = BTreeSet::new();
+        let mut flows = Vec::with_capacity(raw_flows.len());
+        for (index, raw) in raw_flows.iter().enumerate() {
+            let flow: BioevalFlow = match serde_json::from_value(raw.clone()) {
+                Ok(flow) => flow,
+                Err(error) => {
+                    return Ok(refusal(
+                        "flow_deserialization",
+                        format!("flows[{index}] is not a valid Flow: {error}"),
+                    ))
+                }
+            };
+            let fields = [
+                ("id", flow.id.as_str()),
+                ("sender", flow.sender.as_str()),
+                ("subject", flow.subject.as_str()),
+                ("recipient", flow.recipient.as_str()),
+                ("information_type", flow.information_type.as_str()),
+                ("purpose", flow.purpose.as_str()),
+                ("transmission_principle", flow.transmission_principle.as_str()),
+            ];
+            if fields
+                .iter()
+                .any(|(_, value)| value.len() > MAX_TEXT_BYTES)
+            {
+                return Ok(refusal(
+                    "flow_validation",
+                    format!("flows[{index}] contains text over the {MAX_TEXT_BYTES}-byte bound"),
+                ));
+            }
+            if flow.id.trim().is_empty() {
+                return Ok(refusal(
+                    "flow_validation",
+                    format!("flows[{index}].id must be non-empty"),
+                ));
+            }
+            if !flow_ids.insert(flow.id.clone()) {
+                return Ok(refusal(
+                    "flow_validation",
+                    format!("flow {:?} appears more than once", flow.id),
+                ));
+            }
+            if let Err(error) = assessment.assess(&flow) {
+                return Ok(refusal("flow_assessment", error.to_string()));
+            }
+            flows.push(flow);
+        }
+        let violations = assessment.violations();
+        let vetoes = assessment.vetoes();
+        if require_clean && !violations.is_empty() {
+            return Ok(refusal(
+                "violation_policy",
+                format!(
+                    "require_no_violations was true but {} violating flow(s) remain",
+                    violations.len()
+                ),
+            ));
+        }
+        if require_no_veto && !vetoes.is_empty() {
+            return Ok(refusal(
+                "veto_policy",
+                format!(
+                    "require_no_vetoes was true but {} veto or bypass flow(s) remain",
+                    vetoes.len()
+                ),
+            ));
+        }
+        let verdict_by_id = assessment
+            .verdicts()
+            .iter()
+            .map(|(id, verdict)| (id.as_str(), verdict))
+            .collect::<BTreeMap<_, _>>();
+        let flow_rows = flows
+            .iter()
+            .take(max_items)
+            .map(|flow| {
+                let verdict = verdict_by_id
+                    .get(flow.id.as_str())
+                    .expect("every flow was assessed");
+                json!({
+                    "id": flow.id,
+                    "sender": flow.sender,
+                    "subject": flow.subject,
+                    "recipient": flow.recipient,
+                    "information_type": flow.information_type,
+                    "purpose": flow.purpose,
+                    "transmission_principle": flow.transmission_principle,
+                    "channel": flow.channel,
+                    "external": flow.channel.is_external(),
+                    "effect": flow.effect,
+                    "irreversible": flow.irreversible,
+                    "verdict": verdict,
+                    "violation": verdict.is_violation(),
+                    "veto": verdict.is_veto(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let policy_rows = policies
+            .iter()
+            .take(max_items)
+            .map(|policy| serde_json::to_value(policy).expect("policy serializes"))
+            .collect::<Vec<_>>();
+        let bounded_ids = |values: BTreeSet<String>| {
+            json!({
+                "ids": values.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": values.len(),
+                "omitted": values.len().saturating_sub(max_items),
+            })
+        };
+        let violation_ids = violations
+            .iter()
+            .map(|(id, _)| (*id).to_string())
+            .collect::<BTreeSet<_>>();
+        let veto_ids = vetoes
+            .iter()
+            .map(|(id, _)| (*id).to_string())
+            .collect::<BTreeSet<_>>();
+        let compliant_ids = assessment
+            .compliant_proposals()
+            .into_iter()
+            .map(String::from)
+            .collect::<BTreeSet<_>>();
+        let channel_counts = assessment
+            .violations_by_channel(&flows)
+            .into_iter()
+            .map(|(channel, count)| {
+                (
+                    serde_json::to_value(channel)
+                        .expect("channel serializes")
+                        .as_str()
+                        .expect("channel is a string")
+                        .to_string(),
+                    count,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let (composite_status, composite_value, composite_refusal) = match utility {
+            None => ("not_requested", Value::Null, Value::Null),
+            Some(utility) => match assessment.composite_with_utility(utility) {
+                Ok(value) => ("accepted", json!(value), Value::Null),
+                Err(error) => ("refused", Value::Null, json!(error.to_string())),
+            },
+        };
+        let pareto = utility.map(|utility| {
+            json!({
+                "utility": utility,
+                "violations": violations.len(),
+            })
+        });
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_boundary_audit",
+            "boundary": {
+                "policy_count": policies.len(),
+                "flow_count": flows.len(),
+                "authorised_count": assessment.verdicts().iter().filter(|(_, verdict)| matches!(verdict, bioprism_bioevalx::boundary::FlowVerdict::Authorised { .. })).count(),
+                "compliant_count": compliant_ids.len(),
+                "violation_count": violations.len(),
+                "veto_count": vetoes.len(),
+                "external_flow_count": flows.iter().filter(|flow| flow.channel.is_external()).count(),
+                "policies": {
+                    "require_no_violations": require_clean,
+                    "require_no_vetoes": require_no_veto,
+                },
+            },
+            "policies": {
+                "rows": policy_rows,
+                "returned": policies.len().min(max_items),
+                "total": policies.len(),
+                "omitted": policies.len().saturating_sub(max_items),
+            },
+            "flows": {
+                "rows": flow_rows,
+                "returned": flows.len().min(max_items),
+                "total": flows.len(),
+                "omitted": flows.len().saturating_sub(max_items),
+            },
+            "violations_by_channel": channel_counts,
+            "pareto": pareto,
+            "composite": {
+                "status": composite_status,
+                "value": composite_value,
+                "refusal": composite_refusal,
+            },
+            "findings": {
+                "violating_flows": bounded_ids(violation_ids),
+                "veto_flows": bounded_ids(veto_ids),
+                "compliant_proposals": bounded_ids(compliant_ids),
+                "composite_refused": composite_status == "refused",
+                "bypass_is_veto": vetoes.iter().any(|(_, verdict)| matches!(verdict, bioprism_bioevalx::boundary::FlowVerdict::Bypass { .. })),
+            },
+            "guarantees": [
+                "policy-authorized flows remain distinct from proposals whose denial was respected",
+                "materialized unauthorized irreversible flows are vetoes",
+                "bypass attempts remain findings even when they did not succeed",
+                "channel exposure is retained rather than collapsed into a privacy percentage",
+                "utility and safety remain a Pareto pair; composite_with_utility refuses while violations stand",
+            ],
+            "limitations": [
+                "the route audits declared flows and does not inspect payloads or detect hidden transfers",
+                "no necessity or minimum-disclosure counterfactual is inferred",
+                "a clean labeled assessment is not an attestation that no uninstrumented flow occurred",
+            ],
+        }))
+    }
+
     fn bioeval_plane_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-plane-audit/0.1";
         const MAX_DIMENSIONS: usize = 4_096;
@@ -25490,9 +25814,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "evaluation_and_baselines",
-            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication"],
+            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -25522,9 +25846,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluator independence", "shared-input classes", "disagreement witnesses", "abstention preservation", "nonrenewable resource accounting", "branch inheritance", "unit-safe draws", "prospective commitments", "rubric digest integrity", "selective publication", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluator independence", "shared-input classes", "disagreement witnesses", "abstention preservation", "nonrenewable resource accounting", "branch inheritance", "unit-safe draws", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -26986,6 +27310,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "require_complete": { "type": "boolean", "description": "Fail closed unless every commitment has a revealed outcome under an admitted rubric." }
                 },
                 "required": ["study", "commitments", "rubric", "sealed_at"]
+            }
+        }),
+        json!({
+            "name": "bioeval_boundary_audit",
+            "description": "Audit serialized bioevalx contextual-integrity policies and information flows while preserving authorized, compliant-denial, violation, veto, and bypass verdicts, channel exposure, and the refusal of a combined utility-safety score. It does not inspect payloads or infer necessity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "policies": { "type": "array", "maxItems": 4096, "description": "Optional serialized Policy values. Wildcard tuple slots are permitted; transmission_principle remains required and exact." },
+                    "flows": { "type": "array", "minItems": 1, "maxItems": 8192, "description": "Serialized Flow values with sender, subject, recipient, information_type, purpose, principle, channel, effect, and reversibility." },
+                    "utility": { "type": "number", "description": "Optional caller-supplied utility used only for a Pareto point and the guarded composite refusal." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum policy, flow, and finding rows returned." },
+                    "require_no_violations": { "type": "boolean", "description": "Fail closed when any violation, veto, or bypass remains." },
+                    "require_no_vetoes": { "type": "boolean", "description": "Fail closed when any veto or bypass remains." }
+                },
+                "required": ["flows"]
             }
         }),
         json!({
