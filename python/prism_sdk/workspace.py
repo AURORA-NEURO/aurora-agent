@@ -216,6 +216,7 @@ from .token_context import (
     TokenContextPlanningReport,
     token_context_plan_report,
 )
+from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -1571,6 +1572,28 @@ class Workspace:
         """Return typed estimates, mandatory closure, handles, and policy comparison evidence."""
 
         return token_context_plan_report(self.token_context_plan(request))
+
+    def weavelang_compile(
+        self,
+        request: WeaveLangCompileArgs | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Compile WeaveLang and optionally run only its local semantic machine."""
+
+        if isinstance(request, str):
+            normalized = WeaveLangCompileArgs(request)
+        elif isinstance(request, WeaveLangCompileArgs):
+            normalized = request
+        else:
+            normalized = WeaveLangCompileArgs.from_wire(request)
+        return self.tool("weavelang_compile", normalized.to_mcp_arguments())
+
+    def weavelang_compile_report(
+        self,
+        request: WeaveLangCompileArgs | Mapping[str, Any] | str,
+    ) -> WeaveLangCompileReport:
+        """Return typed IR identity, replay posture, liveness, and invariant evidence."""
+
+        return weavelang_compile_report(self.weavelang_compile(request))
 
     def developer_delivery_audit_report(
         self,
@@ -3171,6 +3194,28 @@ class AsyncWorkspace:
         """Async typed token estimates and policy-only comparison evidence."""
 
         return token_context_plan_report(await self.token_context_plan(request))
+
+    async def weavelang_compile(
+        self,
+        request: WeaveLangCompileArgs | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Async WeaveLang compilation and optional local semantic replay."""
+
+        if isinstance(request, str):
+            normalized = WeaveLangCompileArgs(request)
+        elif isinstance(request, WeaveLangCompileArgs):
+            normalized = request
+        else:
+            normalized = WeaveLangCompileArgs.from_wire(request)
+        return (await self.client.call_tool("weavelang_compile", normalized.to_mcp_arguments())).require_ok()
+
+    async def weavelang_compile_report(
+        self,
+        request: WeaveLangCompileArgs | Mapping[str, Any] | str,
+    ) -> WeaveLangCompileReport:
+        """Async typed WeaveLang compilation and replay evidence."""
+
+        return weavelang_compile_report(await self.weavelang_compile(request))
 
     async def developer_delivery_audit_report(
         self,

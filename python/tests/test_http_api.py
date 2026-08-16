@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -87,6 +87,36 @@ def token_context_plan_payload() -> dict:
         "plan": plan,
         "comparison": None,
         "guarantees": ["mandatory closure is checked before a plan is returned"],
+    }
+
+
+def weavelang_compile_payload() -> dict:
+    return {
+        "ok": True,
+        "program": {
+            "program_id": "urn:weave:program:demo@sha256:" + "p" * 64,
+            "digest": "d" * 64,
+            "semantic_digest": "s" * 64,
+            "weave_ir_version": "0.1.0",
+            "roles": 1,
+            "participants": 1,
+            "interfaces": 0,
+            "policies": 1,
+            "state_nodes": 1,
+            "transitions": 0,
+            "monitors": 0,
+            "initial_state": "start",
+            "terminal_states": ["done"],
+        },
+        "execution": {
+            "status": "not_requested",
+            "mode": "replay",
+            "state": "start",
+            "liveness": {"messages_left_unconsumed": 0, "commitments_left_open": [], "states_without_exit": [], "unreachable_states": [], "deadlock_freedom_proven": False},
+            "invariant_violations": [],
+        },
+        "ir": None,
+        "guarantees": ["execution is a local semantic trace; it performs no network, model, or tool call"],
     }
 
 
@@ -337,7 +367,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_platform_status", "/v1/tools/token_context_plan", "/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/observed_world_declare", "/v1/tools/lineage_audit", "/v1/tools/preanalytic_apply", "/v1/tools/contradiction_review", "/v1/tools/onco_boundary_check", "/v1/tools/onco_response_assess", "/v1/tools/onco_worldline_view", "/v1/tools/onco_classification_check", "/v1/tools/oncoworlds_identity_join", "/v1/tools/oncoworlds_model_transport", "/v1/tools/oncoworlds_methylation_classify", "/v1/tools/oncoworlds_methylation_compare", "/v1/tools/oncoworlds_radiogenomic_check", "/v1/tools/oncoworlds_clonal_history_check", "/v1/tools/onco_outcome_analyze", "/v1/tools/oracle_combine", "/v1/tools/oracle_reference_panel", "/v1/tools/oracle_missingness", "/v1/tools/bioeval_reference_audit", "/v1/tools/evaluation_worldline_audit", "/v1/tools/evaluation_reproduction_check", "/v1/tools/evaluation_trajectory_check", "/v1/tools/runtime_effect_check", "/v1/tools/runtime_tape_verify", "/v1/tools/runtime_execution_simulate", "/v1/tools/bioethics_action_review", "/v1/tools/bioethics_human_subject_screen", "/v1/tools/bioethics_dual_use_review", "/v1/tools/bioethics_validation_check", "/v1/tools/bioethics_representation_audit", "/v1/tools/stress_profile", "/v1/tools/stress_report", "/v1/tools/influence_analyze", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/provider_capability_gate", "/v1/tools/sdk_registry_check", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run", "/v1/tools/release_audit", "/v1/tools/operations_catalog", "/v1/tools/ops_acceptance", "/v1/tools/safety_release_gate", "/v1/tools/medical_boundary_check", "/v1/tools/safety_posture", "/v1/tools/measurement_compare", "/v1/tools/hub_search", "/v1/tools/hub_resolve", "/v1/tools/hub_lock"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_platform_status", "/v1/tools/token_context_plan", "/v1/tools/weavelang_compile", "/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/observed_world_declare", "/v1/tools/lineage_audit", "/v1/tools/preanalytic_apply", "/v1/tools/contradiction_review", "/v1/tools/onco_boundary_check", "/v1/tools/onco_response_assess", "/v1/tools/onco_worldline_view", "/v1/tools/onco_classification_check", "/v1/tools/oncoworlds_identity_join", "/v1/tools/oncoworlds_model_transport", "/v1/tools/oncoworlds_methylation_classify", "/v1/tools/oncoworlds_methylation_compare", "/v1/tools/oncoworlds_radiogenomic_check", "/v1/tools/oncoworlds_clonal_history_check", "/v1/tools/onco_outcome_analyze", "/v1/tools/oracle_combine", "/v1/tools/oracle_reference_panel", "/v1/tools/oracle_missingness", "/v1/tools/bioeval_reference_audit", "/v1/tools/evaluation_worldline_audit", "/v1/tools/evaluation_reproduction_check", "/v1/tools/evaluation_trajectory_check", "/v1/tools/runtime_effect_check", "/v1/tools/runtime_tape_verify", "/v1/tools/runtime_execution_simulate", "/v1/tools/bioethics_action_review", "/v1/tools/bioethics_human_subject_screen", "/v1/tools/bioethics_dual_use_review", "/v1/tools/bioethics_validation_check", "/v1/tools/bioethics_representation_audit", "/v1/tools/stress_profile", "/v1/tools/stress_report", "/v1/tools/influence_analyze", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/provider_capability_gate", "/v1/tools/sdk_registry_check", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run", "/v1/tools/release_audit", "/v1/tools/operations_catalog", "/v1/tools/ops_acceptance", "/v1/tools/safety_release_gate", "/v1/tools/medical_boundary_check", "/v1/tools/safety_posture", "/v1/tools/measurement_compare", "/v1/tools/hub_search", "/v1/tools/hub_resolve", "/v1/tools/hub_lock"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -843,6 +873,25 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(report.plan.mandatory_estimate.tokens, 20)
         plan.assert_called_once()
 
+    def test_http_weavelang_compile_round_trips_explicit_replay_controls(self) -> None:
+        request = WeaveLangCompileArgs("package demo", execute=False, mode="replay", include_ir=True)
+        result = ApiClient(self.base_url).weavelang_compile(request)
+        echoed = result["mcp"]["result"]
+        self.assertEqual(echoed["source"], "package demo")
+        self.assertEqual(echoed["mode"], "replay")
+        self.assertTrue(echoed["include_ir"])
+
+    def test_http_typed_weavelang_report_delegates_to_raw_helper(self) -> None:
+        with patch.object(
+            ApiClient,
+            "weavelang_compile",
+            return_value=weavelang_compile_payload(),
+        ) as compile_tool:
+            report = ApiClient(self.base_url).weavelang_compile_report("package demo")
+        self.assertIsInstance(report, WeaveLangCompileReport)
+        self.assertTrue(report.replay_defaulted)
+        compile_tool.assert_called_once_with("package demo")
+
     def test_http_typed_biocapability_evidence_report_delegates_to_raw_helper(self) -> None:
         request = BioCapabilityEvidenceAuditRequest(
             evidence=[EvidenceItem("evidence-1", "evidence_grounding", "observed")],
@@ -1196,6 +1245,15 @@ class HttpApiClientTests(unittest.TestCase):
                 )
             self.assertEqual(report.plan.plan_digest, "b" * 64)
             token_plan.assert_awaited_once()
+            with patch.object(
+                AsyncApiClient,
+                "weavelang_compile",
+                new_callable=AsyncMock,
+                return_value=weavelang_compile_payload(),
+            ) as compile_tool:
+                report = await client.weavelang_compile_report("package demo")
+            self.assertTrue(report.execution_local_only)
+            compile_tool.assert_awaited_once_with("package demo")
             request = BioCapabilityEvidenceAuditRequest(
                 evidence=[EvidenceItem("evidence-1", "evidence_grounding", "observed")],
                 claim_requests=[ClaimRequest("claim-1", "profile", ["evidence_grounding"])],

@@ -123,6 +123,33 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         comparison: null,
         guarantees: ["mandatory closure is checked before a plan is returned"],
       } } } });
+      if (path === "/v1/tools/weavelang_compile") return jsonResponse({ ok: true, tool: "weavelang_compile", request_id: "r18", mcp: { result: { structuredContent: {
+        ok: true,
+        program: {
+          program_id: "urn:weave:program:demo@sha256:" + "p".repeat(64),
+          digest: "d".repeat(64),
+          semantic_digest: "s".repeat(64),
+          weave_ir_version: "0.1.0",
+          roles: 2,
+          participants: 2,
+          interfaces: 1,
+          policies: 1,
+          state_nodes: 3,
+          transitions: 2,
+          monitors: 0,
+          initial_state: "start",
+          terminal_states: ["done"],
+        },
+        execution: {
+          status: "not_requested",
+          mode: "replay",
+          state: "start",
+          liveness: { messages_left_unconsumed: 0, commitments_left_open: [], states_without_exit: [], unreachable_states: [], deadlock_freedom_proven: false },
+          invariant_violations: [],
+        },
+        ir: null,
+        guarantees: ["execution is a local semantic trace; it performs no network, model, or tool call"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -551,6 +578,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   });
   assert.equal(tokenPlan.mcp.result.structuredContent.plan.mandatory_estimate.tokens, 20);
   assert.equal(tokenPlan.mcp.result.structuredContent.comparison, null);
+  const weave = await client.weavelangCompile({ source: "package demo", execute: false, mode: "replay" });
+  assert.equal(weave.mcp.result.structuredContent.execution.mode, "replay");
+  assert.equal(weave.mcp.result.structuredContent.program.semantic_digest.length, 64);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

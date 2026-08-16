@@ -116,6 +116,8 @@ import type {
   DeveloperPlatformStatusResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
+  WeaveLangCompileArgs,
+  WeaveLangCompileResult,
   DeveloperWorkbenchArgs,
   EventMetrics,
   EventPersistenceStatus,
@@ -366,6 +368,10 @@ export class ApiClient {
 
   async tokenContextPlan(args: TokenContextPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<TokenContextPlanningResult>> {
     return this.callTool<TokenContextPlanningResult>("token_context_plan", args, options);
+  }
+
+  async weavelangCompile(args: WeaveLangCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WeaveLangCompileResult>> {
+    return this.callTool<WeaveLangCompileResult>("weavelang_compile", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

@@ -161,6 +161,10 @@ or live-debugger execution.
 comparison plans, keeping node kinds, restricted flags, mandatory closure, stable handles, and
 estimation methods visible. `declared_by_caller`, provider-tokenizer, and mixed totals remain
 different types of evidence; the client does not promote any of them to measured provider usage.
+`weavelangCompile` returns typed `WeaveLangCompileResult` program identity, whole/semantic digests,
+state/liveness/invariant evidence, optional IR, and explicit local execution status. Replay,
+completed, and refused outcomes stay separate, and the TypeScript surface does not imply that a
+local semantic trace called a network, model, or tool.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

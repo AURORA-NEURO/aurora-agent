@@ -179,6 +179,7 @@ from .routing import RoutingDecisionReport, routing_decision_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
+from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -688,6 +689,28 @@ class ApiClient:
         """Return typed HTTP token estimates and policy-only comparison evidence."""
 
         return token_context_plan_report(self.token_context_plan(request))
+
+    def weavelang_compile(
+        self,
+        request: WeaveLangCompileArgs | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Compile WeaveLang through the HTTP gateway."""
+
+        if isinstance(request, str):
+            normalized = WeaveLangCompileArgs(request)
+        elif isinstance(request, WeaveLangCompileArgs):
+            normalized = request
+        else:
+            normalized = WeaveLangCompileArgs.from_wire(request)
+        return self.call_tool("weavelang_compile", normalized.to_mcp_arguments())
+
+    def weavelang_compile_report(
+        self,
+        request: WeaveLangCompileArgs | Mapping[str, Any] | str,
+    ) -> WeaveLangCompileReport:
+        """Return typed HTTP WeaveLang compilation and replay evidence."""
+
+        return weavelang_compile_report(self.weavelang_compile(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2311,6 +2334,28 @@ class AsyncApiClient:
         """Return async typed HTTP token planning evidence."""
 
         return token_context_plan_report(await self.token_context_plan(request))
+
+    async def weavelang_compile(
+        self,
+        request: WeaveLangCompileArgs | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Async WeaveLang compilation through the HTTP gateway."""
+
+        if isinstance(request, str):
+            normalized = WeaveLangCompileArgs(request)
+        elif isinstance(request, WeaveLangCompileArgs):
+            normalized = request
+        else:
+            normalized = WeaveLangCompileArgs.from_wire(request)
+        return await self.call_tool("weavelang_compile", normalized.to_mcp_arguments())
+
+    async def weavelang_compile_report(
+        self,
+        request: WeaveLangCompileArgs | Mapping[str, Any] | str,
+    ) -> WeaveLangCompileReport:
+        """Return async typed HTTP WeaveLang compilation and replay evidence."""
+
+        return weavelang_compile_report(await self.weavelang_compile(request))
 
     async def developer_delivery_audit_report(
         self,

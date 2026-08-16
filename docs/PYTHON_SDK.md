@@ -83,6 +83,12 @@ invent defaults:
   handles, optional estimates, and policy-only comparison deltas; it never treats a caller-declared
   or mixed estimate as a tokenizer measurement, and it refuses mismatched candidate identity at
   the client boundary before Rust performs the authoritative plan.
+- `WeaveLangCompileArgs` and `weavelang_compile_report(...)` expose deterministic WeaveLang
+  compilation, whole/semantic program digests, IR disclosure, and explicit replay/live execution
+  through sync MCP, async MCP, and HTTP. `WeaveLangExecutionReport` preserves not-requested,
+  completed, and fail-closed refused states, local liveness holes, invariant violations, event
+  counts, and optional trace digests without presenting replay as production execution or liveness
+  inspection as a universal proof.
 - `WorldClaimCheckRequest`, `LabPlanRequest`, and `RoutingDecisionRequest` expose typed envelope
   helpers for world support checks, no-execution acquisition planning, and unseen-task routing over
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and

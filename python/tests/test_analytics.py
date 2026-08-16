@@ -79,6 +79,11 @@ from prism_sdk import (
     TokenPlanCandidate,
     TokenPolicyComparisonReport,
     token_context_plan_report,
+    WeaveLangCompileArgs,
+    WeaveLangCompileReport,
+    WeaveLangExecutionReport,
+    WeaveLangLivenessReport,
+    weavelang_compile_report,
     analytics_request,
     tabular_ingest_report,
     conformance_run_report,
@@ -513,6 +518,51 @@ def token_context_plan_payload(*, include_comparison: bool = True) -> dict:
         ],
     }
     return payload
+
+
+def weavelang_compile_payload(*, status: str = "not_requested", include_ir: bool = False) -> dict:
+    execution = {
+        "status": status,
+        "mode": "replay",
+        "state": "start",
+        "liveness": {
+            "messages_left_unconsumed": 0,
+            "commitments_left_open": [],
+            "states_without_exit": [],
+            "unreachable_states": [],
+            "deadlock_freedom_proven": False,
+        },
+        "invariant_violations": [],
+    }
+    if status == "completed":
+        execution.update({"event_count": 2, "trace_digest": "t" * 64, "trace": {"events": []}})
+    if status == "refused":
+        execution.update({"error": "replay refused a world mutation", "fail_closed": True})
+    return {
+        "ok": True,
+        "program": {
+            "program_id": "urn:weave:program:demo@sha256:" + "p" * 64,
+            "digest": "d" * 64,
+            "semantic_digest": "s" * 64,
+            "weave_ir_version": "0.1.0",
+            "roles": 2,
+            "participants": 2,
+            "interfaces": 1,
+            "policies": 1,
+            "state_nodes": 3,
+            "transitions": 2,
+            "monitors": 0,
+            "initial_state": "start",
+            "terminal_states": ["done"],
+        },
+        "execution": execution,
+        "ir": {"weave_ir_version": "0.1.0"} if include_ir else None,
+        "guarantees": [
+            "compilation is deterministic and returns both whole-document and semantic digests",
+            "replay is the default execution mode and refuses world-mutating transitions",
+            "execution is a local semantic trace; it performs no network, model, or tool call",
+        ],
+    }
 
 
 def biocapability_evidence_audit_payload() -> dict:
@@ -1246,6 +1296,48 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertTrue(args.to_mcp_arguments()["candidates"][0]["restricted"])
         self.assertTrue(estimate.method.measured)
 
+    def test_weavelang_compile_report_separates_compilation_and_replay(self) -> None:
+        report = WeaveLangCompileReport.from_wire(weavelang_compile_payload())
+        self.assertTrue(report.compiled)
+        self.assertFalse(report.execution_requested)
+        self.assertTrue(report.execution_local_only)
+        self.assertTrue(report.replay_defaulted)
+        self.assertFalse(report.disclosure_includes_ir)
+        self.assertTrue(report.execution.invariant_clean)
+        self.assertIsInstance(report.execution.liveness, WeaveLangLivenessReport)
+        completed = WeaveLangCompileReport.from_wire(
+            weavelang_compile_payload(status="completed", include_ir=True)
+        )
+        self.assertTrue(completed.execution.completed)
+        self.assertEqual(completed.execution.event_count, 2)
+        self.assertTrue(completed.disclosure_includes_ir)
+
+    def test_weavelang_compile_report_preserves_fail_closed_replay_refusal_and_http_json_text(self) -> None:
+        refused = weavelang_compile_payload(status="refused")
+        report = weavelang_compile_report(
+            {
+                "ok": True,
+                "mcp": {
+                    "result": {
+                        "content": [{"type": "text", "text": json.dumps(refused)}]
+                    }
+                },
+            }
+        )
+        self.assertTrue(report.execution.refused)
+        self.assertTrue(report.execution.fail_closed)
+        self.assertTrue(report.execution.replay_safe)
+        self.assertIn("replay refused", report.execution.error)
+
+    def test_weavelang_compile_args_enforce_source_mode_and_disclosure_bounds(self) -> None:
+        args = WeaveLangCompileArgs("package demo", execute=True, mode="live", thread_id="worker-1", include_ir=True)
+        self.assertEqual(args.to_mcp_arguments()["mode"], "live")
+        self.assertTrue(args.to_mcp_arguments()["include_ir"])
+        with self.assertRaises(ArgumentError):
+            WeaveLangCompileArgs("package demo", mode="unknown")
+        with self.assertRaises(ArgumentError):
+            WeaveLangCompileArgs("package demo", thread_id="")
+
     def test_biocapability_evidence_audit_report_preserves_claim_blockers(self) -> None:
         report = BioCapabilityEvidenceAuditReport.from_wire(
             biocapability_evidence_audit_payload()
@@ -1440,6 +1532,16 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             report = Workspace(None).token_context_plan_report(request)  # type: ignore[arg-type]
         self.assertFalse(report.has_comparison)
         plan.assert_called_once_with(request)
+
+    def test_sync_workspace_typed_weavelang_report(self) -> None:
+        with patch.object(
+            Workspace,
+            "weavelang_compile",
+            return_value=weavelang_compile_payload(status="completed"),
+        ) as compile_tool:
+            report = Workspace(None).weavelang_compile_report("package demo")  # type: ignore[arg-type]
+        self.assertTrue(report.execution.completed)
+        compile_tool.assert_called_once_with("package demo")
 
     def test_sync_workspace_exposes_agent_mission(self) -> None:
         with Client(command(), timeout=2) as client:
@@ -1644,6 +1746,17 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertFalse(report.has_comparison)
         plan.assert_awaited_once_with({"request": {}, "candidates": []})
+
+    async def test_async_workspace_typed_weavelang_report(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "weavelang_compile",
+            new_callable=AsyncMock,
+            return_value=weavelang_compile_payload(status="refused"),
+        ) as compile_tool:
+            report = await AsyncWorkspace(None).weavelang_compile_report("package demo")  # type: ignore[arg-type]
+        self.assertTrue(report.execution.refused)
+        compile_tool.assert_awaited_once_with("package demo")
 
     async def test_async_workspace_exposes_agent_mission(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

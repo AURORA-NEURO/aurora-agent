@@ -727,6 +727,66 @@ export interface TokenContextPlanningResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface WeaveLangCompileArgs extends JsonObject {
+  source: string;
+  execute?: boolean;
+  mode?: "replay" | "live";
+  thread_id?: string;
+  include_ir?: boolean;
+  include_trace?: boolean;
+}
+
+export interface WeaveLangInvariantViolationResult extends JsonObject {
+  invariant: "authority-safety" | "delegation-attenuation" | "budget-conservation" | "commitment-accountability" | "epistemic-integrity" | "information-non-escalation" | "causal-integrity" | "replay-safety";
+  detail: string;
+  at_event: number;
+}
+
+export interface WeaveLangLivenessResult extends JsonObject {
+  messages_left_unconsumed: number;
+  commitments_left_open: string[];
+  states_without_exit: string[];
+  unreachable_states: string[];
+  deadlock_freedom_proven: boolean;
+}
+
+export interface WeaveLangProgramResult extends JsonObject {
+  program_id: string;
+  digest: string;
+  semantic_digest: string;
+  weave_ir_version: string;
+  roles: number;
+  participants: number;
+  interfaces: number;
+  policies: number;
+  state_nodes: number;
+  transitions: number;
+  monitors: number;
+  initial_state: string;
+  terminal_states: string[];
+}
+
+export interface WeaveLangExecutionResult extends JsonObject {
+  status: "not_requested" | "completed" | "refused";
+  mode: "replay" | "live";
+  state: string;
+  liveness: WeaveLangLivenessResult;
+  invariant_violations: WeaveLangInvariantViolationResult[];
+  event_count?: number;
+  trace_digest?: string;
+  trace?: JsonObject | null;
+  error?: string;
+  fail_closed?: boolean;
+}
+
+export interface WeaveLangCompileResult extends JsonObject {
+  ok: boolean;
+  program: WeaveLangProgramResult;
+  execution: WeaveLangExecutionResult;
+  ir: JsonObject | null;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;
