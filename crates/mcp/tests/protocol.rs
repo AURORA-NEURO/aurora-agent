@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 153);
+    assert_eq!(tools.len(), 154);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(153));
-    assert_eq!(result["advertised_tool_count"], json!(153));
+    assert_eq!(result["unique_catalog_tools"], json!(154));
+    assert_eq!(result["advertised_tool_count"], json!(154));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(153));
-    assert_eq!(result["schema_quality"]["valid"], json!(153));
+    assert_eq!(result["schema_quality"]["checked"], json!(154));
+    assert_eq!(result["schema_quality"]["valid"], json!(154));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6339,6 +6339,106 @@ fn bioeval_metamorphic_audit_separates_failure_directions_and_undetermined_trial
     assert_eq!(coverage_refusal["ok"], json!(false));
     assert_eq!(coverage_refusal["stage"], json!("relation_coverage"));
     assert_eq!(coverage_refusal["fail_closed"], json!(true));
+}
+
+#[test]
+fn bioeval_waiver_audit_preserves_gate_verdicts_and_nonwaivable_vetoes() {
+    let arguments = json!({
+        "version": "release-2026.08",
+        "at": "2026-08-16T12:00:00Z",
+        "gates": [
+            { "id": "health", "kind": "benchmark_health", "verdict": { "verdict": "violated", "detail": "calibration below floor" } },
+            { "id": "unknown-rate", "kind": "maximum_unknown_rate", "verdict": { "verdict": "unevaluable", "missing": "reference panel" } },
+            { "id": "safety", "kind": "safety_veto", "verdict": { "verdict": "violated", "detail": "forbidden action" } },
+            { "id": "confidence", "kind": "confidence_requirement", "verdict": { "verdict": "met" } }
+        ],
+        "waivers": [{
+            "gate": "health",
+            "authoriser": "release-board",
+            "rationale": "ship only the documented calibration exception",
+            "expiry": "2026-09-01T00:00:00Z",
+            "affected_versions": ["release-2026.08"],
+            "follow_up": "recalibrate before the next release"
+        }],
+        "max_items": 3
+    });
+    let result = call(&mut server(), "bioeval_waiver_audit", arguments.clone());
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-waiver-audit/0.1"));
+    assert_eq!(result["release"]["blocking_before"], json!(3));
+    assert_eq!(result["release"]["blocking_after"], json!(2));
+    assert_eq!(result["release"]["waived_count"], json!(1));
+    assert_eq!(result["release"]["unevaluable_count"], json!(1));
+    assert_eq!(result["release"]["releasable"], json!(false));
+    assert_eq!(result["findings"]["waived_gates"]["ids"], json!(["health"]));
+    assert_eq!(result["findings"]["still_blocking"]["ids"], json!(["safety", "unknown-rate"]));
+    assert_eq!(result["gates"]["rows"][0]["verdict"]["verdict"], json!("violated"));
+    assert_eq!(result["gates"]["rows"][0]["blocks_after"], json!(false));
+    assert_eq!(result["waivers"]["rows"][0]["waiver"]["follow_up"], json!("recalibrate before the next release"));
+
+    let release_refusal = call(
+        &mut server(),
+        "bioeval_waiver_audit",
+        json!({
+            "version": "release-2026.08",
+            "at": "2026-08-16T12:00:00Z",
+            "gates": arguments["gates"],
+            "waivers": arguments["waivers"],
+            "require_releasable": true
+        }),
+    );
+    assert_eq!(release_refusal["ok"], json!(false));
+    assert_eq!(release_refusal["stage"], json!("release_gate_policy"));
+    assert_eq!(release_refusal["fail_closed"], json!(true));
+
+    let unknown_refusal = call(
+        &mut server(),
+        "bioeval_waiver_audit",
+        json!({
+            "version": "release-2026.08",
+            "at": "2026-08-16T12:00:00Z",
+            "gates": arguments["gates"],
+            "waivers": arguments["waivers"],
+            "require_no_unevaluable": true
+        }),
+    );
+    assert_eq!(unknown_refusal["ok"], json!(false));
+    assert_eq!(unknown_refusal["stage"], json!("unknown_rate_policy"));
+
+    let veto_refusal = call(
+        &mut server(),
+        "bioeval_waiver_audit",
+        json!({
+            "version": "release-2026.08",
+            "at": "2026-08-16T12:00:00Z",
+            "gates": [arguments["gates"][2]],
+            "waivers": [{
+                "gate": "safety",
+                "authoriser": "release-board",
+                "rationale": "attempted override",
+                "expiry": "2026-09-01T00:00:00Z",
+                "affected_versions": ["release-2026.08"],
+                "follow_up": "review safety finding"
+            }]
+        }),
+    );
+    assert_eq!(veto_refusal["ok"], json!(false));
+    assert_eq!(veto_refusal["stage"], json!("waiver_application"));
+    assert_eq!(veto_refusal["fail_closed"], json!(true));
+
+    let expiry_refusal = call(
+        &mut server(),
+        "bioeval_waiver_audit",
+        json!({
+            "version": "release-2026.08",
+            "at": "2026-09-02T00:00:00Z",
+            "gates": [arguments["gates"][0]],
+            "waivers": arguments["waivers"]
+        }),
+    );
+    assert_eq!(expiry_refusal["ok"], json!(false));
+    assert_eq!(expiry_refusal["stage"], json!("waiver_application"));
 }
 
 #[test]

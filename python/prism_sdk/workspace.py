@@ -256,6 +256,7 @@ from .bioeval_estimand import BioevalEstimandAuditArgs, BioevalEstimandAuditRepo
 from .bioeval_evaluator import BioevalEvaluatorAuditArgs, BioevalEvaluatorAuditReport, bioeval_evaluator_audit_report
 from .bioeval_plane import BioevalPlaneAuditArgs, BioevalPlaneAuditReport, bioeval_plane_audit_report
 from .bioeval_metamorphic import BioevalMetamorphicAuditArgs, BioevalMetamorphicAuditReport, bioeval_metamorphic_audit_report
+from .bioeval_waiver import BioevalWaiverAuditArgs, BioevalWaiverAuditReport, bioeval_waiver_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1993,6 +1994,26 @@ class Workspace:
         """Return typed metamorphic failure directions and oracle-quality findings."""
 
         return bioeval_metamorphic_audit_report(self.bioeval_metamorphic_audit(request))
+
+    def bioeval_waiver_audit(
+        self,
+        request: BioevalWaiverAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit release-gate waivers through workspace MCP."""
+
+        normalized = request if isinstance(request, BioevalWaiverAuditArgs) else BioevalWaiverAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioeval_waiver_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioeval_waiver_audit_report(
+        self,
+        request: BioevalWaiverAuditArgs | Mapping[str, Any],
+    ) -> BioevalWaiverAuditReport:
+        """Return typed release-gate verdicts, waiver evidence, and blockers."""
+
+        return bioeval_waiver_audit_report(self.bioeval_waiver_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4542,6 +4563,26 @@ class AsyncWorkspace:
         """Return async typed metamorphic-response evidence."""
 
         return bioeval_metamorphic_audit_report(await self.bioeval_metamorphic_audit(request))
+
+    async def bioeval_waiver_audit(
+        self,
+        request: BioevalWaiverAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async release-gate waiver audit with explicit fail-closed policies."""
+
+        normalized = request if isinstance(request, BioevalWaiverAuditArgs) else BioevalWaiverAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioeval_waiver_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioeval_waiver_audit_report(
+        self,
+        request: BioevalWaiverAuditArgs | Mapping[str, Any],
+    ) -> BioevalWaiverAuditReport:
+        """Return async typed release-gate waiver evidence."""
+
+        return bioeval_waiver_audit_report(await self.bioeval_waiver_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

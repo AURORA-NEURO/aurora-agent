@@ -2873,3 +2873,52 @@ test("client exposes metamorphic response directions and undetermined posture", 
   assert.equal(result.mcp.result.structuredContent.findings.false_sensitivity_trials.ids[0], "shortcut");
   assert.equal(result.mcp.result.structuredContent.findings.false_invariance_trials.ids[0], "blind-spot");
 });
+
+test("client exposes release-gate waiver evidence without rewriting verdicts", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_waiver_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.gates[0].verdict.verdict, "violated");
+      assert.equal(body.waivers[0].affected_versions[0], "release-2026.08");
+      return jsonResponse({ ok: true, tool: "bioeval_waiver_audit", request_id: "waiver-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-waiver-audit/0.1",
+        workflow: "bioeval_waiver_audit",
+        release: { version: "release-2026.08", blocking_before: 2, blocking_after: 1, waived_count: 1, unevaluable_count: 1, releasable: false },
+        gates: { rows: [], returned: 0, total: 2, omitted: 2 },
+        waivers: { rows: [], returned: 0, total: 1, omitted: 1 },
+        findings: {
+          still_blocking: { ids: ["unknown-rate"], total: 1, omitted: 0 },
+          waived_gates: { ids: ["health"], total: 1, omitted: 0 },
+          unevaluable_gates: { ids: ["unknown-rate"], total: 1, omitted: 0 },
+          safety_vetoes: { ids: [], total: 0, omitted: 0 },
+        },
+        guarantees: ["underlying verdict remains visible"],
+        limitations: ["no identity provider"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalWaiverAudit({
+    version: "release-2026.08",
+    at: "2026-08-16T12:00:00Z",
+    gates: [
+      { id: "health", kind: "benchmark_health", verdict: { verdict: "violated", detail: "calibration below floor" } },
+      { id: "unknown-rate", kind: "maximum_unknown_rate", verdict: { verdict: "unevaluable", missing: "reference panel" } },
+    ],
+    waivers: [{
+      gate: "health",
+      authoriser: "release-board",
+      rationale: "documented exception",
+      expiry: "2026-09-01T00:00:00Z",
+      affected_versions: ["release-2026.08"],
+      follow_up: "recalibrate before next release",
+    }],
+    require_releasable: false,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-waiver-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.release.releasable, false);
+  assert.equal(result.mcp.result.structuredContent.findings.waived_gates.ids[0], "health");
+  assert.equal(result.mcp.result.structuredContent.findings.unevaluable_gates.ids[0], "unknown-rate");
+});

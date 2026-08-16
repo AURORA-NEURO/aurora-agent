@@ -535,6 +535,11 @@ perform, and preserves the explicit `require_fold` refusal posture. See
 wrong-direction, and undetermined findings. It exposes relation coverage and keeps suite-wide
 consistency absent; `require_both_relations` and `fail_on_undetermined` remain explicit policy
 gates. See [`docs/BIOEVAL_METAMORPHIC_AUDIT.md`](../docs/BIOEVAL_METAMORPHIC_AUDIT.md).
+`bioevalWaiverAudit` types the eight release-gate kinds, tagged met/violated/unevaluable verdicts,
+complete waiver evidence, before/after blocking posture, safety-veto findings, and unevaluable
+gate counts. A waiver does not rewrite the underlying verdict; `require_releasable` and
+`require_no_unevaluable` remain explicit fail-closed policies. See
+[`docs/BIOEVAL_WAIVER_AUDIT.md`](../docs/BIOEVAL_WAIVER_AUDIT.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

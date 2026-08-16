@@ -5217,6 +5217,62 @@ export interface BioevalMetamorphicAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export type BioevalWaiverGateKind =
+  | "safety_veto"
+  | "benchmark_health"
+  | "capability_floor"
+  | "non_inferiority"
+  | "required_improvement"
+  | "cost_ceiling"
+  | "confidence_requirement"
+  | "maximum_unknown_rate";
+
+export interface BioevalWaiverGateVerdictArgs extends JsonObject {
+  verdict: "met" | "violated" | "unevaluable";
+  detail?: string;
+  missing?: string;
+}
+
+export interface BioevalWaiverGateArgs extends JsonObject {
+  id: string;
+  kind: BioevalWaiverGateKind;
+  verdict: BioevalWaiverGateVerdictArgs;
+}
+
+export interface BioevalWaiverArgs extends JsonObject {
+  gate: string;
+  authoriser: string;
+  rationale: string;
+  expiry: string;
+  affected_versions: string[];
+  follow_up: string;
+}
+
+export interface BioevalWaiverAuditArgs extends JsonObject {
+  version: string;
+  at: string;
+  gates: BioevalWaiverGateArgs[];
+  waivers?: BioevalWaiverArgs[];
+  max_items?: number;
+  require_releasable?: boolean;
+  require_no_unevaluable?: boolean;
+}
+
+export interface BioevalWaiverAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-waiver-audit/0.1";
+  workflow?: "bioeval_waiver_audit";
+  release?: JsonObject;
+  gates?: JsonObject;
+  waivers?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;

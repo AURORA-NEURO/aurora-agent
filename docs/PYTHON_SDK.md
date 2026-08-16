@@ -980,6 +980,12 @@ sensitivity, false invariance, wrong-direction, and undetermined findings. Famil
 uses only the evidential denominator, while suite-wide consistency is intentionally absent.
 `require_both_relations` and `fail_on_undetermined` are explicit fail-closed policies. See
 [`docs/BIOEVAL_METAMORPHIC_AUDIT.md`](BIOEVAL_METAMORPHIC_AUDIT.md).
+`BioevalWaiverAuditArgs` / `bioeval_waiver_audit_report(...)` type release-gate kinds, tagged
+met/violated/unevaluable verdicts, complete authoriser/rationale/expiry/version/follow-up
+waivers, before/after blocking counts, safety-veto findings, and unevaluable-gate counts. The
+typed layer preserves the underlying verdict and exposes `require_releasable` and
+`require_no_unevaluable` as explicit fail-closed policies. See
+[`docs/BIOEVAL_WAIVER_AUDIT.md`](BIOEVAL_WAIVER_AUDIT.md).
 
 ## Biological stress profiling
 

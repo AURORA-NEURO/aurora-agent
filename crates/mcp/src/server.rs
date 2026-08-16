@@ -82,6 +82,10 @@ use bioprism_bioevalx::metamorphic::{
     Relation as BioevalMetamorphicRelation, Suite as BioevalMetamorphicSuite,
     Trial as BioevalMetamorphicTrial, TrialVerdict as BioevalTrialVerdict,
 };
+use bioprism_bioevalx::waiver::{
+    Gate as BioevalReleaseGate, ReleaseDecision as BioevalReleaseDecision,
+    Waiver as BioevalReleaseWaiver,
+};
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
@@ -1372,6 +1376,7 @@ impl Server {
             "bioeval_evaluator_audit" => self.bioeval_evaluator_audit(&arguments),
             "bioeval_plane_audit" => self.bioeval_plane_audit(&arguments),
             "bioeval_metamorphic_audit" => self.bioeval_metamorphic_audit(&arguments),
+            "bioeval_waiver_audit" => self.bioeval_waiver_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -14929,6 +14934,334 @@ impl Server {
         }))
     }
 
+    fn bioeval_waiver_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-waiver-audit/0.1";
+        const MAX_GATES: usize = 1_024;
+        const MAX_WAIVERS: usize = 1_024;
+        const MAX_ID_BYTES: usize = 256;
+
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_waiver_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "a safety veto can never be waived",
+                    "an applied waiver preserves the underlying gate verdict",
+                    "an expired or version-mismatched waiver never makes a release releasable",
+                    "unevaluable gates remain distinct from violated gates",
+                ],
+                "limitations": [
+                    "the route records caller-supplied gate verdicts and does not evaluate metrics, posteriors, or safety policy",
+                    "authoriser identity and authority are assertions; no identity provider or signature verifier is invoked",
+                    "the route does not publish a CI comment, deploy an artifact, or mutate an external release system",
+                ],
+            })
+        };
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure waiver audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("waiver audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let version = arguments
+            .get("version")
+            .and_then(Value::as_str)
+            .ok_or("version is required and must be a release version string")?;
+        if version.trim().is_empty() || version.len() > MAX_ID_BYTES {
+            return Ok(refusal(
+                "release_validation",
+                format!("version must contain 1 to {MAX_ID_BYTES} bytes"),
+            ));
+        }
+        let at_text = arguments
+            .get("at")
+            .and_then(Value::as_str)
+            .ok_or("at is required and must be an RFC-3339 evaluation instant")?;
+        let at = match FactoryTimestamp::parse(at_text) {
+            Ok(at) => at,
+            Err(error) => {
+                return Ok(refusal(
+                    "release_validation",
+                    format!("at is not a valid RFC-3339 timestamp: {error}"),
+                ))
+            }
+        };
+        let raw_gates = arguments
+            .get("gates")
+            .and_then(Value::as_array)
+            .ok_or("gates is required and must be an array of serialized Gate values")?;
+        if raw_gates.is_empty() || raw_gates.len() > MAX_GATES {
+            return Err("gates must contain 1 to 1024 release-gate rows".into());
+        }
+        let raw_waivers = arguments
+            .get("waivers")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if raw_waivers.len() > MAX_WAIVERS {
+            return Err("waivers must contain at most 1024 waiver rows".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+
+        let mut gates = Vec::with_capacity(raw_gates.len());
+        let mut gate_ids = BTreeSet::new();
+        for (index, raw) in raw_gates.iter().enumerate() {
+            let gate: BioevalReleaseGate = match serde_json::from_value(raw.clone()) {
+                Ok(gate) => gate,
+                Err(error) => {
+                    return Ok(refusal(
+                        "gate_deserialization",
+                        format!("gates[{index}] is not a valid Gate: {error}"),
+                    ))
+                }
+            };
+            if gate.id.trim().is_empty() || gate.id.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "gate_validation",
+                    format!("gates[{index}].id must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            if !gate_ids.insert(gate.id.clone()) {
+                return Ok(refusal(
+                    "gate_validation",
+                    format!("gate {:?} appears more than once", gate.id),
+                ));
+            }
+            gates.push(gate);
+        }
+
+        let mut decision = BioevalReleaseDecision::for_version(version, gates);
+        let before_blocking = decision
+            .blocking()
+            .iter()
+            .map(|gate| gate.id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut waiver_ids = BTreeSet::new();
+        for (index, raw) in raw_waivers.iter().enumerate() {
+            let object = match raw.as_object() {
+                Some(object) => object,
+                None => {
+                    return Ok(refusal(
+                        "waiver_deserialization",
+                        format!("waivers[{index}] must be an object"),
+                    ))
+                }
+            };
+            let gate = object
+                .get("gate")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("waivers[{index}].gate is required"))?;
+            if gate.trim().is_empty() || gate.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "waiver_validation",
+                    format!("waivers[{index}].gate must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            if !waiver_ids.insert(gate.to_string()) {
+                return Ok(refusal(
+                    "waiver_validation",
+                    format!("more than one waiver names gate {:?}", gate),
+                ));
+            }
+            let authoriser = object
+                .get("authoriser")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("waivers[{index}].authoriser is required"))?;
+            let rationale = object
+                .get("rationale")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("waivers[{index}].rationale is required"))?;
+            let expiry_text = object
+                .get("expiry")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("waivers[{index}].expiry is required"))?;
+            let expiry = match FactoryTimestamp::parse(expiry_text) {
+                Ok(expiry) => expiry,
+                Err(error) => {
+                    return Ok(refusal(
+                        "waiver_validation",
+                        format!("waivers[{index}].expiry is not a valid RFC-3339 timestamp: {error}"),
+                    ))
+                }
+            };
+            let affected_versions = object
+                .get("affected_versions")
+                .cloned()
+                .ok_or_else(|| format!("waivers[{index}].affected_versions is required"))
+                .and_then(|value| {
+                    serde_json::from_value::<Vec<String>>(value)
+                        .map_err(|error| format!("waivers[{index}].affected_versions must be an array of strings: {error}"))
+                })?;
+            let follow_up = object
+                .get("follow_up")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("waivers[{index}].follow_up is required"))?;
+            let waiver = match BioevalReleaseWaiver::sign(
+                gate,
+                authoriser,
+                rationale,
+                expiry,
+                affected_versions,
+                follow_up,
+            ) {
+                Ok(waiver) => waiver,
+                Err(error) => {
+                    return Ok(refusal(
+                        "waiver_validation",
+                        format!("waivers[{index}] is incomplete: {error}"),
+                    ))
+                }
+            };
+            if let Err(error) = decision.waive(waiver, at) {
+                return Ok(refusal(
+                    "waiver_application",
+                    format!("waivers[{index}] could not be applied: {error}"),
+                ));
+            }
+        }
+
+        let waived_ids = decision
+            .waivers()
+            .iter()
+            .map(|waived| waived.gate.id.clone())
+            .collect::<BTreeSet<_>>();
+        let after_blocking = decision
+            .blocking()
+            .iter()
+            .map(|gate| gate.id.clone())
+            .collect::<BTreeSet<_>>();
+        let unevaluable_ids = decision
+            .unevaluable()
+            .iter()
+            .map(|gate| gate.id.clone())
+            .collect::<BTreeSet<_>>();
+        let safety_veto_ids = decision
+            .gates()
+            .iter()
+            .filter(|gate| matches!(gate.kind, bioprism_bioevalx::waiver::GateKind::SafetyVeto))
+            .map(|gate| gate.id.clone())
+            .collect::<BTreeSet<_>>();
+        let bounded_ids = |ids: &BTreeSet<String>| {
+            json!({
+                "ids": ids.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": ids.len(),
+                "omitted": ids.len().saturating_sub(max_items),
+            })
+        };
+        let gate_rows = decision
+            .gates()
+            .iter()
+            .take(max_items)
+            .map(|gate| {
+                json!({
+                    "id": gate.id,
+                    "kind": gate.kind,
+                    "verdict": gate.verdict,
+                    "blocks_before": before_blocking.contains(&gate.id),
+                    "waived": waived_ids.contains(&gate.id),
+                    "blocks_after": after_blocking.contains(&gate.id),
+                    "unevaluable": matches!(gate.verdict, bioprism_bioevalx::waiver::GateVerdict::Unevaluable { .. }),
+                })
+            })
+            .collect::<Vec<_>>();
+        let waiver_rows = decision
+            .waivers()
+            .iter()
+            .take(max_items)
+            .map(|waived| {
+                json!({
+                    "gate": waived.gate.id,
+                    "kind": waived.gate.kind,
+                    "underlying_verdict": waived.gate.verdict,
+                    "waiver": waived.waiver,
+                    "applied_at": waived.applied_at,
+                })
+            })
+            .collect::<Vec<_>>();
+        let require_releasable = arguments
+            .get("require_releasable")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let require_no_unevaluable = arguments
+            .get("require_no_unevaluable")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if require_no_unevaluable && !unevaluable_ids.is_empty() {
+            return Ok(refusal(
+                "unknown_rate_policy",
+                format!(
+                    "require_no_unevaluable was true but {} gate(s) remain unevaluable",
+                    unevaluable_ids.len()
+                ),
+            ));
+        }
+        if require_releasable && !decision.releasable() {
+            return Ok(refusal(
+                "release_gate_policy",
+                format!(
+                    "require_releasable was true but {} blocking gate(s) remain",
+                    after_blocking.len()
+                ),
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_waiver_audit",
+            "release": {
+                "version": version,
+                "evaluated_at": at,
+                "gate_count": decision.gates().len(),
+                "blocking_before": before_blocking.len(),
+                "blocking_after": after_blocking.len(),
+                "waived_count": decision.waivers().len(),
+                "unevaluable_count": unevaluable_ids.len(),
+                "releasable": decision.releasable(),
+            },
+            "gates": {
+                "rows": gate_rows,
+                "returned": decision.gates().len().min(max_items),
+                "total": decision.gates().len(),
+                "omitted": decision.gates().len().saturating_sub(max_items),
+            },
+            "waivers": {
+                "rows": waiver_rows,
+                "returned": decision.waivers().len().min(max_items),
+                "total": decision.waivers().len(),
+                "omitted": decision.waivers().len().saturating_sub(max_items),
+            },
+            "findings": {
+                "still_blocking": bounded_ids(&after_blocking),
+                "waived_gates": bounded_ids(&waived_ids),
+                "unevaluable_gates": bounded_ids(&unevaluable_ids),
+                "safety_vetoes": bounded_ids(&safety_veto_ids),
+            },
+            "guarantees": [
+                "a waiver changes blocking posture only; the original gate verdict remains visible",
+                "safety vetoes are never waivable, including when a waiver names the veto",
+                "expired waivers and waivers for another release version are refused at application",
+                "unevaluable gates remain separately countable for maximum-unknown-rate policy",
+                "authoriser, rationale, expiry, affected versions, and follow-up are retained in every applied waiver",
+                "bounded gate, waiver, and finding projections retain total and omitted counts",
+            ],
+            "limitations": [
+                "the route does not calculate the gate verdict or verify the authoriser's identity or authority",
+                "a releasable local decision is not a cryptographic signature, CI approval, deployment, scientific validity, or clinical authority",
+                "waiver publicity is represented in the returned evidence record but no external publication is performed",
+            ],
+        }))
+    }
+
     fn bioeval_plane_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-plane-audit/0.1";
         const MAX_DIMENSIONS: usize = 4_096;
@@ -23740,9 +24073,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "evaluation_and_baselines",
-            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
+            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -23772,9 +24105,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -25145,6 +25478,23 @@ pub fn tool_definitions() -> Vec<Value> {
                     "fail_on_undetermined": { "type": "boolean", "description": "Fail closed when any trial is incomparable and therefore cannot contribute evidence." }
                 },
                 "required": ["families"]
+            }
+        }),
+        json!({
+            "name": "bioeval_waiver_audit",
+            "description": "Audit a serialized bioevalx release decision and its bounded gate waivers. It invokes the real waiver signing and release-decision application rules, preserves violated versus unevaluable verdicts, refuses expired or version-mismatched waivers, never waives a safety veto, and optionally fails closed on remaining blockers or unevaluable gates.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "version": { "type": "string", "description": "Exact release version covered by the decision and affected-version checks." },
+                    "at": { "type": "string", "description": "RFC-3339 instant at which waiver expiry is evaluated; required for deterministic replay." },
+                    "gates": { "type": "array", "minItems": 1, "maxItems": 1024, "description": "Serialized Gate values with unique identifiers and tagged met/violated/unevaluable verdicts." },
+                    "waivers": { "type": "array", "maxItems": 1024, "description": "Optional waiver declarations. Each must name a gate, authoriser, rationale, expiry, affected_versions, and follow_up." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum gate rows, applied waiver rows, and finding identifiers returned." },
+                    "require_releasable": { "type": "boolean", "description": "Fail closed when any gate still blocks after valid waivers are applied." },
+                    "require_no_unevaluable": { "type": "boolean", "description": "Fail closed when any gate remains unevaluable, even if a waiver was applied." }
+                },
+                "required": ["version", "at", "gates"]
             }
         }),
         json!({

@@ -412,5 +412,8 @@ inapplicable dimensions rather than manufacturing zeros;
 the metamorphic-response kernel is exposed through `bioeval_metamorphic_audit`, preserving false
 sensitivity, false invariance, wrong-direction, and undetermined trials rather than flattening
 them into a single pass rate;
+the release-gate waiver kernel is exposed through `bioeval_waiver_audit`, preserving the original
+gate verdict, exact affected-version scope, expiry, follow-up, unevaluable counts, and the
+non-waivable safety-veto rule rather than turning an exception into an untraceable pass;
 the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
-evaluator-health, scoring-plane, or metamorphic wrapper.
+evaluator-health, scoring-plane, metamorphic, or waiver wrapper.
