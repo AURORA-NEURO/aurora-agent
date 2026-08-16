@@ -1509,7 +1509,7 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
         oncoworlds_methylation_classify: { ok: true, classified: false, class: null, report: { outcome: "unclassifiable" }, guarantees: [], limitations: [] },
         oncoworlds_methylation_compare: { ok: true, comparison: { divergence: { divergence: "version_conditioned" } }, left_classifier: {}, right_classifier: {}, guarantees: [], limitations: [] },
         oncoworlds_radiogenomic_check: { ok: true, supported_claim: { statement: "supported" }, guarantees: [], limitations: [] },
-        oncoworlds_clonal_history_check: { ok: true, compatible_count: 1, rejected_count: 0, compatible: [{}], rejected: [], unique_history: { ok: true, history: {} }, guarantees: [], limitations: [] },
+        oncoworlds_clonal_history_check: { ok: true, schema: "bioprism-mcp/oncoworlds-clonal-history-check/0.1", compatible_count: 1, rejected_count: 0, candidate_count: 1, compatible: [{ edges: [] }], rejected: [], rejected_records: [], unique_history: { ok: true, history: { edges: [] } }, unique_status: "unique", guarantees: [], limitations: [] },
       }[tool];
       return jsonResponse({ ok: true, tool, request_id: "oncoworlds-1", mcp: { result: { structuredContent: projections } }, guarantee: "bounded" });
     },
@@ -1524,6 +1524,8 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
   assert.equal(compare.mcp.result.structuredContent.comparison.divergence.divergence, "version_conditioned");
   assert.equal(radiogenomic.mcp.result.structuredContent.supported_claim.statement, "supported");
   assert.equal(clonal.mcp.result.structuredContent.unique_history.ok, true);
+  assert.equal(clonal.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-clonal-history-check/0.1");
+  assert.equal(clonal.mcp.result.structuredContent.unique_status, "unique");
   assert.deepEqual(calls.map((call) => call.tool), [
     "oncoworlds_model_transport",
     "oncoworlds_methylation_classify",

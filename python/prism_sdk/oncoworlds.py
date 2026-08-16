@@ -17,6 +17,9 @@ from .errors import ArgumentError
 
 
 METHYLATION_DIVERGENCES = frozenset({"agree", "both_unclassifiable", "version_conditioned"})
+ONCOWORLDS_CLONAL_SCHEMA = "bioprism-mcp/oncoworlds-clonal-history-check/0.1"
+ONCOWORLDS_CLONAL_REFUSAL_KINDS = frozenset({"fractions_exceed_whole", "child_exceeds_parent", "cyclic", "unknown_subclone", "ambiguous", "unsupported_directionality"})
+ONCOWORLDS_CLONAL_UNIQUE_STATUSES = frozenset({"unique", "ambiguous", "refused"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -204,6 +207,75 @@ class OncoWorldsClonalHistoryCheckArgs:
 
 
 @dataclass(frozen=True)
+class OncoClonalHistoryProjection:
+    raw: dict[str, Any]
+    edges: tuple[tuple[str, str], ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClonalHistoryProjection":
+        raw = _object("clonal history", value)
+        edges: list[tuple[str, str]] = []
+        for index, edge in enumerate(_array("clonal history edges", raw.get("edges", []))):
+            if isinstance(edge, Mapping):
+                parent = _route_text(f"clonal history edge[{index}].parent", edge.get("parent"))
+                child = _route_text(f"clonal history edge[{index}].child", edge.get("child"))
+            else:
+                pair = _array(f"clonal history edge[{index}]")
+                if len(pair) != 2:
+                    raise ArgumentError("clonal history edges must be parent/child pairs")
+                parent = _route_text(f"clonal history edge[{index}][0]", pair[0])
+                child = _route_text(f"clonal history edge[{index}][1]", pair[1])
+            edges.append((parent, child))
+        if len(edges) != len(set(edges)):
+            raise ArgumentError("clonal history edges must be unique")
+        return cls(raw, tuple(edges))
+
+
+@dataclass(frozen=True)
+class OncoClonalRejectedHistoryProjection:
+    raw: dict[str, Any]
+    history: OncoClonalHistoryProjection
+    refusal: dict[str, Any]
+    refusal_kind: str
+    refusal_text: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClonalRejectedHistoryProjection":
+        raw = _object("clonal rejected history", value)
+        refusal = _object("clonal history refusal", raw.get("refusal"))
+        refusal_kind = _route_text("clonal history refusal kind", raw.get("refusal_kind", refusal.get("refusal")))
+        if refusal_kind not in ONCOWORLDS_CLONAL_REFUSAL_KINDS or refusal.get("refusal") != refusal_kind:
+            raise ArgumentError("clonal history refusal kind does not reconcile with the typed refusal")
+        return cls(raw, OncoClonalHistoryProjection.from_wire(raw.get("history")), refusal, refusal_kind, _optional_text("clonal history refusal_text", raw.get("refusal_text")))
+
+
+@dataclass(frozen=True)
+class OncoClonalUniqueHistoryProjection:
+    raw: dict[str, Any]
+    ok: bool
+    status: str
+    history: OncoClonalHistoryProjection | None
+    refusal: dict[str, Any] | None
+    refusal_text: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any], status: str) -> "OncoClonalUniqueHistoryProjection":
+        raw = _object("clonal unique_history", value)
+        ok = _bool("clonal unique_history ok", raw.get("ok"))
+        if status not in ONCOWORLDS_CLONAL_UNIQUE_STATUSES:
+            raise ArgumentError(f"unknown clonal unique-history status: {status!r}")
+        if ok:
+            if status != "unique" or raw.get("refusal") is not None:
+                raise ArgumentError("unique clonal history status cannot carry refusal evidence")
+            return cls(raw, True, status, OncoClonalHistoryProjection.from_wire(raw.get("history")), None, None)
+        refusal = _object("clonal unique-history refusal", raw.get("refusal"))
+        refusal_kind = _route_text("clonal unique-history refusal kind", refusal.get("refusal"))
+        if refusal_kind not in ONCOWORLDS_CLONAL_REFUSAL_KINDS or status == "unique":
+            raise ArgumentError("non-unique clonal history must retain a known refusal")
+        return cls(raw, False, status, None, refusal, _optional_text("clonal unique-history refusal_text", raw.get("refusal_text")))
+
+
+@dataclass(frozen=True)
 class OncoWorldsModelTransportReport:
     raw: dict[str, Any]
     ok: bool
@@ -336,6 +408,12 @@ class OncoWorldsClonalHistoryCheckReport:
     unique_history: dict[str, Any]
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    candidate_count: int | None = None
+    unique_status: str | None = None
+    compatible_records: tuple[OncoClonalHistoryProjection, ...] = ()
+    rejected_records: tuple[OncoClonalRejectedHistoryProjection, ...] = ()
+    unique_record: OncoClonalUniqueHistoryProjection | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsClonalHistoryCheckReport":
@@ -348,10 +426,37 @@ class OncoWorldsClonalHistoryCheckReport:
         rejected_count = _route_count("clonal rejected_count", raw.get("rejected_count"))
         if compatible_count != len(compatible) or rejected_count != len(rejected):
             raise ArgumentError("clonal history counts do not reconcile with retained candidates")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("clonal history schema", schema_value)
+        if schema is not None and schema != ONCOWORLDS_CLONAL_SCHEMA:
+            raise ArgumentError(f"unknown clonal history schema: {schema!r}")
+        compatible_records = tuple(OncoClonalHistoryProjection.from_wire(item) for item in compatible)
+        rejected_records_value = raw.get("rejected_records")
+        if rejected_records_value is None:
+            rejected_records = tuple(
+                OncoClonalRejectedHistoryProjection.from_wire({
+                    "history": pair[0],
+                    "refusal": pair[1],
+                    "refusal_kind": _route_mapping("clonal refusal fallback", pair[1]).get("refusal"),
+                })
+                for pair in (_array("clonal rejected pair", item) for item in rejected)
+                if len(pair) == 2
+            )
+            if len(rejected_records) != rejected_count:
+                raise ArgumentError("clonal rejected fallback records must be history/refusal pairs")
+        else:
+            rejected_records = tuple(OncoClonalRejectedHistoryProjection.from_wire(item) for item in _array("clonal rejected_records", rejected_records_value))
+        if len(rejected_records) != rejected_count:
+            raise ArgumentError("clonal rejected_records count does not reconcile")
         unique = _route_mapping("clonal unique_history", raw.get("unique_history"))
         if unique.get("ok") is not True and not isinstance(unique.get("refusal"), Mapping):
             raise ArgumentError("clonal unique_history must retain a typed ambiguity/refusal object")
-        return cls(raw, True, compatible_count, rejected_count, compatible, rejected, unique, _route_strings("clonal guarantees", raw.get("guarantees")), _route_strings("clonal limitations", raw.get("limitations")))
+        unique_status = _route_text("clonal unique_status", raw.get("unique_status", "unique" if unique.get("ok") is True else "ambiguous" if unique.get("refusal", {}).get("refusal") == "ambiguous" else "refused"))
+        unique_record = OncoClonalUniqueHistoryProjection.from_wire(unique, unique_status)
+        candidate_count = _route_count("clonal candidate_count", raw.get("candidate_count", compatible_count + rejected_count))
+        if candidate_count != compatible_count + rejected_count:
+            raise ArgumentError("clonal candidate_count does not reconcile")
+        return cls(raw, True, compatible_count, rejected_count, compatible, rejected, unique, _route_strings("clonal guarantees", raw.get("guarantees")), _route_strings("clonal limitations", raw.get("limitations")), schema=schema, candidate_count=candidate_count, unique_status=unique_status, compatible_records=compatible_records, rejected_records=rejected_records, unique_record=unique_record)
 
     @property
     def unique(self) -> bool:
@@ -384,6 +489,12 @@ def oncoworlds_clonal_history_check_report(value: Mapping[str, Any]) -> OncoWorl
 
 __all__ = [
     "METHYLATION_DIVERGENCES",
+    "ONCOWORLDS_CLONAL_REFUSAL_KINDS",
+    "ONCOWORLDS_CLONAL_SCHEMA",
+    "ONCOWORLDS_CLONAL_UNIQUE_STATUSES",
+    "OncoClonalHistoryProjection",
+    "OncoClonalRejectedHistoryProjection",
+    "OncoClonalUniqueHistoryProjection",
     "OncoWorldsClonalHistoryCheckArgs",
     "OncoWorldsClonalHistoryCheckReport",
     "OncoWorldsMethylationClassifyArgs",

@@ -206,6 +206,9 @@ invent defaults:
   unclassifiable result. `OncoWorldsMethylationCompareArgs`/
   `oncoworlds_methylation_compare_report(...)` keep classifier-version disagreement separate from
   agreement and from the case where both sides are unclassifiable.
+- `OncoWorldsClonalHistoryCheckArgs`/`oncoworlds_clonal_history_check_report(...)` preserve typed
+  compatible histories, per-candidate refusal kinds, candidate accounting, and unique versus
+  ambiguous history status. See `docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md`.
 - `OncoWorldsRadiogenomicCheckArgs`/`oncoworlds_radiogenomic_check_report(...)` preserve split,
   feature-fitting, target-scope, mechanism-stratum, and transport assumptions before admitting a
   cross-modal claim. `OncoWorldsClonalHistoryCheckArgs`/

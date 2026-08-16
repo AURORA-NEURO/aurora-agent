@@ -5165,13 +5165,39 @@ export interface OncoWorldsClonalHistoryCheckArgs extends JsonObject {
   candidates: JsonObject[];
 }
 
+export type OncoWorldsClonalUniqueStatus = "unique" | "ambiguous" | "refused";
+
+export type OncoWorldsClonalRefusalKind = "fractions_exceed_whole" | "child_exceeds_parent" | "cyclic" | "unknown_subclone" | "ambiguous" | "unsupported_directionality";
+
+export interface OncoWorldsClonalHistoryResult extends JsonObject {
+  edges?: [string, string][];
+}
+
+export interface OncoWorldsClonalRejectedHistoryResult extends JsonObject {
+  history: OncoWorldsClonalHistoryResult;
+  refusal: JsonObject;
+  refusal_kind: OncoWorldsClonalRefusalKind;
+  refusal_text?: string;
+}
+
+export interface OncoWorldsClonalUniqueHistoryResult extends JsonObject {
+  ok: boolean;
+  history?: OncoWorldsClonalHistoryResult;
+  refusal?: JsonObject;
+  refusal_text?: string;
+}
+
 export interface OncoWorldsClonalHistoryCheckResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-clonal-history-check/0.1";
   compatible_count: number;
   rejected_count: number;
-  compatible: JsonValue[];
+  candidate_count?: number;
+  compatible: OncoWorldsClonalHistoryResult[];
   rejected: JsonValue[];
-  unique_history: JsonObject;
+  rejected_records?: OncoWorldsClonalRejectedHistoryResult[];
+  unique_history: OncoWorldsClonalUniqueHistoryResult;
+  unique_status?: OncoWorldsClonalUniqueStatus;
   guarantees: string[];
   limitations: string[];
 }

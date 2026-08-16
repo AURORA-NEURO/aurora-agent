@@ -83,17 +83,29 @@ class OncoWorldsReportTests(unittest.TestCase):
         self.assertFalse(refused.supported)
         clonal = oncoworlds_clonal_history_check_report({
             "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-clonal-history-check/0.1",
             "compatible_count": 2,
             "rejected_count": 1,
+            "candidate_count": 3,
             "compatible": [{"edges": []}, {"edges": [{"parent": "a", "child": "b"}]}],
             "rejected": [[{"edges": []}, {"refusal": "cyclic"}]],
-            "unique_history": {"ok": False, "refusal": {"refusal": "ambiguous", "count": 2}},
+            "rejected_records": [{
+                "history": {"edges": []},
+                "refusal": {"refusal": "cyclic"},
+                "refusal_kind": "cyclic",
+                "refusal_text": "ancestry edges contain a cycle",
+            }],
+            "unique_history": {"ok": False, "refusal": {"refusal": "ambiguous", "count": 2}, "refusal_text": "two histories remain"},
+            "unique_status": "ambiguous",
             "guarantees": ["rejected retained"],
             "limitations": [],
         })
         self.assertFalse(clonal.unique)
         self.assertTrue(clonal.ambiguous_or_refused)
         self.assertEqual(clonal.rejected_count, 1)
+        self.assertEqual(clonal.unique_status, "ambiguous")
+        self.assertEqual(clonal.rejected_records[0].refusal_kind, "cyclic")
+        self.assertEqual(clonal.candidate_count, 3)
 
     def test_oncoworlds_requests_enforce_bounded_transport_shape(self) -> None:
         args = OncoWorldsClonalHistoryCheckArgs({"subclones": []}, [{"edges": []}])

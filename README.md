@@ -598,8 +598,9 @@ mechanism strata, and declared transport assumptions before admitting a cross-mo
 keeps loss to follow-up and competing death as censoring distinctions, and reports delayed-entry
 bias. Its versioned typed projection binds endpoint strategy, event/censoring tags, delayed-entry
 exposure, and complete versus informative bias flags; see [`docs/ONCO_OUTCOME_ANALYZE.md`](docs/ONCO_OUTCOME_ANALYZE.md).
-`oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and
-keeps multiple compatible histories as ambiguity rather than selecting one.
+`oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and keeps
+multiple compatible histories as typed ambiguity rather than selecting one; its versioned projection
+retains per-candidate refusal kinds and candidate accounting (see [`docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md`](docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md)).
 The Python and TypeScript SDKs expose all five OncoWorlds workflows as typed MCP and HTTP
 projections, retaining domain refusals, QC abstention, version-conditioned disagreement, transport
 assumptions, and clonal ambiguity without claiming clinical classification or patient-level truth.

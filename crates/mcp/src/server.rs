@@ -10480,13 +10480,42 @@ impl Server {
                 "refusal_text": refusal.to_string()
             }),
         };
+        let unique_status = if unique.get("ok").and_then(Value::as_bool) == Some(true) {
+            "unique"
+        } else if unique["refusal"]["refusal"] == json!("ambiguous") {
+            "ambiguous"
+        } else {
+            "refused"
+        };
+        let rejected_records: Vec<Value> = result
+            .rejected
+            .iter()
+            .map(|(history, refusal)| {
+                let refusal_value =
+                    serde_json::to_value(refusal).expect("clonal refusal is serializable");
+                let refusal_kind = refusal_value
+                    .get("refusal")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                json!({
+                    "history": history,
+                    "refusal": refusal,
+                    "refusal_kind": refusal_kind,
+                    "refusal_text": refusal.to_string(),
+                })
+            })
+            .collect();
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/oncoworlds-clonal-history-check/0.1",
             "compatible_count": compatible_count,
             "rejected_count": rejected_count,
+            "candidate_count": compatible_count + rejected_count,
             "compatible": result.compatible,
             "rejected": result.rejected,
+            "rejected_records": rejected_records,
             "unique_history": unique,
+            "unique_status": unique_status,
             "guarantees": [
                 "candidate histories are audited against fraction, ancestry, cycle, and whole-tumour constraints",
                 "rejected histories remain visible with their typed refusal",
