@@ -325,6 +325,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         ledger: { packs: { "pack-1": { disclosure: "disclosed", since: 5 } } },
         guarantees: ["disclosure is keyed by immutable pack digest rather than a mutable name", "disclosure is a ratchet and contamination cannot be walked back", "headline eligibility returns a caveat or a typed refusal instead of a bare score", "the review does not detect leaks"],
       } } } });
+      if (path === "/v1/tools/hub_card_render") return jsonResponse({ ok: true, tool: "hub_card_render", request_id: "r30", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/hub-card/0.1",
+        card: {
+          resource_type: "bioatlas-card", resource_id: "digest-card", version: "bioatlas-card/0.1", submission: "sub-card",
+          scope: { decision_family: ["ranking"] }, provenance: ["digest-parent"], access: "public", state: "available", verification: "self-reported",
+          score: { display: "published", score: { value: 0.82, interval: null }, label: { label: "held_out" } }, non_claims: [], attributions: [], limitations: "bounded",
+        },
+        score: { attached: true, pack: "pack-1", computed_at: 4 },
+        moderation_state: "accepted", verification: "self-reported",
+        guarantees: ["a card starts with a withheld score and never uses zero or blank as a failure state", "scores require disclosure eligibility and an available publication state", "the result is a renderer-facing object; it does not render HTML, resolve links, or publish a page"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -849,6 +861,17 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(disclosure.mcp.result.structuredContent.trace[2].result.eligible, false);
   assert.equal(disclosure.mcp.result.structuredContent.trace[2].result.fail_closed, true);
   assert.equal(disclosure.mcp.result.structuredContent.trace[3].result.label.label, "disclosed_pack");
+  const card = await client.hubCardRender({
+    moderation: { records: {} },
+    submission: "sub-card",
+    score: { value: 0.82, interval: null },
+    pack: "pack-1",
+    computed_at: 4,
+    disclosure: { packs: {} },
+  });
+  assert.equal(card.mcp.result.structuredContent.schema, "bioprism-mcp/hub-card/0.1");
+  assert.equal(card.mcp.result.structuredContent.card.score.display, "published");
+  assert.equal(card.mcp.result.structuredContent.score.attached, true);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

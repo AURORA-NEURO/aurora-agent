@@ -7826,6 +7826,7 @@ impl Server {
                         .map_err(|serialize| format!("cannot serialize card: {serialize}"))?;
                     return Ok(json!({
                         "ok": false,
+                        "schema": "bioprism-mcp/hub-card/0.1",
                         "stage": "card_disclosure_gate",
                         "refusal": error.to_string(),
                         "fail_closed": true,
@@ -7844,6 +7845,7 @@ impl Server {
                 Err(error) => {
                     return Ok(json!({
                         "ok": false,
+                        "schema": "bioprism-mcp/hub-card/0.1",
                         "stage": "card_publication_gate",
                         "refusal": error.to_string(),
                         "fail_closed": true,
@@ -7857,6 +7859,7 @@ impl Server {
         };
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/hub-card/0.1",
             "card": card,
             "score": score_result,
             "moderation_state": record.state,

@@ -232,6 +232,12 @@ the monotonic unknown/held-out/disclosed/contaminated state, contamination witne
 integrity action results, headline labels and caveats, score-withholding refusals, and the
 fail-closed action trace. The Fetch client records supplied findings only; it does not discover
 leaks, turn a valid split into a secrecy certificate, or publish a network artifact.
+`hubCardRender` accepts serialized moderation/card inputs and returns `HubCardRenderResult`. The
+card result keeps moderation-derived publication state, access, verification, provenance,
+non-claims, limitations, and score display typed. Published scores retain their disclosure label;
+withheld scores retain the state and reason, while disclosure/publication-gate refusals remain
+fail-closed with a null attachment. The Fetch client renders a contract object only; it does not
+generate HTML or publish a page.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

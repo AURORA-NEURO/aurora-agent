@@ -138,6 +138,8 @@ import type {
   CacheInvalidationResult,
   HubDisclosureReviewArgs,
   HubDisclosureReviewResult,
+  HubCardRenderArgs,
+  HubCardRenderResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -444,6 +446,10 @@ export class ApiClient {
 
   async hubDisclosureReview(args: HubDisclosureReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubDisclosureReviewResult>> {
     return this.callTool<HubDisclosureReviewResult>("hub_disclosure_review", args, options);
+  }
+
+  async hubCardRender(args: HubCardRenderArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubCardRenderResult>> {
+    return this.callTool<HubCardRenderResult>("hub_card_render", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

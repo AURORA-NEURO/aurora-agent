@@ -192,6 +192,7 @@ from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateA
 from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimulateArgs, registry_lifecycle_report
 from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimulateArgs, cache_invalidation_report
 from .hub_disclosure import HubDisclosureReviewArgs, HubDisclosureReviewReport, hub_disclosure_review
+from .hub_card import HubCardRenderArgs, HubCardRenderReport, hub_card_render
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -938,6 +939,23 @@ class ApiClient:
         """Return typed disclosure evidence through the HTTP gateway."""
 
         return hub_disclosure_review(self.hub_disclosure_review(request))
+
+    def hub_card_render(
+        self,
+        request: HubCardRenderArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Render a public-hub card through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubCardRenderArgs) else HubCardRenderArgs.from_wire(request)
+        return self.call_tool("hub_card_render", normalized.to_mcp_arguments())
+
+    def hub_card_render_report(
+        self,
+        request: HubCardRenderArgs | Mapping[str, Any],
+    ) -> HubCardRenderReport:
+        """Return typed card evidence through the HTTP gateway."""
+
+        return hub_card_render(self.hub_card_render(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2798,6 +2816,23 @@ class AsyncApiClient:
         """Return async typed disclosure evidence through the HTTP gateway."""
 
         return hub_disclosure_review(await self.hub_disclosure_review(request))
+
+    async def hub_card_render(
+        self,
+        request: HubCardRenderArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async public-hub card rendering through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubCardRenderArgs) else HubCardRenderArgs.from_wire(request)
+        return await self.call_tool("hub_card_render", normalized.to_mcp_arguments())
+
+    async def hub_card_render_report(
+        self,
+        request: HubCardRenderArgs | Mapping[str, Any],
+    ) -> HubCardRenderReport:
+        """Return async typed card evidence through the HTTP gateway."""
+
+        return hub_card_render(await self.hub_card_render(request))
 
     async def developer_delivery_audit_report(
         self,

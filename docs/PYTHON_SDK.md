@@ -442,6 +442,13 @@ invent defaults:
   the serialized ledger is available as explicit continuation state. The parser reconciles action
   counts and requires every failed action to carry a refusal plus `fail_closed=True`. It does not
   claim to detect leaks, certify secrecy from a clean split oracle, or publish a score/network page.
+- `HubCardRenderArgs` and `hub_card_render(...)` type the BioAtlas card renderer across sync MCP,
+  async MCP, and HTTP. `HubCardObjectReport` preserves resource identity, scope, provenance,
+  access, moderation-derived publication state, verification, non-claims, attributions, and the
+  limitations card. `HubCardScoreReport` keeps the published/withheld tagged union explicit;
+  score attachment, disclosure-gate refusals, available-state refusals, and numeric exposure are
+  separate properties. A withheld display is never parsed as zero, and the renderer is not treated
+  as HTML generation or network publication.
 - `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
   across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit

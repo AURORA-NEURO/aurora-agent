@@ -71,6 +71,9 @@ if (result.mcp.result?.isError) {
 - `hubDisclosureReview` keeps digest-keyed disclosure ratchets, contamination witnesses,
   split-integrity findings, caveated headline labels, withheld scores, and fail-closed action
   refusals typed without pretending the Fetch client detects leaks or publishes a hub page.
+- `hubCardRender` keeps moderation-derived publication states and the published/withheld score
+  union typed, including provenance, limitations, non-claims, disclosure labels, and fail-closed
+  attachment refusals without pretending the Fetch client publishes HTML.
 - `toolCatalogue()` snapshots the live `/v1/tools` definitions into a bounded SHA-256 catalogue;
   `planTool()` performs conservative JSON-shape preflight without a POST; and `toolChecked()`
   executes the reviewed call while preserving the raw refusal envelope. This covers every current

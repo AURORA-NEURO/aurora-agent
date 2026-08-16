@@ -1829,6 +1829,69 @@ export interface HubDisclosureReviewResult extends JsonObject {
   guarantees: string[];
 }
 
+export type HubCardPublicationState = "available" | "unavailable" | "controlled" | "stale" | "under-review" | "disputed" | "withdrawn" | "non-reproducible" | "not-comparable";
+export type HubCardScoreDisplay = "published" | "withheld";
+
+export interface HubCardRenderArgs extends JsonObject {
+  moderation: JsonObject;
+  submission: string;
+  version?: string;
+  score?: JsonObject;
+  pack?: string;
+  computed_at?: number;
+  acknowledges_disclosure?: boolean;
+  disclosure?: JsonObject;
+  not_comparable?: JsonObject;
+}
+
+export interface HubCardLabelResult extends JsonObject {
+  label: HubHeadlineLabel;
+  disclosed_at?: number;
+}
+
+export interface HubCardScoreResult extends JsonObject {
+  display: HubCardScoreDisplay;
+  score?: JsonObject;
+  label?: HubCardLabelResult;
+  state?: HubCardPublicationState;
+  why?: string;
+}
+
+export interface HubCardObjectResult extends JsonObject {
+  resource_type: string;
+  resource_id: string;
+  version: string;
+  submission: string;
+  scope: JsonValue;
+  provenance: string[];
+  access: string;
+  state: HubCardPublicationState;
+  verification: string;
+  score: HubCardScoreResult;
+  non_claims: JsonValue[];
+  attributions: JsonValue[];
+  limitations: string;
+}
+
+export interface HubCardScoreAttachmentResult extends JsonObject {
+  attached: boolean;
+  pack?: string;
+  computed_at?: number;
+}
+
+export interface HubCardRenderResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/hub-card/0.1";
+  card: HubCardObjectResult;
+  score: HubCardScoreAttachmentResult | null;
+  moderation_state?: string;
+  verification?: string;
+  stage?: "card_disclosure_gate" | "card_publication_gate";
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

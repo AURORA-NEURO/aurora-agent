@@ -694,6 +694,7 @@ fn hub_cards_and_leaderboards_compose_moderation_disclosure_and_comparability_ga
         }),
     );
     assert_eq!(withheld["ok"], json!(true));
+    assert_eq!(withheld["schema"], json!("bioprism-mcp/hub-card/0.1"));
     assert_eq!(withheld["card"]["state"], json!("available"));
     assert_eq!(withheld["card"]["score"]["display"], json!("withheld"));
 
