@@ -8064,7 +8064,7 @@ fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_e
         .any(|stage| stage == "state_reconstruction"));
     assert_eq!(result["probe"]["execution"], json!("caller-supplied observation table; no world or architecture was run"));
 
-    let mut missing = arguments;
+    let mut missing = arguments.clone();
     missing["probe_observations"]
         .as_array_mut()
         .unwrap()
@@ -8075,6 +8075,18 @@ fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_e
     assert_eq!(refused["stage"], json!("minimization_probe"));
     assert_eq!(refused["fail_closed"], json!(true));
     assert!(refused["refusal"].as_str().unwrap().contains("observation"));
+
+    let mut malformed_claim = arguments;
+    malformed_claim["claims"] = json!([{
+        "status": "evidenced",
+        "claim": "the panel caused the failure",
+        "citations": []
+    }]);
+    let claim_refused = call(&mut server(), "benchmark_compile", malformed_claim);
+    assert_eq!(claim_refused["__isError"], json!(false));
+    assert_eq!(claim_refused["ok"], json!(false));
+    assert_eq!(claim_refused["stage"], json!("claim_attribution"));
+    assert_eq!(claim_refused["fail_closed"], json!(true));
 }
 
 #[test]

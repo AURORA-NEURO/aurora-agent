@@ -1861,7 +1861,7 @@ export interface BenchmarkCompileResult extends JsonObject {
   oracle?: JsonObject | null;
   minimization?: JsonObject | null;
   confidence?: JsonObject;
-  limiting_stage?: JsonObject | null;
+  limiting_stage?: JsonValue;
   unmeasured_stages?: string[];
   probe?: JsonObject;
   stage?: string;

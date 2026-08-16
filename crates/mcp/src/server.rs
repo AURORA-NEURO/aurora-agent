@@ -9060,6 +9060,25 @@ impl Server {
         if claims.len() > 10_000 {
             return Err("claims may contain at most 10000 records".into());
         }
+        if claims.iter().any(|claim| {
+            matches!(
+                claim,
+                BenchmarkAssertion::Evidenced { citations, .. } if citations.is_empty()
+            )
+        }) {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/benchmark-compile/0.1",
+                "stage": "claim_attribution",
+                "trace_id": failing.trace_id,
+                "refusal": "an evidenced benchmark claim must cite an event, artifact, state diff, or counterfactual outcome",
+                "fail_closed": true,
+                "guarantees": [
+                    "uncited claims remain hypotheses and cannot enter backed failure findings",
+                    "the compiler does not repair or silently downgrade a caller's malformed evidence claim",
+                ],
+            }));
+        }
 
         let mut missing_observations = BTreeSet::new();
         let mut probe = |kept: &BTreeSet<String>| -> BenchmarkInterestSignature {
