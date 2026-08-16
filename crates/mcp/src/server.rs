@@ -123,9 +123,10 @@ use bioprism_metrics::{
 use bioprism_modalities::{
     analysis_unit as modality_analysis_unit, catalog::all as all_modalities,
     cites as modality_cites, independent_unit as modality_independent_unit,
+    report as modality_comparability_report,
     supported_claims as modality_supported_claims, supports_descriptor as modality_supports_descriptor,
     ClaimKind, EvaluationHorizon, EvidenceTier, LiteratureClaim, Modality, ModalityDescriptor,
-    ModalityTransport, Resolution, TransportKind,
+    ModalMeasurement, ModalityTransport, Resolution, TransportKind,
 };
 use bioprism_mutation::{
     generate as generate_mutations, measure as measure_diversity, standard_suite,
@@ -1207,6 +1208,7 @@ impl Server {
             "modality_catalog" => self.modality_catalog(&arguments),
             "modality_support_check" => self.modality_support_check(&arguments),
             "modality_transport_check" => self.modality_transport_check(&arguments),
+            "modality_comparability_check" => self.modality_comparability_check(&arguments),
             "literature_bind_check" => self.literature_bind_check(&arguments),
             "mutation_family" => self.mutation_family(&arguments),
             "prism_minimize" => self.prism_minimize(&arguments),
@@ -2579,6 +2581,74 @@ impl Server {
                 }))
             }
         }
+    }
+
+    fn modality_comparability_check(&self, arguments: &Value) -> Result<Value, String> {
+        let left: ModalMeasurement = serde_json::from_value(
+            arguments
+                .get("left")
+                .cloned()
+                .ok_or("left is required and must be a serialized ModalMeasurement")?,
+        )
+        .map_err(|error| format!("invalid left modal measurement: {error}"))?;
+        let right: ModalMeasurement = serde_json::from_value(
+            arguments
+                .get("right")
+                .cloned()
+                .ok_or("right is required and must be a serialized ModalMeasurement")?,
+        )
+        .map_err(|error| format!("invalid right modal measurement: {error}"))?;
+        let policy: bioprism_standards::ComparabilityPolicy = arguments
+            .get("policy")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid modality comparability policy: {error}"))?
+            .unwrap_or_default();
+        let report = modality_comparability_report(&left, &right, policy);
+        let verdict = serde_json::to_value(&report.verdict)
+            .map_err(|error| format!("cannot serialize cross-modal verdict: {error}"))?;
+        let digest = report
+            .digest()
+            .map_err(|error| format!("cannot digest cross-modal report: {error}"))?;
+        let side_summary = |measurement: &ModalMeasurement| {
+            json!({
+                "modality": measurement.modality(),
+                "measurand": measurement.measurand(),
+                "reported_at": measurement.reported_at,
+                "axis_status": measurement.axis_status(),
+                "measurement": &measurement.measurement,
+            })
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/modality-comparability-check/0.1",
+            "outcome_kind": if report.verdict.is_comparable() { "comparable" } else { "blocked" },
+            "comparable": report.verdict.is_comparable(),
+            "policy": policy,
+            "check_order": [
+                "measurand",
+                "reported resolution axis",
+                "status of that axis",
+                "everything in bioprism_standards::CHECK_ORDER",
+            ],
+            "left": side_summary(&left),
+            "right": side_summary(&right),
+            "report": report,
+            "verdict": verdict,
+            "report_sha256": digest.to_string(),
+            "guarantees": [
+                "measurand and modality-resolution checks run before delegated unit, frame, build, and ontology checks",
+                "a standards-comparable pair can still be blocked as different biological quantities",
+                "imputed axes are not silently treated as measured axes",
+                "a comparable verdict means category compatibility, not equality, correctness, power, or biological agreement",
+            ],
+            "limitations": [
+                "no measurement values are read or statistically compared",
+                "resolution-changing aggregation must be declared as a separate modality transport",
+                "the standards report is absent when the modality layer blocks before delegation",
+            ],
+        }))
     }
 
     fn literature_bind_check(&self, arguments: &Value) -> Result<Value, String> {
@@ -17834,7 +17904,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "biological_domains",
             "domains": ["BioIR", "oncology", "modalities", "specimen lineage", "reference worlds"],
             "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
-            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "modality_support_check", "modality_transport_check", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
+            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "modality_support_check", "modality_transport_check", "modality_comparability_check", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18198,6 +18268,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "claims": { "type": "array", "maxItems": 20, "description": "Optional ClaimKind values to compare before and after applying the transport." }
                 },
                 "required": ["from", "to", "axis", "transport"]
+            }
+        }),
+        json!({
+            "name": "modality_comparability_check",
+            "description": "Compare two serialized ModalMeasurement values through the modality-aware comparability kernel before delegating to units, frames, builds, and ontology standards. It preserves measurand, reported-axis, imputed-versus-measured, and standards refusals, carries caveats and a report digest, and never treats category compatibility as equality or biological agreement.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "left": { "type": "object", "description": "Serialized ModalMeasurement with a modality descriptor, reported resolution, and standards Measurement." },
+                    "right": { "type": "object", "description": "Serialized ModalMeasurement to compare against left." },
+                    "policy": { "type": ["object", "null"], "description": "Optional bioprism-standards ComparabilityPolicy; {require_bound_terms: true} is strict." }
+                },
+                "required": ["left", "right"]
             }
         }),
         json!({

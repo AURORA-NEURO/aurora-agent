@@ -554,6 +554,12 @@ invent defaults:
   scope-mapping evidence, post-transport descriptors, and before/after claim-support rows. The
   parser keeps an inverse separate from value recovery and never treats a declaration audit as a
   computation. See [`docs/MODALITY_TRANSPORT_CHECK.md`](MODALITY_TRANSPORT_CHECK.md).
+- `ModalityComparabilityCheckArgs` and `modality_comparability_check(...)` compare serialized
+  `ModalMeasurement` values through the modality-aware kernel before standards delegation.
+  `ModalityComparabilityCheckReport` keeps measurand, resolution, imputation, standards refusals,
+  caveats, and the canonical report digest visible; a comparable verdict means category
+  compatibility, not equality or biological agreement. See
+  [`docs/MODALITY_COMPARABILITY_CHECK.md`](MODALITY_COMPARABILITY_CHECK.md).
 - `HubSearchArgs` and `hub_search(...)` preserve caller-supplied federation, catalog, and exact
   facet query declarations under the server's catalog/release/result bounds. `HubSearchReport`
   types every match, non-empty facet explanation, near miss, trust tier, namespace authority,

@@ -54,7 +54,8 @@ use bioprism_mcp::{
 };
 use bioprism_modalities::{
     ClaimKind as ModalityClaimKind, EvidenceTier as LiteratureEvidenceTier,
-    EvaluationHorizon, LiteratureClaim, RetractionStatus, SourceProvenance,
+    EvaluationHorizon, LiteratureClaim, Modality, ModalMeasurement, Resolution,
+    RetractionStatus, SourceProvenance,
 };
 use bioprism_megafactory::{
     AccessTier as PlacementAccessTier, Attestation, Locale, TrustDomain, WorkRequest, WorkerProfile,
@@ -113,7 +114,7 @@ use bioprism_sdk::{
     AbiGrade, Capability, CapabilityKind, Determinism, PluginManifest, Priority, RegistryPolicy,
 };
 use bioprism_section::OracleStatus;
-use bioprism_standards::{Measurement, Quantity, Unit};
+use bioprism_standards::{Measurement, OntologyId, Quantity, TermBinding, Unit};
 use bioprism_stewardship::id::Actor;
 use bioprism_stewardship::review::{
     full_corpus, EvaluatorRevision, Finding as StewardshipFinding, ReviewDimension, ReviewRecord,
@@ -306,7 +307,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 129);
+    assert_eq!(tools.len(), 130);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1357,6 +1358,51 @@ fn modality_transport_check_preserves_loss_fidelity_and_support_changes() {
     assert_eq!(refused["outcome_kind"], json!("refused"));
     assert_eq!(refused["constructed"], json!(false));
     assert_eq!(refused["transport_evidence"]["refusal_kind"], json!("unstated_basis"));
+}
+
+#[test]
+fn modality_comparability_check_blocks_category_errors_before_standards() {
+    let term = TermBinding::exact(
+        "TP53",
+        OntologyId::parse("HGNC:11998", "2026-01").unwrap(),
+    )
+    .unwrap();
+    let rna = ModalMeasurement::new(
+        bioprism_modalities::descriptor(Modality::BulkTranscriptomics),
+        Resolution::Population,
+        Measurement::scalar("RNA abundance", Quantity::parse(1.0, "1").unwrap()).of(term.clone()),
+    );
+    let protein = ModalMeasurement::new(
+        bioprism_modalities::descriptor(Modality::Proteomics),
+        Resolution::Population,
+        Measurement::scalar("protein abundance", Quantity::parse(1.0, "1").unwrap()).of(term),
+    );
+    let blocked = call(
+        &mut server(),
+        "modality_comparability_check",
+        json!({
+            "left": serde_json::to_value(&rna).unwrap(),
+            "right": serde_json::to_value(&protein).unwrap()
+        }),
+    );
+    assert_eq!(blocked["ok"], json!(true));
+    assert_eq!(blocked["outcome_kind"], json!("blocked"));
+    assert_eq!(blocked["comparable"], json!(false));
+    assert_eq!(blocked["report"]["verdict"]["reason"]["blocked_by"], json!("measurand_mismatch"));
+    assert_eq!(blocked["report"]["standards"], Value::Null);
+    assert_eq!(blocked["report_sha256"].as_str().unwrap().len(), 64);
+
+    let comparable = call(
+        &mut server(),
+        "modality_comparability_check",
+        json!({
+            "left": serde_json::to_value(&rna).unwrap(),
+            "right": serde_json::to_value(&rna).unwrap(),
+            "policy": {"require_bound_terms": true}
+        }),
+    );
+    assert_eq!(comparable["outcome_kind"], json!("comparable"));
+    assert!(comparable["report"]["standards"].is_object());
 }
 
 #[test]
@@ -4092,12 +4138,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(129));
-    assert_eq!(result["advertised_tool_count"], json!(129));
+    assert_eq!(result["unique_catalog_tools"], json!(130));
+    assert_eq!(result["advertised_tool_count"], json!(130));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(129));
-    assert_eq!(result["schema_quality"]["valid"], json!(129));
+    assert_eq!(result["schema_quality"]["checked"], json!(130));
+    assert_eq!(result["schema_quality"]["valid"], json!(130));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

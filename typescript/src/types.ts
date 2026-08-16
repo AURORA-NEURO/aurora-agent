@@ -3800,6 +3800,30 @@ export interface ModalityTransportCheckResult extends JsonObject {
   limitations?: string[];
 }
 
+export type ModalityComparabilityOutcomeKind = "comparable" | "blocked";
+
+export interface ModalityComparabilityCheckArgs extends JsonObject {
+  left: JsonObject;
+  right: JsonObject;
+  policy?: JsonObject | null;
+}
+
+export interface ModalityComparabilityCheckResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/modality-comparability-check/0.1";
+  outcome_kind: ModalityComparabilityOutcomeKind;
+  comparable: boolean;
+  policy: JsonObject;
+  check_order: string[];
+  left: JsonObject;
+  right: JsonObject;
+  report: JsonObject;
+  verdict: JsonObject;
+  report_sha256: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface LineageAuditArgs extends JsonObject {
   registry: JsonObject;
   max_items?: number;

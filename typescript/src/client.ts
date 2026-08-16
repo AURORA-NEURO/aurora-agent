@@ -50,6 +50,8 @@ import type {
   ModalitySupportCheckResult,
   ModalityTransportCheckArgs,
   ModalityTransportCheckResult,
+  ModalityComparabilityCheckArgs,
+  ModalityComparabilityCheckResult,
   LineageAuditArgs,
   LineageAuditResult,
   PreanalyticApplyArgs,
@@ -600,6 +602,10 @@ export class ApiClient {
 
   async modalityTransportCheck(args: ModalityTransportCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ModalityTransportCheckResult>> {
     return this.callTool<ModalityTransportCheckResult>("modality_transport_check", args, options);
+  }
+
+  async modalityComparabilityCheck(args: ModalityComparabilityCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ModalityComparabilityCheckResult>> {
+    return this.callTool<ModalityComparabilityCheckResult>("modality_comparability_check", args, options);
   }
 
   async lineageAudit(args: LineageAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LineageAuditResult>> {

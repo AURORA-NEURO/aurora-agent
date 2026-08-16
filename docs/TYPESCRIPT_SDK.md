@@ -325,6 +325,10 @@ exact-versus-estimated fidelity, scope-mapping checks, invertibility refusals, p
 resolution, and optional claim-support deltas. The client exposes structural transport evidence
 without implying moved values, validated references, or recovery of discarded information. See
 [`docs/MODALITY_TRANSPORT_CHECK.md`](MODALITY_TRANSPORT_CHECK.md).
+`modalityComparabilityCheck` returns `ModalityComparabilityCheckResult` with modality-first
+measurand and resolution checks, optional delegated standards evidence, typed blocked reasons, and
+a canonical report digest. The client keeps standards comparability separate from biological
+equality, calibration, or agreement. See [`docs/MODALITY_COMPARABILITY_CHECK.md`](MODALITY_COMPARABILITY_CHECK.md).
 `hubSearch` returns `HubSearchResult` with typed exact-facet matches, required `why` evidence,
 near-miss exclusions, trust tier, authority provenance, freshness variants, and explicit bounded
 truncation. Federation and catalog values remain JSON inputs because the Rust hubapi owns their

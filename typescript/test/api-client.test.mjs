@@ -1497,6 +1497,37 @@ test("client exposes typed modality transport loss and inverse evidence", async 
   assert.equal(result.mcp.result.structuredContent.claims[0].support_lost, true);
 });
 
+test("client exposes modality-aware comparability refusals and report digests", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async () => jsonResponse({
+      ok: true,
+      tool: "modality_comparability_check",
+      request_id: "comparability-1",
+      mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/modality-comparability-check/0.1",
+        outcome_kind: "blocked",
+        comparable: false,
+        policy: {},
+        check_order: ["measurand", "reported resolution axis", "status of that axis"],
+        left: { modality: "bulk_transcriptomics", measurand: "RNA abundance" },
+        right: { modality: "proteomics", measurand: "protein abundance" },
+        report: { verdict: { comparable: false } },
+        verdict: { reason: { blocked_by: "measurand_mismatch" } },
+        report_sha256: "a".repeat(64),
+      } } },
+    }),
+  });
+  const result = await client.modalityComparabilityCheck({
+    left: { descriptor: {}, reported_at: "population", measurement: {} },
+    right: { descriptor: {}, reported_at: "population", measurement: {} },
+  });
+  assert.equal(result.mcp.result.structuredContent.outcome_kind, "blocked");
+  assert.equal(result.mcp.result.structuredContent.verdict.reason.blocked_by, "measurand_mismatch");
+  assert.equal(result.mcp.result.structuredContent.report_sha256.length, 64);
+});
+
 test("client parses cursor SSE and validates webhook mutations", async () => {
   const client = new ApiClient({
     baseUrl: "https://example.test",

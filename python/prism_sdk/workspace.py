@@ -221,6 +221,7 @@ from .oncoworlds import (
 from .literature import LiteratureBindCheckArgs, LiteratureBindCheckReport, literature_bind_check_report
 from .modality import ModalitySupportCheckArgs, ModalitySupportCheckReport, modality_support_check_report
 from .transport import ModalityTransportCheckArgs, ModalityTransportCheckReport, modality_transport_check_report
+from .comparability import ModalityComparabilityCheckArgs, ModalityComparabilityCheckReport, modality_comparability_check_report
 from .stress import (
     StressProfileArgs,
     StressProfileReport,
@@ -1553,6 +1554,19 @@ class Workspace:
         request: ModalityTransportCheckArgs | Mapping[str, Any],
     ) -> ModalityTransportCheckReport:
         return modality_transport_check_report(self.modality_transport_check(request))
+
+    def modality_comparability_check(
+        self,
+        request: ModalityComparabilityCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ModalityComparabilityCheckArgs) else ModalityComparabilityCheckArgs.from_wire(request)
+        return self.tool("modality_comparability_check", normalized.to_mcp_arguments())
+
+    def modality_comparability_check_report(
+        self,
+        request: ModalityComparabilityCheckArgs | Mapping[str, Any],
+    ) -> ModalityComparabilityCheckReport:
+        return modality_comparability_check_report(self.modality_comparability_check(request))
 
     def hub_search(
         self,
@@ -3660,6 +3674,19 @@ class AsyncWorkspace:
         request: ModalityTransportCheckArgs | Mapping[str, Any],
     ) -> ModalityTransportCheckReport:
         return modality_transport_check_report(await self.modality_transport_check(request))
+
+    async def modality_comparability_check(
+        self,
+        request: ModalityComparabilityCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ModalityComparabilityCheckArgs) else ModalityComparabilityCheckArgs.from_wire(request)
+        return await self.tool("modality_comparability_check", normalized.to_mcp_arguments())
+
+    async def modality_comparability_check_report(
+        self,
+        request: ModalityComparabilityCheckArgs | Mapping[str, Any],
+    ) -> ModalityComparabilityCheckReport:
+        return modality_comparability_check_report(await self.modality_comparability_check(request))
 
     async def hub_search(
         self,

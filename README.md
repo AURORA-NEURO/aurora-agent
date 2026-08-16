@@ -336,8 +336,8 @@ The same server exposes the broader workspace: `world_validate` checks a world b
 `context_compare` runs the equal-engineering baseline panel, `bioworlds_catalog` runs the reference
 vertical slices, `modality_catalog` exposes assay resolution and failure-mode contracts,
 `modality_support_check` evaluates typed claim eligibility and analysis-unit independence across
-the 17 modality families, while `modality_transport_check` reports loss, fidelity, invertibility,
-and before/after support without moving values,
+the 17 modality families; `modality_transport_check` reports loss and fidelity, and
+`modality_comparability_check` preserves modality-first refusals,
 and `literature_bind_check` binds source claims to typed populations and historical horizons while
 keeping citation support separate from biological measurement support; reviews cannot be silently
 laundered into primary evidence, unstated populations refuse, and flagged sources require a

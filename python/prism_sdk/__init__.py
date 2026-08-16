@@ -1005,6 +1005,13 @@ from .transport import (
     ModalityTransportCheckReport,
     modality_transport_check_report,
 )
+from .comparability import (
+    MODALITY_COMPARABILITY_OUTCOME_KINDS,
+    MODALITY_COMPARABILITY_SCHEMA,
+    ModalityComparabilityCheckArgs,
+    ModalityComparabilityCheckReport,
+    modality_comparability_check_report,
+)
 from .preanalytic import (
     PREANALYTIC_RESPONSES,
     PREANALYTIC_STAGES,
@@ -2319,5 +2326,10 @@ __all__ = [
     "ModalityTransportCheckArgs",
     "ModalityTransportCheckReport",
     "modality_transport_check_report",
+    "MODALITY_COMPARABILITY_SCHEMA",
+    "MODALITY_COMPARABILITY_OUTCOME_KINDS",
+    "ModalityComparabilityCheckArgs",
+    "ModalityComparabilityCheckReport",
+    "modality_comparability_check_report",
     "__version__",
 ]
