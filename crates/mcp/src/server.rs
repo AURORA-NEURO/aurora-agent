@@ -31,15 +31,19 @@ use bioprism_benchcompiler::{
     analyse as analyse_benchmark, boundaries as benchmark_boundaries,
     assess_contamination as benchmark_assess_contamination,
     assign_holdout as benchmark_assign_holdout, calibrate as benchmark_calibrate,
+    contrast as benchmark_contrast,
     deduplicate as benchmark_deduplicate, effective_diversity as benchmark_effective_diversity,
     episodes as benchmark_episodes, failure_card as benchmark_failure_card,
     repetitions as benchmark_repetitions, Assertion as BenchmarkAssertion,
     BenchInstance as BenchmarkBenchInstance, CandidateAction as BenchmarkCandidateAction,
     CandidateActionSet as BenchmarkCandidateActionSet, ContaminationRisk as BenchmarkContaminationRisk,
     ExposureLedger as BenchmarkExposureLedger, Instance as BenchmarkInstance,
-    LeakProbe as BenchmarkLeakProbe, PanelRun as BenchmarkPanelRun,
+    ExpectedResponse as BenchmarkExpectedResponse, Intervention as BenchmarkIntervention,
+    LeakProbe as BenchmarkLeakProbe, NoRealismReview as BenchmarkNoRealismReview,
+    PanelRun as BenchmarkPanelRun,
     ConstraintRecord as BenchmarkConstraintRecord,
 };
+use bioprism_benchcompiler::counterfactual::pair as benchmark_counterfactual_pair;
 use bioprism_bioethics::action::{refer as refer_physical_action, ActionPlan, Authorisation};
 use bioprism_bioethics::dualuse::{refer as refer_dual_use, CapabilityRelease};
 use bioprism_bioethics::humansubject::{screen as screen_human_subject, StudyDescription};
@@ -1339,6 +1343,7 @@ impl Server {
             "benchmark_trace_analyze" => self.benchmark_trace_analyze(&arguments),
             "benchmark_decision_audit" => self.benchmark_decision_audit(&arguments),
             "benchmark_integrity_audit" => self.benchmark_integrity_audit(&arguments),
+            "benchmark_counterfactual_check" => self.benchmark_counterfactual_check(&arguments),
             "pack_catalogue" => self.pack_catalogue(&arguments),
             "pack_health_assess" => self.pack_health_assess(&arguments),
             "foundation_contract_check" => self.foundation_contract_check(&arguments),
@@ -8684,6 +8689,114 @@ impl Server {
                 "unmeasured calibration is distinct from universal failure, and safety vetoes remain labelled rather than pruned",
                 "effective diversity counts independent (parent, mutation family, oracle signature) classes rather than raw instance volume",
                 "bounded projections carry omitted counts and this endpoint does not discover publication, run leak probes, fit difficulty models, or compute semantic similarity",
+            ],
+        }))
+    }
+
+    fn benchmark_counterfactual_check(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_source = arguments
+            .get("source")
+            .cloned()
+            .ok_or("source is required and must be a serialized DecisionCell")?;
+        let raw_followup = arguments
+            .get("followup")
+            .cloned()
+            .ok_or("followup is required and must be a serialized DecisionCell")?;
+        let raw_intervention = arguments
+            .get("intervention")
+            .cloned()
+            .ok_or("intervention is required and must be a serialized Intervention")?;
+        let raw_expected = arguments
+            .get("expected")
+            .cloned()
+            .ok_or("expected is required and must be an ExpectedResponse")?;
+        let source_verdict = arguments
+            .get("source_verdict")
+            .and_then(Value::as_str)
+            .ok_or("source_verdict is required and must be a string")?;
+        let followup_verdict = arguments
+            .get("followup_verdict")
+            .and_then(Value::as_str)
+            .ok_or("followup_verdict is required and must be a string")?;
+        if source_verdict.is_empty() || followup_verdict.is_empty() {
+            return Err("source_verdict and followup_verdict must not be empty".into());
+        }
+
+        let encoded = serde_json::to_vec(&json!({
+            "source": raw_source.clone(),
+            "followup": raw_followup.clone(),
+            "intervention": raw_intervention.clone(),
+            "expected": raw_expected.clone(),
+            "source_verdict": source_verdict,
+            "followup_verdict": followup_verdict,
+        }))
+        .map_err(|error| format!("cannot measure counterfactual input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("counterfactual input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let source: bioprism_prism::DecisionCell = serde_json::from_value(raw_source)
+            .map_err(|error| format!("invalid source DecisionCell: {error}"))?;
+        let followup: bioprism_prism::DecisionCell = serde_json::from_value(raw_followup)
+            .map_err(|error| format!("invalid followup DecisionCell: {error}"))?;
+        let intervention: BenchmarkIntervention = serde_json::from_value(raw_intervention)
+            .map_err(|error| format!("invalid Intervention: {error}"))?;
+        let expected: BenchmarkExpectedResponse = serde_json::from_value(raw_expected)
+            .map_err(|error| format!("invalid ExpectedResponse: {error}"))?;
+        let mut no_realism_review = BenchmarkNoRealismReview;
+        let pair = match benchmark_counterfactual_pair(
+            source,
+            followup,
+            intervention,
+            expected,
+            &mut no_realism_review,
+            false,
+        ) {
+            Ok(pair) => pair,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/benchmark-counterfactual/0.1",
+                    "stage": "matched_pair",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "allowed_cell_fields": bioprism_benchcompiler::CELL_FIELDS,
+                    "guarantees": [
+                        "a pair is refused unless the source and follow-up have distinct ids and a non-null intervention",
+                        "every changed cell field must be declared by the intervention",
+                        "absence of a runtime/domain realism validator is represented as an explicit limitation, never as a realism pass",
+                    ],
+                }))
+            }
+        };
+        let outcome = benchmark_contrast(&pair, source_verdict, followup_verdict);
+        let satisfied = matches!(
+            &outcome,
+            bioprism_benchcompiler::ContrastOutcome::AsPredicted
+        );
+        let source_digest = pair.source.digest().as_str().to_string();
+        let followup_digest = pair.followup.digest().as_str().to_string();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/benchmark-counterfactual/0.1",
+            "pair": pair,
+            "outcome": outcome,
+            "satisfied": satisfied,
+            "source_verdict": source_verdict,
+            "followup_verdict": followup_verdict,
+            "cell_digests": {
+                "source": source_digest,
+                "followup": followup_digest,
+            },
+            "allowed_cell_fields": bioprism_benchcompiler::CELL_FIELDS,
+            "guarantees": [
+                "the pair differs only in the intervention-declared fields",
+                "contrast grades the candidate response against the declared invariant or must-change expectation",
+                "source and follow-up cell contracts remain set-valued and digest-bound",
+            ],
+            "limitations": [
+                "this endpoint validates and contrasts caller-constructed cells; it does not apply an intervention or execute a world",
+                "realism_reviewed is false because the MCP boundary has no domain validator; caller-side realism evidence remains required",
             ],
         }))
     }
@@ -18589,7 +18702,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "trajectory_and_decision_cells",
             "domains": ["JSONL trajectory ingestion", "OTLP JSON span ingestion", "semantic-loss accounting", "divergence localization", "decision segmentation", "review-gated cell proposals"],
             "crates": ["bioprism-trace", "bioprism-prism", "bioprism-benchcompiler"],
-            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit"],
+            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18605,7 +18718,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "benchmark_pack_portfolio",
             "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
             "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
-            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "mutation_family", "scale_family_split_verify"],
+            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "mutation_family", "scale_family_split_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18621,7 +18734,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "mutation_and_causal_discovery",
             "domains": ["metamorphic testing", "causal divergence", "robustness"],
             "crates": ["bioprism-mutation", "bioprism-benchcompiler", "bioprism-stress", "bioprism-influence"],
-            "mcp_tools": ["mutation_family", "stress_profile", "stress_report", "influence_analyze"],
+            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "stress_profile", "stress_report", "influence_analyze"],
             "cli_entrypoints": ["mutate family"],
             "status": "available"
         },
@@ -20354,6 +20467,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows per bounded dedup, holdout, contamination, and calibration projection; defaults to 100." }
                 },
                 "required": ["instances"]
+            }
+        }),
+        json!({
+            "name": "benchmark_counterfactual_check",
+            "description": "Validate a matched pair of serialized DecisionCells under one declared intervention and grade a candidate's source/follow-up verdicts against an invariant or must-change response. Refuses undeclared field movement, null interventions, colliding cells, and incoherent caller states; explicitly reports that no domain realism validator or world execution ran.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source": { "type": "object", "description": "Serialized source bioprism-prism DecisionCell." },
+                    "followup": { "type": "object", "description": "Serialized follow-up DecisionCell; all movement must be declared by intervention.changes." },
+                    "intervention": { "type": "object", "description": "Serialized bioprism-benchcompiler Intervention with target, from/to values, and changed cell fields." },
+                    "expected": { "type": "object", "description": "Serialized ExpectedResponse: invariant or must_change with rationale and accepted target verdicts." },
+                    "source_verdict": { "type": "string", "minLength": 1, "description": "Candidate verdict on the source cell." },
+                    "followup_verdict": { "type": "string", "minLength": 1, "description": "Candidate verdict on the follow-up cell." }
+                },
+                "required": ["source", "followup", "intervention", "expected", "source_verdict", "followup_verdict"]
             }
         }),
         json!({

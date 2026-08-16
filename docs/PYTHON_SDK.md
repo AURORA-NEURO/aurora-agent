@@ -134,6 +134,11 @@ invent defaults:
   safety-veto labels, and effective diversity through the same facades. The typed report keeps
   admissible-clean counts separate from unassessed or leaked instances, raw volume separate from
   effective sample size, and every bounded row projection's omission count visible.
+- `BenchmarkCounterfactualCheckArgs` and `benchmark_counterfactual_check_report(...)` validate
+  one-factor `DecisionCell` pairs and grade invariant/must-change contrast outcomes. The report
+  preserves changed fields, source/follow-up digests, the explicit no-realism-review limitation,
+  and fail-closed unmatched-pair refusals through every sync/async MCP, HTTP, and workspace
+  facade.
 - `FoundationContractCheckArgs` and `foundation_contract_check_report(...)` type the foundation
   declaration gate across sync MCP, async MCP, and HTTP. `FoundationContractGateReport`,
   `FoundationParentRelationReport`, `FoundationEnvelopeReport`, `FoundationWorldReport`, and

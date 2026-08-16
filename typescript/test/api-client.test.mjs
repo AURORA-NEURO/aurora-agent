@@ -204,6 +204,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         effective_diversity: { instances: 3, parents: 2, families: 2, signatures: 2, equivalence_classes: 2, inflation_ratio: 1.5, caveat: "independent classes" },
         guarantees: ["unmeasured is not zero"],
       } } } });
+      if (path === "/v1/tools/benchmark_counterfactual_check") return jsonResponse({ ok: true, tool: "benchmark_counterfactual_check", request_id: "r20d", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/benchmark-counterfactual/0.1",
+        pair: { differing_fields: ["query"], realism_reviewed: false },
+        outcome: { outcome: "as_predicted" },
+        satisfied: true,
+        source_verdict: "pass",
+        followup_verdict: "pass",
+        cell_digests: { source: "a".repeat(64), followup: "b".repeat(64) },
+        allowed_cell_fields: ["world", "query", "acceptable_verdicts", "required_witnesses", "require_protected_closure"],
+        guarantees: ["one factor"],
+        limitations: ["no realism validator"],
+      } } } });
       if (path === "/v1/tools/foundation_contract_check") return jsonResponse({ ok: true, tool: "foundation_contract_check", request_id: "r21", mcp: { result: { structuredContent: {
         ok: true,
         verdict: "refused",
@@ -1189,6 +1202,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(integrityAudit.mcp.result.structuredContent.schema, "bioprism-mcp/benchmark-integrity-audit/0.1");
   assert.equal(integrityAudit.mcp.result.structuredContent.contamination.admissible, 1);
   assert.equal(integrityAudit.mcp.result.structuredContent.effective_diversity.equivalence_classes, 2);
+  const counterfactual = await client.benchmarkCounterfactualCheck({
+    source: { cell_id: "source" },
+    followup: { cell_id: "followup" },
+    intervention: { factor: "fresh evidence", target: "evidence_availability", from: false, to: true, changes: ["query"] },
+    expected: { expect: "invariant", rationale: "same verdict" },
+    source_verdict: "pass",
+    followup_verdict: "pass",
+  });
+  assert.equal(counterfactual.mcp.result.structuredContent.outcome.outcome, "as_predicted");
+  assert.equal(counterfactual.mcp.result.structuredContent.pair.realism_reviewed, false);
   const foundation = await client.foundationContractCheck({
     contract: { id: "fbc:test:001", intent: "check", falsifiers: ["disagree"], actions: ["inspect"], claim_schema: "typed", reference_standard: "fixture", terminations: ["success"] },
     claim: "real_treatment_effect",

@@ -245,6 +245,7 @@ from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_repor
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
+from .benchmark_counterfactual import BenchmarkCounterfactualCheckArgs, BenchmarkCounterfactualCheckReport, benchmark_counterfactual_check_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
@@ -2076,6 +2077,26 @@ class Workspace:
         """Return typed portfolio integrity evidence."""
 
         return benchmark_integrity_audit_report(self.benchmark_integrity_audit(request))
+
+    def benchmark_counterfactual_check(
+        self,
+        request: BenchmarkCounterfactualCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate and contrast matched DecisionCells through the workspace MCP client."""
+
+        normalized = request if isinstance(request, BenchmarkCounterfactualCheckArgs) else BenchmarkCounterfactualCheckArgs.from_wire(request)
+        result = self.client.call_tool("benchmark_counterfactual_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def benchmark_counterfactual_check_report(
+        self,
+        request: BenchmarkCounterfactualCheckArgs | Mapping[str, Any],
+    ) -> BenchmarkCounterfactualCheckReport:
+        """Return typed matched-pair and contrast evidence."""
+
+        return benchmark_counterfactual_check_report(self.benchmark_counterfactual_check(request))
 
     def foundation_contract_check(
         self,
@@ -4239,6 +4260,26 @@ class AsyncWorkspace:
         """Return typed async portfolio integrity evidence."""
 
         return benchmark_integrity_audit_report(await self.benchmark_integrity_audit(request))
+
+    async def benchmark_counterfactual_check(
+        self,
+        request: BenchmarkCounterfactualCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate and contrast matched DecisionCells through the async workspace MCP client."""
+
+        normalized = request if isinstance(request, BenchmarkCounterfactualCheckArgs) else BenchmarkCounterfactualCheckArgs.from_wire(request)
+        result = await self.client.call_tool("benchmark_counterfactual_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def benchmark_counterfactual_check_report(
+        self,
+        request: BenchmarkCounterfactualCheckArgs | Mapping[str, Any],
+    ) -> BenchmarkCounterfactualCheckReport:
+        """Return typed async counterfactual evidence."""
+
+        return benchmark_counterfactual_check_report(await self.benchmark_counterfactual_check(request))
 
     async def foundation_contract_check(
         self,

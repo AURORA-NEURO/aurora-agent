@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 133);
+    assert_eq!(tools.len(), 134);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(133));
-    assert_eq!(result["advertised_tool_count"], json!(133));
+    assert_eq!(result["unique_catalog_tools"], json!(134));
+    assert_eq!(result["advertised_tool_count"], json!(134));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(133));
-    assert_eq!(result["schema_quality"]["valid"], json!(133));
+    assert_eq!(result["schema_quality"]["checked"], json!(134));
+    assert_eq!(result["schema_quality"]["valid"], json!(134));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -7863,6 +7863,81 @@ fn benchmark_integrity_audit_keeps_duplicates_leaks_holdouts_and_effective_denom
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("semantic similarity")));
+}
+
+#[test]
+fn benchmark_counterfactual_check_enforces_one_factor_matching_and_grades_contrast() {
+    let source = json!({
+        "schema_version": "bioprism-decision-cell/0.1",
+        "cell_id": "cell-source",
+        "decision_point": "choose evidence",
+        "world": { "locator": "world-a", "sha256": "a".repeat(64) },
+        "query": { "locator": "query-a", "sha256": "b".repeat(64) },
+        "acceptable_verdicts": ["pass"],
+        "required_witnesses": ["evidence"],
+        "require_protected_closure": true
+    });
+    let followup = json!({
+        "schema_version": "bioprism-decision-cell/0.1",
+        "cell_id": "cell-followup",
+        "decision_point": "choose evidence",
+        "world": { "locator": "world-a", "sha256": "a".repeat(64) },
+        "query": { "locator": "query-b", "sha256": "c".repeat(64) },
+        "acceptable_verdicts": ["pass"],
+        "required_witnesses": ["evidence"],
+        "require_protected_closure": true
+    });
+    let result = call(
+        &mut server(),
+        "benchmark_counterfactual_check",
+        json!({
+            "source": source,
+            "followup": followup,
+            "intervention": {
+                "factor": "fresh evidence",
+                "target": "evidence_availability",
+                "from": { "available": false },
+                "to": { "available": true },
+                "changes": ["query"]
+            },
+            "expected": { "expect": "invariant", "rationale": "the correct verdict remains pass" },
+            "source_verdict": "pass",
+            "followup_verdict": "pass"
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["pair"]["differing_fields"], json!(["query"]));
+    assert_eq!(result["pair"]["realism_reviewed"], json!(false));
+    assert_eq!(result["outcome"]["outcome"], json!("as_predicted"));
+    assert_eq!(result["satisfied"], json!(true));
+    assert_eq!(result["cell_digests"]["source"].as_str().unwrap().len(), 64);
+
+    let mut mismatched_followup = followup;
+    mismatched_followup["acceptable_verdicts"] = json!(["abstain"]);
+    let refused = call(
+        &mut server(),
+        "benchmark_counterfactual_check",
+        json!({
+            "source": source,
+            "followup": mismatched_followup,
+            "intervention": {
+                "factor": "fresh evidence",
+                "target": "evidence_availability",
+                "from": { "available": false },
+                "to": { "available": true },
+                "changes": ["query"]
+            },
+            "expected": { "expect": "invariant", "rationale": "unchanged" },
+            "source_verdict": "pass",
+            "followup_verdict": "abstain"
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(false));
+    assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["stage"], json!("matched_pair"));
+    assert_eq!(refused["fail_closed"], json!(true));
+    assert!(refused["refusal"].as_str().unwrap().contains("not matched"));
 }
 
 #[test]

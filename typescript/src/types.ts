@@ -1785,6 +1785,32 @@ export interface BenchmarkIntegrityAuditResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface BenchmarkCounterfactualCheckArgs extends JsonObject {
+  source: JsonObject;
+  followup: JsonObject;
+  intervention: JsonObject;
+  expected: JsonObject;
+  source_verdict: string;
+  followup_verdict: string;
+}
+
+export interface BenchmarkCounterfactualCheckResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/benchmark-counterfactual/0.1";
+  pair?: JsonObject;
+  outcome?: { outcome: "as_predicted" | "spurious_sensitivity" | "missed_the_change" | "wrong_direction"; moved_to?: string; stayed_at?: string };
+  satisfied?: boolean;
+  source_verdict?: string;
+  followup_verdict?: string;
+  cell_digests?: { source: string; followup: string };
+  allowed_cell_fields?: string[];
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface FoundationContractCheckArgs extends JsonObject {
   contract: JsonObject;
   parent?: JsonObject;

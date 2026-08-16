@@ -203,6 +203,10 @@ deterministic holdout assignment, declared contamination, panel calibration, and
 diversity. It preserves clean-versus-unassessed/leaking counts, raw-versus-effective denominators,
 and bounded omission metadata without implying semantic deduplication, execution, or release
 readiness.
+`benchmarkCounterfactualCheck` returns `BenchmarkCounterfactualCheckResult` for matched
+`DecisionCell` pairs, one-factor field declarations, invariant/must-change response outcomes, and
+source/follow-up digests. Unmatched movement, no-realism-review status, execution nonclaims, and
+fail-closed refusals remain typed rather than flattened into a pass/fail score.
 `foundationContractCheck` returns typed `FoundationContractCheckResult` evidence with separate
 contract, parent-refinement, applicability/maturity, world-class, and transition-plane gates. A
 top-level `ok` transport result does not imply admission: callers must inspect the explicit

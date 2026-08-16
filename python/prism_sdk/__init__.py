@@ -455,6 +455,15 @@ from .benchmark_integrity import (
     BenchmarkIntegrityAuditReport,
     benchmark_integrity_audit_report,
 )
+from .benchmark_counterfactual import (
+    BENCHMARK_COUNTERFACTUAL_SCHEMA,
+    COUNTERFACTUAL_CELL_FIELDS,
+    COUNTERFACTUAL_OUTCOMES,
+    MAX_COUNTERFACTUAL_INPUT_BYTES,
+    BenchmarkCounterfactualCheckArgs,
+    BenchmarkCounterfactualCheckReport,
+    benchmark_counterfactual_check_report,
+)
 from .foundation import (
     COUNTERFACTUAL_CLAIMS,
     FOUNDATION_MAX_INPUT_BYTES,
@@ -1566,6 +1575,13 @@ __all__ = [
     "BenchmarkIntegrityAuditArgs",
     "BenchmarkIntegrityAuditReport",
     "benchmark_integrity_audit_report",
+    "BENCHMARK_COUNTERFACTUAL_SCHEMA",
+    "COUNTERFACTUAL_OUTCOMES",
+    "COUNTERFACTUAL_CELL_FIELDS",
+    "MAX_COUNTERFACTUAL_INPUT_BYTES",
+    "BenchmarkCounterfactualCheckArgs",
+    "BenchmarkCounterfactualCheckReport",
+    "benchmark_counterfactual_check_report",
     "FOUNDATION_MAX_INPUT_BYTES",
     "COUNTERFACTUAL_CLAIMS",
     "FOUNDATION_VERDICTS",
