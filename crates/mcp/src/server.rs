@@ -8812,6 +8812,7 @@ impl Server {
         if !policy.validate() {
             return Ok(json!({
                 "ok": false,
+                "schema": "bioprism-mcp/posterior-gate/0.1",
                 "stage": "credit_policy",
                 "refusal": "unsupported and contradicted credit ceilings must both be finite values in [0,1)",
                 "fail_closed": true
@@ -8822,6 +8823,7 @@ impl Server {
             Err(error) => {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/posterior-gate/0.1",
                     "stage": "posterior",
                     "refusal": error.to_string(),
                     "fail_closed": true
@@ -8869,6 +8871,7 @@ impl Server {
                 Err(error) => {
                     return Ok(json!({
                         "ok": false,
+                        "schema": "bioprism-mcp/posterior-gate/0.1",
                         "stage": "comparison_posterior",
                         "refusal": error.to_string(),
                         "fail_closed": true
@@ -8902,6 +8905,7 @@ impl Server {
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/posterior-gate/0.1",
             "schema_version": posterior.schema_version,
             "observations": observations.len(),
             "unprovenanced_observations": unprovenanced,

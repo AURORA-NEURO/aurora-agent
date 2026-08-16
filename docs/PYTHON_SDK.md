@@ -258,6 +258,12 @@ invent defaults:
   bootstrap evidence, withheld estimates, deterministic selection records, capability views,
   comparison refusals, and finished-state refusals. It never treats dispatch or a withheld estimate
   as evidence.
+- `PosteriorGateArgs` and `posterior_gate_report(...)` expose the clustered capability posterior,
+  rationale-bearing release scalar, and capability-wise dominance comparison across sync/async
+  MCP and HTTP. The typed projection preserves pass/outcome/credit axes, ICC and effective sample,
+  provenance gaps, vetoes, disputes, weak-evidence counters, gate terms and sensitivity, and
+  fail-closed `credit_policy`, `posterior`, and `comparison_posterior` refusals. See
+  [`docs/POSTERIOR_GATE.md`](POSTERIOR_GATE.md) for the full contract.
 - `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,

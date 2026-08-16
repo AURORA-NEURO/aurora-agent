@@ -78,6 +78,7 @@ from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_i
 from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
 from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
+from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
 from .oracle import (
     EvidenceTier,
@@ -2272,6 +2273,18 @@ class Workspace:
         normalized = request if isinstance(request, AdaptivePanelRunArgs) else AdaptivePanelRunArgs.from_wire(request)
         return adaptive_panel_report(self.tool("adaptive_panel", normalized.to_mcp_arguments()))
 
+    def posterior_gate(self, request: PosteriorGateArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Build a capability posterior and optional release/comparison projections through MCP."""
+
+        normalized = request if isinstance(request, PosteriorGateArgs) else PosteriorGateArgs.from_wire(request)
+        return self.tool("posterior_gate", normalized.to_mcp_arguments())
+
+    def posterior_gate_report(self, request: PosteriorGateArgs | Mapping[str, Any]) -> PosteriorGateReport:
+        """Return typed clustered capabilities, fail-closed gate state, and dominance evidence."""
+
+        normalized = request if isinstance(request, PosteriorGateArgs) else PosteriorGateArgs.from_wire(request)
+        return posterior_gate_report(self.tool("posterior_gate", normalized.to_mcp_arguments()))
+
 
 class AsyncWorkspace:
     """Async convenience facade mirroring :class:`Workspace`."""
@@ -4249,6 +4262,18 @@ class AsyncWorkspace:
 
         normalized = request if isinstance(request, AdaptivePanelRunArgs) else AdaptivePanelRunArgs.from_wire(request)
         return adaptive_panel_report((await self.client.call_tool("adaptive_panel", normalized.to_mcp_arguments())).require_ok())
+
+    async def posterior_gate(self, request: PosteriorGateArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.posterior_gate`."""
+
+        normalized = request if isinstance(request, PosteriorGateArgs) else PosteriorGateArgs.from_wire(request)
+        return (await self.client.call_tool("posterior_gate", normalized.to_mcp_arguments())).require_ok()
+
+    async def posterior_gate_report(self, request: PosteriorGateArgs | Mapping[str, Any]) -> PosteriorGateReport:
+        """Async typed posterior, release-gate, and comparison evidence."""
+
+        normalized = request if isinstance(request, PosteriorGateArgs) else PosteriorGateArgs.from_wire(request)
+        return posterior_gate_report((await self.client.call_tool("posterior_gate", normalized.to_mcp_arguments())).require_ok())
 
 
 def _developer_delivery_arguments(kwargs: Mapping[str, Any]) -> dict[str, Any]:

@@ -478,6 +478,26 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["abstentions are retained and costed but never counted as failures"],
         limitations: ["selection never executes candidates"],
       } } } });
+      if (path === "/v1/tools/posterior_gate") return jsonResponse({ ok: true, tool: "posterior_gate", request_id: "r15e", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/posterior-gate/0.1",
+        schema_version: "07.0.1",
+        observations: 4,
+        unprovenanced_observations: 2,
+        capabilities: {
+          "capability-a": {
+            capability: "capability-a",
+            pass_rate: { label: "pass", mean: 0.75, naive_instance_mean: 0.75, instances: 2, clusters: 2, largest_cluster: 1, icc: { icc: "not_applicable" }, effective_sample_size: 2, unknown_instances: 0, unknown_fraction: 0 },
+            credit: { label: "credit", mean: 0.75, naive_instance_mean: 0.75, instances: 2, clusters: 2, largest_cluster: 1, icc: { icc: "not_applicable" }, effective_sample_size: 2, unknown_instances: 0, unknown_fraction: 0 },
+            outcome_rate: { label: "outcome", mean: 0.9, naive_instance_mean: 0.9, instances: 2, clusters: 2, largest_cluster: 1, icc: { icc: "not_applicable" }, effective_sample_size: 2, unknown_instances: 0, unknown_fraction: 0 },
+            vetoes: [], disputed: 1, abstained: 0, optimistic_weak_evidence: 1, weakest_tier: "execution",
+          },
+        },
+        gate: { ok: true, value: { gate: "release-a", value: 0.75, formula: "weighted mean", rationale: "named release decision", terms: [["capability-a", 0.75, 1]], sensitivity: [["capability-a", 0.75]], weakest_tier: "execution", min_effective_sample: 2 } },
+        comparison: { ok: true, dominance: { dominance: "incomparable", better: ["capability-a"], worse: [], uncertain: ["capability-b"] }, tolerance: 0.01, min_effective: 2 },
+        guarantees: ["vectors remain separate from release scalars"],
+        limitations: ["point estimates are not posterior distributions"],
+      } } } });
       if (path === "/v1/tools/trace_otel_ingest") return jsonResponse({ ok: true, tool: "trace_otel_ingest", request_id: "r16", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/trace-otel-ingest/0.1",
@@ -871,6 +891,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   });
   const atlas = await client.atlasReport({ atlas: { ontology: {}, cells: {}, failures: [] }, max_items: 10 });
   const adaptive = await client.adaptivePanel({ panel: { config: {}, ledger: {} }, candidates: [{ instance: "inst-1", capability: "capability-a", parent: "parent-1", cost: 1 }], capability: "capability-a" });
+  const posterior = await client.posteriorGate({ observations: [{ capability: "capability-a", parent: "parent-1", result: { conclusion: "pass" } }], other_observations: [], tolerance: 0.01, min_effective: 2 });
   const otel = await client.traceOtelIngest({ trace_id: "otel-ts", otlp_json: '{"resourceSpans":[]}', include_events: true });
   assert.equal(catalog.mcp.result.structuredContent.workflow, "repository_catalog");
   assert.equal(bundle.mcp.result.structuredContent.policy, "exhaustive");
@@ -890,6 +911,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(adaptive.mcp.result.structuredContent.schema, "bioprism-mcp/adaptive-panel/0.1");
   assert.equal(adaptive.mcp.result.structuredContent.selection.value.record.chosen.instance, "inst-1");
   assert.equal(adaptive.mcp.result.structuredContent.capability.estimate, null);
+  assert.equal(posterior.mcp.result.structuredContent.schema, "bioprism-mcp/posterior-gate/0.1");
+  assert.equal(posterior.mcp.result.structuredContent.capabilities["capability-a"].pass_rate.effective_sample_size, 2);
+  assert.equal(posterior.mcp.result.structuredContent.gate.value.sensitivity[0][0], "capability-a");
+  assert.equal(posterior.mcp.result.structuredContent.comparison.dominance.dominance, "incomparable");
   assert.equal(otel.mcp.result.structuredContent.schema, "bioprism-mcp/trace-otel-ingest/0.1");
   assert.equal(otel.mcp.result.structuredContent.mapping.accepted_span_count, 1);
   assert.equal(otel.mcp.result.structuredContent.events[0].kind, "goal");

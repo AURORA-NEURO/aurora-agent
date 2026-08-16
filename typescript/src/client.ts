@@ -203,6 +203,8 @@ import type {
   AtlasReportResult,
   AdaptivePanelRunArgs,
   AdaptivePanelResult,
+  PosteriorGateArgs,
+  PosteriorGateResult,
   ToolCallPlan,
   ToolArguments,
   ToolsResponse,
@@ -412,6 +414,10 @@ export class ApiClient {
 
   async adaptivePanel(args: AdaptivePanelRunArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptivePanelResult>> {
     return this.callTool<AdaptivePanelResult>("adaptive_panel", args, options);
+  }
+
+  async posteriorGate(args: PosteriorGateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<PosteriorGateResult>> {
+    return this.callTool<PosteriorGateResult>("posterior_gate", args, options);
   }
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {

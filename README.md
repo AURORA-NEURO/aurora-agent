@@ -547,7 +547,8 @@ and refuses reportable estimates below coverage or stopping floors; the Python a
 preserve audit totals, coverage shortfalls, withheld estimates, clustered-versus-naive intervals,
 selection records, and comparison refusals. `posterior_gate` keeps
 capability-level posterior vectors separate from rationale-bearing release scalars, coverage
-floors, vetoes, and sensitivity. `oracle_combine` combines tiered judgements without majority
+floors, vetoes, and sensitivity; the Python and TypeScript SDKs preserve these layers and typed
+fail-closed refusals. `oracle_combine` combines tiered judgements without majority
 voting, retaining underdetermination, suppressed overrides, inadmissible evidence, and
 disagreement witnesses.
 `bioeval_reference_audit` validates reference mass normalization and reports distributed truth,

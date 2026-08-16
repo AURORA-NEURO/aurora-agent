@@ -261,6 +261,7 @@ from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_i
 from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
 from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
+from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
 
 
@@ -2225,6 +2226,17 @@ class ApiClient:
         """Return typed adaptive audit and selection evidence through HTTP."""
 
         return adaptive_panel_report(self.adaptive_panel(request))
+
+    def posterior_gate(self, request: PosteriorGateArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Build a capability posterior and optional release/comparison projections through HTTP."""
+
+        normalized = request if isinstance(request, PosteriorGateArgs) else PosteriorGateArgs.from_wire(request)
+        return self.call_tool("posterior_gate", normalized.to_mcp_arguments())
+
+    def posterior_gate_report(self, request: PosteriorGateArgs | Mapping[str, Any]) -> PosteriorGateReport:
+        """Return typed clustered capabilities and fail-closed gate/comparison evidence."""
+
+        return posterior_gate_report(self.posterior_gate(request))
 
     def fiber_compile(
         self,
@@ -4223,6 +4235,17 @@ class AsyncApiClient:
         """Return async typed adaptive audit and selection evidence through HTTP."""
 
         return adaptive_panel_report(await self.adaptive_panel(request))
+
+    async def posterior_gate(self, request: PosteriorGateArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async posterior gate projection through HTTP."""
+
+        normalized = request if isinstance(request, PosteriorGateArgs) else PosteriorGateArgs.from_wire(request)
+        return await self.call_tool("posterior_gate", normalized.to_mcp_arguments())
+
+    async def posterior_gate_report(self, request: PosteriorGateArgs | Mapping[str, Any]) -> PosteriorGateReport:
+        """Return async typed posterior, release-gate, and comparison evidence."""
+
+        return posterior_gate_report(await self.posterior_gate(request))
 
     async def fiber_compile(
         self,

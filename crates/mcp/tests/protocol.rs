@@ -4870,6 +4870,7 @@ fn posterior_gate_keeps_vector_and_release_scalar_separate() {
     );
 
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/posterior-gate/0.1"));
     assert_eq!(result["schema_version"], json!("07.0.1"));
     assert_eq!(
         result["capabilities"]["capability-a"]["pass_rate"]["mean"],

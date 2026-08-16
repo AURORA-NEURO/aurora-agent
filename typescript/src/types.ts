@@ -924,6 +924,103 @@ export interface AdaptivePanelResult extends JsonObject {
   limitations: string[];
 }
 
+export interface PosteriorGateArgs extends JsonObject {
+  observations: JsonObject[];
+  credit_policy?: JsonObject;
+  gate?: JsonObject;
+  other_observations?: JsonObject[];
+  tolerance?: number;
+  min_effective?: number;
+}
+
+export type PosteriorIccResult =
+  | { icc: "estimated"; value: number }
+  | { icc: "not_applicable" }
+  | { icc: "undefined"; reason: string };
+
+export interface PosteriorEstimateResult extends JsonObject {
+  label: string;
+  mean: number;
+  naive_instance_mean: number;
+  instances: number;
+  clusters: number;
+  largest_cluster: number;
+  icc: PosteriorIccResult;
+  effective_sample_size: number;
+  unknown_instances: number;
+  unknown_fraction: number;
+}
+
+export interface PosteriorVetoResult extends JsonObject {
+  kind: string;
+  detail: string;
+  evaluator: string;
+}
+
+export interface PosteriorCapabilityResult extends JsonObject {
+  capability: string;
+  pass_rate: PosteriorEstimateResult;
+  credit: PosteriorEstimateResult;
+  outcome_rate: PosteriorEstimateResult;
+  vetoes: PosteriorVetoResult[];
+  disputed: number;
+  abstained: number;
+  optimistic_weak_evidence: number;
+  weakest_tier: string;
+}
+
+export interface PosteriorGateScalarResult extends JsonObject {
+  gate: string;
+  value: number;
+  formula: string;
+  rationale: string;
+  terms: [string, number, number][];
+  sensitivity: [string, number][];
+  weakest_tier: string;
+  min_effective_sample: number;
+}
+
+export type PosteriorGateDecisionResult =
+  | null
+  | { ok: true; value: PosteriorGateScalarResult }
+  | { ok: false; refusal: string; fail_closed: true; guarantee?: string };
+
+export type PosteriorDominanceResult =
+  | { dominance: "dominates" }
+  | { dominance: "dominated_by" }
+  | { dominance: "equivalent" }
+  | { dominance: "incomparable"; better: string[]; worse: string[]; uncertain: string[] };
+
+export interface PosteriorComparisonResult extends JsonObject {
+  ok: true;
+  dominance: PosteriorDominanceResult;
+  tolerance: number;
+  min_effective: number;
+}
+
+export interface PosteriorGateSuccessResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-mcp/posterior-gate/0.1";
+  schema_version: string;
+  observations: number;
+  unprovenanced_observations: number;
+  capabilities: Record<string, PosteriorCapabilityResult>;
+  gate: PosteriorGateDecisionResult;
+  comparison: PosteriorComparisonResult | null;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface PosteriorGateRefusalResult extends JsonObject {
+  ok: false;
+  schema: "bioprism-mcp/posterior-gate/0.1";
+  stage: "credit_policy" | "posterior" | "comparison_posterior" | string;
+  refusal: string;
+  fail_closed: true;
+}
+
+export type PosteriorGateResult = PosteriorGateSuccessResult | PosteriorGateRefusalResult;
+
 export interface MetricsProfileAuditArgs extends JsonObject {
   vectors: JsonValue[];
   waived_dimensions?: string[];

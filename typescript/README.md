@@ -55,6 +55,10 @@ if (result.mcp.result?.isError) {
   evidence, inconsistency rows, bounded omissions, and fail-closed composite eligibility.
 - `adaptivePanel` returns typed clustered audit totals, coverage shortfalls, stopping and estimate
   evidence, deterministic candidate selection, comparisons, and refusal states.
+- `posteriorGate` returns the capability vector separately from an optional rationale-bearing
+  release scalar and capability-wise dominance comparison. Its types preserve clustered means,
+  ICC/effective sample, vetoes, provenance gaps, gate sensitivity, incomparable capabilities, and
+  fail-closed policy/coverage refusals. See [`docs/POSTERIOR_GATE.md`](../docs/POSTERIOR_GATE.md).
 - `ledgerIngest` keeps recorded, duplicate, and quarantined admission unions, causal releases,
   chain/clock evidence, temporal cuts, and digest-only latest-by-subject projections typed without
   turning the Fetch client into a durable event store.
