@@ -1692,6 +1692,70 @@ export interface BenchmarkTraceAnalysisResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface BenchmarkDecisionAuditArgs extends JsonObject {
+  trace: BenchmarkTraceArgs;
+  reference?: BenchmarkTraceArgs;
+  decision_step?: number;
+  actions?: JsonObject[];
+  constraints?: JsonObject[];
+  claims?: JsonObject[];
+  evaluator_dispute?: string;
+  max_items?: number;
+}
+
+export interface BenchmarkDecisionCoverageResult extends JsonObject {
+  total: number;
+  visible_at_decision_time: number;
+  validation_only: number;
+  feasible: number;
+  strong: number;
+  plausible_wrong_alternatives: number;
+  adequate: boolean;
+}
+
+export interface BenchmarkFailureCardResult extends JsonObject {
+  trace_id: string;
+  terminal_step: number;
+  blame: JsonObject;
+  recommended_cell_steps: number[];
+  findings: JsonObject[];
+  hypotheses: JsonObject[];
+  violated_constraints: JsonObject[];
+  alternative_explanations: string[];
+  missing_evidence: string[];
+  evidence_ratio: number;
+}
+
+export interface BenchmarkDecisionAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/benchmark-decision-audit/0.1";
+  trace_id?: string;
+  trace_digest?: string;
+  reference_trace_id?: string;
+  reference_digest?: string;
+  analysis?: BenchmarkCausalAnalysisResult;
+  analysis_omitted?: { ancestry: number; candidates: number };
+  decision?: {
+    selected_step: number;
+    causal_step?: number;
+    causal_alignment: "aligned" | "explicit_override";
+    event_kind?: string;
+    coverage: BenchmarkDecisionCoverageResult;
+    action_counts: { all: number; visible_to_agent: number; validation_only: number; acceptable: number };
+    actions: JsonObject[];
+    visible_to_agent: JsonObject[];
+    validation_only: JsonObject[];
+    acceptable: JsonObject[];
+    omitted: { all: number; visible_to_agent: number; validation_only: number; acceptable: number };
+  };
+  failure_card?: BenchmarkFailureCardResult;
+  failure_card_omitted?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+}
+
 export interface FoundationContractCheckArgs extends JsonObject {
   contract: JsonObject;
   parent?: JsonObject;

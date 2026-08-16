@@ -122,6 +122,13 @@ invent defaults:
   boundary-ranking arithmetic. Typed verdicts preserve first-causal, conjunction,
   environment-divergence, no-divergence, and unlocalizable outcomes, while structured refusals
   remain fail-closed and never become fabricated blame or executable benchmark cells.
+- `BenchmarkDecisionAuditArgs` and `benchmark_decision_audit_report(...)` narrow that evidence to
+  one selected choice/action step and expose the reconstructed action set, hindsight-firewall
+  provenance, visible-versus-validation-only coverage, causal alignment, and failure-card
+  evidence ratio. Candidate actions, constraint ledgers, and claims remain caller-supplied typed
+  JSON projections; future-derived actions cannot become agent-visible, uncited claims remain
+  hypotheses, and bounded omission counts survive every sync/async MCP, HTTP, and workspace
+  facade.
 - `FoundationContractCheckArgs` and `foundation_contract_check_report(...)` type the foundation
   declaration gate across sync MCP, async MCP, and HTTP. `FoundationContractGateReport`,
   `FoundationParentRelationReport`, `FoundationEnvelopeReport`, `FoundationWorldReport`, and

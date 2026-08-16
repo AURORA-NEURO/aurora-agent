@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 131);
+    assert_eq!(tools.len(), 132);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(131));
-    assert_eq!(result["advertised_tool_count"], json!(131));
+    assert_eq!(result["unique_catalog_tools"], json!(132));
+    assert_eq!(result["advertised_tool_count"], json!(132));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(131));
-    assert_eq!(result["schema_quality"]["valid"], json!(131));
+    assert_eq!(result["schema_quality"]["checked"], json!(132));
+    assert_eq!(result["schema_quality"]["valid"], json!(132));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -7713,6 +7713,94 @@ fn benchmark_trace_analyze_keeps_causal_localization_and_segmentation_distinct()
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("does not replay")));
+}
+
+#[test]
+fn benchmark_decision_audit_preserves_firewall_coverage_and_failure_evidence() {
+    let result = call(
+        &mut server(),
+        "benchmark_decision_audit",
+        json!({
+            "trace": {
+                "trace_id": "failed-run",
+                "succeeded": false,
+                "events": [
+                    { "step": 0, "kind": "goal", "payload": { "summary": "solve" } },
+                    { "step": 1, "kind": "choice", "payload": { "action": "unsafe", "alternatives": ["safe"] }, "visible": ["task"] },
+                    { "step": 2, "kind": "termination", "payload": { "summary": "failed" }, "caused_by": 1, "visible": ["task"] }
+                ]
+            },
+            "reference": {
+                "trace_id": "reference-run",
+                "succeeded": true,
+                "events": [
+                    { "step": 0, "kind": "goal", "payload": { "summary": "solve" } },
+                    { "step": 1, "kind": "choice", "payload": { "action": "safe", "alternatives": ["safe"] }, "visible": ["task"] },
+                    { "step": 2, "kind": "termination", "payload": { "summary": "succeeded" }, "caused_by": 1, "visible": ["task"] }
+                ]
+            },
+            "actions": [
+                {
+                    "label": "future-safe",
+                    "semantic_property": "avoid the irreversible side effect",
+                    "provenance": { "source": "from_future", "from_step": 3 },
+                    "feasibility": { "state": "feasible" },
+                    "strong": true
+                }
+            ],
+            "claims": [
+                { "status": "evidenced", "claim": "the choice differed", "citations": [{ "cites": "event", "step": 1 }] },
+                { "status": "hypothesis", "claim": "the tool was confusing", "why": "no direct evidence" }
+            ],
+            "max_items": 10
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/benchmark-decision-audit/0.1"));
+    assert_eq!(result["decision"]["selected_step"], json!(1));
+    assert_eq!(result["decision"]["causal_alignment"], json!("aligned"));
+    assert_eq!(result["decision"]["action_counts"]["all"], json!(3));
+    assert_eq!(result["decision"]["action_counts"]["visible_to_agent"], json!(2));
+    assert_eq!(result["decision"]["action_counts"]["validation_only"], json!(1));
+    assert_eq!(result["failure_card"]["evidence_ratio"], json!(0.5));
+    assert_eq!(result["failure_card"]["hypotheses"].as_array().unwrap().len(), 1);
+    assert_eq!(result["trace_digest"].as_str().unwrap().len(), 64);
+
+    let leak = call(
+        &mut server(),
+        "benchmark_decision_audit",
+        json!({
+            "trace": {
+                "trace_id": "failed-run",
+                "succeeded": false,
+                "events": [
+                    { "step": 0, "kind": "goal", "payload": { "summary": "solve" } },
+                    { "step": 1, "kind": "choice", "payload": { "action": "unsafe" } },
+                    { "step": 2, "kind": "termination", "payload": { "summary": "failed" }, "caused_by": 1 }
+                ]
+            },
+            "decision_step": 1,
+            "actions": [{
+                "label": "leaked",
+                "provenance": { "source": "visible_at_decision_time", "from_step": 2 },
+                "feasibility": { "state": "feasible" },
+                "strong": true
+            }]
+        }),
+    );
+    assert_eq!(leak["__isError"], json!(false));
+    assert_eq!(leak["ok"], json!(false));
+    assert_eq!(leak["stage"], json!("hindsight_firewall"));
+    assert_eq!(leak["fail_closed"], json!(true));
+
+    let invalid = call(
+        &mut server(),
+        "benchmark_decision_audit",
+        json!({ "trace": { "trace_id": "t", "succeeded": false, "events": [] }, "max_items": "100" }),
+    );
+    assert_eq!(invalid["__isError"], json!(true));
+    assert!(invalid["error"].as_str().unwrap().contains("max_items"));
 }
 
 #[test]

@@ -136,6 +136,8 @@ import type {
   EpistemicVoiResult,
   BenchmarkTraceAnalyzeArgs,
   BenchmarkTraceAnalysisResult,
+  BenchmarkDecisionAuditArgs,
+  BenchmarkDecisionAuditResult,
   FoundationContractCheckArgs,
   FoundationContractCheckResult,
   PackCatalogueArgs,
@@ -460,6 +462,10 @@ export class ApiClient {
 
   async benchmarkTraceAnalyze(args: BenchmarkTraceAnalyzeArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkTraceAnalysisResult>> {
     return this.callTool<BenchmarkTraceAnalysisResult>("benchmark_trace_analyze", args, options);
+  }
+
+  async benchmarkDecisionAudit(args: BenchmarkDecisionAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkDecisionAuditResult>> {
+    return this.callTool<BenchmarkDecisionAuditResult>("benchmark_decision_audit", args, options);
   }
 
   async foundationContractCheck(args: FoundationContractCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FoundationContractCheckResult>> {

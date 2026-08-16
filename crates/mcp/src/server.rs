@@ -29,7 +29,10 @@ use bioprism_atlasx::{named_in_scope, ATLASX_SCHEMA_VERSION, DEFINED_HERE, NAMED
 use bioprism_backends::{Budget as InfluenceBudget, QueryRegion, RegionFactor};
 use bioprism_benchcompiler::{
     analyse as analyse_benchmark, boundaries as benchmark_boundaries,
-    episodes as benchmark_episodes, repetitions as benchmark_repetitions,
+    episodes as benchmark_episodes, failure_card as benchmark_failure_card,
+    repetitions as benchmark_repetitions, Assertion as BenchmarkAssertion,
+    CandidateAction as BenchmarkCandidateAction, CandidateActionSet as BenchmarkCandidateActionSet,
+    ConstraintRecord as BenchmarkConstraintRecord,
 };
 use bioprism_bioethics::action::{refer as refer_physical_action, ActionPlan, Authorisation};
 use bioprism_bioethics::dualuse::{refer as refer_dual_use, CapabilityRelease};
@@ -1328,6 +1331,7 @@ impl Server {
             "bioql_compile" => self.bioql_compile(&arguments),
             "epistemic_voi" => self.epistemic_voi(&arguments),
             "benchmark_trace_analyze" => self.benchmark_trace_analyze(&arguments),
+            "benchmark_decision_audit" => self.benchmark_decision_audit(&arguments),
             "pack_catalogue" => self.pack_catalogue(&arguments),
             "pack_health_assess" => self.pack_health_assess(&arguments),
             "foundation_contract_check" => self.foundation_contract_check(&arguments),
@@ -8086,6 +8090,312 @@ impl Server {
                 "causal ranking, boundary ranking, repetition, and episode segmentation remain separate evidence layers",
                 "observed textual divergence is not treated as intervention effect",
                 "this endpoint proposes review material; it does not replay tools, fork an architecture, approve a cell, or package a benchmark",
+            ],
+        }))
+    }
+
+    fn benchmark_decision_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_trace = arguments
+            .get("trace")
+            .cloned()
+            .ok_or("trace is required and must be a serialized Trace")?;
+        let raw_reference = arguments.get("reference").cloned();
+        let raw_actions = arguments
+            .get("actions")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let raw_constraints = arguments
+            .get("constraints")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let raw_claims = arguments
+            .get("claims")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let max_items = match arguments.get("max_items") {
+            None => 100,
+            Some(value) => value
+                .as_u64()
+                .ok_or("max_items must be a non-negative integer")?,
+        };
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+
+        let encoded = serde_json::to_vec(&json!({
+            "trace": raw_trace.clone(),
+            "reference": raw_reference.clone(),
+            "actions": raw_actions.clone(),
+            "constraints": raw_constraints.clone(),
+            "claims": raw_claims.clone(),
+        }))
+        .map_err(|error| format!("cannot measure benchmark decision-audit envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("benchmark decision-audit input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let trace: TraceIr = serde_json::from_value(raw_trace)
+            .map_err(|error| format!("invalid trace: {error}"))?;
+        if trace.events.len() > 100_000 {
+            return Err("trace is bounded at 100000 events".into());
+        }
+        let reference: Option<TraceIr> = raw_reference
+            .map(|raw| {
+                serde_json::from_value(raw)
+                    .map_err(|error| format!("invalid reference trace: {error}"))
+            })
+            .transpose()?;
+        if reference
+            .as_ref()
+            .is_some_and(|candidate| candidate.events.len() > 100_000)
+        {
+            return Err("reference trace is bounded at 100000 events".into());
+        }
+
+        let mut candidate_actions: Vec<BenchmarkCandidateAction> = serde_json::from_value(raw_actions)
+            .map_err(|error| format!("invalid candidate action: {error}"))?;
+        if candidate_actions.len() > 10_000 {
+            return Err("candidate actions are bounded at 10000 items".into());
+        }
+        let constraints: Vec<BenchmarkConstraintRecord> = serde_json::from_value(raw_constraints)
+            .map_err(|error| format!("invalid constraint record: {error}"))?;
+        if constraints.len() > 10_000 {
+            return Err("constraint records are bounded at 10000 items".into());
+        }
+        let claims: Vec<BenchmarkAssertion> = serde_json::from_value(raw_claims)
+            .map_err(|error| format!("invalid assertion: {error}"))?;
+        if claims.len() > 10_000 {
+            return Err("assertions are bounded at 10000 items".into());
+        }
+        let evaluator_dispute = match arguments.get("evaluator_dispute") {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .ok_or("evaluator_dispute must be a string")?,
+            ),
+        };
+
+        let analysis = match analyse_benchmark(&trace, reference.as_ref()) {
+            Ok(analysis) => analysis,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
+                    "stage": "benchmark_causal_analysis",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "trace_id": trace.trace_id,
+                    "guarantees": [
+                        "a decision audit never manufactures a causal trajectory from an empty or non-decision-bearing trace",
+                        "causal refusal is preserved instead of being converted into agent blame",
+                    ],
+                }))
+            }
+        };
+
+        let explicit_decision_step = match arguments.get("decision_step") {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_u64()
+                    .ok_or("decision_step must be a non-negative integer")?
+                    as usize,
+            ),
+        };
+        let selected_step = match explicit_decision_step {
+            Some(step) => {
+                match analysis.localise_to(&trace, step) {
+                    Ok(step) => step,
+                    Err(error) => {
+                        return Ok(json!({
+                            "ok": false,
+                            "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
+                            "stage": "decision_selection",
+                            "refusal": error.to_string(),
+                            "fail_closed": true,
+                            "trace_id": trace.trace_id,
+                            "analysis": {
+                                "verdict": analysis.verdict,
+                                "localized_step": analysis.first_causal_step(),
+                            },
+                            "guarantees": [
+                                "observations and results are never silently replaced by their nearest decision",
+                                "an explicit decision step is checked against the actual trace before reconstruction",
+                            ],
+                        }))
+                    }
+                }
+            }
+            None => match analysis.first_causal_step() {
+                Some(step) => step,
+                None => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
+                        "stage": "decision_selection",
+                        "refusal": "causal analysis did not localize a decision; provide decision_step only when a reviewer wants an explicit decision audit",
+                        "fail_closed": true,
+                        "trace_id": trace.trace_id,
+                        "analysis": {
+                            "verdict": analysis.verdict,
+                            "localized_step": analysis.first_causal_step(),
+                        },
+                        "guarantees": [
+                            "environment divergences, no-divergence results, and unlocalizable evidence do not become fabricated cells",
+                            "a caller may still request an explicit decision-bearing step for a structural audit",
+                        ],
+                    }))
+                }
+            },
+        };
+
+        let mut action_set = match BenchmarkCandidateActionSet::reconstruct(&trace, selected_step) {
+            Ok(action_set) => action_set,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
+                    "stage": "decision_reconstruction",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "trace_id": trace.trace_id,
+                    "decision_step": selected_step,
+                    "guarantees": [
+                        "only choice and action events can host a candidate action set",
+                        "the server does not infer alternatives from a neighboring observation",
+                    ],
+                }))
+            }
+        };
+        for action in candidate_actions.drain(..) {
+            if let Err(error) = action_set.add(action) {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
+                    "stage": "hindsight_firewall",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "trace_id": trace.trace_id,
+                    "decision_step": selected_step,
+                    "analysis": {
+                        "verdict": analysis.verdict,
+                        "localized_step": analysis.first_causal_step(),
+                    },
+                    "guarantees": [
+                        "future-sourced options remain available for validation but cannot be mislabeled as visible at decision time",
+                        "a candidate with false visible provenance is rejected before coverage is reported",
+                    ],
+                }))
+            }
+        }
+
+        let max_items = max_items as usize;
+        let all_actions = action_set.all();
+        let visible = action_set.visible_to_agent();
+        let validation_only = action_set.validation_only();
+        let acceptable = action_set.acceptable();
+        let action_total = all_actions.len();
+        let visible_total = visible.len();
+        let validation_total = validation_only.len();
+        let acceptable_total = acceptable.len();
+        let actions = all_actions
+            .iter()
+            .take(max_items)
+            .cloned()
+            .collect::<Vec<_>>();
+        let visible_actions = visible
+            .iter()
+            .take(max_items)
+            .cloned()
+            .collect::<Vec<_>>();
+        let validation_actions = validation_only
+            .iter()
+            .take(max_items)
+            .cloned()
+            .collect::<Vec<_>>();
+        let acceptable_actions = acceptable
+            .iter()
+            .take(max_items)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let card = benchmark_failure_card(
+            &analysis,
+            &constraints,
+            evaluator_dispute,
+            claims,
+        );
+        let mut card_projection = card.clone();
+        let card_omitted = json!({
+            "recommended_cell_steps": card.recommended_cell_steps.len().saturating_sub(max_items),
+            "findings": card.findings.len().saturating_sub(max_items),
+            "hypotheses": card.hypotheses.len().saturating_sub(max_items),
+            "violated_constraints": card.violated_constraints.len().saturating_sub(max_items),
+            "alternative_explanations": card.alternative_explanations.len().saturating_sub(max_items),
+            "missing_evidence": card.missing_evidence.len().saturating_sub(max_items),
+        });
+        card_projection.recommended_cell_steps.truncate(max_items);
+        card_projection.findings.truncate(max_items);
+        card_projection.hypotheses.truncate(max_items);
+        card_projection.violated_constraints.truncate(max_items);
+        card_projection.alternative_explanations.truncate(max_items);
+        card_projection.missing_evidence.truncate(max_items);
+        let mut card_projection_value = serde_json::to_value(&card_projection)
+            .map_err(|error| format!("cannot serialize failure-card projection: {error}"))?;
+        if let Some(object) = card_projection_value.as_object_mut() {
+            object.insert("evidence_ratio".to_string(), json!(card.evidence_ratio()));
+        }
+
+        let ancestry_total = analysis.ancestry.len();
+        let candidate_total = analysis.candidates.len();
+        let mut analysis_projection = analysis.clone();
+        analysis_projection.ancestry.truncate(max_items);
+        analysis_projection.candidates.truncate(max_items);
+
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
+            "trace_id": trace.trace_id,
+            "trace_digest": trace.digest().as_str().to_string(),
+            "reference_trace_id": reference.as_ref().map(|trace| trace.trace_id.clone()),
+            "reference_digest": reference.as_ref().map(|trace| trace.digest().as_str().to_string()),
+            "analysis": analysis_projection,
+            "analysis_omitted": {
+                "ancestry": ancestry_total.saturating_sub(max_items),
+                "candidates": candidate_total.saturating_sub(max_items),
+            },
+            "decision": {
+                "selected_step": selected_step,
+                "causal_step": analysis.first_causal_step(),
+                "causal_alignment": if analysis.first_causal_step() == Some(selected_step) { "aligned" } else { "explicit_override" },
+                "event_kind": trace.at(selected_step).map(|event| event.kind.as_str()),
+                "coverage": action_set.coverage(),
+                "action_counts": {
+                    "all": action_total,
+                    "visible_to_agent": visible_total,
+                    "validation_only": validation_total,
+                    "acceptable": acceptable_total,
+                },
+                "actions": actions,
+                "visible_to_agent": visible_actions,
+                "validation_only": validation_actions,
+                "acceptable": acceptable_actions,
+                "omitted": {
+                    "all": action_total.saturating_sub(max_items),
+                    "visible_to_agent": visible_total.saturating_sub(max_items),
+                    "validation_only": validation_total.saturating_sub(max_items),
+                    "acceptable": acceptable_total.saturating_sub(max_items),
+                },
+            },
+            "failure_card": card_projection_value,
+            "failure_card_omitted": card_omitted,
+            "guarantees": [
+                "candidate reconstruction starts from the recorded decision and preserves the hindsight firewall",
+                "visible, validation-only, feasible, and strong coverage remain separate evidence counts",
+                "causal localization refuses environment-produced divergence instead of moving blame to a nearby action",
+                "uncited failure claims remain hypotheses and cannot become evidenced findings",
+                "the endpoint produces bounded review material; it does not replay tools, fork an architecture, approve an oracle, or publish a benchmark",
             ],
         }))
     }
@@ -17991,7 +18301,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "trajectory_and_decision_cells",
             "domains": ["JSONL trajectory ingestion", "OTLP JSON span ingestion", "semantic-loss accounting", "divergence localization", "decision segmentation", "review-gated cell proposals"],
             "crates": ["bioprism-trace", "bioprism-prism", "bioprism-benchcompiler"],
-            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze"],
+            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18007,7 +18317,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "benchmark_pack_portfolio",
             "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
             "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
-            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "mutation_family", "scale_family_split_verify"],
+            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "mutation_family", "scale_family_split_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -19718,6 +20028,24 @@ pub fn tool_definitions() -> Vec<Value> {
                     "reference": { "type": "object", "description": "Optional serialized better/reference Trace used only for observed divergence comparison." }
                 },
                 "required": ["failing"]
+            }
+        }),
+        json!({
+            "name": "benchmark_decision_audit",
+            "description": "Audit one benchmark decision cell candidate through causal localization, recorded-option reconstruction, hindsight-firewall validation, bounded action coverage, and evidence-backed failure attribution. Explicitly separates agent-visible options from future validation options and refuses environment steps, uncited findings, replay claims, and oracle approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "trace": { "type": "object", "description": "Serialized bioprism-trace Trace being audited." },
+                    "reference": { "type": "object", "description": "Optional better or peer Trace used for observed divergence and causal ranking; it is never treated as an intervention replay." },
+                    "decision_step": { "type": "integer", "minimum": 0, "description": "Optional explicit choice/action step. If omitted, the localized causal decision is selected; unlocalized analyses fail closed." },
+                    "actions": { "type": "array", "maxItems": 10000, "description": "Optional serialized CandidateAction values to add to the recorded set. Future provenance is validation-only; false visible provenance is refused." },
+                    "constraints": { "type": "array", "maxItems": 10000, "description": "Optional serialized ConstraintRecord ledger used to route unsatisfiable task defects before agent blame." },
+                    "claims": { "type": "array", "maxItems": 10000, "description": "Optional serialized Assertion values. Claims without citations remain hypotheses." },
+                    "evaluator_dispute": { "type": "string", "description": "Optional evaluator dispute; when present it takes precedence over causal agent blame in the failure card." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows retained per bounded projection; defaults to 100." }
+                },
+                "required": ["trace"]
             }
         }),
         json!({

@@ -172,6 +172,26 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         summary: { episode_count: 0, boundary_count: 0, extractable_boundaries: 0, repetition_groups: 0 },
         guarantees: ["causal ranking remains separate"],
       } } } });
+      if (path === "/v1/tools/benchmark_decision_audit") return jsonResponse({ ok: true, tool: "benchmark_decision_audit", request_id: "r20b", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/benchmark-decision-audit/0.1",
+        trace_id: "failed-run",
+        trace_digest: "a".repeat(64),
+        analysis: { trace_id: "failed-run", verdict: { verdict: "first_causal", step: 1, score: 0.8 }, ancestry: [1], candidates: [] },
+        decision: {
+          selected_step: 1,
+          causal_step: 1,
+          causal_alignment: "aligned",
+          event_kind: "choice",
+          coverage: { total: 3, visible_at_decision_time: 2, validation_only: 1, feasible: 2, strong: 1, plausible_wrong_alternatives: 1, adequate: true },
+          action_counts: { all: 3, visible_to_agent: 2, validation_only: 1, acceptable: 2 },
+          actions: [], visible_to_agent: [], validation_only: [], acceptable: [],
+          omitted: { all: 3, visible_to_agent: 2, validation_only: 1, acceptable: 2 },
+        },
+        failure_card: { trace_id: "failed-run", terminal_step: 2, blame: { blame: "agent", at_step: 1 }, recommended_cell_steps: [1], findings: [], hypotheses: [], violated_constraints: [], alternative_explanations: [], missing_evidence: [], evidence_ratio: 1 },
+        failure_card_omitted: {},
+        guarantees: ["future options are validation-only"],
+      } } } });
       if (path === "/v1/tools/foundation_contract_check") return jsonResponse({ ok: true, tool: "foundation_contract_check", request_id: "r21", mcp: { result: { structuredContent: {
         ok: true,
         verdict: "refused",
@@ -1142,6 +1162,13 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     },
   });
   assert.equal(traceAnalysis.mcp.result.structuredContent.analysis.verdict.verdict, "first_causal");
+  const decisionAudit = await client.benchmarkDecisionAudit({
+    trace: { trace_id: "failed-run", succeeded: false, events: [{ step: 1, kind: "choice", payload: { action: "unsafe" } }] },
+    max_items: 10,
+  });
+  assert.equal(decisionAudit.mcp.result.structuredContent.schema, "bioprism-mcp/benchmark-decision-audit/0.1");
+  assert.equal(decisionAudit.mcp.result.structuredContent.decision.coverage.validation_only, 1);
+  assert.equal(decisionAudit.mcp.result.structuredContent.failure_card.blame.blame, "agent");
   const foundation = await client.foundationContractCheck({
     contract: { id: "fbc:test:001", intent: "check", falsifiers: ["disagree"], actions: ["inspect"], claim_schema: "typed", reference_standard: "fixture", terminations: ["success"] },
     claim: "real_treatment_effect",

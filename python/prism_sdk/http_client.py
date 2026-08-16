@@ -199,6 +199,7 @@ from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, tok
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
+from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
@@ -784,6 +785,23 @@ class ApiClient:
         """Return typed HTTP benchmark compiler evidence."""
 
         return benchmark_trace_analysis_report(self.benchmark_trace_analyze(request))
+
+    def benchmark_decision_audit(
+        self,
+        request: BenchmarkDecisionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit one reconstructed decision through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BenchmarkDecisionAuditArgs) else BenchmarkDecisionAuditArgs.from_wire(request)
+        return self.call_tool("benchmark_decision_audit", normalized.to_mcp_arguments())
+
+    def benchmark_decision_audit_report(
+        self,
+        request: BenchmarkDecisionAuditArgs | Mapping[str, Any],
+    ) -> BenchmarkDecisionAuditReport:
+        """Return typed HTTP decision-cell, firewall, and failure-card evidence."""
+
+        return benchmark_decision_audit_report(self.benchmark_decision_audit(request))
 
     def foundation_contract_check(
         self,
@@ -2916,6 +2934,23 @@ class AsyncApiClient:
         """Return async typed HTTP benchmark compiler evidence."""
 
         return benchmark_trace_analysis_report(await self.benchmark_trace_analyze(request))
+
+    async def benchmark_decision_audit(
+        self,
+        request: BenchmarkDecisionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit one reconstructed decision through the async HTTP gateway."""
+
+        normalized = request if isinstance(request, BenchmarkDecisionAuditArgs) else BenchmarkDecisionAuditArgs.from_wire(request)
+        return await self.call_tool("benchmark_decision_audit", normalized.to_mcp_arguments())
+
+    async def benchmark_decision_audit_report(
+        self,
+        request: BenchmarkDecisionAuditArgs | Mapping[str, Any],
+    ) -> BenchmarkDecisionAuditReport:
+        """Return typed async HTTP decision-cell evidence."""
+
+        return benchmark_decision_audit_report(await self.benchmark_decision_audit(request))
 
     async def foundation_contract_check(
         self,
