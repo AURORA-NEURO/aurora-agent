@@ -250,6 +250,9 @@ assay-degradation evidence into a scalar robustness score.
 total-variation estimates, method/validity provenance, attempted-method refusals, budget posture,
 and structural-only execution. `unknown` estimates retain their reason object and never become a
 numeric infinity or an implicit robustness claim.
+`routingDecide` types the approved architecture, confidence score, abstention reason, considered
+panel, neighbourhood evidence, and holdout posture; safe-default abstention remains distinct from
+a routed win.
 `oracleCombine` retains tiered decisions, underdetermination, suppressed overrides, inadmissible
 and withheld ledgers, and nullable deciding/confidence evidence. `oracleReferencePanel` and
 `oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and

@@ -203,6 +203,7 @@ from .stress import (
     stress_report_projection,
 )
 from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_analysis_report
+from .routing import RoutingDecisionReport, routing_decision_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -690,6 +691,16 @@ class Workspace:
         request: InfluenceAnalyzeArgs | Mapping[str, Any],
     ) -> InfluenceAnalysisReport:
         return influence_analysis_report(self.influence_analyze(request))
+
+    def routing_decision_report(
+        self,
+        fingerprint: Mapping[str, Any] | RoutingDecisionRequest,
+        evidence: Sequence[Mapping[str, Any]] | None = None,
+        policy: Mapping[str, Any] | None = None,
+        *,
+        task_id: str | None = None,
+    ) -> RoutingDecisionReport:
+        return routing_decision_report(self.routing_decide(fingerprint, evidence, policy, task_id=task_id))
 
     def lab_plan(
         self,
@@ -2205,6 +2216,16 @@ class AsyncWorkspace:
         request: InfluenceAnalyzeArgs | Mapping[str, Any],
     ) -> InfluenceAnalysisReport:
         return influence_analysis_report(await self.influence_analyze(request))
+
+    async def routing_decision_report(
+        self,
+        fingerprint: Mapping[str, Any] | RoutingDecisionRequest,
+        evidence: Sequence[Mapping[str, Any]] | None = None,
+        policy: Mapping[str, Any] | None = None,
+        *,
+        task_id: str | None = None,
+    ) -> RoutingDecisionReport:
+        return routing_decision_report(await self.routing_decide(fingerprint, evidence, policy, task_id=task_id))
 
     async def lab_plan(
         self,

@@ -301,6 +301,7 @@ from .influence import (
     InfluenceAnalyzeArgs,
     influence_analysis_report,
 )
+from .routing import RoutingDecisionReport, routing_decision_report
 from .bioethics import (
     ENGAGEMENT_KINDS,
     MISUSE_SURFACES,

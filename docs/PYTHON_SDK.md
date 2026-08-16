@@ -641,6 +641,12 @@ attempted method, looseness, and the structural-only flag. An `unknown` estimate
 typed reason (for example an untabled factor) and has no numeric fallback; the SDK never promotes
 unknown influence to infinity or a vacuous bound. The same projection is available on all four
 sync/async MCP and HTTP facades.
+`routing_decision_report(...)` adds the corresponding typed routing result to the existing bounded
+`RoutingDecisionRequest`: the approved architecture tag, confidence score, abstention flag,
+structured coverage/margin reason, considered architecture scores, neighbourhood evidence, task
+identity, and holdout check are all retained. The parser enforces that an abstention agrees with
+its reason and treats `caller_must_supply_unseen_identity` as a caller posture rather than proof
+that holdout isolation was actually performed.
 
 ## Runtime and bioethics safety workflows
 

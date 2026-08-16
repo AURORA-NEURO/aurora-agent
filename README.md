@@ -398,6 +398,9 @@ hard budgets, attempted-method provenance, exact versus conservative validity, a
 reasons; they never turn an uncomputable influence into infinity or a fabricated numeric bound.
 `routing_decide` selects only among an explicitly approved architecture panel, abstains on weak
 coverage or margins, and refuses held-out evidence leakage when a task identity is supplied;
+the Python and TypeScript SDKs preserve the selected architecture, structured abstention reason,
+considered panel, neighbourhood evidence, confidence score, and holdout check without treating a
+safe-default abstention as a routing win;
 `token_context_plan` checks mandatory token closure, dry-run restricted-data privacy, and policy-only
 comparisons while preserving estimator provenance; `bioql_compile` type-checks explicit biological
 schemas for units, frames, builds, clocks, labels, provenance, and cost bounds without executing a

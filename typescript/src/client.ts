@@ -80,6 +80,8 @@ import type {
   StressReportToolResult,
   InfluenceAnalyzeArgs,
   InfluenceAnalyzeResult,
+  RoutingDecideArgs,
+  RoutingToolResult,
   OracleCombineArgs,
   OracleCombineResult,
   OracleReferencePanelArgs,
@@ -496,6 +498,10 @@ export class ApiClient {
 
   async influenceAnalyze(args: InfluenceAnalyzeArgs, options?: ClientRequestOptions): Promise<RestToolResponse<InfluenceAnalyzeResult>> {
     return this.callTool<InfluenceAnalyzeResult>("influence_analyze", args, options);
+  }
+
+  async routingDecide(args: RoutingDecideArgs, options?: ClientRequestOptions): Promise<RestToolResponse<RoutingToolResult>> {
+    return this.callTool<RoutingToolResult>("routing_decide", args, options);
   }
 
   async oracleCombine(args: OracleCombineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleCombineResult>> {

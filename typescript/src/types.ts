@@ -2792,4 +2792,58 @@ export interface InfluenceAnalyzeResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface RoutingDecideArgs extends JsonObject {
+  fingerprint: JsonObject;
+  evidence: JsonObject[];
+  policy: JsonObject;
+  task_id?: string;
+}
+
+export interface RoutingArchitectureResult extends JsonObject {
+  kind: "full_context" | "graph_k_hop" | "hypergraph_component" | "query_graph" | "lexical_top_k" | "fiber_compiled";
+  depth?: number;
+  k?: number;
+}
+
+export interface RoutingDecisionReasonResult extends JsonObject {
+  reason: "routed" | "insufficient_coverage" | "insufficient_margin";
+  margin?: number;
+  supporting_tasks?: number;
+  eligible_architectures?: number;
+  neighbouring_observations?: number;
+  runner_up?: RoutingArchitectureResult;
+}
+
+export interface RoutingArchitectureScoreResult extends JsonObject {
+  architecture: RoutingArchitectureResult;
+  observations: number;
+  distinct_tasks: number;
+  mean_utility: number;
+  admissible_rate: number;
+}
+
+export interface RoutingDecisionResult extends JsonObject {
+  architecture: RoutingArchitectureResult;
+  confidence: number;
+  abstained: boolean;
+  reason: RoutingDecisionReasonResult;
+  considered: RoutingArchitectureScoreResult[];
+}
+
+export interface RoutingEvidenceSummaryResult extends JsonObject {
+  observations: number;
+  distinct_tasks: number;
+  neighbourhood_observations: number;
+  neighbourhood_radius: number;
+}
+
+export interface RoutingToolResult extends JsonObject {
+  ok: boolean;
+  decision: RoutingDecisionResult;
+  task_id: string | null;
+  holdout_check: "enforced" | "caller_must_supply_unseen_identity";
+  evidence: RoutingEvidenceSummaryResult;
+  guarantees: string[];
+}
+
 export type ToolArguments = JsonObject;

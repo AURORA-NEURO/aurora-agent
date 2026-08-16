@@ -921,3 +921,29 @@ test("client exposes typed influence bounds and explicit unknown estimates", asy
   assert.equal(result.mcp.result.structuredContent.analysis.estimate.kind, "unknown");
   assert.equal(result.mcp.result.structuredContent.execute, false);
 });
+
+test("client exposes typed routing abstention and holdout posture", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/routing_decide");
+      return jsonResponse({ ok: true, tool: "routing_decide", request_id: "routing-1", mcp: { result: { structuredContent: {
+        ok: true,
+        decision: {
+          architecture: { kind: "full_context" },
+          confidence: 0,
+          abstained: true,
+          reason: { reason: "insufficient_coverage", eligible_architectures: 0, neighbouring_observations: 0 },
+          considered: [],
+        },
+        task_id: null,
+        holdout_check: "caller_must_supply_unseen_identity",
+        evidence: { observations: 0, distinct_tasks: 0, neighbourhood_observations: 0, neighbourhood_radius: 3 },
+        guarantees: ["safe default"],
+      } } } });
+    },
+  });
+  const result = await client.routingDecide({ fingerprint: {}, evidence: [], policy: {} });
+  assert.equal(result.mcp.result.structuredContent.decision.abstained, true);
+  assert.equal(result.mcp.result.structuredContent.holdout_check, "caller_must_supply_unseen_identity");
+});
