@@ -393,6 +393,13 @@ invent defaults:
   attestations. Per-row refusals remain fail-closed; the report explicitly preserves the endpoint's
   nonclaims about fuzzers, sandboxes, notification, credential revocation, and durable security
   infrastructure.
+- `WorldGenerateArgs` and `world_generate_report(...)` type deterministic synthetic world/query
+  generation across sync MCP, async MCP, and HTTP. `WorldGenerationCountsReport` retains facts,
+  factors, events, subjects, distractors, relay depth, and generated targets; diagnostics preserve
+  warning versus error severity; and `WorldGenerateReport` keeps world/query identifiers, exact
+  content digests, optional documents, and fail-closed parse/validation stages distinct. The
+  report exposes deterministic, digest-binding, and side-effect-free guarantees without treating
+  generation as a clinical, network, model, or publication action.
 - `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
   across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit

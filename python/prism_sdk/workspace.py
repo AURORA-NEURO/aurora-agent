@@ -223,6 +223,7 @@ from .foundation import FoundationContractCheckArgs, FoundationContractCheckRepo
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
+from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -340,6 +341,25 @@ class Workspace:
         normalized = SecurityRedteamSimulateArgs() if request is None else request if isinstance(request, SecurityRedteamSimulateArgs) else SecurityRedteamSimulateArgs.from_wire(request)
         result = self.client.call_tool("security_redteam_simulate", normalized.to_mcp_arguments())
         return security_redteam_simulate_report(result.require_object())
+
+    def world_generate(
+        self,
+        request: WorldGenerateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Generate a deterministic synthetic world/query pair through the Rust authority."""
+
+        normalized = request if isinstance(request, WorldGenerateArgs) else WorldGenerateArgs.from_wire(request)
+        return self.tool("world_generate", normalized.to_mcp_arguments())
+
+    def world_generate_report(
+        self,
+        request: WorldGenerateArgs | Mapping[str, Any],
+    ) -> WorldGenerateReport:
+        """Return digest, validation, structural-count, and optional-document evidence."""
+
+        normalized = request if isinstance(request, WorldGenerateArgs) else WorldGenerateArgs.from_wire(request)
+        result = self.client.call_tool("world_generate", normalized.to_mcp_arguments())
+        return world_generate_report(result.require_object())
 
     def pack_catalogue_report(
         self,
@@ -2088,6 +2108,25 @@ class AsyncWorkspace:
         normalized = SecurityRedteamSimulateArgs() if request is None else request if isinstance(request, SecurityRedteamSimulateArgs) else SecurityRedteamSimulateArgs.from_wire(request)
         result = await self.client.call_tool("security_redteam_simulate", normalized.to_mcp_arguments())
         return security_redteam_simulate_report(result.require_object())
+
+    async def world_generate(
+        self,
+        request: WorldGenerateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.world_generate`."""
+
+        normalized = request if isinstance(request, WorldGenerateArgs) else WorldGenerateArgs.from_wire(request)
+        return await self.tool("world_generate", normalized.to_mcp_arguments())
+
+    async def world_generate_report(
+        self,
+        request: WorldGenerateArgs | Mapping[str, Any],
+    ) -> WorldGenerateReport:
+        """Async typed world-generation evidence."""
+
+        normalized = request if isinstance(request, WorldGenerateArgs) else WorldGenerateArgs.from_wire(request)
+        result = await self.client.call_tool("world_generate", normalized.to_mcp_arguments())
+        return world_generate_report(result.require_object())
 
     async def pack_catalogue_report(
         self,

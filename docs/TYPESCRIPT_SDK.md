@@ -198,6 +198,10 @@ eligibility, sequential disclosure, within-trial versus across-trial influence, 
 claims, audit-chain verification, and observation/assertion status independent. A permitted model
 crossing is not an observed transfer, a containment request is not a performed action, and the
 client preserves these nonclaims beside the typed evidence.
+`worldGenerate` accepts a serialized `WorldSpec` and returns `WorldGenerateResult` with separate
+world/query IDs, exact digests, structural counts, warning/error diagnostics, and optional bounded
+documents. Parse, query-parse, and world-validation refusals retain their stage and fail-closed
+state; a successful transport response is not treated as a side effect or a clinical assertion.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

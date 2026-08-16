@@ -126,6 +126,8 @@ import type {
   PackHealthAssessmentResult,
   SecurityRedteamSimulateArgs,
   SecurityRedteamResult,
+  WorldGenerateArgs,
+  WorldGenerateResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -408,6 +410,10 @@ export class ApiClient {
 
   async securityRedteamSimulate(args: SecurityRedteamSimulateArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<SecurityRedteamResult>> {
     return this.callTool<SecurityRedteamResult>("security_redteam_simulate", args, options);
+  }
+
+  async worldGenerate(args: WorldGenerateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorldGenerateResult>> {
+    return this.callTool<WorldGenerateResult>("world_generate", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

@@ -1376,6 +1376,52 @@ export interface SecurityRedteamResult extends JsonObject {
   fail_closed?: boolean;
 }
 
+export interface WorldGenerateArgs extends JsonObject {
+  spec: JsonObject;
+  include_world?: boolean;
+  include_query?: boolean;
+}
+
+export interface WorldDiagnosticResult extends JsonObject {
+  severity: "warning" | "error";
+  code: string;
+  subject: string;
+  message: string;
+}
+
+export interface WorldValidationResult extends JsonObject {
+  errors: number;
+  warnings: number;
+  diagnostics: WorldDiagnosticResult[];
+}
+
+export interface WorldGenerationCountsResult extends JsonObject {
+  facts: number;
+  factors: number;
+  events: number;
+  subjects: number;
+  distractors: number;
+  relay_depth: number;
+  generated_query_targets: number;
+}
+
+export interface WorldGenerateResult extends JsonObject {
+  ok: boolean;
+  world_id?: string;
+  query_id?: string;
+  world_digest?: string;
+  query_digest?: string;
+  counts?: WorldGenerationCountsResult;
+  validation?: WorldValidationResult;
+  world?: JsonObject | null;
+  query?: JsonObject | null;
+  guarantees: string[];
+  stage?: "generated_world_parse" | "generated_query_parse" | "generated_world_validation";
+  refusal?: string;
+  fail_closed?: boolean;
+  diagnostics?: WorldDiagnosticResult[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

@@ -186,6 +186,7 @@ from .foundation import FoundationContractCheckArgs, FoundationContractCheckRepo
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
+from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -830,6 +831,23 @@ class ApiClient:
         """Return typed section-13 safety evidence without collapsing partial refusals."""
 
         return security_redteam_simulate_report(self.security_redteam_simulate(request))
+
+    def world_generate(
+        self,
+        request: WorldGenerateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Generate a deterministic synthetic world/query pair through the HTTP gateway."""
+
+        normalized = request if isinstance(request, WorldGenerateArgs) else WorldGenerateArgs.from_wire(request)
+        return self.call_tool("world_generate", normalized.to_mcp_arguments())
+
+    def world_generate_report(
+        self,
+        request: WorldGenerateArgs | Mapping[str, Any],
+    ) -> WorldGenerateReport:
+        """Return typed world/query identity and validation evidence."""
+
+        return world_generate_report(self.world_generate(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2588,6 +2606,23 @@ class AsyncApiClient:
         """Return async typed section-13 safety evidence."""
 
         return security_redteam_simulate_report(await self.security_redteam_simulate(request))
+
+    async def world_generate(
+        self,
+        request: WorldGenerateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async deterministic world generation through the HTTP gateway."""
+
+        normalized = request if isinstance(request, WorldGenerateArgs) else WorldGenerateArgs.from_wire(request)
+        return await self.call_tool("world_generate", normalized.to_mcp_arguments())
+
+    async def world_generate_report(
+        self,
+        request: WorldGenerateArgs | Mapping[str, Any],
+    ) -> WorldGenerateReport:
+        """Return async typed world-generation evidence."""
+
+        return world_generate_report(await self.world_generate(request))
 
     async def developer_delivery_audit_report(
         self,

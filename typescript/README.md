@@ -37,7 +37,8 @@ if (result.mcp.result?.isError) {
   `bioAtlasPublicationAudit`, `repositoryCatalog`, `repositoryBundle`, `repositoryImpact`,
   `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`,
   `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
-  `runtimeExecutionSimulate`, `packCatalogue`, `packHealthAssess`, and `securityRedteamSimulate`
+  `runtimeExecutionSimulate`, `packCatalogue`, `packHealthAssess`, `securityRedteamSimulate`, and
+  `worldGenerate`
   cover the highest-value
   cross-domain workflows without pretending
   to type every domain payload twice. Repository helpers keep catalog, route traversal, and
@@ -51,6 +52,9 @@ if (result.mcp.result?.isError) {
 - `securityRedteamSimulate` returns separately typed regression, disclosure, trust-boundary,
   incident-containment, audit-chain, and attestation evidence. It models safety contracts only:
   permitted crossings are not observed transfers and requested containment is not execution.
+- `worldGenerate` keeps synthetic world/query documents, exact digests, structural counts, and
+  validation diagnostics visible in one bounded response; it performs no file, network, model,
+  clinical, or publication action.
 - `toolCatalogue()` snapshots the live `/v1/tools` definitions into a bounded SHA-256 catalogue;
   `planTool()` performs conservative JSON-shape preflight without a POST; and `toolChecked()`
   executes the reviewed call while preserving the raw refusal envelope. This covers every current
