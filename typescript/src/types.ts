@@ -1556,6 +1556,50 @@ export interface EpistemicVoiResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface EpistemicEvidenceItemArgs extends JsonObject {
+  id: string;
+  cost: number;
+  likelihood: number[];
+}
+
+export interface EpistemicEvidencePoolArgs extends JsonObject {
+  items: EpistemicEvidenceItemArgs[];
+}
+
+export interface EpistemicContextAuditArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  evidence_pool: EpistemicEvidencePoolArgs;
+  criterion: "bayes_regret" | "minimax_regret";
+  tolerance: number;
+  compatibility_floor: number;
+  subsets?: number[][];
+  include_frontier?: boolean;
+  max_rows?: number;
+}
+
+export interface EpistemicContextAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/epistemic-context-audit/0.1";
+  criterion?: "bayes_regret" | "minimax_regret";
+  problem?: JsonObject;
+  evidence_pool?: JsonObject;
+  identification?: JsonObject;
+  sufficiency?: JsonObject;
+  frontier?: JsonObject | null;
+  include_frontier?: boolean;
+  subset_rows?: JsonObject[];
+  subset_count?: number;
+  subset_refusal_count?: number;
+  subset_rows_omitted?: number;
+  max_rows?: number;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface BenchmarkTraceEventArgs extends JsonObject {
   step: number;
   kind: "goal" | "observation" | "choice" | "action" | "result" | "claim" | "termination";

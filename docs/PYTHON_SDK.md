@@ -114,6 +114,11 @@ invent defaults:
   joint-versus-singleton excess for explicitly non-adaptive bundles. Improper partitions and
   exhaustive-cap failures remain typed fail-closed refusals rather than being rounded into a
   negative result or silently treated as an adaptive policy.
+- `EpistemicContextAuditArgs` / `epistemic_context_audit_report(...)` audit observed-evidence
+  compression with typed `EpistemicEvidenceItemArgs` and `EpistemicEvidencePoolArgs`. The report
+  keeps decision identification, minimal sufficient context, exhaustive rate–distortion frontier,
+  and requested subset rows separate; minimax abstention, contradictory subsets, and enumeration
+  caps remain fail-closed. See [`docs/EPISTEMIC_CONTEXT_AUDIT.md`](EPISTEMIC_CONTEXT_AUDIT.md).
 - `BenchmarkTraceAnalyzeArgs` and `benchmark_trace_analysis_report(...)` expose the benchmark
   compiler's causal, divergence, boundary, episode, and repetition layers through sync MCP, async
   MCP, and HTTP. `BenchmarkTraceEventArgs` preserves event kind, payload, causal parent, and

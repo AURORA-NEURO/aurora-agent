@@ -85,8 +85,13 @@ use bioprism_docgraph::{
 };
 use bioprism_epistemic::{
     complementarity as epistemic_complementarity, joint_value as epistemic_joint_value,
+    evaluate_context as epistemic_evaluate_context,
+    frontier as epistemic_frontier,
+    identification as epistemic_identification,
+    minimal_sufficient_context as epistemic_minimal_sufficient_context,
     value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
     Belief as EpistemicBelief, DecisionProblem as EpistemicDecisionProblem,
+    DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
     Outcome as EpistemicOutcome,
 };
 use bioprism_evalengine::{
@@ -1361,6 +1366,7 @@ impl Server {
             "token_context_plan" => self.token_context_plan(&arguments),
             "bioql_compile" => self.bioql_compile(&arguments),
             "epistemic_voi" => self.epistemic_voi(&arguments),
+            "epistemic_context_audit" => self.epistemic_context_audit(&arguments),
             "routing_lab_run" => self.routing_lab_run(&arguments),
             "benchmark_trace_analyze" => self.benchmark_trace_analyze(&arguments),
             "benchmark_decision_audit" => self.benchmark_decision_audit(&arguments),
@@ -9365,6 +9371,299 @@ impl Server {
                 ],
             })),
         }
+    }
+
+    fn epistemic_context_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required and must be a serialized epistemic DecisionProblem")?;
+        let raw_belief = arguments
+            .get("belief")
+            .cloned()
+            .ok_or("belief is required and must be a serialized epistemic Belief")?;
+        let raw_pool = arguments
+            .get("evidence_pool")
+            .cloned()
+            .ok_or("evidence_pool is required and must be a serialized epistemic EvidencePool")?;
+        let criterion: EpistemicDistortionCriterion = serde_json::from_value(
+            arguments
+                .get("criterion")
+                .cloned()
+                .ok_or("criterion is required and must be bayes_regret or minimax_regret")?,
+        )
+        .map_err(|error| format!("invalid context distortion criterion: {error}"))?;
+        let tolerance = arguments
+            .get("tolerance")
+            .and_then(Value::as_f64)
+            .ok_or("tolerance is required and must be a finite non-negative number")?;
+        if !tolerance.is_finite() || tolerance < 0.0 {
+            return Err("tolerance must be finite and non-negative".into());
+        }
+        let compatibility_floor = arguments
+            .get("compatibility_floor")
+            .and_then(Value::as_f64)
+            .ok_or("compatibility_floor is required and must be between 0 and 1")?;
+        if !compatibility_floor.is_finite() || !(0.0..=1.0).contains(&compatibility_floor) {
+            return Err("compatibility_floor must be finite and between 0 and 1".into());
+        }
+        let include_frontier = arguments
+            .get("include_frontier")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let max_rows = arguments
+            .get("max_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_rows == 0 || max_rows > 1_000 {
+            return Err("max_rows must be between 1 and 1000".into());
+        }
+        let raw_subsets = arguments
+            .get("subsets")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if raw_subsets.len() > 256 {
+            return Err("subsets must contain at most 256 context index sets".into());
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "belief": raw_belief.clone(),
+            "evidence_pool": raw_pool.clone(),
+            "criterion": criterion,
+            "tolerance": tolerance,
+            "compatibility_floor": compatibility_floor,
+            "subsets": raw_subsets.clone(),
+        }))
+        .map_err(|error| format!("cannot measure epistemic context envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("epistemic context input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let parsed_problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        if parsed_problem.action_count() > 1_000 || parsed_problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let action_count = parsed_problem.action_count();
+        let model_count = parsed_problem.model_count();
+        let problem_ref = &parsed_problem;
+        let problem = EpistemicDecisionProblem::new(
+            parsed_problem.actions().to_vec(),
+            parsed_problem.models().to_vec(),
+            (0..action_count)
+                .flat_map(|action| (0..model_count).map(move |model| problem_ref.loss(action, model)))
+                .collect(),
+        )
+        .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+
+        let parsed_belief: EpistemicBelief = serde_json::from_value(raw_belief)
+            .map_err(|error| format!("invalid belief: {error}"))?;
+        if parsed_belief.len() > 1_000 {
+            return Err("belief is bounded at 1000 models".into());
+        }
+        let belief = EpistemicBelief::new(parsed_belief.masses().to_vec())
+            .map_err(|error| format!("belief invariant failed: {error}"))?;
+
+        let parsed_pool: EpistemicEvidencePool = serde_json::from_value(raw_pool)
+            .map_err(|error| format!("invalid evidence pool: {error}"))?;
+        if parsed_pool.len() > 16 {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/epistemic-context-audit/0.1",
+                "stage": "enumeration_bound",
+                "refusal": "evidence_pool has more than 16 items; exhaustive frontier and minimal-context claims would exceed the kernel cap",
+                "fail_closed": true,
+                "pool_size": parsed_pool.len(),
+                "cap": 16,
+                "guarantees": [
+                    "a frontier is never downgraded to a heuristic sample while retaining a minimum claim"
+                ]
+            }));
+        }
+        let pool = EpistemicEvidencePool::new(parsed_pool.items().to_vec())
+            .map_err(|error| format!("evidence pool invariant failed: {error}"))?;
+        pool.check_against(&problem)
+            .map_err(|error| format!("evidence pool does not match decision problem: {error}"))?;
+
+        let identification = match epistemic_identification(
+            &problem,
+            &belief,
+            &pool,
+            tolerance,
+            compatibility_floor,
+        ) {
+            Ok(report) => report,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/epistemic-context-audit/0.1",
+                    "stage": "identification",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "decision identification is not inferred from a compressed context when full evidence is invalid"
+                    ]
+                }))
+            }
+        };
+        let sufficiency = match epistemic_minimal_sufficient_context(
+            &problem,
+            &belief,
+            &pool,
+            criterion,
+            tolerance,
+            compatibility_floor,
+        ) {
+            Ok(report) => report,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/epistemic-context-audit/0.1",
+                    "stage": "minimal_context",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "insufficient or contradictory evidence is not converted into a cheapest context"
+                    ]
+                }))
+            }
+        };
+        let frontier = if include_frontier {
+            match epistemic_frontier(&problem, &belief, &pool, criterion, compatibility_floor) {
+                Ok(report) => json!(report),
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": "bioprism-mcp/epistemic-context-audit/0.1",
+                        "stage": "frontier",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "guarantees": [
+                            "frontier output is exhaustive or withheld; it is never a sampled approximation wearing a minimum label"
+                        ]
+                    }))
+                }
+            }
+        } else {
+            Value::Null
+        };
+
+        let mut subset_rows = Vec::with_capacity(raw_subsets.len());
+        let mut subset_refusal_count = 0usize;
+        for (index, raw_subset) in raw_subsets.iter().enumerate() {
+            let Some(values) = raw_subset.as_array() else {
+                subset_refusal_count += 1;
+                subset_rows.push(json!({
+                    "index": index,
+                    "result": "refused",
+                    "refusal": "each subset must be an array of evidence indexes",
+                    "fail_closed": true,
+                }));
+                continue;
+            };
+            let mut subset = BTreeSet::new();
+            let mut refusal = None;
+            for (position, value) in values.iter().enumerate() {
+                let Some(raw_index) = value.as_u64() else {
+                    refusal = Some(format!("subsets[{index}][{position}] must be a non-negative integer"));
+                    break;
+                };
+                let evidence_index = usize::try_from(raw_index)
+                    .map_err(|_| format!("subsets[{index}][{position}] is outside the supported range"))?;
+                if evidence_index >= pool.len() {
+                    refusal = Some(format!("subsets[{index}] names evidence index {evidence_index}, outside pool size {}", pool.len()));
+                    break;
+                }
+                if !subset.insert(evidence_index) {
+                    refusal = Some(format!("subsets[{index}] repeats evidence index {evidence_index}"));
+                    break;
+                }
+            }
+            if let Some(refusal) = refusal {
+                subset_refusal_count += 1;
+                subset_rows.push(json!({
+                    "index": index,
+                    "subset": values,
+                    "result": "refused",
+                    "refusal": refusal,
+                    "fail_closed": true,
+                }));
+                continue;
+            }
+            match epistemic_evaluate_context(
+                &problem,
+                &belief,
+                &pool,
+                &subset,
+                criterion,
+                compatibility_floor,
+            ) {
+                Ok(evaluation) => subset_rows.push(json!({
+                    "index": index,
+                    "subset": subset,
+                    "result": "evaluated",
+                    "evaluation": evaluation,
+                })),
+                Err(error) => {
+                    subset_refusal_count += 1;
+                    subset_rows.push(json!({
+                        "index": index,
+                        "subset": subset,
+                        "result": "refused",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                    }));
+                }
+            }
+        }
+        let output = json!({
+            "ok": true,
+            "schema": "bioprism-mcp/epistemic-context-audit/0.1",
+            "criterion": criterion,
+            "tolerance": tolerance,
+            "compatibility_floor": compatibility_floor,
+            "problem": {
+                "actions": problem.actions(),
+                "models": problem.models(),
+                "action_count": problem.action_count(),
+                "model_count": problem.model_count(),
+            },
+            "evidence_pool": {
+                "item_count": pool.len(),
+                "items": pool.items().iter().map(|item| json!({
+                    "id": item.id,
+                    "cost": item.cost,
+                    "likelihoods": item.likelihoods(),
+                })).collect::<Vec<_>>(),
+                "full_rate": pool.rate(&pool.everything()).map_err(|error| error.to_string())?,
+            },
+            "identification": identification,
+            "sufficiency": sufficiency,
+            "frontier": frontier,
+            "include_frontier": include_frontier,
+            "subset_rows": subset_rows.iter().take(max_rows as usize).collect::<Vec<_>>(),
+            "subset_count": subset_rows.len(),
+            "subset_refusal_count": subset_refusal_count,
+            "subset_rows_omitted": subset_rows.len().saturating_sub(max_rows as usize),
+            "max_rows": max_rows,
+            "guarantees": [
+                "rate is summed evidence cost and distortion is decision regret, not embedding similarity",
+                "identification, minimal sufficiency, exhaustive frontier, and requested subset evaluations remain separate evidence layers",
+                "minimax non-identification abstains rather than selecting a context that cannot support the requested tolerance"
+            ],
+            "limitations": [
+                "the prior, loss matrix, likelihoods, and scalar evidence costs are caller-declared",
+                "the endpoint evaluates already-available evidence and does not run an adaptive acquisition policy",
+                "decision identification is not causal identification, and a sufficient context is not a biological or clinical conclusion"
+            ]
+        });
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure epistemic context result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err("epistemic context result exceeds the 20000000-byte safety bound".into());
+        }
+        Ok(output)
     }
 
     fn epistemic_voi(&self, arguments: &Value) -> Result<Value, String> {
@@ -21142,7 +21441,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "epistemic_voi"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "epistemic_voi", "epistemic_context_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -22944,6 +23243,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "acquisitions": { "type": "array", "maxItems": 64, "description": "Alternative bounded acquisition bundle; provide this instead of acquisition for joint non-adaptive pricing." }
                 },
                 "required": ["problem", "belief"]
+            }
+        }),
+        json!({
+            "name": "epistemic_context_audit",
+            "description": "Audit decision-relative context compression over an explicit DecisionProblem, Belief, and observed EvidencePool. It uses the epistemic kernel's identification, exhaustive rate-distortion frontier, minimal-sufficient-context, and requested-subset evaluation; it preserves minimax abstention, contradictory-subset refusals, and the distinction between decision identification and causal or clinical claims.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem with explicit actions, models, and row-major loss matrix." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief over the problem models." },
+                    "evidence_pool": { "type": "object", "description": "Serialized observed EvidencePool with ordered items {id, cost, likelihood}; order is load-bearing for deterministic subset indices." },
+                    "criterion": { "type": "string", "enum": ["bayes_regret", "minimax_regret"], "description": "Decision distortion criterion; minimax preserves model-set uncertainty without pretending the prior is authoritative." },
+                    "tolerance": { "type": "number", "minimum": 0, "description": "Maximum decision regret accepted for minimal-context sufficiency and identification." },
+                    "compatibility_floor": { "type": "number", "minimum": 0, "maximum": 1, "description": "Posterior mass floor for the compatible-model set." },
+                    "subsets": { "type": "array", "maxItems": 256, "description": "Optional evidence-index subsets to evaluate individually; duplicate or out-of-range indexes remain refusal rows." },
+                    "include_frontier": { "type": "boolean", "description": "Include the exhaustive frontier projection; defaults true." },
+                    "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum requested subset rows returned; omission count remains explicit. Defaults to 100." }
+                },
+                "required": ["problem", "belief", "evidence_pool", "criterion", "tolerance", "compatibility_floor"]
             }
         }),
         json!({

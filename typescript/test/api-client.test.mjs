@@ -2540,3 +2540,49 @@ test("client exposes SDK registry fail-closed admission results", async () => {
   assert.equal(result.mcp.result.structuredContent.registry, null);
   assert.equal(result.mcp.result.structuredContent.fail_closed, true);
 });
+
+test("client exposes epistemic context frontier and subset refusal accounting", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/epistemic_context_audit");
+      return jsonResponse({ ok: true, tool: "epistemic_context_audit", request_id: "context-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/epistemic-context-audit/0.1",
+        criterion: "bayes_regret",
+        tolerance: 1,
+        compatibility_floor: 0,
+        problem: { actions: ["treat", "abstain"], models: ["responsive", "resistant"] },
+        evidence_pool: { item_count: 2, full_rate: 3 },
+        identification: { status: "non_identified", minimax_regret: 10 },
+        sufficiency: { outcome: "sufficient", retained: [0, 1], rate: 3, distortion: 0 },
+        frontier: { criterion: "bayes_regret", evaluated: 4, points: [] },
+        include_frontier: true,
+        subset_rows: [{ index: 0, result: "evaluated" }],
+        subset_count: 2,
+        subset_refusal_count: 0,
+        subset_rows_omitted: 1,
+        max_rows: 1,
+        guarantees: ["decision regret"],
+        limitations: ["caller-declared prior"],
+      } } } });
+    },
+  });
+  const result = await client.epistemicContextAudit({
+    problem: { actions: ["treat", "abstain"], models: ["responsive", "resistant"], loss: [0, 10, 10, 0] },
+    belief: { mass: [0.5, 0.5] },
+    evidence_pool: { items: [
+      { id: "scan", cost: 2, likelihood: [0.9, 0.1] },
+      { id: "marker", cost: 1, likelihood: [0.1, 0.9] },
+    ] },
+    criterion: "bayes_regret",
+    tolerance: 1,
+    compatibility_floor: 0,
+    subsets: [[0], [0, 1]],
+    include_frontier: true,
+    max_rows: 1,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/epistemic-context-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.frontier.evaluated, 4);
+  assert.equal(result.mcp.result.structuredContent.subset_rows_omitted, 1);
+});

@@ -188,6 +188,11 @@ action changes, and complementarity for bounded non-adaptive bundles. The reques
 explicit row-major losses and per-model likelihood vectors; the result keeps structured
 fail-closed refusals visible and does not invent an adaptive policy, hidden prior, causal effect,
 or execution step.
+`epistemicContextAudit` adds the observed-context boundary: explicit evidence pools, decision
+identification, minimal sufficient contexts, exhaustive rate–distortion points, and bounded
+subset evaluations remain distinct. Its minimax non-identification abstention and contradictory
+subset refusals are typed instead of being collapsed into an efficiency score. See
+[`docs/EPISTEMIC_CONTEXT_AUDIT.md`](../docs/EPISTEMIC_CONTEXT_AUDIT.md).
 `benchmarkTraceAnalyze` returns typed `BenchmarkTraceAnalysisResult` evidence for causal
 candidate scores, textual divergence, decision-boundary ranks, reversibility basis, goal-anchored
 episodes, repeated-action progress, and reconciled summary counts. Causal verdicts remain distinct

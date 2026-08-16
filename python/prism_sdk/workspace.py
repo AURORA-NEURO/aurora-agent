@@ -248,6 +248,7 @@ from .token_context import (
 )
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
+from .epistemic_context import EpistemicContextAuditArgs, EpistemicContextAuditReport, epistemic_context_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -2164,6 +2165,26 @@ class Workspace:
         """Return typed gross/cost/net, action-change, bundle, and refusal evidence."""
 
         return epistemic_voi_report(self.epistemic_voi(request))
+
+    def epistemic_context_audit(
+        self,
+        request: EpistemicContextAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit decision-relative context compression through workspace MCP."""
+
+        normalized = request if isinstance(request, EpistemicContextAuditArgs) else EpistemicContextAuditArgs.from_wire(request)
+        result = self.client.call_tool("epistemic_context_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def epistemic_context_audit_report(
+        self,
+        request: EpistemicContextAuditArgs | Mapping[str, Any],
+    ) -> EpistemicContextAuditReport:
+        """Return typed frontier, sufficiency, identification, and subset evidence."""
+
+        return epistemic_context_audit_report(self.epistemic_context_audit(request))
 
     def benchmark_trace_analyze(
         self,
@@ -4543,6 +4564,26 @@ class AsyncWorkspace:
         """Return async typed value-of-information evidence."""
 
         return epistemic_voi_report(await self.epistemic_voi(request))
+
+    async def epistemic_context_audit(
+        self,
+        request: EpistemicContextAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit decision-relative context compression through async workspace MCP."""
+
+        normalized = request if isinstance(request, EpistemicContextAuditArgs) else EpistemicContextAuditArgs.from_wire(request)
+        result = await self.client.call_tool("epistemic_context_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def epistemic_context_audit_report(
+        self,
+        request: EpistemicContextAuditArgs | Mapping[str, Any],
+    ) -> EpistemicContextAuditReport:
+        """Return typed frontier, sufficiency, identification, and subset evidence."""
+
+        return epistemic_context_audit_report(await self.epistemic_context_audit(request))
 
     async def benchmark_trace_analyze(
         self,

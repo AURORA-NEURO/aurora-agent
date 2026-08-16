@@ -146,6 +146,8 @@ import type {
   DeveloperPlatformStatusResult,
   EpistemicVoiArgs,
   EpistemicVoiResult,
+  EpistemicContextAuditArgs,
+  EpistemicContextAuditResult,
   BenchmarkTraceAnalyzeArgs,
   BenchmarkTraceAnalysisResult,
   BenchmarkDecisionAuditArgs,
@@ -484,6 +486,10 @@ export class ApiClient {
 
   async epistemicVoi(args: EpistemicVoiArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicVoiResult>> {
     return this.callTool<EpistemicVoiResult>("epistemic_voi", args, options);
+  }
+
+  async epistemicContextAudit(args: EpistemicContextAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicContextAuditResult>> {
+    return this.callTool<EpistemicContextAuditResult>("epistemic_context_audit", args, options);
   }
 
   async benchmarkTraceAnalyze(args: BenchmarkTraceAnalyzeArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkTraceAnalysisResult>> {

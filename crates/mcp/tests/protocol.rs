@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 145);
+    assert_eq!(tools.len(), 146);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(145));
-    assert_eq!(result["advertised_tool_count"], json!(145));
+    assert_eq!(result["unique_catalog_tools"], json!(146));
+    assert_eq!(result["advertised_tool_count"], json!(146));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(145));
-    assert_eq!(result["schema_quality"]["valid"], json!(145));
+    assert_eq!(result["schema_quality"]["checked"], json!(146));
+    assert_eq!(result["schema_quality"]["valid"], json!(146));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -8123,6 +8123,46 @@ fn epistemic_voi_keeps_gross_cost_net_and_action_change_separate() {
         .as_str()
         .unwrap()
         .contains("invariant failed"));
+}
+
+#[test]
+fn epistemic_context_audit_keeps_frontier_sufficiency_and_subset_refusals_distinct() {
+    let result = call(
+        &mut server(),
+        "epistemic_context_audit",
+        json!({
+            "problem": {
+                "actions": ["treat", "abstain"],
+                "models": ["responsive", "resistant"],
+                "loss": [0.0, 10.0, 10.0, 0.0]
+            },
+            "belief": { "mass": [0.5, 0.5] },
+            "evidence_pool": {
+                "items": [
+                    { "id": "scan", "cost": 2.0, "likelihood": [0.9, 0.1] },
+                    { "id": "marker", "cost": 1.0, "likelihood": [0.1, 0.9] }
+                ]
+            },
+            "criterion": "bayes_regret",
+            "tolerance": 1.0,
+            "compatibility_floor": 0.0,
+            "subsets": [[0], [0, 1], [0, 0]],
+            "include_frontier": true,
+            "max_rows": 10
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/epistemic-context-audit/0.1"));
+    assert_eq!(result["criterion"], json!("bayes_regret"));
+    assert_eq!(result["evidence_pool"]["item_count"], json!(2));
+    assert_eq!(result["evidence_pool"]["full_rate"], json!(3.0));
+    assert_eq!(result["frontier"]["evaluated"], json!(4));
+    assert!(result["sufficiency"]["outcome"].is_string());
+    assert_eq!(result["subset_count"], json!(3));
+    assert_eq!(result["subset_refusal_count"], json!(1));
+    assert_eq!(result["subset_rows"][2]["result"], json!("refused"));
+    assert!(result["identification"]["status"].is_string());
 }
 
 #[test]
