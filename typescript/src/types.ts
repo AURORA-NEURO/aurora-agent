@@ -1484,6 +1484,106 @@ export interface FactoryLifecycleResult extends JsonObject {
   guarantees: string[];
 }
 
+export type StorageTier = "Hot" | "Warm" | "Cold";
+export type StorageClass = "Objects" | "Events" | "Indexes" | "Results" | "Cache";
+export type StoragePurpose = "Ingest" | "EvidenceFinalization" | "Cleanup";
+
+export interface StorageLifecycleSimulateArgs extends JsonObject {
+  now: number;
+  tiering_policy: JsonObject;
+  records: JsonObject[];
+  apply_tiering?: boolean;
+  quota: JsonObject;
+  charges?: JsonObject[];
+  releases?: JsonObject[];
+  delegations?: JsonObject[];
+  absorb_delegated?: JsonValue[];
+  max_items?: number;
+}
+
+export interface StorageTieringPolicyResult extends JsonObject {
+  demote_to_warm_after: number;
+  demote_to_cold_after: number;
+  promote_after_accesses: number;
+  promote_within: number;
+}
+
+export interface StorageAccessRecordResult extends JsonObject {
+  object: string;
+  tier: StorageTier;
+  last_access: number;
+  recent_accesses: number;
+  bytes: number;
+  pinned: boolean;
+}
+
+export interface StorageTierTransitionResult extends JsonObject {
+  object: string;
+  from: StorageTier;
+  to: StorageTier;
+  reason: JsonObject;
+  skipped_a_tier: boolean;
+}
+
+export interface StorageLifecycleRowResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface StorageTieringResult extends JsonObject {
+  policy: StorageTieringPolicyResult;
+  plan: { now: number; transitions: StorageTierTransitionResult[] } & JsonObject;
+  transition_count: number;
+  bytes_by_target: JsonObject[];
+  apply_requested: boolean;
+  apply_report?: { applied: number; absent: number } | null;
+  records: StorageAccessRecordResult[];
+  omitted_records: number;
+  input_rows: StorageLifecycleRowResult[];
+  omitted_input_rows: number;
+}
+
+export interface StorageClassResult extends JsonObject {
+  class: StorageClass;
+  name: "objects" | "events" | "indexes" | "results" | "cache";
+  reconstructible: boolean;
+  charged: number;
+}
+
+export interface StorageQuotaResult extends JsonObject {
+  limit: number;
+  reserve: number;
+  used: number;
+  remaining: number;
+  remaining_for_ingest: number;
+  remaining_for_evidence_finalization: number;
+  remaining_for_cleanup: number;
+  classes: StorageClassResult[];
+  charges: StorageLifecycleRowResult[];
+  omitted_charges: number;
+  releases: StorageLifecycleRowResult[];
+  omitted_releases: number;
+  delegations: StorageLifecycleRowResult[];
+  omitted_delegations: number;
+  absorptions: StorageLifecycleRowResult[];
+  omitted_absorptions: number;
+  remaining_children: JsonObject[];
+  omitted_children: number;
+}
+
+export interface StorageLifecycleResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/storage-lifecycle/0.1";
+  max_items: number;
+  now: number;
+  tiering: StorageTieringResult;
+  quota: StorageQuotaResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

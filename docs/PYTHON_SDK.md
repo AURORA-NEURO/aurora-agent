@@ -409,6 +409,15 @@ invent defaults:
   preserving unknown operation kinds for the Rust authority to refuse explicitly. This is an
   in-memory deterministic lifecycle projection: it does not create workers, queues, clocks,
   durable leases, filesystem state, network effects, or external side effects.
+- `StorageLifecycleSimulateArgs` and `storage_lifecycle_report(...)` type deterministic storage
+  planning across sync MCP, async MCP, and HTTP. `StorageTieringReport` retains the caller epoch,
+  thresholds, tagged idle/recent/pin-held transition reasons, skipped-tier witnesses, bytes by
+  target, input-row refusals, and applied-versus-absent counts. `StorageQuotaReport` keeps the hard
+  limit, protected reserve, realized usage, purpose-specific remaining allowance, five raw storage
+  classes, charge/release/delegation/absorption rows, remaining child allowances, and fail-closed
+  refusals distinct. Request bounds mirror Rust: 20 MB, 1000 records/actions, 100 delegated
+  children, and max-item truncation. This is a deterministic in-memory projection; it does not
+  move bytes, persist an audit log, enforce a backend write, or create tenant isolation.
 - `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
   across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit

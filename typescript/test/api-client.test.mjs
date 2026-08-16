@@ -237,6 +237,44 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         counts_by_class: { compile: 1 },
         guarantees: ["the simulation delegates every lifecycle transition to the typed in-memory JobStore"],
       } } } });
+      if (path === "/v1/tools/storage_lifecycle_simulate") return jsonResponse({ ok: true, tool: "storage_lifecycle_simulate", request_id: "r26", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/storage-lifecycle/0.1",
+        max_items: 100,
+        now: 20,
+        tiering: {
+          policy: { demote_to_warm_after: 5, demote_to_cold_after: 12, promote_after_accesses: 3, promote_within: 2 },
+          plan: { now: 20, transitions: [{ object: "pinned-hot", from: "Hot", to: "Warm", reason: { HeldByPin: { epochs: 20 } }, skipped_a_tier: false }] },
+          transition_count: 1,
+          bytes_by_target: [{ tier: "Warm", name: "warm", bytes: 200 }],
+          apply_requested: false,
+          apply_report: null,
+          records: [{ object: "pinned-hot", tier: "Hot", last_access: 0, recent_accesses: 0, bytes: 200, pinned: true }],
+          omitted_records: 0,
+          input_rows: [{ index: 0, ok: true, object: "pinned-hot" }],
+          omitted_input_rows: 0,
+        },
+        quota: {
+          limit: 1000,
+          reserve: 100,
+          used: 0,
+          remaining: 1000,
+          remaining_for_ingest: 900,
+          remaining_for_evidence_finalization: 1000,
+          remaining_for_cleanup: 1000,
+          classes: [
+            { class: "Objects", name: "objects", reconstructible: false, charged: 0 },
+            { class: "Events", name: "events", reconstructible: false, charged: 0 },
+            { class: "Indexes", name: "indexes", reconstructible: true, charged: 0 },
+            { class: "Results", name: "results", reconstructible: false, charged: 0 },
+            { class: "Cache", name: "cache", reconstructible: true, charged: 0 },
+          ],
+          charges: [], omitted_charges: 0, releases: [], omitted_releases: 0, delegations: [], omitted_delegations: 0,
+          absorptions: [], omitted_absorptions: 0, remaining_children: [], omitted_children: 0,
+        },
+        guarantees: ["tiering is planned against a caller-supplied logical epoch, so the same records and policy replay to the same transitions"],
+        limitations: ["this is a deterministic in-memory lifecycle projection; it does not move bytes, run a scheduler, or persist an audit event"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -721,6 +759,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(factory.mcp.result.structuredContent.trace[0].kind, "lease");
   assert.equal(factory.mcp.result.structuredContent.jobs[0].job.state, "succeeded");
   assert.equal(factory.mcp.result.structuredContent.trace.every((row) => row.fail_closed !== true), true);
+  const storage = await client.storageLifecycleSimulate({
+    now: 20,
+    tiering_policy: { demote_to_warm_after: 5, demote_to_cold_after: 12, promote_after_accesses: 3, promote_within: 2 },
+    records: [{ object: "pinned-hot", tier: "hot", last_access: 0, pinned: true }],
+    quota: { limit: 1000, reserve: 100 },
+  });
+  assert.equal(storage.mcp.result.structuredContent.schema, "bioprism-mcp/storage-lifecycle/0.1");
+  assert.equal(storage.mcp.result.structuredContent.tiering.plan.transitions[0].reason.HeldByPin.epochs, 20);
+  assert.equal(storage.mcp.result.structuredContent.quota.remaining_for_ingest, 900);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

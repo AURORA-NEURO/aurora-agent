@@ -225,6 +225,7 @@ from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
 from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateArgs, factory_lifecycle_report
+from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateArgs, storage_lifecycle_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -380,6 +381,25 @@ class Workspace:
         normalized = request if isinstance(request, FactoryLifecycleSimulateArgs) else FactoryLifecycleSimulateArgs.from_wire(request)
         result = self.client.call_tool("factory_lifecycle_simulate", normalized.to_mcp_arguments())
         return factory_lifecycle_report(result.require_object())
+
+    def storage_lifecycle_simulate(
+        self,
+        request: StorageLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan and optionally apply deterministic storage tiering and quota accounting."""
+
+        normalized = request if isinstance(request, StorageLifecycleSimulateArgs) else StorageLifecycleSimulateArgs.from_wire(request)
+        return self.tool("storage_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    def storage_lifecycle_simulate_report(
+        self,
+        request: StorageLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> StorageLifecycleReport:
+        """Return typed tier transitions, quota usage, and fail-closed accounting rows."""
+
+        normalized = request if isinstance(request, StorageLifecycleSimulateArgs) else StorageLifecycleSimulateArgs.from_wire(request)
+        result = self.client.call_tool("storage_lifecycle_simulate", normalized.to_mcp_arguments())
+        return storage_lifecycle_report(result.require_object())
 
     def pack_catalogue_report(
         self,
@@ -2166,6 +2186,25 @@ class AsyncWorkspace:
         normalized = request if isinstance(request, FactoryLifecycleSimulateArgs) else FactoryLifecycleSimulateArgs.from_wire(request)
         result = await self.client.call_tool("factory_lifecycle_simulate", normalized.to_mcp_arguments())
         return factory_lifecycle_report(result.require_object())
+
+    async def storage_lifecycle_simulate(
+        self,
+        request: StorageLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.storage_lifecycle_simulate`."""
+
+        normalized = request if isinstance(request, StorageLifecycleSimulateArgs) else StorageLifecycleSimulateArgs.from_wire(request)
+        return await self.tool("storage_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    async def storage_lifecycle_simulate_report(
+        self,
+        request: StorageLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> StorageLifecycleReport:
+        """Async typed storage lifecycle evidence."""
+
+        normalized = request if isinstance(request, StorageLifecycleSimulateArgs) else StorageLifecycleSimulateArgs.from_wire(request)
+        result = await self.client.call_tool("storage_lifecycle_simulate", normalized.to_mcp_arguments())
+        return storage_lifecycle_report(result.require_object())
 
     async def pack_catalogue_report(
         self,

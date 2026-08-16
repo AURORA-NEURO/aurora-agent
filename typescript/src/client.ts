@@ -130,6 +130,8 @@ import type {
   WorldGenerateResult,
   FactoryLifecycleSimulateArgs,
   FactoryLifecycleResult,
+  StorageLifecycleSimulateArgs,
+  StorageLifecycleResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -420,6 +422,10 @@ export class ApiClient {
 
   async factoryLifecycleSimulate(args: FactoryLifecycleSimulateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FactoryLifecycleResult>> {
     return this.callTool<FactoryLifecycleResult>("factory_lifecycle_simulate", args, options);
+  }
+
+  async storageLifecycleSimulate(args: StorageLifecycleSimulateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<StorageLifecycleResult>> {
+    return this.callTool<StorageLifecycleResult>("storage_lifecycle_simulate", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

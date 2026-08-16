@@ -188,6 +188,7 @@ from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
 from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateArgs, factory_lifecycle_report
+from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateArgs, storage_lifecycle_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -866,6 +867,23 @@ class ApiClient:
         """Return typed factory traces and final visibility through the HTTP gateway."""
 
         return factory_lifecycle_report(self.factory_lifecycle_simulate(request))
+
+    def storage_lifecycle_simulate(
+        self,
+        request: StorageLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan and optionally apply storage lifecycle accounting through the HTTP gateway."""
+
+        normalized = request if isinstance(request, StorageLifecycleSimulateArgs) else StorageLifecycleSimulateArgs.from_wire(request)
+        return self.call_tool("storage_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    def storage_lifecycle_simulate_report(
+        self,
+        request: StorageLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> StorageLifecycleReport:
+        """Return typed storage tiering and quota evidence through the HTTP gateway."""
+
+        return storage_lifecycle_report(self.storage_lifecycle_simulate(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2658,6 +2676,23 @@ class AsyncApiClient:
         """Return async typed factory lifecycle evidence."""
 
         return factory_lifecycle_report(await self.factory_lifecycle_simulate(request))
+
+    async def storage_lifecycle_simulate(
+        self,
+        request: StorageLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async storage lifecycle accounting through the HTTP gateway."""
+
+        normalized = request if isinstance(request, StorageLifecycleSimulateArgs) else StorageLifecycleSimulateArgs.from_wire(request)
+        return await self.call_tool("storage_lifecycle_simulate", normalized.to_mcp_arguments())
+
+    async def storage_lifecycle_simulate_report(
+        self,
+        request: StorageLifecycleSimulateArgs | Mapping[str, Any],
+    ) -> StorageLifecycleReport:
+        """Return async typed storage lifecycle evidence."""
+
+        return storage_lifecycle_report(await self.storage_lifecycle_simulate(request))
 
     async def developer_delivery_audit_report(
         self,

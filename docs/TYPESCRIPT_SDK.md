@@ -208,6 +208,12 @@ heartbeat/expiry recovery outcomes, stage-versus-commit visibility, compensation
 cancellation, final snapshots, and fail-closed trace rows without moving lifecycle semantics into
 TypeScript. Unknown action kinds remain representable so the Rust authority can return an explicit
 refusal; the SDK only types the bounded request shape and the evidence-bearing response.
+`storageLifecycleSimulate` accepts a caller-supplied logical epoch, tiering policy, access records,
+and quota accounting actions, returning `StorageLifecycleResult`. `StorageTieringResult` keeps
+planning, application, pin protection, skipped moves, and truncation separate; `StorageQuotaResult`
+keeps reserve-protected purpose allowances, raw class charges, independent row refusals, and
+non-copyable child delegation visible. The Fetch client does not move bytes, schedule jobs, or
+authorize writes in an external storage backend.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected
