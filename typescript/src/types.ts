@@ -1261,6 +1261,7 @@ export interface DeveloperDeliveryAuditArgs extends JsonObject {
   provider?: JsonObject;
   governance?: JsonObject;
   release?: JsonObject;
+  ci_evidence?: JsonObject;
   release_request?: JsonObject;
 }
 
@@ -1283,6 +1284,7 @@ export interface DeveloperDeliveryReadinessResult extends JsonObject {
   provider_capability_gate_cleared: boolean;
   governance_document_clean: boolean;
   release_audit_ready: boolean;
+  ci_execution_evidence_ready?: boolean;
   local_delivery_ready: boolean;
 }
 
@@ -1316,6 +1318,7 @@ export interface DeveloperDeliveryAuditResult extends JsonObject {
   provider: JsonObject | null;
   governance: JsonObject | null;
   release: JsonObject | null;
+  ci_evidence: JsonObject | null;
   readiness: DeveloperDeliveryReadinessResult;
   external_surface_posture: DeveloperDeliveryExternalSurfaceResult;
   release_request: DeveloperDeliveryReleaseRequestResult;

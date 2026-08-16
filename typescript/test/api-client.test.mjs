@@ -556,6 +556,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         provider: {},
         governance: {},
         release: {},
+        ci_evidence: { ci_evidence_ready: true },
         readiness: {
           platform_checks_clean: true,
           unguarded_claims: 0,
@@ -567,6 +568,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           provider_capability_gate_cleared: true,
           governance_document_clean: true,
           release_audit_ready: true,
+          ci_execution_evidence_ready: true,
           local_delivery_ready: true,
         },
         external_surface_posture: {
@@ -579,11 +581,11 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         release_request: {
           present: true,
           id: "delivery-1",
-          targets: [{ target: "local_delivery", available: true, eligible: true, blockers: [], notes: [] }],
+          targets: [{ target: "ci_execution_evidence", available: true, eligible: true, blockers: [], notes: [] }],
           ready: true,
           fail_closed: false,
           no_implicit_release: true,
-          available_target_count: 10,
+          available_target_count: 11,
         },
         guarantees: ["no implicit release"],
         limitations: ["external execution remains outside the workflow"],
@@ -1729,10 +1731,17 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const leaderboard = await client.hubLeaderboardRender({ board: {}, entries: [], moderation: {}, disclosure: {}, include_details: false });
   assert.equal(leaderboard.mcp.result.structuredContent.schema, "bioprism-mcp/hub-leaderboard/0.1");
   assert.equal(leaderboard.mcp.result.structuredContent.unranked_count, 1);
-  const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
+  const delivery = await client.developerDeliveryAudit({
+    ci_evidence: { ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } },
+    release_request: { id: "delivery-1", targets: ["ci_execution_evidence"] },
+  });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);
-  assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "local_delivery");
+  assert.equal(delivery.mcp.result.structuredContent.ci_evidence.ci_evidence_ready, true);
+  assert.equal(delivery.mcp.result.structuredContent.readiness.ci_execution_evidence_ready, true);
+  assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "ci_execution_evidence");
+  const deliveryRequest = JSON.parse(seen.at(-1).init.body);
+  assert.deepEqual(deliveryRequest.ci_evidence, { ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } });
   const engineering = await client.engineeringManifestAudit({
     project: { id: "aurora-agent", version: "0.1.0", repository: "github.com/AURORA-NEURO/aurora-agent" },
     baseline: { language: "Rust 2021", runtime: "cargo", api: "MCP JSON-RPC", storage: "in-memory", observability: "structured", deployment: "local" },

@@ -58,7 +58,9 @@ contact GitHub, verify signatures, fetch logs, execute checks, or approve a rele
 governance, and release checks into independently inspectable readiness gates. Its typed Python and
 TypeScript projections preserve explicit release targets, blockers, fail-closed/no-implicit-release
 state, foreign-artifact posture, and omitted optional evidence instead of collapsing an incomplete
-delivery review into a green score.
+delivery review into a green score. The explicit `ci_execution_evidence` target consumes the
+structurally reconciled CI result only when the caller supplies it; it never turns structural
+evidence into execution or deployment approval.
 `release_audit` now provides the lower-level composition boundary beneath that delivery review:
 typed callers can supply exact delegated checks, retain each result digest and refusal, and inspect
 the strict required-gate conjunction while repository impact and developer-platform diagnostics stay

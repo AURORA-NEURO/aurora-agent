@@ -352,11 +352,16 @@ def _developer_delivery_arguments(
     *,
     request_id: str | None,
     targets: Sequence[str] | None,
-    checks: Mapping[str, Mapping[str, Any] | None],
+    checks: Mapping[str, Mapping[str, Any] | CiExecutionEvidenceRequest | None],
 ) -> dict[str, Any]:
-    arguments: dict[str, Any] = {
-        name: dict(value) for name, value in checks.items() if value is not None
-    }
+    arguments: dict[str, Any] = {}
+    for name, value in checks.items():
+        if value is not None:
+            arguments[name] = (
+                value.to_mcp_arguments()
+                if isinstance(value, CiExecutionEvidenceRequest)
+                else dict(value)
+            )
     if request_id is None and targets is None:
         return arguments
     if not isinstance(request_id, str) or not request_id:
@@ -709,6 +714,7 @@ class ApiClient:
         provider: Mapping[str, Any] | None = None,
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
+        ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the cross-domain delivery audit through the HTTP gateway."""
 
@@ -724,6 +730,7 @@ class ApiClient:
                 "provider": provider,
                 "governance": governance,
                 "release": release,
+                "ci_evidence": ci_evidence,
             },
         )
         return self.call_tool("developer_delivery_audit", arguments)
@@ -1256,6 +1263,7 @@ class ApiClient:
         provider: Mapping[str, Any] | None = None,
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
+        ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Return typed delivery-readiness evidence from the HTTP gateway."""
 
@@ -1271,6 +1279,7 @@ class ApiClient:
                 provider=provider,
                 governance=governance,
                 release=release,
+                ci_evidence=ci_evidence,
             )
         )
 
@@ -3444,6 +3453,7 @@ class AsyncApiClient:
         provider: Mapping[str, Any] | None = None,
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
+        ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Async cross-domain delivery audit through the HTTP gateway."""
 
@@ -3459,6 +3469,7 @@ class AsyncApiClient:
                 "provider": provider,
                 "governance": governance,
                 "release": release,
+                "ci_evidence": ci_evidence,
             },
         )
         return await self.call_tool("developer_delivery_audit", arguments)
@@ -3991,6 +4002,7 @@ class AsyncApiClient:
         provider: Mapping[str, Any] | None = None,
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
+        ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Async typed delivery-readiness evidence from the HTTP gateway."""
 
@@ -4006,6 +4018,7 @@ class AsyncApiClient:
                 provider=provider,
                 governance=governance,
                 release=release,
+                ci_evidence=ci_evidence,
             )
         )
 

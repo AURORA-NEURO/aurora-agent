@@ -73,6 +73,7 @@ class DeliveryReadinessReport:
     provider_capability_gate_cleared: bool
     governance_document_clean: bool
     release_audit_ready: bool
+    ci_execution_evidence_ready: bool
     local_delivery_ready: bool
 
     @classmethod
@@ -108,6 +109,10 @@ class DeliveryReadinessReport:
             ),
             release_audit_ready=_delivery_bool(
                 "delivery release_audit_ready", raw.get("release_audit_ready")
+            ),
+            ci_execution_evidence_ready=_delivery_bool(
+                "delivery ci_execution_evidence_ready",
+                raw.get("ci_execution_evidence_ready", False),
             ),
             local_delivery_ready=_delivery_bool(
                 "delivery local_delivery_ready", raw.get("local_delivery_ready")
@@ -275,6 +280,7 @@ class DeveloperDeliveryAuditReport:
                     "provider",
                     "governance",
                     "release",
+                    "ci_evidence",
                 )
             },
             guarantees=_route_strings("developer delivery guarantees", raw.get("guarantees", [])),

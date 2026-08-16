@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -170,6 +170,7 @@ def developer_delivery_audit_payload() -> dict:
             "provider_capability_gate_cleared": True,
             "governance_document_clean": True,
             "release_audit_ready": True,
+            "ci_execution_evidence_ready": False,
             "local_delivery_ready": True,
         },
         "external_surface_posture": {
@@ -491,6 +492,19 @@ class HttpApiClientTests(unittest.TestCase):
                 request_id="delivery-1", targets=["local_delivery"]
             )["mcp"]["result"]["release_request"]["id"],
             "delivery-1",
+        )
+        ci_evidence = CiExecutionEvidenceRequest(
+            {"workflow": "contracts"},
+            {"run_id": "run-42"},
+        )
+        ci_result = client.developer_delivery_audit(
+            request_id="delivery-ci-1",
+            targets=["ci_execution_evidence"],
+            ci_evidence=ci_evidence,
+        )
+        self.assertEqual(
+            ci_result["mcp"]["result"]["ci_evidence"],
+            ci_evidence.to_mcp_arguments(),
         )
         self.assertEqual(
             client.capability_route("compose evidence", [{"id": "oncology", "query": "oncology"}])["mcp"]["result"]["goal"],
@@ -831,6 +845,7 @@ class HttpApiClientTests(unittest.TestCase):
             provider=None,
             governance=None,
             release=None,
+            ci_evidence=None,
         )
 
     def test_http_developer_platform_status_round_trips_bounded_arguments(self) -> None:
@@ -1240,6 +1255,7 @@ class HttpApiClientTests(unittest.TestCase):
                 provider=None,
                 governance=None,
                 release=None,
+                ci_evidence=None,
             )
             with patch.object(
                 AsyncApiClient,

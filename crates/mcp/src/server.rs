@@ -24613,6 +24613,10 @@ impl Server {
             Some(raw) => Some(self.release_audit(raw)?),
             None => None,
         };
+        let ci_evidence = match arguments.get("ci_evidence") {
+            Some(raw) => Some(self.ci_execution_evidence_audit(raw)?),
+            None => None,
+        };
 
         let platform_ok = platform.get("ok").and_then(Value::as_bool).unwrap_or(false);
         let platform_checks_clean = platform_ok
@@ -24749,6 +24753,19 @@ impl Server {
                 value.get("ok").and_then(Value::as_bool).unwrap_or(false)
                     && value
                         .get("release_ready")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        let ci_evidence_ready = ci_evidence
+            .as_ref()
+            .map(|value| {
+                value
+                    .get("ok")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    && value
+                        .get("ci_evidence_ready")
                         .and_then(Value::as_bool)
                         .unwrap_or(false)
             })
@@ -24935,9 +24952,24 @@ impl Server {
                                 .to_string(),
                         ],
                     ),
+                    "ci_execution_evidence" => (
+                        ci_evidence.is_some(),
+                        ci_evidence_ready,
+                        if ci_evidence.is_none() {
+                            vec!["ci_evidence_arguments_missing".to_string()]
+                        } else if ci_evidence_ready {
+                            vec![]
+                        } else {
+                            vec!["ci_execution_evidence_not_ready".to_string()]
+                        },
+                        vec![
+                            "CI evidence readiness requires an exact regenerated plan digest, complete passing checks, and a successful conclusion; it remains structural-only"
+                                .to_string(),
+                        ],
+                    ),
                     other => {
                         return Err(format!(
-                            "unknown release target {other:?}; choose local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release"
+                            "unknown release target {other:?}; choose local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, or ci_execution_evidence"
                         ));
                     }
                 };
@@ -24970,7 +25002,7 @@ impl Server {
                 "no_implicit_release": true,
             })
         };
-        release_request["available_target_count"] = json!(10);
+        release_request["available_target_count"] = json!(11);
 
         let foreign_subject_count = platform
             .get("devplat")
@@ -24988,6 +25020,7 @@ impl Server {
             "provider": provider,
             "governance": governance,
             "release": release,
+            "ci_evidence": ci_evidence,
             "readiness": {
                 "platform_checks_clean": platform_ready,
                 "unguarded_claims": unguarded_claims,
@@ -24999,6 +25032,7 @@ impl Server {
                 "provider_capability_gate_cleared": provider_ready,
                 "governance_document_clean": governance_ready,
                 "release_audit_ready": release_ready,
+                "ci_execution_evidence_ready": ci_evidence_ready,
                 "local_delivery_ready": local_delivery_ready,
             },
             "external_surface_posture": {
@@ -29080,7 +29114,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "provider": { "type": "object", "description": "Optional exact arguments for provider_capability_gate. Required for provider_capability readiness." },
                     "governance": { "type": "object", "description": "Optional exact arguments for governance_schema_check. A document-mode conforming result is required for governance_schema readiness; a catalog result is not enough." },
                     "release": { "type": "object", "description": "Optional exact arguments for release_audit. Required for release readiness." },
-                    "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, or release. Omit it to receive no readiness claim." }
+                    "ci_evidence": { "type": "object", "description": "Optional exact CiExecutionEvidenceRequest arguments with ci and evidence. Required for the ci_execution_evidence target; it is structurally reconciled and never executed here." },
+                    "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, or ci_execution_evidence. Omit it to receive no readiness claim." }
                 },
                 "required": []
             }

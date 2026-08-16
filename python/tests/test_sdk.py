@@ -8,6 +8,7 @@ from prism_sdk import (
     ArgumentError,
     AsyncClient,
     AsyncWorkspace,
+    CiExecutionEvidenceRequest,
     Client,
     LifecycleError,
     RemoteError,
@@ -73,9 +74,14 @@ class SyncClientTests(unittest.TestCase):
             self.assertEqual(client.read_resource("test://resource")["contents"][0]["text"], "{}")
             report = Workspace(client).developer_delivery_audit(
                 request_id="sdk-test",
-                targets=["developer_platform"],
+                targets=["ci_execution_evidence"],
+                ci_evidence=CiExecutionEvidenceRequest(
+                    {"workflow": "contracts"},
+                    {"run_id": "run-42"},
+                ),
             )
             self.assertEqual(report["echo"]["release_request"]["id"], "sdk-test")
+            self.assertEqual(report["echo"]["ci_evidence"]["evidence"]["run_id"], "run-42")
             otel = Workspace(client).trace_otel_ingest(
                 "otel-test",
                 otlp_json='{"resourceSpans":[]}',
@@ -140,9 +146,14 @@ class AsyncClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.require_ok()["echo"]["async"], True)
             report = await AsyncWorkspace(client).developer_delivery_audit(
                 request_id="async-test",
-                targets=["developer_platform"],
+                targets=["ci_execution_evidence"],
+                ci_evidence=CiExecutionEvidenceRequest(
+                    {"workflow": "contracts"},
+                    {"run_id": "run-42"},
+                ),
             )
             self.assertEqual(report["echo"]["release_request"]["id"], "async-test")
+            self.assertEqual(report["echo"]["ci_evidence"]["evidence"]["run_id"], "run-42")
             context = await AsyncWorkspace(client).compile_context(
                 {"world": "fixture"},
                 {"query": "fixture"},

@@ -36,6 +36,7 @@ from prism_sdk import (
     ConformanceRunArgs,
     ConformanceRunReport,
     ConformanceSuiteReport,
+    CiExecutionEvidenceRequest,
     DeliveryReadinessReport,
     DeveloperDeliveryAuditReport,
     DeveloperPlatformStatusArgs,
@@ -297,6 +298,7 @@ def developer_delivery_audit_payload() -> dict:
             "provider_capability_gate_cleared": True,
             "governance_document_clean": True,
             "release_audit_ready": True,
+            "ci_execution_evidence_ready": False,
             "local_delivery_ready": True,
         },
         "external_surface_posture": {
@@ -1494,7 +1496,34 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             provider=None,
             governance=None,
             release=None,
+            ci_evidence=None,
         )
+
+    def test_delivery_audit_report_preserves_explicit_ci_evidence_target(self) -> None:
+        payload = developer_delivery_audit_payload()
+        payload["ci_evidence"] = {"ci_evidence_ready": True, "audit": {"verification": "structural_only"}}
+        payload["readiness"]["ci_execution_evidence_ready"] = True
+        payload["release_request"] = {
+            "present": True,
+            "id": "delivery-ci-1",
+            "targets": [
+                {
+                    "target": "ci_execution_evidence",
+                    "available": True,
+                    "eligible": True,
+                    "blockers": [],
+                    "notes": ["structural CI evidence reconciled"],
+                }
+            ],
+            "ready": True,
+            "fail_closed": False,
+            "no_implicit_release": True,
+            "available_target_count": 11,
+        }
+        report = DeveloperDeliveryAuditReport.from_wire(payload)
+        self.assertTrue(report.readiness.ci_execution_evidence_ready)
+        self.assertEqual(report.checks["ci_evidence"]["ci_evidence_ready"], True)
+        self.assertTrue(report.ready_for_requested_release)
 
     def test_sync_workspace_typed_developer_platform_report(self) -> None:
         with patch.object(
@@ -1719,6 +1748,7 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             provider=None,
             governance=None,
             release=None,
+            ci_evidence=None,
         )
 
     async def test_async_workspace_typed_developer_platform_report(self) -> None:

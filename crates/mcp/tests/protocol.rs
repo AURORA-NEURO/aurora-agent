@@ -4167,6 +4167,60 @@ fn ci_execution_evidence_audit_reconciles_plan_and_run_without_execution() {
 }
 
 #[test]
+fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "delivery contracts",
+        "triggers": ["push"],
+        "rust_toolchain": "stable",
+        "checks": [{"name": "tests", "run": "cargo test -p core", "required": true}]
+    });
+    let planned = call(
+        &mut server,
+        "developer_workbench",
+        json!({
+            "session": {"session_id": "delivery-ci", "owner": "agent-a", "goal": "delivery evidence", "artifacts": [], "cells": [], "changes": []},
+            "ci": ci.clone()
+        }),
+    );
+    let evidence = json!({
+        "run_id": "delivery-run",
+        "provider": "github_actions",
+        "source": "provider_observed",
+        "plan_digest": planned["ci"]["digest"].clone(),
+        "conclusion": "success",
+        "checks": [{"name": "tests", "status": "passed", "result_digest": "a".repeat(64)}]
+    });
+    let payload = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "ci_evidence": {"ci": ci.clone(), "evidence": evidence},
+            "release_request": {"id": "delivery-ci-1", "targets": ["ci_execution_evidence"]}
+        }),
+    );
+    assert_eq!(payload["readiness"]["ci_execution_evidence_ready"], json!(true));
+    assert_eq!(payload["ci_evidence"]["ci_evidence_ready"], json!(true));
+    assert_eq!(payload["release_request"]["available_target_count"], json!(11));
+    assert_eq!(payload["release_request"]["ready"], json!(true));
+    assert_eq!(payload["release_request"]["targets"][0]["eligible"], json!(true));
+
+    let missing = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "release_request": {"id": "delivery-ci-2", "targets": ["ci_execution_evidence"]}
+        }),
+    );
+    assert_eq!(missing["readiness"]["ci_execution_evidence_ready"], json!(false));
+    assert_eq!(missing["release_request"]["ready"], json!(false));
+    assert_eq!(
+        missing["release_request"]["targets"][0]["blockers"],
+        json!(["ci_evidence_arguments_missing"])
+    );
+}
+
+#[test]
 fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     let mut server = server();
     let planned = call(

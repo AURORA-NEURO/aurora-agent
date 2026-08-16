@@ -244,6 +244,9 @@ digests, reconciles exact check names and requiredness, and keeps caller/provide
 missingness, failure, cancellation, and structural-only verification visible. A complete passing
 report can become a bounded handoff signal, but it is not provider authentication, log retrieval,
 deployment approval, or scientific validity.
+`developer_delivery_audit` now accepts that result only through an explicit `ci_evidence` argument;
+the independent `ci_execution_evidence` release target is fail-closed when the evidence is absent or
+not ready, while unrelated local-delivery targets remain independently auditable.
 The mission layer now composes the shipped domain tools into a deterministic DAG with an explicit
 preview/execute boundary, tool allow-list, side-effect policy, output budgets, and refusal-to-blocked
 dependency propagation. This materially improves agent usefulness across domains without claiming

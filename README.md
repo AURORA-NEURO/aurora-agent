@@ -702,6 +702,9 @@ per-check result digests, and keeps provider/caller provenance separate from str
 Complete passing evidence can produce a bounded `ci_evidence_ready` handoff signal, never a claim
 that GitHub was contacted, logs were fetched, a signature was verified, or deployment/scientific
 validity was established.
+When a delivery decision needs this signal, `developer_delivery_audit` accepts the exact
+`ci_evidence` payload and exposes a separate `ci_execution_evidence` target; missing evidence blocks
+that target without changing the semantics of other delivery targets.
 Typed discovery projections now preserve the complete matched group context—domains, Rust crates,
 CLI entrypoints, Python artifacts, ranked fields, matched tools, catalog digest, and optional
 authoritative tool schemas—so cross-domain routing can inspect coverage without falling back to

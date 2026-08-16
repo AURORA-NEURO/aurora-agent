@@ -54,7 +54,9 @@ Callers that need to render partial evidence can use `value()` without discardin
 invent defaults:
 
 - `developer_delivery_audit(...)` forwards exact nested evidence and creates a release request only
-  when the caller supplies an id and target list.
+  when the caller supplies an id and target list. Its optional `ci_evidence` request is preserved
+  as a separate structural check, and the explicit `ci_execution_evidence` target is available
+  only when that evidence is complete, digest-bound, and passing.
 - `bioatlas_publication_audit(atlas, ...)` preserves optional evidence, card, leaderboard, and
   weighting contracts and never implies publication without explicit targets.
 - `BioAtlasPublicationAuditReport.from_wire(...)` plus the sync, async, and HTTP
@@ -406,7 +408,8 @@ invent defaults:
   `foreign_artifacts_present`, and `complete_summary` properties; it does not turn a clean local
   check into proof that foreign SDK, CI, gRPC, or live-debugger surfaces were executed.
 - `developer_delivery_audit(...)` composes platform, repository, SDK, conformance, provider,
-  governance, and release evidence without executing publication or CI. `DeveloperDeliveryAuditReport`
+  governance, release, and optional CI execution evidence without executing publication or CI.
+  `DeveloperDeliveryAuditReport`
   plus `Workspace.developer_delivery_audit_report(...)`, `AsyncWorkspace.developer_delivery_audit_report(...)`,
   and the HTTP counterparts expose typed readiness gates, explicit target blockers, fail-closed
   release-request state, foreign-artifact posture, and preserved check evidence. A report is release

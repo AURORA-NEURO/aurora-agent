@@ -2388,6 +2388,7 @@ class Workspace:
         provider: Mapping[str, Any] | None = None,
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
+        ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         arguments: dict[str, Any] = {}
         for key, value in (
@@ -2402,6 +2403,13 @@ class Workspace:
         ):
             if value is not None:
                 arguments[key] = dict(value)
+        if ci_evidence is not None:
+            normalized_ci = (
+                ci_evidence
+                if isinstance(ci_evidence, CiExecutionEvidenceRequest)
+                else CiExecutionEvidenceRequest(**dict(ci_evidence))
+            )
+            arguments["ci_evidence"] = normalized_ci.to_mcp_arguments()
         release_request = _targets(request_id, targets)
         if release_request is not None:
             arguments["release_request"] = release_request
@@ -2715,6 +2723,7 @@ class Workspace:
         provider: Mapping[str, Any] | None = None,
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
+        ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Return typed cross-domain delivery gates and explicit release-target blockers."""
 
@@ -2730,6 +2739,7 @@ class Workspace:
                 provider=provider,
                 governance=governance,
                 release=release,
+                ci_evidence=ci_evidence,
             )
         )
 
@@ -5181,6 +5191,7 @@ class AsyncWorkspace:
         provider: Mapping[str, Any] | None = None,
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
+        ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         arguments = _developer_delivery_arguments(
             {
@@ -5194,6 +5205,7 @@ class AsyncWorkspace:
                 "provider": provider,
                 "governance": governance,
                 "release": release,
+                "ci_evidence": ci_evidence,
             }
         )
         return (await self.client.call_tool("developer_delivery_audit", arguments)).require_ok()
@@ -5502,6 +5514,7 @@ class AsyncWorkspace:
         provider: Mapping[str, Any] | None = None,
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
+        ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Async typed cross-domain delivery gates and release-target blockers."""
 
@@ -5517,6 +5530,7 @@ class AsyncWorkspace:
                 provider=provider,
                 governance=governance,
                 release=release,
+                ci_evidence=ci_evidence,
             )
         )
 
@@ -5949,9 +5963,15 @@ def _developer_delivery_arguments(kwargs: Mapping[str, Any]) -> dict[str, Any]:
         "provider",
         "governance",
         "release",
+        "ci_evidence",
     ):
         if kwargs.get(key) is not None:
-            arguments[key] = dict(kwargs[key])
+            value = kwargs[key]
+            arguments[key] = (
+                value.to_mcp_arguments()
+                if isinstance(value, CiExecutionEvidenceRequest)
+                else dict(value)
+            )
     release_request = _targets(kwargs.get("request_id"), kwargs.get("targets"))
     if release_request is not None:
         arguments["release_request"] = release_request

@@ -179,7 +179,9 @@ transport coverage only and is not permission, execution, scientific, or deploym
 returns typed `BioCapabilityEvidenceAuditResult` evidence rows, dimension rollups, claim blockers,
 omission accounting, optional subaudits, and explicit release posture; `developerDeliveryAudit`
 returns typed `DeveloperDeliveryAuditResult` readiness gates, explicit target blockers, release
-request state, and foreign-surface posture; `bioAtlasPublicationAudit` returns typed
+request state, foreign-surface posture, and optional CI evidence readiness. Requesting the
+`ci_execution_evidence` target requires an explicit `ci_evidence` payload; absence or structural
+failure blocks only that target. `bioAtlasPublicationAudit` returns typed
 `BioAtlasPublicationAuditResult` atlas aggregation, score/evidence gates, leaderboard state, and
 `developerPlatformStatus` returns typed `DeveloperPlatformStatusResult` evidence for walkthrough
 standing, module classification, cookbook verification, declared contract surfaces, diagnostic
