@@ -100,6 +100,36 @@ class OncoWorldsReportTests(unittest.TestCase):
         })
         self.assertIsInstance(comparison, OncoWorldsMethylationCompareReport)
         self.assertTrue(comparison.version_conditioned)
+        versioned = oncoworlds_methylation_classify_report({
+            "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-methylation-classify/0.1",
+            "outcome_kind": "unclassifiable",
+            "classified": False,
+            "class": None,
+            "classifier": {"name": "demo", "version": "v1", "reference_version": "ref-1", "reporting_threshold": 7000},
+            "classifier_threshold": 7000,
+            "threshold_declared": True,
+            "qc": {"qc": "passed"},
+            "tumour_content": {"unobserved": "not_collected"},
+            "score_count": 1,
+            "score_classes": ["class-b"],
+            "caveat_count": 1,
+            "nearest_present": True,
+            "report": {
+                "outcome": {
+                    "outcome": "unclassifiable",
+                    "reason": {"reason": "no_class_above_threshold", "best": 6500, "threshold": 7000},
+                    "nearest": {"label_only": "class-b", "score": {"value": 6500, "calibration": {"method": "isotonic", "version": "cal-1"}}},
+                },
+                "caveats": ["tumour content is not measured"],
+            },
+            "guarantees": [],
+            "limitations": [],
+        })
+        self.assertEqual(versioned.outcome_kind, "unclassifiable")
+        self.assertEqual(versioned.classifier.reporting_threshold, 7000)
+        self.assertEqual(versioned.outcome_record.reason["reason"], "no_class_above_threshold")
+        self.assertTrue(versioned.nearest_present)
 
     def test_radiogenomic_refusal_and_clonal_ambiguity_remain_visible(self) -> None:
         accepted = oncoworlds_radiogenomic_check_report({

@@ -595,7 +595,9 @@ fidelity, establishment selection, technical/biological replication, transport a
 typed fail-closed refusal kinds; see [`docs/ONCOWORLDS_MODEL_TRANSPORT.md`](docs/ONCOWORLDS_MODEL_TRANSPORT.md).
 `oncoworlds_methylation_classify` preserves QC abstention,
 threshold, calibration, and tumour-content caveats, while `oncoworlds_methylation_compare` keeps
-classifier-version disagreement version-conditioned. `oncoworlds_radiogenomic_check` checks
+classifier-version disagreement version-conditioned. Both expose versioned outcome/divergence,
+threshold, score-coverage, and classifier-change projections; see
+[`docs/ONCOWORLDS_METHYLATION.md`](docs/ONCOWORLDS_METHYLATION.md). `oncoworlds_radiogenomic_check` checks
 participant-safe splits, training-only feature fitting, specimen-versus-tumour target scope,
 mechanism strata, and declared transport assumptions before admitting a cross-modal claim. Its
 versioned projection retains the blocked sentence, design summary, required/declared transport

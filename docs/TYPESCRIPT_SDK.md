@@ -352,7 +352,8 @@ transport assumptions, and typed fail-closed patient-transport refusals. Its ver
 also carries model identity, passage-specific fidelity, establishment selection, replication
 accounting, and refusal kinds. The methylation pair
 (`oncoworldsMethylationClassify` and `oncoworldsMethylationCompare`) keeps QC abstention,
-threshold/calibration/tumour-content caveats, and classifier-version disagreement explicit.
+threshold/calibration/tumour-content caveats, classifier outcome, score coverage, classifier
+change, and version-conditioned disagreement explicit.
 `oncoworldsRadiogenomicCheck` retains participant-safe split, training-only fitting, target scope,
 mechanism strata, and transport assumptions, plus a versioned support/refusal state, blocked claim,
 design summary, refusal kind, and typed supported-claim envelope; `oncoworldsClonalHistoryCheck` returns compatible and

@@ -206,9 +206,11 @@ invent defaults:
   `docs/ONCOWORLDS_MODEL_TRANSPORT.md`.
   `OncoWorldsMethylationClassifyArgs`/`oncoworlds_methylation_classify_report(...)` retain QC,
   calibration, threshold, and tumour-content caveats while treating an abstention as an explicit
-  unclassifiable result. `OncoWorldsMethylationCompareArgs`/
+  unclassifiable result, with typed classifier, threshold, score-coverage, outcome, and nearest
+  evidence projections. `OncoWorldsMethylationCompareArgs`/
   `oncoworlds_methylation_compare_report(...)` keep classifier-version disagreement separate from
-  agreement and from the case where both sides are unclassifiable.
+  agreement and from the case where both sides are unclassifiable, with typed divergence and
+  classifier-change accounting. See `docs/ONCOWORLDS_METHYLATION.md`.
 - `OncoWorldsClonalHistoryCheckArgs`/`oncoworlds_clonal_history_check_report(...)` preserve typed
   compatible histories, per-candidate refusal kinds, candidate accounting, and unique versus
   ambiguous history status. See `docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md`.

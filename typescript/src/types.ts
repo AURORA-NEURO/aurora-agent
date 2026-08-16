@@ -5195,11 +5195,23 @@ export interface OncoWorldsMethylationClassifyArgs extends JsonObject {
 
 export interface OncoWorldsMethylationClassifyResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-methylation-classify/0.1";
+  outcome_kind?: "classified" | "unclassifiable" | "refused";
   classified?: boolean;
   class?: string | null;
+  classifier?: JsonObject;
+  classifier_threshold?: number | null;
+  threshold_declared?: boolean;
+  qc?: JsonObject;
+  tumour_content?: JsonObject;
+  score_count?: number;
+  score_classes?: string[];
+  caveat_count?: number;
+  nearest_present?: boolean;
   report?: JsonObject;
   stage?: string;
   refusal?: JsonObject;
+  refusal_kind?: "undeclared_threshold" | "score_out_of_range" | "uncalibrated_cross_version" | "circular_copy_number" | "circular_label_use" | "unclassifiable";
   refusal_text?: string;
   fail_closed?: boolean;
   guarantee?: string;
@@ -5214,6 +5226,12 @@ export interface OncoWorldsMethylationCompareArgs extends JsonObject {
 
 export interface OncoWorldsMethylationCompareResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-methylation-compare/0.1";
+  divergence_kind?: "agree" | "both_unclassifiable" | "version_conditioned";
+  classifier_changed?: boolean;
+  left_outcome_kind?: "classified" | "unclassifiable";
+  right_outcome_kind?: "classified" | "unclassifiable";
+  stable_evidence_count?: number;
   comparison: JsonObject;
   left_classifier: JsonObject;
   right_classifier: JsonObject;

@@ -1542,8 +1542,39 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
           guarantees: [],
           limitations: [],
         },
-        oncoworlds_methylation_classify: { ok: true, classified: false, class: null, report: { outcome: "unclassifiable" }, guarantees: [], limitations: [] },
-        oncoworlds_methylation_compare: { ok: true, comparison: { divergence: { divergence: "version_conditioned" } }, left_classifier: {}, right_classifier: {}, guarantees: [], limitations: [] },
+        oncoworlds_methylation_classify: {
+          ok: true,
+          schema: "bioprism-mcp/oncoworlds-methylation-classify/0.1",
+          outcome_kind: "unclassifiable",
+          classified: false,
+          class: null,
+          classifier: { name: "methylation-demo", version: "v1", reference_version: "ref-1", reporting_threshold: 7000 },
+          classifier_threshold: 7000,
+          threshold_declared: true,
+          qc: { qc: "passed" },
+          tumour_content: { unobserved: "not_collected" },
+          score_count: 1,
+          score_classes: ["class-a"],
+          caveat_count: 1,
+          nearest_present: true,
+          report: { outcome: { outcome: "unclassifiable", reason: { reason: "no_class_above_threshold" }, nearest: { label_only: "class-a" }, }, caveats: ["tumour content is not measured"] },
+          guarantees: [],
+          limitations: [],
+        },
+        oncoworlds_methylation_compare: {
+          ok: true,
+          schema: "bioprism-mcp/oncoworlds-methylation-compare/0.1",
+          divergence_kind: "version_conditioned",
+          classifier_changed: true,
+          left_outcome_kind: "classified",
+          right_outcome_kind: "unclassifiable",
+          stable_evidence_count: 0,
+          comparison: { divergence: { divergence: "version_conditioned", under_left: "class-a", under_right: null }, stable_evidence: [] },
+          left_classifier: { version: "v1" },
+          right_classifier: { version: "v2" },
+          guarantees: [],
+          limitations: [],
+        },
         oncoworlds_radiogenomic_check: {
           ok: true,
           schema: "bioprism-mcp/oncoworlds-radiogenomic-check/0.1",
@@ -1585,7 +1616,11 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
   assert.equal(model.mcp.result.structuredContent.model_identity.verified_against_source, true);
   assert.equal(model.mcp.result.structuredContent.replicates.effective_biological_n, 3);
   assert.equal(classify.mcp.result.structuredContent.classified, false);
+  assert.equal(classify.mcp.result.structuredContent.outcome_kind, "unclassifiable");
+  assert.equal(classify.mcp.result.structuredContent.score_count, 1);
   assert.equal(compare.mcp.result.structuredContent.comparison.divergence.divergence, "version_conditioned");
+  assert.equal(compare.mcp.result.structuredContent.divergence_kind, "version_conditioned");
+  assert.equal(compare.mcp.result.structuredContent.classifier_changed, true);
   assert.equal(radiogenomic.mcp.result.structuredContent.supported_claim.claim.statement, "supported");
   assert.equal(radiogenomic.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-radiogenomic-check/0.1");
   assert.equal(radiogenomic.mcp.result.structuredContent.outcome_kind, "supported");

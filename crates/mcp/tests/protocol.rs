@@ -5977,6 +5977,16 @@ fn oncoworlds_methylation_tools_preserve_threshold_and_version_conditioning() {
         }),
     );
     assert_eq!(classified["ok"], json!(true));
+    assert_eq!(
+        classified["schema"],
+        json!("bioprism-mcp/oncoworlds-methylation-classify/0.1")
+    );
+    assert_eq!(classified["outcome_kind"], json!("classified"));
+    assert_eq!(classified["threshold_declared"], json!(true));
+    assert_eq!(classified["score_count"], json!(1));
+    assert_eq!(classified["score_classes"], json!(["class-a"]));
+    assert_eq!(classified["nearest_present"], json!(false));
+    assert_eq!(classified["caveat_count"], json!(1));
     assert_eq!(classified["classified"], json!(true));
     assert_eq!(classified["class"], json!("class-a"));
     assert!(!classified["report"]["caveats"]
@@ -5999,6 +6009,9 @@ fn oncoworlds_methylation_tools_preserve_threshold_and_version_conditioning() {
         }),
     );
     assert_eq!(missing_threshold["ok"], json!(false));
+    assert_eq!(missing_threshold["outcome_kind"], json!("refused"));
+    assert_eq!(missing_threshold["refusal_kind"], json!("undeclared_threshold"));
+    assert_eq!(missing_threshold["threshold_declared"], json!(false));
     assert_eq!(
         missing_threshold["refusal"]["refusal"],
         json!("undeclared_threshold")
@@ -6028,6 +6041,15 @@ fn oncoworlds_methylation_tools_preserve_threshold_and_version_conditioning() {
         }),
     );
     assert_eq!(comparison["ok"], json!(true));
+    assert_eq!(
+        comparison["schema"],
+        json!("bioprism-mcp/oncoworlds-methylation-compare/0.1")
+    );
+    assert_eq!(comparison["divergence_kind"], json!("version_conditioned"));
+    assert_eq!(comparison["classifier_changed"], json!(true));
+    assert_eq!(comparison["left_outcome_kind"], json!("classified"));
+    assert_eq!(comparison["right_outcome_kind"], json!("classified"));
+    assert_eq!(comparison["stable_evidence_count"], json!(0));
     assert_eq!(
         comparison["comparison"]["divergence"]["divergence"],
         json!("version_conditioned")

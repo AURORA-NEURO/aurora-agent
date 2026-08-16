@@ -10415,14 +10415,34 @@ impl Server {
                 .ok_or("context is required and must be a SampleContext")?,
         )
         .map_err(|error| format!("invalid methylation sample context: {error}"))?;
+        let classifier_value = serde_json::to_value(&classifier).map_err(|error| error.to_string())?;
+        let qc_value = serde_json::to_value(&context.qc).map_err(|error| error.to_string())?;
+        let tumour_content_value =
+            serde_json::to_value(&context.tumour_content).map_err(|error| error.to_string())?;
+        let score_classes: Vec<String> = scores.keys().map(|class| class.as_str().to_owned()).collect();
         match onco_classify_methylation(&classifier, &scores, &context) {
             Ok(report) => {
                 let classified = report.outcome.is_classified();
                 let class = report.outcome.class().cloned();
+                let report_value = serde_json::to_value(&report).map_err(|error| error.to_string())?;
+                let outcome_kind = report_value["outcome"]["outcome"]
+                    .as_str()
+                    .ok_or("methylation report must carry a tagged outcome")?;
                 Ok(json!({
                     "ok": true,
+                    "schema": "bioprism-mcp/oncoworlds-methylation-classify/0.1",
+                    "outcome_kind": outcome_kind,
                     "classified": classified,
                     "class": class,
+                    "classifier": classifier_value,
+                    "classifier_threshold": classifier.reporting_threshold,
+                    "threshold_declared": classifier.reporting_threshold.is_some(),
+                    "qc": qc_value,
+                    "tumour_content": tumour_content_value,
+                    "score_count": scores.len(),
+                    "score_classes": score_classes,
+                    "caveat_count": report.caveats.len(),
+                    "nearest_present": report_value["outcome"]["nearest"].is_object(),
                     "report": report,
                     "denominator_policy": "an unclassifiable result remains a result and must stay in the evaluation denominator",
                     "guarantees": [
@@ -10439,10 +10459,21 @@ impl Server {
             }
             Err(refusal) => Ok(json!({
                 "ok": false,
+                "schema": "bioprism-mcp/oncoworlds-methylation-classify/0.1",
+                "outcome_kind": "refused",
+                "refusal_kind": serde_json::to_value(&refusal)
+                    .map_err(|error| error.to_string())?["refusal"].clone(),
                 "stage": "methylation_classification",
                 "refusal": serde_json::to_value(&refusal).map_err(|error| error.to_string())?,
                 "refusal_text": refusal.to_string(),
                 "fail_closed": true,
+                "classifier": classifier_value,
+                "classifier_threshold": classifier.reporting_threshold,
+                "threshold_declared": classifier.reporting_threshold.is_some(),
+                "qc": qc_value,
+                "tumour_content": tumour_content_value,
+                "score_count": scores.len(),
+                "score_classes": score_classes,
                 "guarantee": "an undeclared threshold or other typed methylation refusal never becomes a maximum-score class call"
             })),
         }
@@ -10464,8 +10495,17 @@ impl Server {
         )
         .map_err(|error| format!("invalid right versioned result: {error}"))?;
         let comparison = onco_reconcile_methylation(&left, &right);
+        let comparison_value = serde_json::to_value(&comparison).map_err(|error| error.to_string())?;
+        let left_outcome = serde_json::to_value(&left.outcome).map_err(|error| error.to_string())?;
+        let right_outcome = serde_json::to_value(&right.outcome).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/oncoworlds-methylation-compare/0.1",
+            "divergence_kind": comparison_value["divergence"]["divergence"],
+            "classifier_changed": left.classifier != right.classifier,
+            "left_outcome_kind": left_outcome["outcome"],
+            "right_outcome_kind": right_outcome["outcome"],
+            "stable_evidence_count": comparison.stable_evidence.len(),
             "comparison": comparison,
             "left_classifier": left.classifier,
             "right_classifier": right.classifier,

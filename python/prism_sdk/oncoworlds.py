@@ -17,6 +17,10 @@ from .errors import ArgumentError
 
 
 METHYLATION_DIVERGENCES = frozenset({"agree", "both_unclassifiable", "version_conditioned"})
+METHYLATION_CLASSIFY_SCHEMA = "bioprism-mcp/oncoworlds-methylation-classify/0.1"
+METHYLATION_COMPARE_SCHEMA = "bioprism-mcp/oncoworlds-methylation-compare/0.1"
+METHYLATION_OUTCOME_KINDS = frozenset({"classified", "unclassifiable", "refused"})
+METHYLATION_REFUSAL_KINDS = frozenset({"undeclared_threshold", "score_out_of_range", "uncalibrated_cross_version", "circular_copy_number", "circular_label_use", "unclassifiable"})
 ONCOWORLDS_CLONAL_SCHEMA = "bioprism-mcp/oncoworlds-clonal-history-check/0.1"
 ONCOWORLDS_CLONAL_REFUSAL_KINDS = frozenset({"fractions_exceed_whole", "child_exceeds_parent", "cyclic", "unknown_subclone", "ambiguous", "unsupported_directionality"})
 ONCOWORLDS_CLONAL_UNIQUE_STATUSES = frozenset({"unique", "ambiguous", "refused"})
@@ -269,6 +273,77 @@ class OncoWorldsMethylationCompareArgs:
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         return {"left": dict(self.left), "right": dict(self.right)}
+
+
+@dataclass(frozen=True)
+class OncoMethylationClassifierProjection:
+    raw: dict[str, Any]
+    name: str
+    version: str
+    reference_version: str
+    reporting_threshold: int | None
+    threshold_declared: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoMethylationClassifierProjection":
+        raw = _object("methylation classifier projection", value)
+        threshold_value = raw.get("reporting_threshold")
+        threshold = None if threshold_value is None else _route_count("methylation reporting threshold", threshold_value)
+        threshold_declared = threshold is not None
+        return cls(
+            raw,
+            _route_text("methylation classifier name", raw.get("name")),
+            _route_text("methylation classifier version", raw.get("version")),
+            _route_text("methylation reference version", raw.get("reference_version")),
+            threshold,
+            threshold_declared,
+        )
+
+
+@dataclass(frozen=True)
+class OncoMethylationOutcomeProjection:
+    raw: dict[str, Any]
+    kind: str
+    class_label: str | None
+    reason: dict[str, Any] | None
+    nearest: dict[str, Any] | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoMethylationOutcomeProjection":
+        raw = _object("methylation outcome projection", value)
+        kind = _route_text("methylation outcome kind", raw.get("outcome"))
+        if kind not in {"classified", "unclassifiable"}:
+            raise ArgumentError(f"unknown methylation outcome: {kind!r}")
+        class_label = None if raw.get("class") is None else _route_text("methylation class label", raw.get("class"))
+        reason = None if raw.get("reason") is None else _object("methylation unclassifiable reason", raw.get("reason"))
+        nearest = None if raw.get("nearest") is None else _object("methylation nearest class", raw.get("nearest"))
+        if (kind == "classified") != (class_label is not None) or (kind == "classified" and (reason is not None or nearest is not None)):
+            raise ArgumentError("methylation classified outcome does not reconcile with its fields")
+        if kind == "unclassifiable" and reason is None:
+            raise ArgumentError("methylation unclassifiable outcome must retain its reason")
+        return cls(raw, kind, class_label, reason, nearest)
+
+
+@dataclass(frozen=True)
+class OncoMethylationDivergenceProjection:
+    raw: dict[str, Any]
+    kind: str
+    under_left: str | None
+    under_right: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoMethylationDivergenceProjection":
+        raw = _object("methylation divergence projection", value)
+        kind = _route_text("methylation divergence kind", raw.get("divergence"))
+        if kind not in METHYLATION_DIVERGENCES:
+            raise ArgumentError(f"unknown methylation divergence: {kind!r}")
+        under_left = None if raw.get("under_left") is None else _route_text("methylation left conditioned class", raw.get("under_left"))
+        under_right = None if raw.get("under_right") is None else _route_text("methylation right conditioned class", raw.get("under_right"))
+        if kind == "agree" and under_left != under_right:
+            raise ArgumentError("methylation agreement must carry the same conditioned class")
+        if kind == "both_unclassifiable" and (under_left is not None or under_right is not None):
+            raise ArgumentError("both-unclassifiable methylation divergence cannot carry class labels")
+        return cls(raw, kind, under_left, under_right)
 
 
 @dataclass(frozen=True)
@@ -550,21 +625,92 @@ class OncoWorldsMethylationClassifyReport:
     guarantee: str | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+    refusal_kind: str | None = None
+    classifier: OncoMethylationClassifierProjection | None = None
+    classifier_threshold: int | None = None
+    threshold_declared: bool = False
+    qc: dict[str, Any] | None = None
+    tumour_content: dict[str, Any] | None = None
+    score_count: int = 0
+    score_classes: tuple[str, ...] = ()
+    caveat_count: int = 0
+    nearest_present: bool = False
+    outcome_record: OncoMethylationOutcomeProjection | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsMethylationClassifyReport":
         raw = _payload(value, label="oncoworlds methylation classification", direct_keys=("report", "refusal"))
         ok = _bool("methylation classification ok", raw.get("ok"))
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("methylation classification schema", schema_value)
+        if schema is not None and schema != METHYLATION_CLASSIFY_SCHEMA:
+            raise ArgumentError(f"unknown methylation classification schema: {schema!r}")
+        outcome_kind_value = raw.get("outcome_kind")
+        outcome_kind = "refused" if not ok else None
+        if outcome_kind_value is not None:
+            outcome_kind = _route_text("methylation classification outcome kind", outcome_kind_value)
+            if outcome_kind not in METHYLATION_OUTCOME_KINDS or (not ok and outcome_kind != "refused"):
+                raise ArgumentError("methylation classification outcome kind does not reconcile with transport state")
+        classifier_value = raw.get("classifier")
+        classifier = None if classifier_value is None else OncoMethylationClassifierProjection.from_wire(classifier_value)
+        threshold_value = raw.get("classifier_threshold")
+        classifier_threshold = None if threshold_value is None else _route_count("methylation classifier threshold", threshold_value)
+        threshold_declared = _bool("methylation threshold declared", raw.get("threshold_declared", classifier_threshold is not None))
+        if threshold_declared != (classifier_threshold is not None):
+            raise ArgumentError("methylation threshold declaration does not reconcile with threshold")
+        if classifier is not None and classifier.reporting_threshold != classifier_threshold:
+            raise ArgumentError("methylation classifier threshold does not reconcile with classifier")
+        qc = None if raw.get("qc") is None else _object("methylation qc", raw.get("qc"))
+        tumour_content = None if raw.get("tumour_content") is None else _object("methylation tumour content", raw.get("tumour_content"))
+        score_count = _route_count("methylation score count", raw.get("score_count", 0))
+        score_classes = _route_strings("methylation score classes", raw.get("score_classes", []))
+        if score_count != len(score_classes):
+            raise ArgumentError("methylation score count does not reconcile with score classes")
+        caveat_count_declared = "caveat_count" in raw
+        caveat_count = _route_count("methylation caveat count", raw.get("caveat_count", 0))
+        nearest_present = _bool("methylation nearest presence", raw.get("nearest_present", False))
+        outcome_record = None
+        report_value = raw.get("report")
+        if report_value is not None:
+            report = _object("methylation classification report", report_value)
+            if isinstance(report.get("outcome"), Mapping):
+                outcome_record = OncoMethylationOutcomeProjection.from_wire(report.get("outcome"))
+                if outcome_kind is None:
+                    outcome_kind = outcome_record.kind
+                if outcome_kind != outcome_record.kind:
+                    raise ArgumentError("methylation outcome kind does not reconcile with nested outcome")
+                classified = _bool("methylation classified", raw.get("classified"))
+                if classified != (outcome_record.kind == "classified"):
+                    raise ArgumentError("methylation classified does not reconcile with nested outcome")
+                label = None if raw.get("class") is None else _route_text("methylation class", raw.get("class"))
+                if label != outcome_record.class_label:
+                    raise ArgumentError("methylation class does not reconcile with nested outcome")
+            caveats = report.get("caveats", [])
+            if not isinstance(caveats, Sequence) or isinstance(caveats, (str, bytes)) or ((caveat_count_declared or schema is not None) and caveat_count != len(caveats)):
+                raise ArgumentError("methylation caveat count does not reconcile with report")
+            if outcome_record is not None and nearest_present != (outcome_record.nearest is not None):
+                raise ArgumentError("methylation nearest presence does not reconcile with outcome")
+        if schema is not None:
+            if "outcome_kind" not in raw or classifier is None or "score_count" not in raw or "score_classes" not in raw:
+                raise ArgumentError("versioned methylation classification requires classifier and score accounting")
         if not ok:
             stage, refusal, refusal_text, fail_closed, guarantee = _domain_refusal(raw, "methylation classification")
-            return cls(raw, False, None, None, None, stage, refusal, refusal_text, fail_closed, guarantee, (), ())
+            refusal_kind_value = raw.get("refusal_kind")
+            refusal_kind = _route_text("methylation refusal kind", refusal_kind_value) if refusal_kind_value is not None else _route_text("methylation refusal kind", refusal.get("refusal"))
+            if refusal_kind not in METHYLATION_REFUSAL_KINDS or refusal_kind != refusal.get("refusal"):
+                raise ArgumentError("methylation refusal kind does not reconcile with typed refusal")
+            if schema is not None and refusal_kind_value is None:
+                raise ArgumentError("versioned methylation refusals require refusal_kind")
+            return cls(raw, False, None, None, None, stage, refusal, refusal_text, fail_closed, guarantee, (), (), schema, outcome_kind, refusal_kind, classifier, classifier_threshold, threshold_declared, qc, tumour_content, score_count, score_classes, caveat_count, nearest_present, None)
         if raw.get("refusal") is not None or raw.get("stage") is not None or raw.get("fail_closed", False):
             raise ArgumentError("successful methylation classifications cannot carry refusal evidence")
         classified = _bool("methylation classified", raw.get("classified"))
         label = _optional_text("methylation class", raw.get("class"))
         if classified != (label is not None):
             raise ArgumentError("methylation classified and class do not reconcile")
-        return cls(raw, True, classified, label, _route_mapping("methylation report", raw.get("report")), None, None, None, False, None, _route_strings("methylation guarantees", raw.get("guarantees")), _route_strings("methylation limitations", raw.get("limitations")))
+        return cls(raw, True, classified, label, _route_mapping("methylation report", raw.get("report")), None, None, None, False, None, _route_strings("methylation guarantees", raw.get("guarantees")), _route_strings("methylation limitations", raw.get("limitations")), schema, outcome_kind, None, classifier, classifier_threshold, threshold_declared, qc, tumour_content, score_count, score_classes, caveat_count, nearest_present, outcome_record)
 
     @property
     def unclassifiable(self) -> bool:
@@ -581,6 +727,13 @@ class OncoWorldsMethylationCompareReport:
     divergence: str
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    divergence_kind: str | None = None
+    classifier_changed: bool = False
+    left_outcome_kind: str | None = None
+    right_outcome_kind: str | None = None
+    stable_evidence_count: int = 0
+    divergence_record: OncoMethylationDivergenceProjection | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsMethylationCompareReport":
@@ -588,10 +741,32 @@ class OncoWorldsMethylationCompareReport:
         if not _bool("methylation comparison ok", raw.get("ok")):
             raise ArgumentError("methylation comparison transport projection is not successful")
         comparison = _route_mapping("methylation comparison", raw.get("comparison"))
-        divergence = _route_text("methylation divergence", _route_mapping("methylation divergence object", comparison.get("divergence")).get("divergence"))
-        if divergence not in METHYLATION_DIVERGENCES:
-            raise ArgumentError(f"unknown methylation divergence: {divergence!r}")
-        return cls(raw, True, comparison, _route_mapping("left classifier", raw.get("left_classifier")), _route_mapping("right classifier", raw.get("right_classifier")), divergence, _route_strings("methylation comparison guarantees", raw.get("guarantees")), _route_strings("methylation comparison limitations", raw.get("limitations")))
+        divergence_record = OncoMethylationDivergenceProjection.from_wire(comparison.get("divergence"))
+        divergence = divergence_record.kind
+        divergence_kind_value = raw.get("divergence_kind")
+        divergence_kind = divergence if divergence_kind_value is None else _route_text("methylation divergence_kind", divergence_kind_value)
+        if divergence_kind != divergence:
+            raise ArgumentError("methylation divergence kind does not reconcile with comparison")
+        left_classifier = _route_mapping("left classifier", raw.get("left_classifier"))
+        right_classifier = _route_mapping("right classifier", raw.get("right_classifier"))
+        classifier_changed = _bool("methylation classifier changed", raw.get("classifier_changed", left_classifier != right_classifier))
+        if classifier_changed != (left_classifier != right_classifier):
+            raise ArgumentError("methylation classifier change does not reconcile with classifier records")
+        left_outcome_kind = _optional_text("methylation left outcome kind", raw.get("left_outcome_kind"))
+        right_outcome_kind = _optional_text("methylation right outcome kind", raw.get("right_outcome_kind"))
+        stable_evidence = comparison.get("stable_evidence", [])
+        if not isinstance(stable_evidence, Sequence) or isinstance(stable_evidence, (str, bytes)):
+            raise ArgumentError("methylation stable evidence must be an array")
+        stable_evidence_count = _route_count("methylation stable evidence count", raw.get("stable_evidence_count", len(stable_evidence)))
+        if stable_evidence_count != len(stable_evidence):
+            raise ArgumentError("methylation stable evidence count does not reconcile")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("methylation comparison schema", schema_value)
+        if schema is not None and schema != METHYLATION_COMPARE_SCHEMA:
+            raise ArgumentError(f"unknown methylation comparison schema: {schema!r}")
+        if schema is not None and ("divergence_kind" not in raw or "classifier_changed" not in raw or "stable_evidence_count" not in raw):
+            raise ArgumentError("versioned methylation comparisons require divergence and evidence accounting")
+        return cls(raw, True, comparison, left_classifier, right_classifier, divergence, _route_strings("methylation comparison guarantees", raw.get("guarantees")), _route_strings("methylation comparison limitations", raw.get("limitations")), schema, divergence_kind, classifier_changed, left_outcome_kind, right_outcome_kind, stable_evidence_count, divergence_record)
 
     @property
     def version_conditioned(self) -> bool:
@@ -779,6 +954,10 @@ def oncoworlds_clonal_history_check_report(value: Mapping[str, Any]) -> OncoWorl
 
 __all__ = [
     "METHYLATION_DIVERGENCES",
+    "METHYLATION_CLASSIFY_SCHEMA",
+    "METHYLATION_COMPARE_SCHEMA",
+    "METHYLATION_OUTCOME_KINDS",
+    "METHYLATION_REFUSAL_KINDS",
     "ONCOWORLDS_CLONAL_REFUSAL_KINDS",
     "ONCOWORLDS_CLONAL_SCHEMA",
     "ONCOWORLDS_CLONAL_UNIQUE_STATUSES",
@@ -801,6 +980,9 @@ __all__ = [
     "OncoWorldsMethylationClassifyReport",
     "OncoWorldsMethylationCompareArgs",
     "OncoWorldsMethylationCompareReport",
+    "OncoMethylationClassifierProjection",
+    "OncoMethylationDivergenceProjection",
+    "OncoMethylationOutcomeProjection",
     "OncoWorldsModelTransportArgs",
     "OncoWorldsModelTransportReport",
     "OncoModelEstablishmentProjection",
