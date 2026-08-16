@@ -653,3 +653,12 @@ lineage checks, attestation binding, promotion order, production signature/appro
 rollback presence, and explicit warning/blocking issue rows. `release_ready` is a derived artifact
 projection, not proof of CI execution or deployment. The client does not verify signatures,
 contact registries, or mutate release state. See RELEASE_PIPELINE_AUDIT.md.
+
+## Operational-readiness audit
+
+`ApiClient.operationalReadinessAudit(...)` accepts `OperationalReadinessManifestArgs` and returns
+`OperationalReadinessToolResult`. The types preserve objective/indicator evidence, dependency
+fallbacks, runbook review, incident closure, control audits, counts, and stable warning/blocking
+issue rows. `operationally_ready` is an artifact-derived posture, not evidence of live telemetry,
+reachable on-call staff, exercised fallbacks/restores, incident-system mutation, or deployment.
+See OPERATIONAL_READINESS_AUDIT.md.

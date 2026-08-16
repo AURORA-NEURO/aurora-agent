@@ -397,6 +397,11 @@ targets. It still does not replace hosted CI, signing infrastructure, registry s
 authority, deployment execution, or rollback testing, so the six blueprint entries remain
 uncovered as process/external artifacts.
 
+The `operational_readiness_audit` route adds an artifact-level companion for service-operability
+concerns: objective/indicator evidence, dependency fallbacks, runbook review, incident closure,
+and baseline controls. It intentionally leaves live telemetry, on-call reachability, executed
+restore/fallback tests, incident-management authority, and external operational process uncovered.
+
 ## §19 Reference Examples — 3 uncovered
 
 - `19.01` Decision Cell Example

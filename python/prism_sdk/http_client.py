@@ -308,6 +308,7 @@ from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_re
 from .atlas_surface import AtlasSurfaceAuditArgs, AtlasSurfaceAuditReport, atlas_surface_audit_report
 from .engineering_manifest import EngineeringAuditReport, EngineeringManifestArgs, engineering_manifest_audit_report
 from .release_pipeline import ReleasePipelineAuditReport, ReleasePipelineManifestArgs, release_pipeline_audit_report
+from .operational_readiness import OperationalReadinessAuditReport, OperationalReadinessManifestArgs, operational_readiness_audit_report
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2889,6 +2890,17 @@ class ApiClient:
         """Return typed release-pipeline evidence through HTTP."""
 
         return release_pipeline_audit_report(self.release_pipeline_audit(request))
+
+    def operational_readiness_audit(self, request: OperationalReadinessManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit operational objectives and controls through the HTTP gateway."""
+
+        normalized = request if isinstance(request, OperationalReadinessManifestArgs) else OperationalReadinessManifestArgs.from_wire(request)
+        return self.call_tool("operational_readiness_audit", normalized.to_mcp_arguments())
+
+    def operational_readiness_audit_report(self, request: OperationalReadinessManifestArgs | Mapping[str, Any]) -> OperationalReadinessAuditReport:
+        """Return typed operational-readiness evidence through HTTP."""
+
+        return operational_readiness_audit_report(self.operational_readiness_audit(request))
 
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive panel through the HTTP gateway."""
@@ -5524,6 +5536,17 @@ class AsyncApiClient:
         """Return async typed release-pipeline evidence through HTTP."""
 
         return release_pipeline_audit_report(await self.release_pipeline_audit(request))
+
+    async def operational_readiness_audit(self, request: OperationalReadinessManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async operational-readiness audit through the HTTP gateway."""
+
+        normalized = request if isinstance(request, OperationalReadinessManifestArgs) else OperationalReadinessManifestArgs.from_wire(request)
+        return await self.call_tool("operational_readiness_audit", normalized.to_mcp_arguments())
+
+    async def operational_readiness_audit_report(self, request: OperationalReadinessManifestArgs | Mapping[str, Any]) -> OperationalReadinessAuditReport:
+        """Return async typed operational-readiness evidence through HTTP."""
+
+        return operational_readiness_audit_report(await self.operational_readiness_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async adaptive panel audit through the HTTP gateway."""

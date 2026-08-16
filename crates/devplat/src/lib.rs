@@ -210,6 +210,7 @@ pub mod error;
 pub mod exploit;
 pub mod engineering;
 pub mod mission;
+pub mod operational_readiness;
 pub mod report;
 pub mod release_pipeline;
 pub mod repro;
@@ -249,6 +250,16 @@ pub use mission::{
     apply_binding, plan_mission, MissionBinding, MissionError, MissionPlan, MissionPolicy,
     MissionReport, MissionRequest, MissionStep, MissionStepPlan, MissionStepResult,
     MissionTraceEvent, MissionTraceObserver, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
+};
+pub use operational_readiness::{
+    DependencyCriticality, IncidentSeverity, IncidentState, IndicatorStatus,
+    OperationalContract, OperationalContractKind, OperationalControls, OperationalCriticality,
+    OperationalDependency, OperationalDependencyAudit, OperationalIncident, OperationalIncidentAudit,
+    OperationalIndicator, OperationalIndicatorAudit, OperationalIssueSeverity, OperationalReadinessAudit,
+    OperationalReadinessCounts, OperationalReadinessError, OperationalReadinessIssue,
+    OperationalReadinessManifest, OperationalReadinessPolicies, OperationalRunbook,
+    OperationalRunbookAudit, OperationalService, RunbookReviewStatus,
+    OPERATIONAL_READINESS_AUDIT_SCHEMA, OPERATIONAL_READINESS_MANIFEST_SCHEMA,
 };
 pub use report::{
     drifted_figures, render, render_all, Audience, Depth, EvidenceState, Figure, FigureStatus,

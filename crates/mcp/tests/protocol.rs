@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 162);
+    assert_eq!(tools.len(), 163);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3703,6 +3703,43 @@ fn release_pipeline_audit_preserves_promotion_provenance_and_rollback_boundaries
 }
 
 #[test]
+fn operational_readiness_audit_keeps_observation_fallback_and_incident_closure_explicit() {
+    let mut server = server();
+    let manifest = json!({
+        "schema": "bioprism-operational-readiness/0.1",
+        "service": { "id": "prism-api", "version": "0.1.0", "owner": "platform-oncall", "criticality": "critical" },
+        "contracts": [{ "id": "availability", "kind": "availability", "objective": "serve health checks", "target": "99.9%", "required": true }],
+        "indicators": [{ "id": "availability-sli", "contract": "availability", "metric": "request_success_ratio", "source": "telemetry-digest", "status": "observed", "measurement": "0.999", "evidence_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+        "dependencies": [{ "id": "registry", "name": "artifact registry", "owner": "release-team", "criticality": "critical", "failure_mode": "artifact fetch unavailable", "fallback": "pinned offline mirror" }],
+        "runbooks": [{ "id": "api-degraded", "trigger": "availability below target", "owner": "platform-oncall", "steps": ["freeze rollout", "restore last known good"], "review_status": "reviewed", "incident_classes": ["availability"] }],
+        "incidents": [{ "id": "inc-1", "severity": "sev2", "state": "closed", "runbook": "api-degraded", "owner": "platform-oncall", "timeline": ["detected", "contained", "restored"], "postmortem": "postmortem-digest" }],
+        "controls": { "on_call": true, "alerting": true, "tracing": true, "audit_logging": true, "backup": true, "restore_test": true, "access_review": true }
+    });
+    let result = call(&mut server, "operational_readiness_audit", json!({ "manifest": manifest.clone() }));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["operationally_ready"], json!(true));
+    assert_eq!(result["audit"]["counts"]["observed_indicators"], json!(1));
+    assert_eq!(result["audit"]["dependency_audits"][0]["fallback_present"], json!(true));
+    assert_eq!(result["audit"]["incident_audits"][0]["postmortem_present"], json!(true));
+
+    let mut refused = manifest;
+    refused["indicators"][0]["status"] = json!("not_observed");
+    refused["dependencies"][0]["fallback"] = json!(null);
+    refused["controls"]["restore_test"] = json!(false);
+    refused["incidents"][0]["postmortem"] = json!(null);
+    let refusal = call(&mut server, "operational_readiness_audit", json!({ "manifest": refused }));
+    assert_eq!(refusal["ok"], json!(true));
+    assert_eq!(refusal["valid"], json!(false));
+    assert_eq!(refusal["operationally_ready"], json!(false));
+    let issues = refusal["audit"]["issues"].as_array().unwrap();
+    assert!(issues.iter().any(|issue| issue["code"] == "indicator_not_observed"));
+    assert!(issues.iter().any(|issue| issue["code"] == "critical_dependency_fallback_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "required_control_disabled"));
+    assert!(issues.iter().any(|issue| issue["code"] == "closed_incident_postmortem_missing"));
+}
+
+#[test]
 fn developer_workbench_audits_notebook_digests_queries_dashboard_and_plans_ci() {
     let mut server = server();
     let digest = "a".repeat(64);
@@ -4239,12 +4276,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(162));
-    assert_eq!(result["advertised_tool_count"], json!(162));
+    assert_eq!(result["unique_catalog_tools"], json!(163));
+    assert_eq!(result["advertised_tool_count"], json!(163));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(162));
-    assert_eq!(result["schema_quality"]["valid"], json!(162));
+    assert_eq!(result["schema_quality"]["checked"], json!(163));
+    assert_eq!(result["schema_quality"]["valid"], json!(163));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

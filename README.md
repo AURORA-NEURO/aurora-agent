@@ -909,6 +909,15 @@ it is not evidence that CI ran or that a deployment succeeded. The route never e
 contacts CI or registries, verifies cryptographic signatures, or mutates deployment state. See
 docs/RELEASE_PIPELINE_AUDIT.md.
 
+## Operational-readiness audit
+
+The `operational_readiness_audit` route adds a bounded service-operability contract over declared
+objectives, observed indicators with digest-bound evidence, dependency failure fallbacks, reviewed
+runbooks, incident timelines/postmortems, and on-call/observability/backup/access controls.
+`operationally_ready` is derived from blocking issue rows; it does not mean telemetry was queried,
+an operator was paged, a fallback or restore was executed, an incident system was updated, or a
+deployment was authorized. See docs/OPERATIONAL_READINESS_AUDIT.md.
+
 ## License
 
 Apache-2.0

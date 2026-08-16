@@ -92,6 +92,11 @@ from .release_pipeline import (
     ReleasePipelineManifestArgs,
     release_pipeline_audit_report,
 )
+from .operational_readiness import (
+    OperationalReadinessAuditReport,
+    OperationalReadinessManifestArgs,
+    operational_readiness_audit_report,
+)
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -3008,6 +3013,17 @@ class Workspace:
 
         return release_pipeline_audit_report(self.release_pipeline_audit(request))
 
+    def operational_readiness_audit(self, request: OperationalReadinessManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit objectives, observations, fallbacks, runbooks, incidents, and controls through MCP."""
+
+        normalized = request if isinstance(request, OperationalReadinessManifestArgs) else OperationalReadinessManifestArgs.from_wire(request)
+        return self.tool("operational_readiness_audit", normalized.to_mcp_arguments())
+
+    def operational_readiness_audit_report(self, request: OperationalReadinessManifestArgs | Mapping[str, Any]) -> OperationalReadinessAuditReport:
+        """Return typed operational-readiness evidence and production-operability blockers."""
+
+        return operational_readiness_audit_report(self.operational_readiness_audit(request))
+
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive evaluation panel through MCP."""
 
@@ -5684,6 +5700,17 @@ class AsyncWorkspace:
         """Async counterpart to Workspace.release_pipeline_audit_report."""
 
         return release_pipeline_audit_report(await self.release_pipeline_audit(request))
+
+    async def operational_readiness_audit(self, request: OperationalReadinessManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.operational_readiness_audit."""
+
+        normalized = request if isinstance(request, OperationalReadinessManifestArgs) else OperationalReadinessManifestArgs.from_wire(request)
+        return (await self.client.call_tool("operational_readiness_audit", normalized.to_mcp_arguments())).require_ok()
+
+    async def operational_readiness_audit_report(self, request: OperationalReadinessManifestArgs | Mapping[str, Any]) -> OperationalReadinessAuditReport:
+        """Async counterpart to Workspace.operational_readiness_audit_report."""
+
+        return operational_readiness_audit_report(await self.operational_readiness_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.adaptive_panel`."""

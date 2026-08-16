@@ -1629,6 +1629,198 @@ export interface ReleasePipelineAuditToolResult extends JsonObject {
   fail_closed?: boolean;
 }
 
+export type OperationalReadinessCriticality = "critical" | "important" | "advisory";
+export type OperationalReadinessContractKind = "availability" | "latency" | "durability" | "recovery" | "security" | "privacy" | "capacity";
+export type OperationalReadinessIndicatorStatus = "observed" | "not_observed" | "blocked" | "not_applicable";
+export type OperationalReadinessDependencyCriticality = "critical" | "important" | "advisory";
+export type OperationalReadinessRunbookReviewStatus = "draft" | "reviewed" | "expired";
+export type OperationalReadinessIncidentSeverity = "sev1" | "sev2" | "sev3" | "sev4";
+export type OperationalReadinessIncidentState = "open" | "contained" | "resolved" | "closed";
+export type OperationalReadinessIssueSeverity = "warning" | "blocking";
+
+export interface OperationalReadinessServiceArgs extends JsonObject {
+  id: string;
+  version: string;
+  owner: string;
+  criticality: OperationalReadinessCriticality;
+}
+
+export interface OperationalReadinessContractArgs extends JsonObject {
+  id: string;
+  kind: OperationalReadinessContractKind;
+  objective: string;
+  target: string;
+  required?: boolean;
+}
+
+export interface OperationalReadinessIndicatorArgs extends JsonObject {
+  id: string;
+  contract: string;
+  metric: string;
+  source: string;
+  status: OperationalReadinessIndicatorStatus;
+  measurement?: string;
+  evidence_digest?: string;
+}
+
+export interface OperationalReadinessDependencyArgs extends JsonObject {
+  id: string;
+  name: string;
+  owner: string;
+  criticality: OperationalReadinessDependencyCriticality;
+  failure_mode: string;
+  fallback?: string;
+}
+
+export interface OperationalReadinessRunbookArgs extends JsonObject {
+  id: string;
+  trigger: string;
+  owner: string;
+  steps: string[];
+  review_status: OperationalReadinessRunbookReviewStatus;
+  incident_classes?: string[];
+}
+
+export interface OperationalReadinessIncidentArgs extends JsonObject {
+  id: string;
+  severity: OperationalReadinessIncidentSeverity;
+  state: OperationalReadinessIncidentState;
+  runbook: string;
+  owner: string;
+  timeline?: string[];
+  postmortem?: string;
+}
+
+export interface OperationalReadinessControlsArgs extends JsonObject {
+  on_call?: boolean;
+  alerting?: boolean;
+  tracing?: boolean;
+  audit_logging?: boolean;
+  backup?: boolean;
+  restore_test?: boolean;
+  access_review?: boolean;
+}
+
+export interface OperationalReadinessPoliciesArgs extends JsonObject {
+  require_contract_evidence?: boolean;
+  require_observability?: boolean;
+  require_runbooks?: boolean;
+  require_restore_test?: boolean;
+  require_dependency_fallback?: boolean;
+  require_incident_closure?: boolean;
+  require_access_review?: boolean;
+}
+
+export interface OperationalReadinessManifestArgs extends JsonObject {
+  schema?: "bioprism-operational-readiness/0.1";
+  service: OperationalReadinessServiceArgs;
+  contracts?: OperationalReadinessContractArgs[];
+  indicators?: OperationalReadinessIndicatorArgs[];
+  dependencies?: OperationalReadinessDependencyArgs[];
+  runbooks?: OperationalReadinessRunbookArgs[];
+  incidents?: OperationalReadinessIncidentArgs[];
+  controls?: OperationalReadinessControlsArgs;
+  policies?: OperationalReadinessPoliciesArgs;
+}
+
+export interface OperationalReadinessIssueResult extends JsonObject {
+  code: string;
+  severity: OperationalReadinessIssueSeverity;
+  subject: string;
+  detail: string;
+  remediation: string;
+}
+
+export interface OperationalReadinessIndicatorAuditResult extends JsonObject {
+  indicator_id: string;
+  contract_valid: boolean;
+  source_valid: boolean;
+  observed: boolean;
+  evidence_valid: boolean;
+  ready: boolean;
+}
+
+export interface OperationalReadinessDependencyAuditResult extends JsonObject {
+  dependency_id: string;
+  owner_valid: boolean;
+  failure_mode_valid: boolean;
+  fallback_present: boolean;
+  critical: boolean;
+  ready: boolean;
+}
+
+export interface OperationalReadinessRunbookAuditResult extends JsonObject {
+  runbook_id: string;
+  valid: boolean;
+  review_current: boolean;
+  step_count: number;
+  referenced_incidents: number;
+}
+
+export interface OperationalReadinessIncidentAuditResult extends JsonObject {
+  incident_id: string;
+  valid: boolean;
+  runbook_valid: boolean;
+  timeline_present: boolean;
+  postmortem_present: boolean;
+  closed: boolean;
+}
+
+export interface OperationalReadinessControlAuditResult extends JsonObject {
+  control: string;
+  enabled: boolean;
+  required: boolean;
+  ready: boolean;
+}
+
+export interface OperationalReadinessCountsResult extends JsonObject {
+  contracts: number;
+  required_contracts: number;
+  indicators: number;
+  observed_indicators: number;
+  dependencies: number;
+  critical_dependencies: number;
+  runbooks: number;
+  incidents: number;
+  open_incidents: number;
+  controls: number;
+  enabled_controls: number;
+}
+
+export interface OperationalReadinessAuditResult extends JsonObject {
+  schema: "bioprism-operational-readiness-audit/0.1";
+  manifest_schema: string;
+  digest: string;
+  valid: boolean;
+  service_id: string;
+  counts: OperationalReadinessCountsResult;
+  indicator_audits: OperationalReadinessIndicatorAuditResult[];
+  dependency_audits: OperationalReadinessDependencyAuditResult[];
+  runbook_audits: OperationalReadinessRunbookAuditResult[];
+  incident_audits: OperationalReadinessIncidentAuditResult[];
+  control_audits: OperationalReadinessControlAuditResult[];
+  issues: OperationalReadinessIssueResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface OperationalReadinessToolResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-operational-readiness-audit/0.1";
+  workflow: "operational_readiness_audit";
+  manifest_digest: string;
+  valid: boolean;
+  operationally_ready: boolean;
+  blocking_issue_count: number;
+  warning_count: number;
+  audit: OperationalReadinessAuditResult;
+  guarantees: string[];
+  limitations: string[];
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
 export interface DeveloperPlatformStatusArgs extends JsonObject {
   include_details?: boolean;
   max_items?: number;

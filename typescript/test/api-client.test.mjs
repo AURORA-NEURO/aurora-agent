@@ -658,6 +658,31 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         },
         guarantees: ["layers remain separate"], limitations: ["artifact only"],
       } } } });
+      if (path === "/v1/tools/operational_readiness_audit") return jsonResponse({ ok: true, tool: "operational_readiness_audit", request_id: "r15operational", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-operational-readiness-audit/0.1",
+        workflow: "operational_readiness_audit",
+        manifest_digest: "a".repeat(64),
+        valid: true,
+        operationally_ready: true,
+        blocking_issue_count: 0,
+        warning_count: 0,
+        audit: {
+          schema: "bioprism-operational-readiness-audit/0.1",
+          manifest_schema: "bioprism-operational-readiness/0.1",
+          digest: "a".repeat(64),
+          valid: true,
+          service_id: "aurora-api",
+          counts: { contracts: 1, required_contracts: 1, indicators: 1, observed_indicators: 1, dependencies: 1, critical_dependencies: 1, runbooks: 1, incidents: 1, open_incidents: 0, controls: 7, enabled_controls: 7 },
+          indicator_audits: [{ indicator_id: "availability", contract_valid: true, source_valid: true, observed: true, evidence_valid: true, ready: true }],
+          dependency_audits: [{ dependency_id: "registry", owner_valid: true, failure_mode_valid: true, fallback_present: true, critical: true, ready: true }],
+          runbook_audits: [{ runbook_id: "api-degraded", valid: true, review_current: true, step_count: 2, referenced_incidents: 1 }],
+          incident_audits: [{ incident_id: "INC-1", valid: true, runbook_valid: true, timeline_present: true, postmortem_present: true, closed: true }],
+          control_audits: [{ control: "on_call", enabled: true, required: true, ready: true }],
+          issues: [], guarantees: ["layers remain separate"], limitations: ["artifact only"],
+        },
+        guarantees: ["layers remain separate"], limitations: ["artifact only"],
+      } } } });
       if (path === "/v1/tools/adaptive_panel") return jsonResponse({ ok: true, tool: "adaptive_panel", request_id: "r15d", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/adaptive-panel/0.1",
@@ -1517,6 +1542,20 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(releasePipeline.mcp.result.structuredContent.schema, "bioprism-release-pipeline-audit/0.1");
   assert.equal(releasePipeline.mcp.result.structuredContent.release_ready, true);
   assert.equal(releasePipeline.mcp.result.structuredContent.audit.promotion_audits[0].rollback_present, true);
+  const operational = await client.operationalReadinessAudit({
+    service: { id: "aurora-api", version: "0.1.0", owner: "platform", criticality: "critical" },
+    contracts: [{ id: "availability", kind: "availability", objective: "serve requests", target: "99.9%", required: true }],
+    indicators: [{ id: "availability", contract: "availability", metric: "availability_ratio", source: "metrics", status: "observed", measurement: "0.999", evidence_digest: "a".repeat(64) }],
+    dependencies: [{ id: "registry", name: "registry", owner: "platform", criticality: "critical", failure_mode: "unavailable", fallback: "cached" }],
+    runbooks: [{ id: "api-degraded", trigger: "availability alert", owner: "oncall", steps: ["triage", "fail over"], review_status: "reviewed", incident_classes: ["availability"] }],
+    incidents: [{ id: "INC-1", severity: "sev2", state: "closed", runbook: "api-degraded", owner: "oncall", timeline: ["detected", "resolved"], postmortem: "learned" }],
+    controls: { on_call: true, alerting: true, tracing: true, audit_logging: true, backup: true, restore_test: true, access_review: true },
+  });
+  assert.equal(operational.mcp.result.structuredContent.schema, "bioprism-operational-readiness-audit/0.1");
+  assert.equal(operational.mcp.result.structuredContent.operationally_ready, true);
+  assert.equal(operational.mcp.result.structuredContent.audit.indicator_audits[0].observed, true);
+  assert.equal(operational.mcp.result.structuredContent.audit.dependency_audits[0].fallback_present, true);
+  assert.equal(operational.mcp.result.structuredContent.audit.incident_audits[0].postmortem_present, true);
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });
   const evidenceAudit = await client.bioCapabilityEvidenceAudit({ evidence: [], claim_requests: [], metrics: {} });
   const publicationAudit = await client.bioAtlasPublicationAudit({ atlas: { atlas_id: "atlas-1" }, release_request: { id: "publication-1", targets: ["atlas_profile"] } });

@@ -1165,3 +1165,14 @@ deterministic stage order/readiness, artifact and promotion audits, production p
 warning/blocking issue rows, `release_ready`, the canonical manifest digest, guarantees, and
 limitations. It remains an artifact audit: it does not run CI, verify signatures, query registries,
 authenticate approvals, or deploy. See RELEASE_PIPELINE_AUDIT.md.
+
+## Operational-readiness audit
+
+`OperationalReadinessManifestArgs` and `operational_readiness_audit_report(...)` expose the
+service-operability contract across sync/async MCP and HTTP. Typed nested arguments cover service
+objectives, indicator status and evidence digests, dependency fallbacks, runbook review, incident
+closure, controls, and requirement policies. `OperationalReadinessAuditReport` preserves the
+canonical digest, layer-specific audit rows, counts, warning/blocking issue records,
+`operationally_ready`, guarantees, and limitations. It remains declaration-only and does not
+query telemetry, page operators, execute runbooks, test restores, mutate incidents, or authorize
+deployment. See OPERATIONAL_READINESS_AUDIT.md.

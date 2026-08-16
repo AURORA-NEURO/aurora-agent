@@ -281,6 +281,8 @@ import type {
   EngineeringManifestAuditResult,
   ReleasePipelineManifestArgs,
   ReleasePipelineAuditToolResult,
+  OperationalReadinessManifestArgs,
+  OperationalReadinessToolResult,
   AdaptivePanelRunArgs,
   AdaptivePanelResult,
   PosteriorGateArgs,
@@ -502,6 +504,10 @@ export class ApiClient {
 
   async releasePipelineAudit(args: ReleasePipelineManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ReleasePipelineAuditToolResult>> {
     return this.callTool<ReleasePipelineAuditToolResult>("release_pipeline_audit", args, options);
+  }
+
+  async operationalReadinessAudit(args: OperationalReadinessManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OperationalReadinessToolResult>> {
+    return this.callTool<OperationalReadinessToolResult>("operational_readiness_audit", args, options);
   }
 
   async adaptivePanel(args: AdaptivePanelRunArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptivePanelResult>> {

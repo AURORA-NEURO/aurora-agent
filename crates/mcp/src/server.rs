@@ -131,9 +131,9 @@ use bioprism_devplat::{
     apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
     CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
-    EngineeringManifest, ReleasePipelineManifest, CAPABILITY_SCHEMA_VERSION,
-    ENGINEERING_AUDIT_SCHEMA, RELEASE_PIPELINE_AUDIT_SCHEMA, MISSION_SCHEMA_VERSION,
-    WORKBENCH_SCHEMA_VERSION,
+    EngineeringManifest, OperationalReadinessManifest, ReleasePipelineManifest,
+    CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1467,6 +1467,7 @@ impl Server {
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "engineering_manifest_audit" => self.engineering_manifest_audit(&arguments),
             "release_pipeline_audit" => self.release_pipeline_audit(&arguments),
+            "operational_readiness_audit" => self.operational_readiness_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
@@ -24170,6 +24171,54 @@ impl Server {
         }))
     }
 
+    fn operational_readiness_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_manifest = arguments
+            .get("manifest")
+            .cloned()
+            .ok_or("manifest is required and must be a serialized OperationalReadinessManifest")?;
+        let encoded = serde_json::to_vec(&raw_manifest)
+            .map_err(|error| format!("cannot measure operational-readiness manifest: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("manifest exceeds the 20000000-byte safety bound".into());
+        }
+        let manifest: OperationalReadinessManifest = serde_json::from_value(raw_manifest)
+            .map_err(|error| format!("invalid operational-readiness manifest: {error}"))?;
+        let audit = manifest
+            .audit()
+            .map_err(|error| format!("cannot audit operational-readiness manifest: {error}"))?;
+        let blocking_issue_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::OperationalIssueSeverity::Blocking)
+            .count();
+        let warning_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::OperationalIssueSeverity::Warning)
+            .count();
+        Ok(json!({
+            "ok": true,
+            "workflow": "operational_readiness_audit",
+            "schema": OPERATIONAL_READINESS_AUDIT_SCHEMA,
+            "manifest_digest": audit.digest,
+            "valid": audit.valid,
+            "operationally_ready": audit.valid,
+            "blocking_issue_count": blocking_issue_count,
+            "warning_count": warning_count,
+            "audit": audit,
+            "guarantees": [
+                "service objectives, observed indicators, dependency fallbacks, runbooks, incidents, and controls remain separate evidence layers",
+                "required operational controls are reported individually rather than hidden in one readiness score",
+                "closed incidents retain a postmortem obligation and critical dependencies retain explicit fallback obligations",
+            ],
+            "limitations": [
+                "the route does not query telemetry, page an on-call team, inspect a live dependency, or open an incident",
+                "evidence digests, control booleans, ownership, and review status are caller-declared",
+                "a valid declaration is operational-readiness evidence, not proof of uptime, recovery, or safe production behavior",
+            ],
+        }))
+    }
+
     fn developer_delivery_audit(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery input: {error}"))?;
@@ -26498,7 +26547,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -28663,6 +28712,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "manifest": { "type": "object", "description": "Serialized bioprism-devplat ReleasePipelineManifest with project/source identity, environments, stages, artifacts, attestations, promotions, and explicit policies." }
+                },
+                "required": ["manifest"]
+            }
+        }),
+        json!({
+            "name": "operational_readiness_audit",
+            "description": "Validate a bounded machine-readable operational-readiness manifest. It audits service objectives, observed indicator evidence, dependency ownership and fallbacks, reviewed runbooks, incident timelines and closure records, and explicit on-call/observability/backup/access controls; it returns deterministic operational readiness without querying telemetry, paging operators, opening incidents, or asserting production uptime.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifest": { "type": "object", "description": "Serialized bioprism-devplat OperationalReadinessManifest with service identity, contracts, indicators, dependencies, runbooks, incidents, controls, and explicit policies." }
                 },
                 "required": ["manifest"]
             }
