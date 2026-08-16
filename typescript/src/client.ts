@@ -114,6 +114,8 @@ import type {
   DeveloperDeliveryAuditResult,
   DeveloperPlatformStatusArgs,
   DeveloperPlatformStatusResult,
+  TokenContextPlanArgs,
+  TokenContextPlanningResult,
   DeveloperWorkbenchArgs,
   EventMetrics,
   EventPersistenceStatus,
@@ -360,6 +362,10 @@ export class ApiClient {
 
   async developerPlatformStatus(args: DeveloperPlatformStatusArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperPlatformStatusResult>> {
     return this.callTool<DeveloperPlatformStatusResult>("developer_platform_status", args, options);
+  }
+
+  async tokenContextPlan(args: TokenContextPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<TokenContextPlanningResult>> {
+    return this.callTool<TokenContextPlanningResult>("token_context_plan", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

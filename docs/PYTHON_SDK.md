@@ -76,6 +76,13 @@ invent defaults:
   over sync MCP, async MCP, and HTTP. Query text and explicit schema JSON are size-checked locally;
   lexical, unit/frame, temporal, provenance, access-label, and cost semantics remain authoritative
   in Rust, and compilation never executes a query.
+- `TokenContextPlanArgs` and `token_context_plan_report(...)` type token-context planning across
+  sync MCP, async MCP, and HTTP. `TokenContextRequest`, `TokenPlanCandidate`, and `TokenEstimate`
+  preserve pinned compiler identity, resolution depth, node kind, restricted-data flags, and the
+  estimation ruler. `TokenContextPlanningReport` exposes mandatory closure affordability, dry-run
+  handles, optional estimates, and policy-only comparison deltas; it never treats a caller-declared
+  or mixed estimate as a tokenizer measurement, and it refuses mismatched candidate identity at
+  the client boundary before Rust performs the authoritative plan.
 - `WorldClaimCheckRequest`, `LabPlanRequest`, and `RoutingDecisionRequest` expose typed envelope
   helpers for world support checks, no-execution acquisition planning, and unseen-task routing over
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and

@@ -178,6 +178,7 @@ from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_
 from .routing import RoutingDecisionReport, routing_decision_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
+from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -670,6 +671,23 @@ class ApiClient:
         return developer_platform_status_report(
             self.developer_platform_status(include_details=include_details, max_items=max_items)
         )
+
+    def token_context_plan(
+        self,
+        request: TokenContextPlanArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a token context through the HTTP gateway without execution."""
+
+        normalized = request if isinstance(request, TokenContextPlanArgs) else TokenContextPlanArgs.from_wire(request)
+        return self.call_tool("token_context_plan", normalized.to_mcp_arguments())
+
+    def token_context_plan_report(
+        self,
+        request: TokenContextPlanArgs | Mapping[str, Any],
+    ) -> TokenContextPlanningReport:
+        """Return typed HTTP token estimates and policy-only comparison evidence."""
+
+        return token_context_plan_report(self.token_context_plan(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2276,6 +2294,23 @@ class AsyncApiClient:
         return developer_platform_status_report(
             await self.developer_platform_status(include_details=include_details, max_items=max_items)
         )
+
+    async def token_context_plan(
+        self,
+        request: TokenContextPlanArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async token-context planning through the HTTP gateway."""
+
+        normalized = request if isinstance(request, TokenContextPlanArgs) else TokenContextPlanArgs.from_wire(request)
+        return await self.call_tool("token_context_plan", normalized.to_mcp_arguments())
+
+    async def token_context_plan_report(
+        self,
+        request: TokenContextPlanArgs | Mapping[str, Any],
+    ) -> TokenContextPlanningReport:
+        """Return async typed HTTP token planning evidence."""
+
+        return token_context_plan_report(await self.token_context_plan(request))
 
     async def developer_delivery_audit_report(
         self,

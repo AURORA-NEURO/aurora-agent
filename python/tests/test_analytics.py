@@ -72,6 +72,13 @@ from prism_sdk import (
     TabularIngestRequest,
     TabularManifestReport,
     TabularSemanticLossReport,
+    TokenContextPlanArgs,
+    TokenContextPlanningReport,
+    TokenContextRequest,
+    TokenEstimate,
+    TokenPlanCandidate,
+    TokenPolicyComparisonReport,
+    token_context_plan_report,
     analytics_request,
     tabular_ingest_report,
     conformance_run_report,
@@ -439,6 +446,72 @@ def developer_platform_status_payload(*, include_details: bool = False) -> dict:
             "diagnostic_findings": [{"code": "DEVX-0001"}],
             "exit_code_divergences": [{"kind": "class_collision"}],
         }
+    return payload
+
+
+def token_context_plan_payload(*, include_comparison: bool = True) -> dict:
+    def plan(
+        request_digest: str,
+        plan_digest: str,
+        candidates: list[str],
+        mandatory: list[str],
+        handles: list[str],
+        mandatory_tokens: int,
+        optional_tokens: int,
+    ) -> dict:
+        return {
+            "request_digest": request_digest,
+            "plan_digest": plan_digest,
+            "candidates": candidates,
+            "mandatory": mandatory,
+            "handles": handles,
+            "mandatory_estimate": {
+                "tokens": mandatory_tokens,
+                "method": {"method": "declared_by_caller"},
+            },
+            "optional_estimate": {
+                "tokens": optional_tokens,
+                "method": {"method": "declared_by_caller"},
+            },
+            "envelope": {"total": 100},
+        }
+
+    baseline = plan(
+        "a" * 64,
+        "b" * 64,
+        ["invariant/identity", "evidence/summary"],
+        ["invariant/identity"],
+        [],
+        20,
+        30,
+    )
+    variant = plan(
+        "c" * 64,
+        "e" * 64,
+        ["invariant/identity", "invariant/uncertainty"],
+        ["invariant/identity", "invariant/uncertainty"],
+        [],
+        35,
+        0,
+    )
+    payload = {
+        "ok": True,
+        "plan": baseline,
+        "comparison": {
+            "comparison_id": "mcp-token-policy-comparison",
+            "mode": "policy_only",
+            "baseline_policy": "policy/minimal",
+            "variant_policy": "policy/strict",
+            "baseline_plan": baseline,
+            "variant_plan": variant,
+        }
+        if include_comparison
+        else None,
+        "guarantees": [
+            "mandatory closure is checked before a plan is returned",
+            "token counts retain their estimation method",
+        ],
+    }
     return payload
 
 
@@ -1113,6 +1186,66 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             DeveloperPlatformStatusArgs(max_items=1_001)
 
+    def test_token_context_plan_report_preserves_estimates_and_policy_delta(self) -> None:
+        report = TokenContextPlanningReport.from_wire(token_context_plan_payload())
+        self.assertIsInstance(report.comparison, TokenPolicyComparisonReport)
+        self.assertTrue(report.mandatory_closure_affordable)
+        self.assertEqual(report.plan.discretionary_tokens, 80)
+        self.assertEqual(report.comparison.mandatory_difference, 15)
+        self.assertEqual(report.comparison.mandatory_added, ("invariant/uncertainty",))
+        self.assertEqual(report.comparison.mandatory_removed, ())
+        self.assertFalse(report.estimates_are_measured)
+
+    def test_token_context_plan_report_extracts_http_text_and_rejects_bad_candidates(self) -> None:
+        payload = token_context_plan_payload(include_comparison=False)
+        report = token_context_plan_report(
+            {
+                "ok": True,
+                "mcp": {
+                    "result": {
+                        "content": [{"type": "text", "text": json.dumps(payload)}]
+                    }
+                },
+            }
+        )
+        self.assertFalse(report.has_comparison)
+        self.assertEqual(report.plan.mandatory_estimate.method.label, "declared-by-caller")
+        with self.assertRaises(ArgumentError):
+            TokenContextPlanArgs.from_wire(
+                {
+                    "request": {
+                        "world_ref": "world",
+                        "decision_ref": "decision",
+                        "role": "researcher",
+                        "policy_id": "policy",
+                        "envelope": {"total": 10},
+                        "depth": "l1",
+                        "compiler_version": "compiler/1",
+                    },
+                    "candidates": [
+                        {
+                            "node_id": "same",
+                            "kind": "evidence",
+                            "estimate": {"tokens": 1, "method": {"method": "declared_by_caller"}},
+                        },
+                        {
+                            "node_id": "same",
+                            "kind": "summary",
+                            "estimate": {"tokens": 1, "method": {"method": "declared_by_caller"}},
+                        },
+                    ],
+                }
+            )
+
+    def test_token_context_request_and_candidate_types_round_trip(self) -> None:
+        request = TokenContextRequest("world", "decision", "researcher", "policy", 50, "dry_run", "compiler/1")
+        estimate = TokenEstimate.from_wire({"tokens": 5, "method": {"method": "provider_tokenizer", "name": "cl100k"}})
+        candidate = TokenPlanCandidate("evidence/one", "evidence", estimate, restricted=True)
+        args = TokenContextPlanArgs(request, [candidate])
+        self.assertEqual(args.to_mcp_arguments()["request"]["depth"], "dry_run")
+        self.assertTrue(args.to_mcp_arguments()["candidates"][0]["restricted"])
+        self.assertTrue(estimate.method.measured)
+
     def test_biocapability_evidence_audit_report_preserves_claim_blockers(self) -> None:
         report = BioCapabilityEvidenceAuditReport.from_wire(
             biocapability_evidence_audit_payload()
@@ -1281,6 +1414,32 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertIsInstance(report, DeveloperPlatformStatusReport)
         self.assertTrue(report.foreign_artifacts_present)
         status.assert_called_once_with(None, include_details=False, max_items=100)
+
+    def test_sync_workspace_typed_token_context_report(self) -> None:
+        request = TokenContextPlanArgs.from_wire(
+            {
+                "request": {
+                    "world_ref": "world",
+                    "decision_ref": "decision",
+                    "role": "researcher",
+                    "policy_id": "policy",
+                    "envelope": {"total": 100},
+                    "depth": "l1",
+                    "compiler_version": "compiler/1",
+                },
+                "candidates": [
+                    {"node_id": "evidence/one", "kind": "evidence", "estimate": {"tokens": 5, "method": {"method": "declared_by_caller"}}}
+                ],
+            }
+        )
+        with patch.object(
+            Workspace,
+            "token_context_plan",
+            return_value=token_context_plan_payload(include_comparison=False),
+        ) as plan:
+            report = Workspace(None).token_context_plan_report(request)  # type: ignore[arg-type]
+        self.assertFalse(report.has_comparison)
+        plan.assert_called_once_with(request)
 
     def test_sync_workspace_exposes_agent_mission(self) -> None:
         with Client(command(), timeout=2) as client:
@@ -1472,6 +1631,19 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             )  # type: ignore[arg-type]
         self.assertTrue(report.details_available)
         status.assert_awaited_once_with(None, include_details=True, max_items=100)
+
+    async def test_async_workspace_typed_token_context_report(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "token_context_plan",
+            new_callable=AsyncMock,
+            return_value=token_context_plan_payload(include_comparison=False),
+        ) as plan:
+            report = await AsyncWorkspace(None).token_context_plan_report(  # type: ignore[arg-type]
+                {"request": {}, "candidates": []}
+            )
+        self.assertFalse(report.has_comparison)
+        plan.assert_awaited_once_with({"request": {}, "candidates": []})
 
     async def test_async_workspace_exposes_agent_mission(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

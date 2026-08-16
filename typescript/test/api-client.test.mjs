@@ -108,6 +108,21 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         exit_code_audit: { clean: true, retry_decision_recoverable_from_code_alone: true, divergence_count: 0, divergences_returned: [], omitted_divergences: 0 },
         limitations: ["foreign artifacts remain explicit"],
       } } } });
+      if (path === "/v1/tools/token_context_plan") return jsonResponse({ ok: true, tool: "token_context_plan", request_id: "r17", mcp: { result: { structuredContent: {
+        ok: true,
+        plan: {
+          request_digest: "a".repeat(64),
+          plan_digest: "b".repeat(64),
+          candidates: ["invariant/identity"],
+          mandatory: ["invariant/identity"],
+          handles: [],
+          mandatory_estimate: { tokens: 20, method: { method: "declared_by_caller" } },
+          optional_estimate: { tokens: 0, method: { method: "declared_by_caller" } },
+          envelope: { total: 100 },
+        },
+        comparison: null,
+        guarantees: ["mandatory closure is checked before a plan is returned"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -530,6 +545,12 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const platform = await client.developerPlatformStatus({ include_details: false, max_items: 3 });
   assert.equal(platform.mcp.result.structuredContent.detail_mode, "summary");
   assert.equal(platform.mcp.result.structuredContent.devplat.modules_classified, 4);
+  const tokenPlan = await client.tokenContextPlan({
+    request: { world_ref: "world", decision_ref: "decision", role: "researcher", policy_id: "policy", envelope: { total: 100 }, depth: "l1", compiler_version: "compiler/1" },
+    candidates: [{ node_id: "invariant/identity", kind: "invariant", mandatory: true, estimate: { tokens: 20, method: { method: "declared_by_caller" } } }],
+  });
+  assert.equal(tokenPlan.mcp.result.structuredContent.plan.mandatory_estimate.tokens, 20);
+  assert.equal(tokenPlan.mcp.result.structuredContent.comparison, null);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

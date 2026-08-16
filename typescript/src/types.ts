@@ -664,6 +664,69 @@ export interface DeveloperPlatformStatusResult extends JsonObject {
   details?: DeveloperPlatformDetailsResult;
 }
 
+export interface TokenContextRequestResult extends JsonObject {
+  world_ref: string;
+  decision_ref: string;
+  role: string;
+  policy_id: string;
+  envelope: { total: number };
+  depth: "dry_run" | "l0" | "l1" | "l2" | "l3";
+  compiler_version: string;
+}
+
+export type TokenEstimationMethodResult =
+  | { method: "chars_per_token4" }
+  | { method: "declared_by_caller" }
+  | { method: "provider_tokenizer"; name: string }
+  | { method: "mixed"; methods: string[] };
+
+export interface TokenEstimateResult extends JsonObject {
+  tokens: number;
+  method: TokenEstimationMethodResult;
+}
+
+export interface TokenPlanCandidateResult extends JsonObject {
+  node_id: string;
+  kind: "invariant" | "evidence" | "contradiction" | "negative_evidence" | "uncertainty" | "policy_restriction" | "summary" | "handle" | "attested_claim";
+  mandatory?: boolean;
+  restricted?: boolean;
+  estimate: TokenEstimateResult;
+}
+
+export interface TokenContextPlanArgs extends JsonObject {
+  request: TokenContextRequestResult;
+  candidates: TokenPlanCandidateResult[];
+  variant_request?: TokenContextRequestResult;
+  variant_candidates?: TokenPlanCandidateResult[];
+}
+
+export interface TokenContextPlanResult extends JsonObject {
+  request_digest: string;
+  plan_digest: string;
+  candidates: string[];
+  mandatory: string[];
+  handles: string[];
+  mandatory_estimate: TokenEstimateResult;
+  optional_estimate: TokenEstimateResult;
+  envelope: { total: number };
+}
+
+export interface TokenPolicyComparisonResult extends JsonObject {
+  comparison_id: string;
+  mode: "policy_only";
+  baseline_policy: string;
+  variant_policy: string;
+  baseline_plan: TokenContextPlanResult;
+  variant_plan: TokenContextPlanResult;
+}
+
+export interface TokenContextPlanningResult extends JsonObject {
+  ok: boolean;
+  plan: TokenContextPlanResult;
+  comparison: TokenPolicyComparisonResult | null;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

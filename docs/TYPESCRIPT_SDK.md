@@ -157,6 +157,10 @@ standing, module classification, cookbook verification, declared contract surfac
 findings, exit-code divergences, foreign artifacts, and optional full details. Its bounded counts
 and standing fields remain explicit; a clean local projection does not claim foreign SDK, CI, gRPC,
 or live-debugger execution.
+`tokenContextPlan` returns typed `TokenContextPlanningResult` baseline and optional policy-only
+comparison plans, keeping node kinds, restricted flags, mandatory closure, stable handles, and
+estimation methods visible. `declared_by_caller`, provider-tokenizer, and mixed totals remain
+different types of evidence; the client does not promote any of them to measured provider usage.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

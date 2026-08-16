@@ -211,6 +211,11 @@ from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_
 from .routing import RoutingDecisionReport, routing_decision_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
+from .token_context import (
+    TokenContextPlanArgs,
+    TokenContextPlanningReport,
+    token_context_plan_report,
+)
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -1549,6 +1554,23 @@ class Workspace:
                 request, include_details=include_details, max_items=max_items
             )
         )
+
+    def token_context_plan(
+        self,
+        request: TokenContextPlanArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a bounded token context without resolving payloads or executing tools."""
+
+        normalized = request if isinstance(request, TokenContextPlanArgs) else TokenContextPlanArgs.from_wire(request)
+        return self.tool("token_context_plan", normalized.to_mcp_arguments())
+
+    def token_context_plan_report(
+        self,
+        request: TokenContextPlanArgs | Mapping[str, Any],
+    ) -> TokenContextPlanningReport:
+        """Return typed estimates, mandatory closure, handles, and policy comparison evidence."""
+
+        return token_context_plan_report(self.token_context_plan(request))
 
     def developer_delivery_audit_report(
         self,
@@ -3132,6 +3154,23 @@ class AsyncWorkspace:
                 request, include_details=include_details, max_items=max_items
             )
         )
+
+    async def token_context_plan(
+        self,
+        request: TokenContextPlanArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async bounded token-context planning without execution."""
+
+        normalized = request if isinstance(request, TokenContextPlanArgs) else TokenContextPlanArgs.from_wire(request)
+        return (await self.client.call_tool("token_context_plan", normalized.to_mcp_arguments())).require_ok()
+
+    async def token_context_plan_report(
+        self,
+        request: TokenContextPlanArgs | Mapping[str, Any],
+    ) -> TokenContextPlanningReport:
+        """Async typed token estimates and policy-only comparison evidence."""
+
+        return token_context_plan_report(await self.token_context_plan(request))
 
     async def developer_delivery_audit_report(
         self,
