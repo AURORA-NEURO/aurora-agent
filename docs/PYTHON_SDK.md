@@ -648,6 +648,14 @@ identity, and holdout check are all retained. The parser enforces that an absten
 its reason and treats `caller_must_supply_unseen_identity` as a caller posture rather than proof
 that holdout isolation was actually performed.
 
+`ProviderCapabilityGateArgs` / `provider_capability_gate_report(...)` type the runtime-provider
+evidence gate. Required checks are restricted to pass/fail capabilities; the report distinguishes
+untested, failed, and passed claim states, retains reproducible run references and failure
+witnesses, keeps performance measurements as measurements, and preserves per-check differential
+states including indeterminate comparisons when either provider is untested. `cleared` means the
+declared required checks passed; it does not execute a provider or establish general runtime
+correctness.
+
 ## Runtime and bioethics safety workflows
 
 The runtime projection is split into request authoring and evidence parsing so callers can inspect

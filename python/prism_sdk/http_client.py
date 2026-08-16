@@ -171,6 +171,7 @@ from .stress import (
 )
 from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_analysis_report
 from .routing import RoutingDecisionReport, routing_decision_report
+from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -1598,6 +1599,19 @@ class ApiClient:
         task_id: str | None = None,
     ) -> RoutingDecisionReport:
         return routing_decision_report(self.routing_decide(fingerprint, evidence, policy, task_id=task_id))
+
+    def provider_capability_gate(
+        self,
+        request: ProviderCapabilityGateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ProviderCapabilityGateArgs) else ProviderCapabilityGateArgs.from_wire(request)
+        return self.call_tool("provider_capability_gate", normalized.to_mcp_arguments())
+
+    def provider_capability_gate_report(
+        self,
+        request: ProviderCapabilityGateArgs | Mapping[str, Any],
+    ) -> ProviderCapabilityGateReport:
+        return provider_capability_gate_report(self.provider_capability_gate(request))
 
     def lab_plan(
         self,
@@ -3151,6 +3165,19 @@ class AsyncApiClient:
         task_id: str | None = None,
     ) -> RoutingDecisionReport:
         return routing_decision_report(await self.routing_decide(fingerprint, evidence, policy, task_id=task_id))
+
+    async def provider_capability_gate(
+        self,
+        request: ProviderCapabilityGateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ProviderCapabilityGateArgs) else ProviderCapabilityGateArgs.from_wire(request)
+        return await self.call_tool("provider_capability_gate", normalized.to_mcp_arguments())
+
+    async def provider_capability_gate_report(
+        self,
+        request: ProviderCapabilityGateArgs | Mapping[str, Any],
+    ) -> ProviderCapabilityGateReport:
+        return provider_capability_gate_report(await self.provider_capability_gate(request))
 
     async def lab_plan(
         self,

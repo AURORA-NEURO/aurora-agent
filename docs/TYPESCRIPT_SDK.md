@@ -253,6 +253,9 @@ numeric infinity or an implicit robustness claim.
 `routingDecide` types the approved architecture, confidence score, abstention reason, considered
 panel, neighbourhood evidence, and holdout posture; safe-default abstention remains distinct from
 a routed win.
+`providerCapabilityGate` preserves untested/failed/passed provider states, conjunctive gate
+outcomes, measurement counts, reproducible run evidence, and indeterminate cross-provider drift;
+performance observations remain measurements rather than invented pass/fail claims.
 `oracleCombine` retains tiered decisions, underdetermination, suppressed overrides, inadmissible
 and withheld ledgers, and nullable deciding/confidence evidence. `oracleReferencePanel` and
 `oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and

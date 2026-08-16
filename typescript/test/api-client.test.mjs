@@ -947,3 +947,26 @@ test("client exposes typed routing abstention and holdout posture", async () => 
   assert.equal(result.mcp.result.structuredContent.decision.abstained, true);
   assert.equal(result.mcp.result.structuredContent.holdout_check, "caller_must_supply_unseen_identity");
 });
+
+test("client exposes provider gate states and differential indeterminacy", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/provider_capability_gate");
+      return jsonResponse({ ok: true, tool: "provider_capability_gate", request_id: "provider-1", mcp: { result: { structuredContent: {
+        ok: true,
+        provider: "runtime-a",
+        required: ["host_escape"],
+        required_states: { HostEscape: { state: "untested" } },
+        gate: { outcome: "blocked", unproven: ["HostEscape=untested"] },
+        claims: [],
+        measurement_count: 0,
+        differential: { HostEscape: { drift: "indeterminate", untested: ["runtime-a", "runtime-b"] } },
+        guarantees: ["untested blocks"],
+      } } } });
+    },
+  });
+  const result = await client.providerCapabilityGate({ card: { provider: "runtime-a", states: {}, measurements: [] }, required: ["host_escape"] });
+  assert.equal(result.mcp.result.structuredContent.gate.outcome, "blocked");
+  assert.equal(result.mcp.result.structuredContent.differential.HostEscape.drift, "indeterminate");
+});

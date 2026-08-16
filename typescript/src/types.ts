@@ -2846,4 +2846,39 @@ export interface RoutingToolResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface ProviderCapabilityGateArgs extends JsonObject {
+  card: JsonObject;
+  required: string[];
+  other_card?: JsonObject;
+  include_card?: boolean;
+}
+
+export type ProviderClaimStateResult =
+  | { state: "untested" }
+  | { state: "failed"; witness: string; run: JsonObject }
+  | { state: "passed"; run: JsonObject };
+
+export interface ProviderGateResult extends JsonObject {
+  outcome: "cleared" | "blocked";
+  unproven?: string[];
+}
+
+export type ProviderDriftResult =
+  | { drift: "agree" }
+  | { drift: "differ"; left: string; right: string }
+  | { drift: "indeterminate"; untested: string[] };
+
+export interface ProviderCapabilityGateResult extends JsonObject {
+  ok: boolean;
+  provider: string | null;
+  required: string[];
+  required_states: { [name: string]: ProviderClaimStateResult };
+  gate: ProviderGateResult;
+  claims: string[];
+  measurement_count: number;
+  differential: { [check: string]: ProviderDriftResult } | null;
+  card?: JsonObject | null;
+  guarantees: string[];
+}
+
 export type ToolArguments = JsonObject;

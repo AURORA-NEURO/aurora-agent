@@ -82,6 +82,8 @@ import type {
   InfluenceAnalyzeResult,
   RoutingDecideArgs,
   RoutingToolResult,
+  ProviderCapabilityGateArgs,
+  ProviderCapabilityGateResult,
   OracleCombineArgs,
   OracleCombineResult,
   OracleReferencePanelArgs,
@@ -502,6 +504,10 @@ export class ApiClient {
 
   async routingDecide(args: RoutingDecideArgs, options?: ClientRequestOptions): Promise<RestToolResponse<RoutingToolResult>> {
     return this.callTool<RoutingToolResult>("routing_decide", args, options);
+  }
+
+  async providerCapabilityGate(args: ProviderCapabilityGateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ProviderCapabilityGateResult>> {
+    return this.callTool<ProviderCapabilityGateResult>("provider_capability_gate", args, options);
   }
 
   async oracleCombine(args: OracleCombineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleCombineResult>> {

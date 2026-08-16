@@ -204,6 +204,7 @@ from .stress import (
 )
 from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_analysis_report
 from .routing import RoutingDecisionReport, routing_decision_report
+from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -701,6 +702,22 @@ class Workspace:
         task_id: str | None = None,
     ) -> RoutingDecisionReport:
         return routing_decision_report(self.routing_decide(fingerprint, evidence, policy, task_id=task_id))
+
+    def provider_capability_gate(
+        self,
+        request: ProviderCapabilityGateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ProviderCapabilityGateArgs) else ProviderCapabilityGateArgs.from_wire(request)
+        result = self.client.call_tool("provider_capability_gate", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def provider_capability_gate_report(
+        self,
+        request: ProviderCapabilityGateArgs | Mapping[str, Any],
+    ) -> ProviderCapabilityGateReport:
+        return provider_capability_gate_report(self.provider_capability_gate(request))
 
     def lab_plan(
         self,
@@ -2226,6 +2243,22 @@ class AsyncWorkspace:
         task_id: str | None = None,
     ) -> RoutingDecisionReport:
         return routing_decision_report(await self.routing_decide(fingerprint, evidence, policy, task_id=task_id))
+
+    async def provider_capability_gate(
+        self,
+        request: ProviderCapabilityGateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ProviderCapabilityGateArgs) else ProviderCapabilityGateArgs.from_wire(request)
+        result = await self.client.call_tool("provider_capability_gate", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def provider_capability_gate_report(
+        self,
+        request: ProviderCapabilityGateArgs | Mapping[str, Any],
+    ) -> ProviderCapabilityGateReport:
+        return provider_capability_gate_report(await self.provider_capability_gate(request))
 
     async def lab_plan(
         self,

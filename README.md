@@ -419,6 +419,9 @@ digests before running the FIBER suite and returns its noncompensatory release d
 `provider_capability_gate` gates runtime/provider claims on passed correctness and security
 evidence, keeps performance values as measurements without invented thresholds, and marks
 cross-provider comparisons indeterminate when either side is untested.
+The Python and TypeScript SDKs expose the same evidence boundary with typed claim states, gate
+outcomes, run witnesses, measurement counts, and differential drift; a cleared gate never implies
+that runtime execution occurred or that unmeasured capabilities are safe.
 `scale_family_split_verify` verifies imported benchmark tiers against lineage roots and refuses
 family straddles; `stewardship_review_check` concludes evaluator reviews only when mandatory
 dimensions, corpus support, and independence hold, keeping unreviewed dimensions explicit.
