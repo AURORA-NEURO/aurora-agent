@@ -4044,6 +4044,75 @@ export interface OncoOutcomeResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface OracleRefResult extends JsonObject {
+  id: string;
+  version: { major: number; minor: number; patch: number };
+}
+
+export interface OracleJudgementResult extends JsonObject {
+  oracle: OracleRefResult;
+  tier: "deterministic" | "execution" | "property" | "statistical" | "judge";
+  declared_tier: "deterministic" | "execution" | "property" | "statistical" | "judge";
+  position: "supported" | "contradicted" | "unresolved" | "not_evaluable";
+  confidence: number;
+  belief?: JsonObject | null;
+  establishes: string[];
+  cannot_establish: string[];
+  findings: JsonValue[];
+  admissibility: JsonObject;
+  rationale: string;
+}
+
+export type OracleOverrideRule = "nondeterministic_over_grounded" | "lower_tier_over_higher";
+
+export interface OracleSuppressedOverrideResult extends JsonObject {
+  oracle: OracleRefResult;
+  attempted_position: "supported" | "contradicted" | "unresolved" | "not_evaluable";
+  attempted_tier: "deterministic" | "execution" | "property" | "statistical" | "judge";
+  attempted_confidence: number;
+  deciding_tier: "deterministic" | "execution" | "property" | "statistical" | "judge";
+  deciding_positions: ("supported" | "contradicted" | "unresolved" | "not_evaluable")[];
+  rule: OracleOverrideRule;
+}
+
+export type OracleDisagreementSourceResult =
+  | { source: "version_mismatch"; id: string; versions: string[] }
+  | { source: "scope_mismatch"; planes: Record<string, string[]> }
+  | { source: "independence_violation"; circular: OracleRefResult[] }
+  | { source: "genuine_ambiguity" };
+
+export type OracleSettlementResult =
+  | { settlement: "higher_tier_oracle"; at_least: "deterministic" | "execution" | "property" | "statistical" | "judge" }
+  | { settlement: "version_alignment"; id: string }
+  | { settlement: "independent_review"; reason: string }
+  | { settlement: "artifact_repair"; pointer: string }
+  | { settlement: "longitudinal_observation"; awaiting: string };
+
+export type OracleResolutionResult =
+  | { resolution: "open" }
+  | { resolution: "upheld"; by: OracleRefResult; at: string; position: string }
+  | { resolution: "overturned"; by: OracleRefResult; at: string; position: string; superseded: string[] }
+  | { resolution: "unresolvable"; reason: string };
+
+export interface OracleDisagreementResult extends JsonObject {
+  tier: "deterministic" | "execution" | "property" | "statistical" | "judge";
+  positions: Record<string, OracleRefResult[]>;
+  source: OracleDisagreementSourceResult;
+  would_be_settled_by: OracleSettlementResult[];
+  resolution: OracleResolutionResult;
+}
+
+export type OracleBasisResult =
+  | { basis: "decided"; tier: "deterministic" | "execution" | "property" | "statistical" | "judge" }
+  | { basis: "no_admissible_oracle" }
+  | { basis: "no_applicable_oracle" }
+  | { basis: "below_policy_floor"; best: string; required: string };
+
+export interface OracleConfidenceResult extends JsonObject {
+  low: number;
+  high: number;
+}
+
 export interface OracleCombineArgs extends JsonObject {
   subject: string;
   at: string;
@@ -4054,6 +4123,7 @@ export interface OracleCombineArgs extends JsonObject {
 
 export interface OracleCombineResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/oracle-combine/0.1";
   subject?: string;
   at?: string;
   status?: "valid" | "invalid" | "underdetermined";
@@ -4062,19 +4132,19 @@ export interface OracleCombineResult extends JsonObject {
   judge_only?: boolean;
   suppressed_override?: boolean;
   acceptable?: boolean;
-  basis?: JsonValue;
-  confidence?: JsonObject | null;
+  basis?: OracleBasisResult | null;
+  confidence?: OracleConfidenceResult | null;
   establishes?: string[];
   does_not_establish?: string[];
-  contributing?: JsonValue[];
+  contributing?: OracleJudgementResult[];
   omitted_contributing?: number;
-  withheld?: JsonValue[];
+  withheld?: OracleJudgementResult[];
   omitted_withheld?: number;
-  inadmissible?: JsonValue[];
+  inadmissible?: OracleJudgementResult[];
   omitted_inadmissible?: number;
-  suppressed?: JsonValue[];
+  suppressed?: OracleSuppressedOverrideResult[];
   omitted_suppressed?: number;
-  disagreements?: JsonValue[];
+  disagreements?: OracleDisagreementResult[];
   omitted_disagreements?: number;
   guarantees?: string[];
   limitations?: string[];

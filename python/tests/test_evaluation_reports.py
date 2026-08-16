@@ -53,6 +53,9 @@ class EvaluationReportTests(unittest.TestCase):
         self.assertTrue(report.underdetermined)
         self.assertTrue(report.release_blocked)
         self.assertEqual(report.omitted_withheld, 1)
+        self.assertEqual(report.contributing_records[0].oracle.id, "a")
+        self.assertEqual(report.suppressed_records[0].oracle.id, "c")
+        self.assertEqual(report.basis_record.kind, "disagreement")
 
     def test_reference_panel_refusal_and_missingness_resolution_are_not_errors(self) -> None:
         refusal = oracle_reference_panel_report({

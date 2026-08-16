@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 from .capability import _route_count, _route_mapping, _route_strings, _route_text
@@ -19,6 +19,7 @@ from .errors import ArgumentError
 
 ORACLE_STATUSES = frozenset({"valid", "invalid", "underdetermined"})
 ORACLE_EVIDENCE_TIERS = frozenset({"deterministic", "execution", "property", "statistical", "judge"})
+ORACLE_COMBINE_SCHEMA = "bioprism-mcp/oracle-combine/0.1"
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -45,6 +46,10 @@ def _finite(name: str, value: Any) -> float:
 
 def _optional_finite(name: str, value: Any) -> float | None:
     return None if value is None else _finite(name, value)
+
+
+def _optional_text(name: str, value: Any) -> str | None:
+    return None if value is None else _route_text(name, value)
 
 
 def _projection_payload(
@@ -103,6 +108,155 @@ def _refusal(raw: Mapping[str, Any], description: str) -> tuple[str, str, str | 
 
 
 @dataclass(frozen=True)
+class OracleRefProjection:
+    """An oracle identity retained in an evidence row."""
+
+    raw: Any
+    id: str | None
+    version: dict[str, Any] | None
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "OracleRefProjection":
+        if isinstance(value, str):
+            return cls(value, value, None)
+        raw = _route_mapping("oracle reference", value)
+        version = None if raw.get("version") is None else _route_mapping("oracle reference version", raw.get("version"))
+        return cls(raw, _optional_text("oracle reference id", raw.get("id")), version)
+
+
+@dataclass(frozen=True)
+class OracleJudgementProjection:
+    """A full contributing/withheld/inadmissible judgement when the server returned one."""
+
+    raw: dict[str, Any]
+    oracle: OracleRefProjection | None
+    tier: str | None
+    declared_tier: str | None
+    position: str | None
+    confidence: float | None
+    belief: dict[str, Any] | None
+    establishes: tuple[str, ...]
+    cannot_establish: tuple[str, ...]
+    findings: tuple[Any, ...]
+    admissibility: dict[str, Any] | None
+    rationale: str | None
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "OracleJudgementProjection":
+        raw = _route_mapping("oracle judgement", value)
+        tier = _optional_text("oracle judgement tier", raw.get("tier"))
+        declared_tier = _optional_text("oracle declared tier", raw.get("declared_tier"))
+        for name, tier_value in (("oracle judgement tier", tier), ("oracle declared tier", declared_tier)):
+            if tier_value is not None and tier_value not in ORACLE_EVIDENCE_TIERS:
+                raise ArgumentError(f"unknown {name}: {tier_value!r}")
+        position = _optional_text("oracle judgement position", raw.get("position"))
+        if position is not None and position not in {"supported", "contradicted", "unresolved", "not_evaluable"}:
+            raise ArgumentError(f"unknown oracle judgement position: {position!r}")
+        return cls(
+            raw,
+            None if raw.get("oracle") is None else OracleRefProjection.from_wire(raw.get("oracle")),
+            tier,
+            declared_tier,
+            position,
+            _optional_finite("oracle judgement confidence", raw.get("confidence")),
+            _optional_mapping("oracle judgement belief", raw.get("belief")),
+            _route_strings("oracle judgement establishes", raw.get("establishes", [])),
+            _route_strings("oracle judgement cannot_establish", raw.get("cannot_establish", [])),
+            _array("oracle judgement findings", raw.get("findings", [])),
+            _optional_mapping("oracle judgement admissibility", raw.get("admissibility")),
+            _optional_text("oracle judgement rationale", raw.get("rationale")),
+        )
+
+
+@dataclass(frozen=True)
+class OracleSuppressedOverrideProjection:
+    raw: dict[str, Any]
+    oracle: OracleRefProjection | None
+    attempted_position: str | None
+    attempted_tier: str | None
+    attempted_confidence: float | None
+    deciding_tier: str | None
+    deciding_positions: tuple[str, ...]
+    rule: str | None
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "OracleSuppressedOverrideProjection":
+        raw = _route_mapping("oracle suppressed override", value)
+        return cls(
+            raw,
+            None if raw.get("oracle") is None else OracleRefProjection.from_wire(raw.get("oracle")),
+            _optional_text("oracle attempted position", raw.get("attempted_position")),
+            _optional_text("oracle attempted tier", raw.get("attempted_tier")),
+            _optional_finite("oracle attempted confidence", raw.get("attempted_confidence")),
+            _optional_text("oracle deciding tier", raw.get("deciding_tier")),
+            _route_strings("oracle deciding positions", raw.get("deciding_positions", [])),
+            _optional_text("oracle override rule", raw.get("rule")),
+        )
+
+
+@dataclass(frozen=True)
+class OracleDisagreementProjection:
+    raw: dict[str, Any]
+    tier: str | None
+    positions: dict[str, tuple[OracleRefProjection, ...]]
+    source: dict[str, Any] | None
+    would_be_settled_by: tuple[dict[str, Any], ...]
+    resolution: dict[str, Any] | None
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "OracleDisagreementProjection":
+        raw = _route_mapping("oracle disagreement", value)
+        positions_raw = raw.get("positions", {})
+        positions: dict[str, tuple[OracleRefProjection, ...]] = {}
+        if isinstance(positions_raw, Mapping):
+            for position, oracles in positions_raw.items():
+                positions[_route_text("oracle disagreement position", position)] = tuple(OracleRefProjection.from_wire(item) for item in _array("oracle disagreement oracles", oracles))
+        return cls(
+            raw,
+            _optional_text("oracle disagreement tier", raw.get("tier")),
+            positions,
+            _optional_mapping("oracle disagreement source", raw.get("source")),
+            tuple(_route_mapping("oracle disagreement settlement", item) for item in _array("oracle disagreement settlements", raw.get("would_be_settled_by", []))),
+            _optional_mapping("oracle disagreement resolution", raw.get("resolution")),
+        )
+
+    @property
+    def is_open(self) -> bool:
+        return self.resolution is not None and self.resolution.get("resolution") == "open"
+
+
+@dataclass(frozen=True)
+class OracleBasisProjection:
+    raw: Any
+    kind: str | None
+    payload: dict[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "OracleBasisProjection":
+        if value is None:
+            return cls(None, None, {})
+        raw = _route_mapping("oracle verdict basis", value)
+        kind = _optional_text("oracle verdict basis kind", raw.get("basis"))
+        return cls(raw, kind, {key: item for key, item in raw.items() if key != "basis"})
+
+
+@dataclass(frozen=True)
+class OracleConfidenceProjection:
+    raw: dict[str, Any]
+    low: float
+    high: float
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OracleConfidenceProjection":
+        raw = _route_mapping("oracle confidence envelope", value)
+        low = _finite("oracle confidence low", raw.get("low"))
+        high = _finite("oracle confidence high", raw.get("high"))
+        if not 0.0 <= low <= high <= 1.0:
+            raise ArgumentError("oracle confidence envelope must satisfy 0 <= low <= high <= 1")
+        return cls(raw, low, high)
+
+
+@dataclass(frozen=True)
 class OracleCombineReport:
     raw: dict[str, Any]
     ok: bool
@@ -130,12 +284,21 @@ class OracleCombineReport:
     omitted_disagreements: int
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    contributing_records: tuple[OracleJudgementProjection, ...] = field(default_factory=tuple)
+    withheld_records: tuple[OracleJudgementProjection, ...] = field(default_factory=tuple)
+    inadmissible_records: tuple[OracleJudgementProjection, ...] = field(default_factory=tuple)
+    suppressed_records: tuple[OracleSuppressedOverrideProjection, ...] = field(default_factory=tuple)
+    disagreement_records: tuple[OracleDisagreementProjection, ...] = field(default_factory=tuple)
+    basis_record: OracleBasisProjection | None = None
+    confidence_record: OracleConfidenceProjection | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OracleCombineReport":
         raw = _projection_payload(value, description="oracle combination", direct_keys=("status", "contributing"))
         if not _bool("oracle combination ok", raw.get("ok")):
             raise ArgumentError("oracle combination is not successful")
+        if raw.get("schema") is not None and _route_text("oracle combination schema", raw.get("schema")) != ORACLE_COMBINE_SCHEMA:
+            raise ArgumentError("unsupported oracle combination schema")
         status = _route_text("oracle combination status", raw.get("status"))
         if status not in ORACLE_STATUSES:
             raise ArgumentError(f"unknown oracle combination status: {status!r}")
@@ -157,9 +320,12 @@ class OracleCombineReport:
         suppressed, omitted_suppressed = rows("suppressed")
         disagreements, omitted_disagreements = rows("disagreements")
         confidence = _optional_mapping("oracle confidence", raw.get("confidence"))
-        if confidence is not None:
-            _finite("oracle confidence.low", confidence.get("low"))
-            _finite("oracle confidence.high", confidence.get("high"))
+        confidence_record = None if confidence is None else OracleConfidenceProjection.from_wire(confidence)
+        contributing_records = tuple(OracleJudgementProjection.from_wire(item) for item in contributing)
+        withheld_records = tuple(OracleJudgementProjection.from_wire(item) for item in withheld)
+        inadmissible_records = tuple(OracleJudgementProjection.from_wire(item) for item in inadmissible)
+        suppressed_records = tuple(OracleSuppressedOverrideProjection.from_wire(item) for item in suppressed)
+        disagreement_records = tuple(OracleDisagreementProjection.from_wire(item) for item in disagreements)
         return cls(
             raw,
             True,
@@ -187,11 +353,35 @@ class OracleCombineReport:
             omitted_disagreements,
             _route_strings("oracle guarantees", raw.get("guarantees")),
             _route_strings("oracle limitations", raw.get("limitations")),
+            contributing_records,
+            withheld_records,
+            inadmissible_records,
+            suppressed_records,
+            disagreement_records,
+            OracleBasisProjection.from_wire(raw.get("basis")),
+            confidence_record,
         )
 
     @property
     def release_blocked(self) -> bool:
         return self.status != "valid" or self.underdetermined or not self.acceptable
+
+    @property
+    def returned_rows_are_typed(self) -> bool:
+        return all(
+            typed_count == raw_count
+            for typed_count, raw_count in (
+                (len(self.contributing_records), len(self.contributing)),
+                (len(self.withheld_records), len(self.withheld)),
+                (len(self.inadmissible_records), len(self.inadmissible)),
+                (len(self.suppressed_records), len(self.suppressed)),
+                (len(self.disagreement_records), len(self.disagreements)),
+            )
+        )
+
+    @property
+    def has_open_disagreement(self) -> bool:
+        return any(record.is_open for record in self.disagreement_records)
 
 
 @dataclass(frozen=True)
@@ -510,6 +700,7 @@ def evaluation_trajectory_check_report(value: Mapping[str, Any]) -> EvaluationTr
 
 
 __all__ = [
+    "ORACLE_COMBINE_SCHEMA",
     "ORACLE_EVIDENCE_TIERS",
     "ORACLE_STATUSES",
     "BioevalReferenceAuditReport",
@@ -517,8 +708,14 @@ __all__ = [
     "EvaluationTrajectoryReport",
     "EvaluationWorldlineReport",
     "OracleCombineReport",
+    "OracleBasisProjection",
+    "OracleConfidenceProjection",
+    "OracleDisagreementProjection",
+    "OracleJudgementProjection",
     "OracleMissingnessReport",
+    "OracleRefProjection",
     "OracleReferencePanelReport",
+    "OracleSuppressedOverrideProjection",
     "bioeval_reference_audit_report",
     "evaluation_reproduction_check_report",
     "evaluation_trajectory_check_report",

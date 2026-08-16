@@ -374,8 +374,10 @@ performance observations remain measurements rather than invented pass/fail clai
 `sdkRegistryCheck` preserves manifest-validation versus registry-registration refusal stages,
 whole/core digests, capability kinds, trust evidence, deterministic resolution, and the invariant
 that a refused set has no partial registry.
-`oracleCombine` retains tiered decisions, underdetermination, suppressed overrides, inadmissible
-and withheld ledgers, and nullable deciding/confidence evidence. `oracleReferencePanel` and
+`oracleCombine` retains tiered decisions, underdetermination, typed oracle judgement identities,
+admissibility, suppressed overrides, disagreement source/settlement/resolution, inadmissible and
+withheld ledgers, and nullable deciding/confidence evidence. See
+[`docs/ORACLE_COMBINE.md`](../docs/ORACLE_COMBINE.md). `oracleReferencePanel` and
 `oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and
 aggregate egress boundaries. `bioevalReferenceAudit` keeps distributed reference mass separate
 from modal summaries; `evaluationWorldlineAudit` reconciles leakage and dangling references;

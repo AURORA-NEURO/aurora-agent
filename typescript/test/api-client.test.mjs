@@ -724,7 +724,30 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/onco_classification_check") return jsonResponse({ ok: true, tool: "onco_classification_check", request_id: "r34", mcp: { result: { structuredContent: { ok: true, is_integrated: false, obligations: [{ marker: "idh_mutation" }] } } } });
       if (path === "/v1/tools/oncoworlds_identity_join") return jsonResponse({ ok: true, tool: "oncoworlds_identity_join", request_id: "r35", mcp: { result: { structuredContent: { ok: true, joinable: false, bridge_declared: false } } } });
       if (path === "/v1/tools/onco_outcome_analyze") return jsonResponse({ ok: true, tool: "onco_outcome_analyze", request_id: "r36", mcp: { result: { structuredContent: { ok: true, event: false, censoring_reason: "lost_to_follow_up", immortal_time_days: 4 } } } });
-      if (path === "/v1/tools/oracle_combine") return jsonResponse({ ok: true, tool: "oracle_combine", request_id: "r37", mcp: { result: { structuredContent: { ok: true, status: "underdetermined", underdetermined: true, deciding_tier: "deterministic" } } } });
+      if (path === "/v1/tools/oracle_combine") return jsonResponse({ ok: true, tool: "oracle_combine", request_id: "r37", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/oracle-combine/0.1",
+        subject: "s",
+        at: "2026-01-01T00:00:00Z",
+        status: "underdetermined",
+        underdetermined: true,
+        deciding_tier: "deterministic",
+        judge_only: false,
+        suppressed_override: true,
+        acceptable: false,
+        basis: { basis: "decided", tier: "deterministic" },
+        confidence: { low: 1, high: 1 },
+        establishes: ["artifact"],
+        does_not_establish: ["biology"],
+        contributing: [{ oracle: { id: "checksum:sha", version: { major: 1, minor: 0, patch: 0 } }, tier: "deterministic", declared_tier: "deterministic", position: "supported", confidence: 1, belief: null, establishes: ["artifact"], cannot_establish: ["biology"], findings: [], admissibility: { state: "admissible" }, rationale: "" }],
+        omitted_contributing: 0,
+        withheld: [], omitted_withheld: 0, inadmissible: [], omitted_inadmissible: 0,
+        suppressed: [{ oracle: { id: "judge:review", version: { major: 1, minor: 0, patch: 0 } }, attempted_position: "contradicted", attempted_tier: "judge", attempted_confidence: 0.99, deciding_tier: "deterministic", deciding_positions: ["supported"], rule: "nondeterministic_over_grounded" }],
+        omitted_suppressed: 0,
+        disagreements: [{ tier: "deterministic", positions: { supported: [{ id: "checksum:sha", version: { major: 1, minor: 0, patch: 0 } }] }, source: { source: "genuine_ambiguity" }, would_be_settled_by: [{ settlement: "higher_tier_oracle", at_least: "deterministic" }], resolution: { resolution: "open" } }],
+        omitted_disagreements: 0,
+        guarantees: ["same-tier disagreement remains set-valued"], limitations: ["caller supplied"],
+      } } } });
       if (path === "/v1/tools/oracle_reference_panel") return jsonResponse({ ok: true, tool: "oracle_reference_panel", request_id: "r38", mcp: { result: { structuredContent: { ok: true, rule_label: "majority", readers: 2, omitted_reads: 0 } } } });
       if (path === "/v1/tools/oracle_missingness") return jsonResponse({ ok: true, tool: "oracle_missingness", request_id: "r39", mcp: { result: { structuredContent: { ok: true, small_cell_floor: 5 } } } });
       if (path === "/v1/tools/bioeval_reference_audit") return jsonResponse({ ok: true, tool: "bioeval_reference_audit", request_id: "r40", mcp: { result: { structuredContent: { ok: true, reference_kind: "distribution", can_certify_clean_pass: false } } } });
@@ -1146,6 +1169,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(identity.mcp.result.structuredContent.joinable, false);
   assert.equal(outcome.mcp.result.structuredContent.censoring_reason, "lost_to_follow_up");
   assert.equal(oracleCombine.mcp.result.structuredContent.status, "underdetermined");
+  assert.equal(oracleCombine.mcp.result.structuredContent.schema, "bioprism-mcp/oracle-combine/0.1");
+  assert.equal(oracleCombine.mcp.result.structuredContent.contributing[0].oracle.version.major, 1);
+  assert.equal(oracleCombine.mcp.result.structuredContent.suppressed[0].rule, "nondeterministic_over_grounded");
+  assert.equal(oracleCombine.mcp.result.structuredContent.disagreements[0].resolution.resolution, "open");
   assert.equal(oraclePanel.mcp.result.structuredContent.rule_label, "majority");
   assert.equal(oracleMissingness.mcp.result.structuredContent.small_cell_floor, 5);
   assert.equal(referenceAudit.mcp.result.structuredContent.reference_kind, "distribution");

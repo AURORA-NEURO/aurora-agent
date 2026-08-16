@@ -4933,6 +4933,7 @@ fn oracle_combine_keeps_grounded_decisions_and_suppressed_judgements_visible() {
     );
 
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/oracle-combine/0.1"));
     assert_eq!(result["status"], json!("valid"));
     assert_eq!(result["deciding_tier"], json!("deterministic"));
     assert_eq!(result["suppressed_override"], json!(true));

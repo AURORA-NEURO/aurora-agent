@@ -10461,6 +10461,7 @@ impl Server {
         let max_items = max_items as usize;
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/oracle-combine/0.1",
             "subject": verdict.subject,
             "at": verdict.at,
             "status": verdict.status(),

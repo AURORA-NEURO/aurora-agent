@@ -550,7 +550,9 @@ capability-level posterior vectors separate from rationale-bearing release scala
 floors, vetoes, and sensitivity; the Python and TypeScript SDKs preserve these layers and typed
 fail-closed refusals. `oracle_combine` combines tiered judgements without majority
 voting, retaining underdetermination, suppressed overrides, inadmissible evidence, and
-disagreement witnesses.
+disagreement witnesses; its Python and TypeScript SDK projections now preserve nested oracle
+identities, admissibility, settlement routes, and resolution state. See
+[`docs/ORACLE_COMBINE.md`](docs/ORACLE_COMBINE.md).
 `bioeval_reference_audit` validates reference mass normalization and reports distributed truth,
 modal confidence, entropy, dispersion attribution, unresolved scope, and not-evaluable scope
 without treating an omitted state as zero or collapsing the reference to a label.
