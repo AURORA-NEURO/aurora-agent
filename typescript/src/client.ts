@@ -64,6 +64,20 @@ import type {
   OncoResponseResult,
   OncoWorldlineViewArgs,
   OncoWorldlineResult,
+  OracleCombineArgs,
+  OracleCombineResult,
+  OracleReferencePanelArgs,
+  OracleReferencePanelResult,
+  OracleMissingnessArgs,
+  OracleMissingnessResult,
+  BioevalReferenceAuditArgs,
+  BioevalReferenceAuditResult,
+  EvaluationWorldlineArgs,
+  EvaluationWorldlineResult,
+  EvaluationReproductionArgs,
+  EvaluationReproductionResult,
+  EvaluationTrajectoryArgs,
+  EvaluationTrajectoryResult,
   OpsAcceptanceArgs,
   OpsAcceptanceResult,
   BioAtlasPublicationAuditArgs,
@@ -419,6 +433,34 @@ export class ApiClient {
 
   async oncoOutcomeAnalyze(args: OncoOutcomeAnalyzeArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoOutcomeResult>> {
     return this.callTool<OncoOutcomeResult>("onco_outcome_analyze", args, options);
+  }
+
+  async oracleCombine(args: OracleCombineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleCombineResult>> {
+    return this.callTool<OracleCombineResult>("oracle_combine", args, options);
+  }
+
+  async oracleReferencePanel(args: OracleReferencePanelArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleReferencePanelResult>> {
+    return this.callTool<OracleReferencePanelResult>("oracle_reference_panel", args, options);
+  }
+
+  async oracleMissingness(args: OracleMissingnessArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleMissingnessResult>> {
+    return this.callTool<OracleMissingnessResult>("oracle_missingness", args, options);
+  }
+
+  async bioevalReferenceAudit(args: BioevalReferenceAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalReferenceAuditResult>> {
+    return this.callTool<BioevalReferenceAuditResult>("bioeval_reference_audit", args, options);
+  }
+
+  async evaluationWorldlineAudit(args: EvaluationWorldlineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EvaluationWorldlineResult>> {
+    return this.callTool<EvaluationWorldlineResult>("evaluation_worldline_audit", args, options);
+  }
+
+  async evaluationReproductionCheck(args: EvaluationReproductionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EvaluationReproductionResult>> {
+    return this.callTool<EvaluationReproductionResult>("evaluation_reproduction_check", args, options);
+  }
+
+  async evaluationTrajectoryCheck(args: EvaluationTrajectoryArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EvaluationTrajectoryResult>> {
+    return this.callTool<EvaluationTrajectoryResult>("evaluation_trajectory_check", args, options);
   }
 
   async opsAcceptance(args: OpsAcceptanceArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OpsAcceptanceResult>> {

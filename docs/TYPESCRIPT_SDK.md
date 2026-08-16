@@ -232,6 +232,13 @@ without treating it as a transport failure; and `oncoOutcomeAnalyze` keeps estim
 censoring, delayed entry, and informative-bias fields distinct. Nested domain records remain
 `JsonObject` values so the Rust oncology crate remains the serialization authority, while the
 top-level invariants and contradictions are checked by the SDK.
+`oracleCombine` retains tiered decisions, underdetermination, suppressed overrides, inadmissible
+and withheld ledgers, and nullable deciding/confidence evidence. `oracleReferencePanel` and
+`oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and
+aggregate egress boundaries. `bioevalReferenceAudit` keeps distributed reference mass separate
+from modal summaries; `evaluationWorldlineAudit` reconciles leakage and dangling references;
+`evaluationReproductionCheck` keeps reproducibility separate from biological validity; and
+`evaluationTrajectoryCheck` exposes non-vacuous property outcomes and bounded suffix completeness.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

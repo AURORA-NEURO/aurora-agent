@@ -338,6 +338,13 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/onco_classification_check") return jsonResponse({ ok: true, tool: "onco_classification_check", request_id: "r34", mcp: { result: { structuredContent: { ok: true, is_integrated: false, obligations: [{ marker: "idh_mutation" }] } } } });
       if (path === "/v1/tools/oncoworlds_identity_join") return jsonResponse({ ok: true, tool: "oncoworlds_identity_join", request_id: "r35", mcp: { result: { structuredContent: { ok: true, joinable: false, bridge_declared: false } } } });
       if (path === "/v1/tools/onco_outcome_analyze") return jsonResponse({ ok: true, tool: "onco_outcome_analyze", request_id: "r36", mcp: { result: { structuredContent: { ok: true, event: false, censoring_reason: "lost_to_follow_up", immortal_time_days: 4 } } } });
+      if (path === "/v1/tools/oracle_combine") return jsonResponse({ ok: true, tool: "oracle_combine", request_id: "r37", mcp: { result: { structuredContent: { ok: true, status: "underdetermined", underdetermined: true, deciding_tier: "deterministic" } } } });
+      if (path === "/v1/tools/oracle_reference_panel") return jsonResponse({ ok: true, tool: "oracle_reference_panel", request_id: "r38", mcp: { result: { structuredContent: { ok: true, rule_label: "majority", readers: 2, omitted_reads: 0 } } } });
+      if (path === "/v1/tools/oracle_missingness") return jsonResponse({ ok: true, tool: "oracle_missingness", request_id: "r39", mcp: { result: { structuredContent: { ok: true, small_cell_floor: 5 } } } });
+      if (path === "/v1/tools/bioeval_reference_audit") return jsonResponse({ ok: true, tool: "bioeval_reference_audit", request_id: "r40", mcp: { result: { structuredContent: { ok: true, reference_kind: "distribution", can_certify_clean_pass: false } } } });
+      if (path === "/v1/tools/evaluation_worldline_audit") return jsonResponse({ ok: true, tool: "evaluation_worldline_audit", request_id: "r41", mcp: { result: { structuredContent: { ok: true, leak_count: 1, dangling_count: 0 } } } });
+      if (path === "/v1/tools/evaluation_reproduction_check") return jsonResponse({ ok: true, tool: "evaluation_reproduction_check", request_id: "r42", mcp: { result: { structuredContent: { ok: true, reproduced: false, portability_demonstrated: false } } } });
+      if (path === "/v1/tools/evaluation_trajectory_check") return jsonResponse({ ok: true, tool: "evaluation_trajectory_check", request_id: "r43", mcp: { result: { structuredContent: { ok: true, steps: 1 } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -536,6 +543,13 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const classification = await client.oncoClassificationCheck({ histology: "diffuse_glioma", panel: {} });
   const identity = await client.oncoworldsIdentityJoin({ left: {}, right: {}, unit: "specimen" });
   const outcome = await client.oncoOutcomeAnalyze({ follow_up: {}, estimand: {} });
+  const oracleCombine = await client.oracleCombine({ subject: "s", at: "2026-01-01T00:00:00Z", judgements: [{}] });
+  const oraclePanel = await client.oracleReferencePanel({ panel: {} });
+  const oracleMissingness = await client.oracleMissingness({ pattern: {}, field: {}, boundary: {}, small_cell_floor: 5 });
+  const referenceAudit = await client.bioevalReferenceAudit({ reference: {} });
+  const evaluationWorldline = await client.evaluationWorldlineAudit({ worldline: {} });
+  const reproduction = await client.evaluationReproductionCheck({ reexecution: {} });
+  const trajectory = await client.evaluationTrajectoryCheck({ trajectory: {} });
   assert.equal(capabilities.mcp.result.structuredContent.workflow, "capability_discover");
   assert.equal(capabilities.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilities.mcp.result.structuredContent.matches[0].group.domains[0], "verification");
@@ -588,6 +602,13 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(classification.mcp.result.structuredContent.is_integrated, false);
   assert.equal(identity.mcp.result.structuredContent.joinable, false);
   assert.equal(outcome.mcp.result.structuredContent.censoring_reason, "lost_to_follow_up");
+  assert.equal(oracleCombine.mcp.result.structuredContent.status, "underdetermined");
+  assert.equal(oraclePanel.mcp.result.structuredContent.rule_label, "majority");
+  assert.equal(oracleMissingness.mcp.result.structuredContent.small_cell_floor, 5);
+  assert.equal(referenceAudit.mcp.result.structuredContent.reference_kind, "distribution");
+  assert.equal(evaluationWorldline.mcp.result.structuredContent.leak_count, 1);
+  assert.equal(reproduction.mcp.result.structuredContent.reproduced, false);
+  assert.equal(trajectory.mcp.result.structuredContent.steps, 1);
   const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");

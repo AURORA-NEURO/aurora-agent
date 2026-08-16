@@ -1894,6 +1894,170 @@ export interface OncoOutcomeResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface OracleCombineArgs extends JsonObject {
+  subject: string;
+  at: string;
+  judgements: JsonObject[];
+  minimum_deciding_tier?: "deterministic" | "execution" | "property" | "statistical" | "judge";
+  max_items?: number;
+}
+
+export interface OracleCombineResult extends JsonObject {
+  ok: boolean;
+  subject?: string;
+  at?: string;
+  status?: "valid" | "invalid" | "underdetermined";
+  underdetermined?: boolean;
+  deciding_tier?: "deterministic" | "execution" | "property" | "statistical" | "judge" | null;
+  judge_only?: boolean;
+  suppressed_override?: boolean;
+  acceptable?: boolean;
+  basis?: JsonValue;
+  confidence?: JsonObject | null;
+  establishes?: string[];
+  does_not_establish?: string[];
+  contributing?: JsonValue[];
+  omitted_contributing?: number;
+  withheld?: JsonValue[];
+  omitted_withheld?: number;
+  inadmissible?: JsonValue[];
+  omitted_inadmissible?: number;
+  suppressed?: JsonValue[];
+  omitted_suppressed?: number;
+  disagreements?: JsonValue[];
+  omitted_disagreements?: number;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OracleReferencePanelArgs extends JsonObject {
+  panel: JsonObject;
+  rule?: JsonObject;
+  model_call?: string;
+  max_items?: number;
+}
+
+export interface OracleReferencePanelResult extends JsonObject {
+  ok: boolean;
+  rule?: JsonValue;
+  rule_label?: string;
+  consensus?: JsonObject;
+  tally?: JsonObject;
+  readers?: number;
+  minority_calls?: JsonValue[];
+  reads?: JsonValue[];
+  omitted_reads?: number;
+  per_reader?: JsonObject | null;
+  model_call?: string | null;
+  adjudication?: JsonObject | null;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OracleMissingnessArgs extends JsonObject {
+  pattern: JsonObject;
+  field: JsonObject;
+  boundary: JsonObject;
+  small_cell_floor: number;
+  mechanism?: JsonObject;
+}
+
+export interface OracleMissingnessResult extends JsonObject {
+  ok: boolean;
+  groups?: JsonValue[];
+  informativeness?: JsonObject;
+  field?: JsonObject;
+  boundary?: JsonObject;
+  small_cell_floor?: number;
+  egress?: JsonObject;
+  mechanism?: JsonObject | null;
+  complete_case?: JsonObject | null;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface BioevalReferenceAuditArgs extends JsonObject {
+  reference: JsonObject;
+  state?: string;
+}
+
+export interface BioevalReferenceAuditResult extends JsonObject {
+  ok: boolean;
+  reference?: JsonObject;
+  reference_kind?: string;
+  can_certify_clean_pass?: boolean;
+  resolution?: JsonObject | null;
+  modal_state?: string | null;
+  modal_mass?: number | null;
+  modal_confidence?: number | null;
+  entropy_bits?: number | null;
+  dispersion?: string | null;
+  queried_state?: string | null;
+  queried_state_mass?: number | null;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface EvaluationWorldlineArgs extends JsonObject {
+  worldline: JsonObject;
+  at?: string;
+}
+
+export interface EvaluationWorldlineResult extends JsonObject {
+  ok: boolean;
+  decisions?: number;
+  leak_count?: number;
+  leaks?: JsonObject[];
+  dangling_count?: number;
+  dangling_references?: JsonValue[];
+  admissible_at?: JsonValue[] | null;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface EvaluationReproductionArgs extends JsonObject {
+  reexecution: JsonObject;
+  biological_claim?: string;
+}
+
+export interface EvaluationReproductionResult extends JsonObject {
+  ok: boolean;
+  certificate?: JsonObject;
+  reproduced?: boolean;
+  first_divergence?: JsonObject | null;
+  missing_outputs?: JsonValue[];
+  portability_demonstrated?: boolean;
+  validity_claim?: JsonObject | null;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface EvaluationTrajectoryArgs extends JsonObject {
+  trajectory: JsonObject;
+  step?: number;
+  horizon?: number;
+}
+
+export interface EvaluationTrajectoryResult extends JsonObject {
+  ok: boolean;
+  steps?: number;
+  acts?: JsonValue[];
+  properties?: JsonValue[];
+  property_outcomes?: JsonObject[];
+  recovery?: JsonValue[];
+  bounded_suffix?: JsonObject | null;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface OpsAcceptanceArgs extends JsonObject {
   max_items?: number;
 }

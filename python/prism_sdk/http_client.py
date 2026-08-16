@@ -60,6 +60,16 @@ from .evidence import (
     biocapability_evidence_audit_report,
 )
 from .domain_requests import LabPlanRequest, RoutingDecisionRequest, WorldClaimCheckRequest
+from .oracle import (
+    EvidenceTier,
+    EvaluationReproductionRequest,
+    EvaluationTrajectoryRequest,
+    EvaluationWorldlineRequest,
+    MissingnessAuditRequest,
+    OracleCombineRequest,
+    ReferencePanelRequest,
+    ReferenceStandardAuditRequest,
+)
 from .mission import (
     MissionAssembly,
     MAX_MISSION_LIST_LIMIT,
@@ -133,6 +143,22 @@ from .oncology import (
     onco_outcome_report,
     onco_response_report,
     onco_worldline_report,
+)
+from .evaluation import (
+    BioevalReferenceAuditReport,
+    EvaluationReproductionReport,
+    EvaluationTrajectoryReport,
+    EvaluationWorldlineReport,
+    OracleCombineReport,
+    OracleMissingnessReport,
+    OracleReferencePanelReport,
+    bioeval_reference_audit_report,
+    evaluation_reproduction_check_report,
+    evaluation_trajectory_check_report,
+    evaluation_worldline_audit_report,
+    oracle_combine_report,
+    oracle_missingness_report,
+    oracle_reference_panel_report,
 )
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .world import (
@@ -951,6 +977,122 @@ class ApiClient:
         """Return typed HTTP dependency-lock evidence."""
 
         return hub_lock_report(self.hub_lock(request))
+
+    def oracle_combine(
+        self,
+        subject: str,
+        at: str,
+        judgements: Sequence[Mapping[str, Any] | Any],
+        *,
+        minimum_deciding_tier: EvidenceTier | str = EvidenceTier.JUDGE,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        tier = minimum_deciding_tier if isinstance(minimum_deciding_tier, EvidenceTier) else EvidenceTier(minimum_deciding_tier)
+        request = OracleCombineRequest(subject, at, tuple(judgements), tier, max_items)
+        return self.call_tool("oracle_combine", request.to_mcp_arguments())
+
+    def oracle_combine_report(
+        self,
+        subject: str,
+        at: str,
+        judgements: Sequence[Mapping[str, Any] | Any],
+        *,
+        minimum_deciding_tier: EvidenceTier | str = EvidenceTier.JUDGE,
+        max_items: int = 100,
+    ) -> OracleCombineReport:
+        return oracle_combine_report(self.oracle_combine(subject, at, judgements, minimum_deciding_tier=minimum_deciding_tier, max_items=max_items))
+
+    def oracle_reference_panel(
+        self,
+        panel: Mapping[str, Any],
+        *,
+        rule: Mapping[str, Any] | None = None,
+        model_call: str | None = None,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        request = ReferencePanelRequest(panel, rule, model_call, max_items)
+        return self.call_tool("oracle_reference_panel", request.to_mcp_arguments())
+
+    def oracle_reference_panel_report(
+        self,
+        panel: Mapping[str, Any],
+        *,
+        rule: Mapping[str, Any] | None = None,
+        model_call: str | None = None,
+        max_items: int = 100,
+    ) -> OracleReferencePanelReport:
+        return oracle_reference_panel_report(self.oracle_reference_panel(panel, rule=rule, model_call=model_call, max_items=max_items))
+
+    def oracle_missingness(
+        self,
+        pattern: Mapping[str, Any],
+        field: Mapping[str, Any],
+        boundary: Mapping[str, Any],
+        small_cell_floor: int,
+        *,
+        mechanism: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        request = MissingnessAuditRequest(pattern, field, boundary, small_cell_floor, mechanism)
+        return self.call_tool("oracle_missingness", request.to_mcp_arguments())
+
+    def oracle_missingness_report(
+        self,
+        pattern: Mapping[str, Any],
+        field: Mapping[str, Any],
+        boundary: Mapping[str, Any],
+        small_cell_floor: int,
+        *,
+        mechanism: Mapping[str, Any] | None = None,
+    ) -> OracleMissingnessReport:
+        return oracle_missingness_report(self.oracle_missingness(pattern, field, boundary, small_cell_floor, mechanism=mechanism))
+
+    def bioeval_reference_audit(
+        self, reference: Mapping[str, Any], *, state: str | None = None
+    ) -> dict[str, Any]:
+        return self.call_tool("bioeval_reference_audit", ReferenceStandardAuditRequest(reference, state).to_mcp_arguments())
+
+    def bioeval_reference_audit_report(
+        self, reference: Mapping[str, Any], *, state: str | None = None
+    ) -> BioevalReferenceAuditReport:
+        return bioeval_reference_audit_report(self.bioeval_reference_audit(reference, state=state))
+
+    def evaluation_worldline_audit(
+        self, worldline: Mapping[str, Any], *, at: str | None = None
+    ) -> dict[str, Any]:
+        return self.call_tool("evaluation_worldline_audit", EvaluationWorldlineRequest(worldline, at).to_mcp_arguments())
+
+    def evaluation_worldline_audit_report(
+        self, worldline: Mapping[str, Any], *, at: str | None = None
+    ) -> EvaluationWorldlineReport:
+        return evaluation_worldline_audit_report(self.evaluation_worldline_audit(worldline, at=at))
+
+    def evaluation_reproduction_check(
+        self, reexecution: Mapping[str, Any], *, biological_claim: str | None = None
+    ) -> dict[str, Any]:
+        return self.call_tool("evaluation_reproduction_check", EvaluationReproductionRequest(reexecution, biological_claim).to_mcp_arguments())
+
+    def evaluation_reproduction_check_report(
+        self, reexecution: Mapping[str, Any], *, biological_claim: str | None = None
+    ) -> EvaluationReproductionReport:
+        return evaluation_reproduction_check_report(self.evaluation_reproduction_check(reexecution, biological_claim=biological_claim))
+
+    def evaluation_trajectory_check(
+        self,
+        trajectory: Mapping[str, Any],
+        *,
+        step: int | None = None,
+        horizon: int | None = None,
+    ) -> dict[str, Any]:
+        return self.call_tool("evaluation_trajectory_check", EvaluationTrajectoryRequest(trajectory, step, horizon).to_mcp_arguments())
+
+    def evaluation_trajectory_check_report(
+        self,
+        trajectory: Mapping[str, Any],
+        *,
+        step: int | None = None,
+        horizon: int | None = None,
+    ) -> EvaluationTrajectoryReport:
+        return evaluation_trajectory_check_report(self.evaluation_trajectory_check(trajectory, step=step, horizon=horizon))
 
     def biocapability_evidence_audit(
         self,
@@ -2174,6 +2316,122 @@ class AsyncApiClient:
         """Return typed async HTTP dependency-lock evidence."""
 
         return hub_lock_report(await self.hub_lock(request))
+
+    async def oracle_combine(
+        self,
+        subject: str,
+        at: str,
+        judgements: Sequence[Mapping[str, Any] | Any],
+        *,
+        minimum_deciding_tier: EvidenceTier | str = EvidenceTier.JUDGE,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        tier = minimum_deciding_tier if isinstance(minimum_deciding_tier, EvidenceTier) else EvidenceTier(minimum_deciding_tier)
+        request = OracleCombineRequest(subject, at, tuple(judgements), tier, max_items)
+        return await self.call_tool("oracle_combine", request.to_mcp_arguments())
+
+    async def oracle_combine_report(
+        self,
+        subject: str,
+        at: str,
+        judgements: Sequence[Mapping[str, Any] | Any],
+        *,
+        minimum_deciding_tier: EvidenceTier | str = EvidenceTier.JUDGE,
+        max_items: int = 100,
+    ) -> OracleCombineReport:
+        return oracle_combine_report(await self.oracle_combine(subject, at, judgements, minimum_deciding_tier=minimum_deciding_tier, max_items=max_items))
+
+    async def oracle_reference_panel(
+        self,
+        panel: Mapping[str, Any],
+        *,
+        rule: Mapping[str, Any] | None = None,
+        model_call: str | None = None,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        request = ReferencePanelRequest(panel, rule, model_call, max_items)
+        return await self.call_tool("oracle_reference_panel", request.to_mcp_arguments())
+
+    async def oracle_reference_panel_report(
+        self,
+        panel: Mapping[str, Any],
+        *,
+        rule: Mapping[str, Any] | None = None,
+        model_call: str | None = None,
+        max_items: int = 100,
+    ) -> OracleReferencePanelReport:
+        return oracle_reference_panel_report(await self.oracle_reference_panel(panel, rule=rule, model_call=model_call, max_items=max_items))
+
+    async def oracle_missingness(
+        self,
+        pattern: Mapping[str, Any],
+        field: Mapping[str, Any],
+        boundary: Mapping[str, Any],
+        small_cell_floor: int,
+        *,
+        mechanism: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        request = MissingnessAuditRequest(pattern, field, boundary, small_cell_floor, mechanism)
+        return await self.call_tool("oracle_missingness", request.to_mcp_arguments())
+
+    async def oracle_missingness_report(
+        self,
+        pattern: Mapping[str, Any],
+        field: Mapping[str, Any],
+        boundary: Mapping[str, Any],
+        small_cell_floor: int,
+        *,
+        mechanism: Mapping[str, Any] | None = None,
+    ) -> OracleMissingnessReport:
+        return oracle_missingness_report(await self.oracle_missingness(pattern, field, boundary, small_cell_floor, mechanism=mechanism))
+
+    async def bioeval_reference_audit(
+        self, reference: Mapping[str, Any], *, state: str | None = None
+    ) -> dict[str, Any]:
+        return await self.call_tool("bioeval_reference_audit", ReferenceStandardAuditRequest(reference, state).to_mcp_arguments())
+
+    async def bioeval_reference_audit_report(
+        self, reference: Mapping[str, Any], *, state: str | None = None
+    ) -> BioevalReferenceAuditReport:
+        return bioeval_reference_audit_report(await self.bioeval_reference_audit(reference, state=state))
+
+    async def evaluation_worldline_audit(
+        self, worldline: Mapping[str, Any], *, at: str | None = None
+    ) -> dict[str, Any]:
+        return await self.call_tool("evaluation_worldline_audit", EvaluationWorldlineRequest(worldline, at).to_mcp_arguments())
+
+    async def evaluation_worldline_audit_report(
+        self, worldline: Mapping[str, Any], *, at: str | None = None
+    ) -> EvaluationWorldlineReport:
+        return evaluation_worldline_audit_report(await self.evaluation_worldline_audit(worldline, at=at))
+
+    async def evaluation_reproduction_check(
+        self, reexecution: Mapping[str, Any], *, biological_claim: str | None = None
+    ) -> dict[str, Any]:
+        return await self.call_tool("evaluation_reproduction_check", EvaluationReproductionRequest(reexecution, biological_claim).to_mcp_arguments())
+
+    async def evaluation_reproduction_check_report(
+        self, reexecution: Mapping[str, Any], *, biological_claim: str | None = None
+    ) -> EvaluationReproductionReport:
+        return evaluation_reproduction_check_report(await self.evaluation_reproduction_check(reexecution, biological_claim=biological_claim))
+
+    async def evaluation_trajectory_check(
+        self,
+        trajectory: Mapping[str, Any],
+        *,
+        step: int | None = None,
+        horizon: int | None = None,
+    ) -> dict[str, Any]:
+        return await self.call_tool("evaluation_trajectory_check", EvaluationTrajectoryRequest(trajectory, step, horizon).to_mcp_arguments())
+
+    async def evaluation_trajectory_check_report(
+        self,
+        trajectory: Mapping[str, Any],
+        *,
+        step: int | None = None,
+        horizon: int | None = None,
+    ) -> EvaluationTrajectoryReport:
+        return evaluation_trajectory_check_report(await self.evaluation_trajectory_check(trajectory, step=step, horizon=horizon))
 
     async def biocapability_evidence_audit(
         self,

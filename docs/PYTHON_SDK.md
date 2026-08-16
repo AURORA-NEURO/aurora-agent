@@ -596,6 +596,13 @@ small-cell/missingness boundaries. `bioeval_reference_audit()`, `evaluation_worl
 uncertainty, future-evidence firewalls, reproducibility divergence, and bounded trajectory
 properties. These helpers never locally choose a biological truth or convert an abstention into a
 negative result.
+The corresponding `*_report(...)` helpers now validate top-level invariants and preserve the
+complete evidence ledgers: omitted oracle rows, nullable deciding tiers and confidence envelopes,
+reader-panel refusal state, complete-case/egress determinations, distributed reference mass,
+leakage versus dangling context, reproduction versus biological-validity refusal, and vacuous or
+bounded trajectory properties. The same projections are available on `Workspace`,
+`AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`; nested oracle/evaluation records remain
+authoritative JSON objects rather than being flattened into lossy SDK guesses.
 
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData, indexed/compressed VCF,
 binary BIDS image parsing, inferential statistics, OTLP export, a notebook UI, or CI deployment. It
