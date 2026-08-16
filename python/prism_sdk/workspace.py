@@ -218,6 +218,7 @@ from .oncoworlds import (
     oncoworlds_model_transport_report,
     oncoworlds_radiogenomic_check_report,
 )
+from .literature import LiteratureBindCheckArgs, LiteratureBindCheckReport, literature_bind_check_report
 from .stress import (
     StressProfileArgs,
     StressProfileReport,
@@ -1511,6 +1512,19 @@ class Workspace:
         """Return typed comparability, conversion receipt, caveats, and blocking reason."""
 
         return measurement_compare_report(self.measurement_compare(request))
+
+    def literature_bind_check(
+        self,
+        request: LiteratureBindCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, LiteratureBindCheckArgs) else LiteratureBindCheckArgs.from_wire(request)
+        return self.tool("literature_bind_check", normalized.to_mcp_arguments())
+
+    def literature_bind_check_report(
+        self,
+        request: LiteratureBindCheckArgs | Mapping[str, Any],
+    ) -> LiteratureBindCheckReport:
+        return literature_bind_check_report(self.literature_bind_check(request))
 
     def hub_search(
         self,
@@ -3579,6 +3593,19 @@ class AsyncWorkspace:
         """Return typed async measurement-comparability evidence."""
 
         return measurement_compare_report(await self.measurement_compare(request))
+
+    async def literature_bind_check(
+        self,
+        request: LiteratureBindCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, LiteratureBindCheckArgs) else LiteratureBindCheckArgs.from_wire(request)
+        return await self.tool("literature_bind_check", normalized.to_mcp_arguments())
+
+    async def literature_bind_check_report(
+        self,
+        request: LiteratureBindCheckArgs | Mapping[str, Any],
+    ) -> LiteratureBindCheckReport:
+        return literature_bind_check_report(await self.literature_bind_check(request))
 
     async def hub_search(
         self,

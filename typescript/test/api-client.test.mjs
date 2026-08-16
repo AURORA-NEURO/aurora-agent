@@ -1376,6 +1376,45 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   await assert.rejects(async () => client.requireToolSuccess(await client.callTool("refuse")), ToolRefusalError);
 });
 
+test("client exposes typed literature binding and citation refusal evidence", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async () => jsonResponse({
+      ok: true,
+      tool: "literature_bind_check",
+      request_id: "literature-1",
+      mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/literature-bind-check/0.1",
+        outcome_kind: "cite_refused",
+        bound: true,
+        citable: false,
+        evidence: {
+          outcome_kind: "cite_refused",
+          bound: true,
+          citable: false,
+          refusal: null,
+          refusal_kind: null,
+          citation_refusal: { unsupported: "biological_measurement" },
+          citation_refusal_kind: "unsupported",
+        },
+        guarantees: ["source binding is separate from citation support"],
+        limitations: ["no external literature retrieval"],
+      } } },
+    }),
+  });
+  const result = await client.literatureBindCheck({
+    claim: { text: "a bounded source claim" },
+    target: { disease: "diffuse_glioma" },
+    at_tier: "primary",
+    horizon: { kind: "open" },
+    claim_kind: "published_claim_support",
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/literature-bind-check/0.1");
+  assert.equal(result.mcp.result.structuredContent.outcome_kind, "cite_refused");
+  assert.equal(result.mcp.result.structuredContent.evidence.citation_refusal_kind, "unsupported");
+});
+
 test("client parses cursor SSE and validates webhook mutations", async () => {
   const client = new ApiClient({
     baseUrl: "https://example.test",

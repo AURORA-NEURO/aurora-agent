@@ -309,6 +309,12 @@ of the result rather than being inferred from a green transport response.
 explicit conversion records, caveats, a report SHA-256, and the closed first-blocking reason
 vocabulary. The input preserves caller-supplied standards declarations as JSON so the Rust
 standards kernel remains authoritative for units, frames, builds, and ontology bindings.
+`literatureBindCheck` returns `LiteratureBindCheckResult` with separate `bound`, `citable`, and
+`outcome_kind` states. Its evidence retains source-binding refusals, historical-horizon checks,
+population scope, retraction warrants, and citation refusals for unsupported biological claim
+kinds. The TypeScript boundary does not turn a literature statement into a measurement; the
+literature modality admits only `published_claim_support`. See
+[`docs/LITERATURE_BIND_CHECK.md`](LITERATURE_BIND_CHECK.md).
 `hubSearch` returns `HubSearchResult` with typed exact-facet matches, required `why` evidence,
 near-miss exclusions, trust tier, authority provenance, freshness variants, and explicit bounded
 truncation. Federation and catalog values remain JSON inputs because the Rust hubapi owns their

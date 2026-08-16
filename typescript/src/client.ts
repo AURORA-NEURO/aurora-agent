@@ -44,6 +44,8 @@ import type {
   ObservedWorldDeclareResult,
   MeasurementCompareArgs,
   MeasurementCompareResult,
+  LiteratureBindCheckArgs,
+  LiteratureBindCheckResult,
   LineageAuditArgs,
   LineageAuditResult,
   PreanalyticApplyArgs,
@@ -582,6 +584,10 @@ export class ApiClient {
 
   async measurementCompare(args: MeasurementCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MeasurementCompareResult>> {
     return this.callTool<MeasurementCompareResult>("measurement_compare", args, options);
+  }
+
+  async literatureBindCheck(args: LiteratureBindCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LiteratureBindCheckResult>> {
+    return this.callTool<LiteratureBindCheckResult>("literature_bind_check", args, options);
   }
 
   async lineageAudit(args: LineageAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LineageAuditResult>> {

@@ -335,6 +335,10 @@ serialize behind a global router mutex.
 The same server exposes the broader workspace: `world_validate` checks a world before compilation,
 `context_compare` runs the equal-engineering baseline panel, `bioworlds_catalog` runs the reference
 vertical slices, `modality_catalog` exposes assay resolution and failure-mode contracts,
+and `literature_bind_check` binds source claims to typed populations and historical horizons while
+keeping citation support separate from biological measurement support; reviews cannot be silently
+laundered into primary evidence, unstated populations refuse, and flagged sources require a
+recorded warrant,
 `mutation_family` validates metamorphic families with effective diversity, `prism_minimize` reduces
 and re-checks a diagnostic world, `registry_gate` fail-closes attested benchmark packs,
 `registry_lifecycle_simulate` replays the local content-addressed publication lifecycle with
@@ -623,6 +627,10 @@ inventing a single phylogeny or treatment mechanism; see
 benchmark, lesion-clustering, and competing-event safeguards. Requested sections retain separate
 admissibility and refusal evidence, while the top-level report reconciles only the requested
 sections; see [`docs/ONCOWORLDS_ENTITY_WORLDS.md`](docs/ONCOWORLDS_ENTITY_WORLDS.md).
+`literature_bind_check` exposes the same fail-closed literature boundary through MCP and both SDKs:
+binding a source to a scope is not permission to use it as a measurement, and a successful bound
+claim may be citable only as `published_claim_support`; see
+[`docs/LITERATURE_BIND_CHECK.md`](docs/LITERATURE_BIND_CHECK.md).
 The Python and TypeScript SDKs expose the OncoWorlds workflows as typed MCP and HTTP projections,
 retaining domain refusals, QC abstention, version-conditioned disagreement, transport assumptions,
 clonal ambiguity, era/site comparability, resource absence, descriptor boundaries, and subgroup

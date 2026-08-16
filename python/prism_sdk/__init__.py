@@ -977,6 +977,15 @@ from .lineage import (
     LineageFingerprintReport,
     lineage_audit_report,
 )
+from .literature import (
+    LITERATURE_BIND_OUTCOME_KINDS,
+    LITERATURE_BIND_SCHEMA,
+    LITERATURE_BINDING_REFUSAL_KINDS,
+    LITERATURE_CLAIM_KINDS,
+    LiteratureBindCheckArgs,
+    LiteratureBindCheckReport,
+    literature_bind_check_report,
+)
 from .preanalytic import (
     PREANALYTIC_RESPONSES,
     PREANALYTIC_STAGES,
@@ -2269,5 +2278,12 @@ __all__ = [
     "paired_effect",
     "summarize_distribution",
     "validate_pack",
+    "LITERATURE_BIND_OUTCOME_KINDS",
+    "LITERATURE_BIND_SCHEMA",
+    "LITERATURE_BINDING_REFUSAL_KINDS",
+    "LITERATURE_CLAIM_KINDS",
+    "LiteratureBindCheckArgs",
+    "LiteratureBindCheckReport",
+    "literature_bind_check_report",
     "__version__",
 ]

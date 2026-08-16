@@ -3712,6 +3712,37 @@ export interface MeasurementCompareResult extends JsonObject {
   limitations: string[];
 }
 
+export type LiteratureBindTier = "primary" | "review" | "guideline" | "database";
+
+export type LiteratureBindOutcomeKind = "bound" | "citable" | "cite_refused" | "refused";
+
+export type LiteratureBindingRefusalKind =
+  | "citation_laundering"
+  | "unstated_population"
+  | "population_mismatch"
+  | "temporal_leakage"
+  | "retracted_source";
+
+export interface LiteratureBindCheckArgs extends JsonObject {
+  claim: JsonObject;
+  target: JsonObject;
+  at_tier: LiteratureBindTier;
+  horizon: JsonObject;
+  flag_warrant?: string | null;
+  claim_kind?: string | null;
+}
+
+export interface LiteratureBindCheckResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/literature-bind-check/0.1";
+  outcome_kind: LiteratureBindOutcomeKind;
+  bound: boolean;
+  citable: boolean | null;
+  evidence: JsonObject;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface LineageAuditArgs extends JsonObject {
   registry: JsonObject;
   max_items?: number;

@@ -120,7 +120,10 @@ use bioprism_metrics::{
     ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting, PartialRanking,
     RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
 };
-use bioprism_modalities::{catalog::all as all_modalities, Modality, Resolution};
+use bioprism_modalities::{
+    catalog::all as all_modalities, cites as modality_cites, ClaimKind, EvaluationHorizon,
+    EvidenceTier, LiteratureClaim, Modality, Resolution,
+};
 use bioprism_mutation::{
     generate as generate_mutations, measure as measure_diversity, standard_suite,
 };
@@ -1199,6 +1202,7 @@ impl Server {
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
+            "literature_bind_check" => self.literature_bind_check(&arguments),
             "mutation_family" => self.mutation_family(&arguments),
             "prism_minimize" => self.prism_minimize(&arguments),
             "registry_gate" => self.registry_gate(&arguments),
@@ -2184,6 +2188,146 @@ impl Server {
             "unmechanised_failure_modes": unmechanised,
             "failure_modes_are_not_claims_of_detection": true,
             "modalities": modalities,
+        }))
+    }
+
+    fn literature_bind_check(&self, arguments: &Value) -> Result<Value, String> {
+        let claim: LiteratureClaim = serde_json::from_value(
+            arguments
+                .get("claim")
+                .cloned()
+                .ok_or("claim is required and must be a serialized LiteratureClaim")?,
+        )
+        .map_err(|error| format!("invalid literature claim: {error}"))?;
+        if claim.text.len() > 100_000 {
+            return Err("literature claim text exceeds the 100000-byte safety bound".into());
+        }
+        if claim.provenance.identifier.is_empty() || claim.provenance.identifier.len() > 2_000 {
+            return Err("literature source identifier must contain between 1 and 2000 bytes".into());
+        }
+        let target: ScopeKey = serde_json::from_value(
+            arguments
+                .get("target")
+                .cloned()
+                .ok_or("target is required and must be a serialized ScopeKey")?,
+        )
+        .map_err(|error| format!("invalid literature target scope: {error}"))?;
+        if target.len() > 100 {
+            return Err("literature target scope may contain at most 100 dimensions".into());
+        }
+        let at_tier: EvidenceTier = serde_json::from_value(
+            arguments
+                .get("at_tier")
+                .cloned()
+                .ok_or("at_tier is required and must be an EvidenceTier")?,
+        )
+        .map_err(|error| format!("invalid literature citation tier: {error}"))?;
+        let horizon: EvaluationHorizon = serde_json::from_value(
+            arguments
+                .get("horizon")
+                .cloned()
+                .ok_or("horizon is required and must be an EvaluationHorizon")?,
+        )
+        .map_err(|error| format!("invalid literature evaluation horizon: {error}"))?;
+        let warrant = arguments.get("flag_warrant").and_then(Value::as_str);
+        if warrant.is_some_and(|text| text.trim().is_empty()) {
+            return Err("flag_warrant must not be empty when supplied".into());
+        }
+        if warrant.is_some_and(|text| text.len() > 10_000) {
+            return Err("flag_warrant exceeds the 10000-byte safety bound".into());
+        }
+        let claim_kind: Option<ClaimKind> = arguments
+            .get("claim_kind")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid literature claim kind: {error}"))?;
+        let claim_value = serde_json::to_value(&claim).map_err(|error| error.to_string())?;
+        let provenance_value =
+            serde_json::to_value(&claim.provenance).map_err(|error| error.to_string())?;
+        let target_value = serde_json::to_value(&target).map_err(|error| error.to_string())?;
+        let horizon_value = serde_json::to_value(horizon).map_err(|error| error.to_string())?;
+        let bind = match warrant {
+            Some(warrant) => claim.bind_despite_flag(&target, at_tier, horizon, warrant),
+            None => claim.bind(&target, at_tier, horizon),
+        };
+        let mut projection = json!({
+            "ok": true,
+            "schema": "bioprism-mcp/literature-bind-check/0.1",
+            "claim": claim_value,
+            "provenance": provenance_value,
+            "target": target_value,
+            "requested_tier": at_tier,
+            "horizon": horizon_value,
+            "flag_warrant_supplied": warrant.is_some(),
+            "claim_kind": claim_kind,
+            "bound": false,
+            "citable": Value::Null,
+            "bound_claim": Value::Null,
+            "refusal": Value::Null,
+            "refusal_kind": Value::Null,
+            "citation": Value::Null,
+            "citation_refusal": Value::Null,
+            "citation_refusal_kind": Value::Null
+        });
+        match bind {
+            Ok(bound) => {
+                projection["bound"] = json!(true);
+                projection["bound_claim"] =
+                    serde_json::to_value(&bound).map_err(|error| error.to_string())?;
+                projection["outcome_kind"] = json!("bound");
+                if let Some(kind) = claim_kind {
+                    match modality_cites(&bound, kind) {
+                        Ok(tier) => {
+                            projection["citable"] = json!(true);
+                            projection["outcome_kind"] = json!("citable");
+                            projection["citation"] = json!({
+                                "claim_kind": kind,
+                                "cited_as": tier,
+                                "direct_evidence": tier.is_direct_evidence()
+                            });
+                        }
+                        Err(refusal) => {
+                            let refusal_value = serde_json::to_value(&refusal)
+                                .map_err(|error| error.to_string())?;
+                            projection["citable"] = json!(false);
+                            projection["outcome_kind"] = json!("cite_refused");
+                            projection["citation_refusal"] = refusal_value.clone();
+                            projection["citation_refusal_kind"] = refusal_value
+                                .get("unsupported")
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            projection["citation_refusal_text"] = json!(refusal.to_string());
+                        }
+                    }
+                }
+            }
+            Err(refusal) => {
+                let refusal_value = serde_json::to_value(&refusal)
+                    .map_err(|error| error.to_string())?;
+                projection["outcome_kind"] = json!("refused");
+                projection["refusal"] = refusal_value.clone();
+                projection["refusal_kind"] = refusal_value["binding_refusal"].clone();
+                projection["refusal_text"] = json!(refusal.to_string());
+            }
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/literature-bind-check/0.1",
+            "outcome_kind": projection["outcome_kind"],
+            "bound": projection["bound"],
+            "citable": projection["citable"],
+            "evidence": projection,
+            "guarantees": [
+                "retraction, evaluation horizon, evidence tier, and target population are checked in the literature crate's declared order",
+                "a review or guideline cannot be cited as primary evidence without changing the requested tier",
+                "a bound literature claim remains a claim about a source and is not promoted into a measurement",
+                "citation support is evaluated separately from successful scope binding"
+            ],
+            "limitations": [
+                "no paper retrieval, identifier resolution, citation-graph traversal, natural-language entailment, or evidence synthesis is performed",
+                "the target scope, source metadata, and any flagged-source warrant are caller-supplied"
+            ]
         }))
     }
 
@@ -17300,7 +17444,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "biological_domains",
             "domains": ["BioIR", "oncology", "modalities", "specimen lineage", "reference worlds"],
             "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
-            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
+            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -17634,6 +17778,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_failure_modes": { "type": "boolean", "description": "Include full blueprint failure-mode statements; defaults to false." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "literature_bind_check",
+            "description": "Bind a serialized LiteratureClaim to a target ScopeKey under an explicit evidence tier and evaluation horizon. It preserves retraction, temporal leakage, citation laundering, unstated population, and population mismatch refusals, then separately tests whether the bound source may support a requested claim kind without promoting literature into a measurement.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "claim": { "type": "object", "description": "Serialized bioprism-modalities LiteratureClaim with source text and provenance." },
+                    "target": { "type": "object", "description": "Serialized ScopeKey for the population or entity the caller wants to cite." },
+                    "at_tier": { "type": "string", "enum": ["primary", "review", "guideline", "database"], "description": "EvidenceTier at which the caller wants to cite the source." },
+                    "horizon": { "type": "object", "description": "Serialized EvaluationHorizon: {horizon: \"open\"} or {horizon: \"as_of\", instant: RFC-3339 timestamp}." },
+                    "flag_warrant": { "type": ["string", "null"], "description": "Optional explicit warrant required to bind an expression-of-concern or retracted source." },
+                    "claim_kind": { "type": ["string", "null"], "description": "Optional modality ClaimKind to test after binding; literature normally supports only published-claim-support." }
+                },
+                "required": ["claim", "target", "at_tier", "horizon"]
             }
         }),
         json!({

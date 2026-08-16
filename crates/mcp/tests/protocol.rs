@@ -52,6 +52,10 @@ use bioprism_mcp::{
     serve, tool_definitions, Lifecycle, Request, Server, CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI,
     PROTOCOL_VERSION,
 };
+use bioprism_modalities::{
+    ClaimKind as ModalityClaimKind, EvidenceTier as LiteratureEvidenceTier,
+    EvaluationHorizon, LiteratureClaim, RetractionStatus, SourceProvenance,
+};
 use bioprism_megafactory::{
     AccessTier as PlacementAccessTier, Attestation, Locale, TrustDomain, WorkRequest, WorkerProfile,
 };
@@ -302,7 +306,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 126);
+    assert_eq!(tools.len(), 127);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1264,6 +1268,86 @@ fn modality_catalog_exposes_resolution_and_failure_mode_boundaries() {
     assert!(payload["modalities"][0]["resolutions"].is_array());
     assert!(payload["modalities"][0]["failure_modes"].is_array());
     assert!(payload["unmechanised_failure_modes"].is_number());
+}
+
+#[test]
+fn literature_bind_check_separates_source_binding_from_citation_support() {
+    let published = Timestamp::parse("2026-01-01T00:00:00Z").unwrap();
+    let population = ScopeKey::new().exact("disease", "diffuse_glioma");
+    let claim = LiteratureClaim::new(
+        "the source reports an observed cohort result",
+        SourceProvenance::new(
+            "doi:10.1000/example",
+            LiteratureEvidenceTier::Primary,
+            published,
+        )
+        .studying(population),
+    );
+    let bound = call(
+        &mut server(),
+        "literature_bind_check",
+        json!({
+            "claim": serde_json::to_value(&claim).unwrap(),
+            "target": serde_json::to_value(ScopeKey::new().exact("disease", "diffuse_glioma").exact("site", "site-a")).unwrap(),
+            "at_tier": "primary",
+            "horizon": serde_json::to_value(EvaluationHorizon::open()).unwrap(),
+            "claim_kind": serde_json::to_value(ModalityClaimKind::PublishedClaimSupport).unwrap()
+        }),
+    );
+    assert_eq!(bound["ok"], json!(true));
+    assert_eq!(bound["outcome_kind"], json!("citable"));
+    assert_eq!(bound["bound"], json!(true));
+    assert_eq!(bound["citable"], json!(true));
+    assert_eq!(bound["evidence"]["citation"]["cited_as"], json!("primary"));
+    assert_eq!(bound["evidence"]["citation"]["direct_evidence"], json!(true));
+
+    let review = LiteratureClaim::new(
+        "a review summary",
+        SourceProvenance::new(
+            "doi:10.1000/review",
+            LiteratureEvidenceTier::Review,
+            published,
+        )
+        .studying(ScopeKey::new().exact("disease", "diffuse_glioma")),
+    );
+    let laundered = call(
+        &mut server(),
+        "literature_bind_check",
+        json!({
+            "claim": serde_json::to_value(&review).unwrap(),
+            "target": { "disease": "diffuse_glioma" },
+            "at_tier": "primary",
+            "horizon": { "horizon": "open" }
+        }),
+    );
+    assert_eq!(laundered["outcome_kind"], json!("refused"));
+    assert_eq!(laundered["bound"], json!(false));
+    assert_eq!(laundered["evidence"]["refusal_kind"], json!("citation_laundering"));
+
+    let flagged = LiteratureClaim::new(
+        "a flagged source",
+        SourceProvenance::new(
+            "doi:10.1000/flagged",
+            LiteratureEvidenceTier::Primary,
+            published,
+        )
+        .flagged(RetractionStatus::Retracted)
+        .studying(ScopeKey::new().exact("disease", "diffuse_glioma")),
+    );
+    let warrant = call(
+        &mut server(),
+        "literature_bind_check",
+        json!({
+            "claim": serde_json::to_value(&flagged).unwrap(),
+            "target": { "disease": "diffuse_glioma" },
+            "at_tier": "review",
+            "horizon": { "horizon": "open" },
+            "flag_warrant": "citing the retraction history explicitly"
+        }),
+    );
+    assert_eq!(warrant["outcome_kind"], json!("bound"));
+    assert_eq!(warrant["bound"], json!(true));
+    assert_eq!(warrant["evidence"]["flag_warrant_supplied"], json!(true));
 }
 
 #[test]
@@ -3919,12 +4003,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(126));
-    assert_eq!(result["advertised_tool_count"], json!(126));
+    assert_eq!(result["unique_catalog_tools"], json!(127));
+    assert_eq!(result["advertised_tool_count"], json!(127));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(126));
-    assert_eq!(result["schema_quality"]["valid"], json!(126));
+    assert_eq!(result["schema_quality"]["checked"], json!(127));
+    assert_eq!(result["schema_quality"]["valid"], json!(127));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

@@ -536,6 +536,13 @@ invent defaults:
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit
   conversion and its exact/conventional status, retains caveats, validates the report digest, and
   exposes the first typed blocking reason rather than silently coercing values.
+- `LiteratureBindCheckArgs` and `literature_bind_check(...)` preserve the distinction between
+  binding a source claim to a typed scope and admitting it as citation support. `LiteratureBindCheckReport`
+  retains the requested tier, historical horizon, bound/citable states, citation-laundering and
+  population refusals, temporal leakage, retraction warrants, and unsupported biological claim
+  kinds. A bound literature claim is not parsed as a measurement; only `published_claim_support`
+  can be cited through the literature modality. See
+  [`docs/LITERATURE_BIND_CHECK.md`](LITERATURE_BIND_CHECK.md).
 - `HubSearchArgs` and `hub_search(...)` preserve caller-supplied federation, catalog, and exact
   facet query declarations under the server's catalog/release/result bounds. `HubSearchReport`
   types every match, non-empty facet explanation, near miss, trust tier, namespace authority,
