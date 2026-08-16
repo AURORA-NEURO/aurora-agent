@@ -360,4 +360,3 @@ def stress_profile_report(value: Mapping[str, Any]) -> StressProfileReport:
 
 def stress_report_projection(value: Mapping[str, Any]) -> StressReportProjection:
     return StressReportProjection.from_wire(value)
-
