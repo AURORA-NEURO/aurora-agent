@@ -309,6 +309,7 @@ from .atlas_surface import AtlasSurfaceAuditArgs, AtlasSurfaceAuditReport, atlas
 from .engineering_manifest import EngineeringAuditReport, EngineeringManifestArgs, engineering_manifest_audit_report
 from .release_pipeline import ReleasePipelineAuditReport, ReleasePipelineManifestArgs, release_pipeline_audit_report
 from .operational_readiness import OperationalReadinessAuditReport, OperationalReadinessManifestArgs, operational_readiness_audit_report
+from .security_privacy import SecurityPrivacyAuditReport, SecurityPrivacyManifestArgs, security_privacy_audit_report
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2901,6 +2902,17 @@ class ApiClient:
         """Return typed operational-readiness evidence through HTTP."""
 
         return operational_readiness_audit_report(self.operational_readiness_audit(request))
+
+    def security_privacy_audit(self, request: SecurityPrivacyManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit security/privacy governance through the HTTP gateway."""
+
+        normalized = request if isinstance(request, SecurityPrivacyManifestArgs) else SecurityPrivacyManifestArgs.from_wire(request)
+        return self.call_tool("security_privacy_audit", normalized.to_mcp_arguments())
+
+    def security_privacy_audit_report(self, request: SecurityPrivacyManifestArgs | Mapping[str, Any]) -> SecurityPrivacyAuditReport:
+        """Return typed security/privacy governance evidence through HTTP."""
+
+        return security_privacy_audit_report(self.security_privacy_audit(request))
 
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive panel through the HTTP gateway."""
@@ -5547,6 +5559,17 @@ class AsyncApiClient:
         """Return async typed operational-readiness evidence through HTTP."""
 
         return operational_readiness_audit_report(await self.operational_readiness_audit(request))
+
+    async def security_privacy_audit(self, request: SecurityPrivacyManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async security/privacy governance audit through the HTTP gateway."""
+
+        normalized = request if isinstance(request, SecurityPrivacyManifestArgs) else SecurityPrivacyManifestArgs.from_wire(request)
+        return await self.call_tool("security_privacy_audit", normalized.to_mcp_arguments())
+
+    async def security_privacy_audit_report(self, request: SecurityPrivacyManifestArgs | Mapping[str, Any]) -> SecurityPrivacyAuditReport:
+        """Return async typed security/privacy governance evidence through HTTP."""
+
+        return security_privacy_audit_report(await self.security_privacy_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async adaptive panel audit through the HTTP gateway."""

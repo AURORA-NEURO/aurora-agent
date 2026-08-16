@@ -1176,3 +1176,12 @@ canonical digest, layer-specific audit rows, counts, warning/blocking issue reco
 `operationally_ready`, guarantees, and limitations. It remains declaration-only and does not
 query telemetry, page operators, execute runbooks, test restores, mutate incidents, or authorize
 deployment. See OPERATIONAL_READINESS_AUDIT.md.
+
+## Security/privacy governance audit
+
+`SecurityPrivacyManifestArgs` and `security_privacy_audit_report(...)` expose typed asset,
+authorized-flow, identity, threat, review, policy, and control contracts across sync/async MCP and
+HTTP. `SecurityPrivacyAuditReport` preserves separate governance rows, canonical digest,
+warning/blocking issues, `security_privacy_ready`, counts, guarantees, and limitations. The
+projection remains declaration-only: it does not scan hosts, authenticate people, validate law,
+execute red-team actions, erase records, or contact vendors. See SECURITY_PRIVACY_AUDIT.md.

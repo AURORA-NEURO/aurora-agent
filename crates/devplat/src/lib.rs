@@ -214,6 +214,7 @@ pub mod operational_readiness;
 pub mod report;
 pub mod release_pipeline;
 pub mod repro;
+pub mod security_privacy;
 pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
@@ -272,6 +273,17 @@ pub use release_pipeline::{
     PipelineStageReadiness, PipelineProject, PipelineSource, ReleasePipelineAudit,
     ReleasePipelineCounts, ReleasePipelineError, ReleasePipelineIssue, ReleasePipelineManifest,
     ReleasePipelinePolicies, RELEASE_PIPELINE_AUDIT_SCHEMA, RELEASE_PIPELINE_MANIFEST_SCHEMA,
+};
+pub use security_privacy::{
+    SecurityPrivacyAsset, SecurityPrivacyAssetAudit, SecurityPrivacyAudit, SecurityPrivacyClassification,
+    SecurityPrivacyControlAudit, SecurityPrivacyControls, SecurityPrivacyError, SecurityPrivacyFlow,
+    SecurityPrivacyFlowAudit, SecurityPrivacyFlowDecision, SecurityPrivacyIdentity,
+    SecurityPrivacyIdentityAudit, SecurityPrivacyIssue, SecurityPrivacyIssueSeverity,
+    SecurityPrivacyManifest, SecurityPrivacyPolicies, SecurityPrivacyReview, SecurityPrivacyReviewAudit,
+    SecurityPrivacyReviewKind, SecurityPrivacyReviewStatus, SecurityPrivacySystem,
+    SecurityPrivacyThreat, SecurityPrivacyThreatAudit, SecurityPrivacyThreatSeverity,
+    SecurityPrivacyThreatStatus, SecurityPrivacyCounts, SECURITY_PRIVACY_AUDIT_SCHEMA,
+    SECURITY_PRIVACY_MANIFEST_SCHEMA,
 };
 pub use repro::{
     figure_reproduction_case, forbidden_by_default, summarise, Effect, MoleculeCard, Obligation,

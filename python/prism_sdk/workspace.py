@@ -97,6 +97,11 @@ from .operational_readiness import (
     OperationalReadinessManifestArgs,
     operational_readiness_audit_report,
 )
+from .security_privacy import (
+    SecurityPrivacyAuditReport,
+    SecurityPrivacyManifestArgs,
+    security_privacy_audit_report,
+)
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -3024,6 +3029,17 @@ class Workspace:
 
         return operational_readiness_audit_report(self.operational_readiness_audit(request))
 
+    def security_privacy_audit(self, request: SecurityPrivacyManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit data governance, authorized flows, identity hardening, threats, reviews, and controls through MCP."""
+
+        normalized = request if isinstance(request, SecurityPrivacyManifestArgs) else SecurityPrivacyManifestArgs.from_wire(request)
+        return self.tool("security_privacy_audit", normalized.to_mcp_arguments())
+
+    def security_privacy_audit_report(self, request: SecurityPrivacyManifestArgs | Mapping[str, Any]) -> SecurityPrivacyAuditReport:
+        """Return typed security/privacy governance evidence and blockers."""
+
+        return security_privacy_audit_report(self.security_privacy_audit(request))
+
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive evaluation panel through MCP."""
 
@@ -5711,6 +5727,17 @@ class AsyncWorkspace:
         """Async counterpart to Workspace.operational_readiness_audit_report."""
 
         return operational_readiness_audit_report(await self.operational_readiness_audit(request))
+
+    async def security_privacy_audit(self, request: SecurityPrivacyManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.security_privacy_audit."""
+
+        normalized = request if isinstance(request, SecurityPrivacyManifestArgs) else SecurityPrivacyManifestArgs.from_wire(request)
+        return (await self.client.call_tool("security_privacy_audit", normalized.to_mcp_arguments())).require_ok()
+
+    async def security_privacy_audit_report(self, request: SecurityPrivacyManifestArgs | Mapping[str, Any]) -> SecurityPrivacyAuditReport:
+        """Async counterpart to Workspace.security_privacy_audit_report."""
+
+        return security_privacy_audit_report(await self.security_privacy_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.adaptive_panel`."""

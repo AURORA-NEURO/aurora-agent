@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 163);
+    assert_eq!(tools.len(), 164);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3740,6 +3740,50 @@ fn operational_readiness_audit_keeps_observation_fallback_and_incident_closure_e
 }
 
 #[test]
+fn security_privacy_audit_keeps_asset_flow_identity_threat_and_review_layers_explicit() {
+    let mut server = server();
+    let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let manifest = json!({
+        "schema": "bioprism-security-privacy/0.1",
+        "system": { "id": "prism-api", "version": "0.1.0", "owner": "platform" },
+        "assets": [{ "id": "patient-records", "name": "records", "classification": "regulated", "owner": "privacy", "purpose": "care research", "retention_days": 365, "residency": "us", "deletion_process": "erase workflow" }],
+        "flows": [{ "id": "api-to-vendor", "asset": "patient-records", "source": "api", "destination": "approved-vendor", "purpose": "care research", "legal_basis": "consent", "decision": "allow", "authorization_evidence": digest }],
+        "identities": [{ "id": "researcher", "principal": "team", "role": "research", "authentication": "oidc", "mfa": true, "least_privilege": true, "assets": ["patient-records"] }],
+        "threats": [{ "id": "exfiltration", "category": "data-exfiltration", "severity": "high", "status": "mitigated", "control": "dlp", "evidence_digest": digest }],
+        "reviews": [{ "id": "pia-1", "kind": "privacy_impact", "scope": "patient-records", "reviewer": "independent-reviewer", "status": "complete", "evidence_digest": digest, "expires_at": "2027-01-01", "findings": ["none"] }],
+        "controls": { "access_control": true, "encryption_at_rest": true, "encryption_in_transit": true, "key_rotation": true, "audit_logging": true, "vulnerability_management": true, "backup_restore": true, "incident_response": true, "vendor_review": true, "data_subject_rights": true }
+    });
+    let result = call(&mut server, "security_privacy_audit", json!({ "manifest": manifest.clone() }));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["security_privacy_ready"], json!(true));
+    assert_eq!(result["audit"]["counts"]["sensitive_assets"], json!(1));
+    assert_eq!(result["audit"]["flow_audits"][0]["authorization_present"], json!(true));
+    assert_eq!(result["audit"]["identity_audits"][0]["ready"], json!(true));
+    assert_eq!(result["audit"]["threat_audits"][0]["evidence_valid"], json!(true));
+    assert_eq!(result["audit"]["review_audits"][0]["complete"], json!(true));
+
+    let mut refused = manifest;
+    refused["assets"][0]["retention_days"] = Value::Null;
+    refused["flows"][0]["authorization_evidence"] = Value::Null;
+    refused["identities"][0]["mfa"] = json!(false);
+    refused["threats"][0]["evidence_digest"] = Value::Null;
+    refused["reviews"][0]["status"] = json!("expired");
+    refused["controls"]["encryption_at_rest"] = json!(false);
+    let refusal = call(&mut server, "security_privacy_audit", json!({ "manifest": refused }));
+    assert_eq!(refusal["ok"], json!(true));
+    assert_eq!(refusal["valid"], json!(false));
+    assert_eq!(refusal["security_privacy_ready"], json!(false));
+    let issues = refusal["audit"]["issues"].as_array().unwrap();
+    assert!(issues.iter().any(|issue| issue["code"] == "sensitive_retention_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "flow_authorization_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "sensitive_mfa_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "mitigation_evidence_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "review_evidence_missing"));
+    assert!(issues.iter().any(|issue| issue["code"] == "required_control_disabled"));
+}
+
+#[test]
 fn developer_workbench_audits_notebook_digests_queries_dashboard_and_plans_ci() {
     let mut server = server();
     let digest = "a".repeat(64);
@@ -4276,12 +4320,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(163));
-    assert_eq!(result["advertised_tool_count"], json!(163));
+    assert_eq!(result["unique_catalog_tools"], json!(164));
+    assert_eq!(result["advertised_tool_count"], json!(164));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(163));
-    assert_eq!(result["schema_quality"]["valid"], json!(163));
+    assert_eq!(result["schema_quality"]["checked"], json!(164));
+    assert_eq!(result["schema_quality"]["valid"], json!(164));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

@@ -1821,6 +1821,35 @@ export interface OperationalReadinessToolResult extends JsonObject {
   fail_closed?: boolean;
 }
 
+export type SecurityPrivacyClassification = "public" | "internal" | "confidential" | "restricted" | "regulated";
+export type SecurityPrivacyFlowDecision = "allow" | "deny" | "conditional";
+export type SecurityPrivacyThreatSeverity = "low" | "medium" | "high" | "critical";
+export type SecurityPrivacyThreatStatus = "mitigated" | "accepted" | "unmitigated" | "unanalysed";
+export type SecurityPrivacyReviewKind = "privacy_impact" | "security_assessment" | "red_team" | "access_review";
+export type SecurityPrivacyReviewStatus = "draft" | "in_review" | "complete" | "expired";
+export type SecurityPrivacyIssueSeverity = "warning" | "blocking";
+
+export interface SecurityPrivacySystemArgs extends JsonObject { id: string; version: string; owner: string; }
+export interface SecurityPrivacyAssetArgs extends JsonObject { id: string; name: string; classification: SecurityPrivacyClassification; owner: string; purpose: string; retention_days?: number; residency: string; deletion_process?: string; }
+export interface SecurityPrivacyFlowArgs extends JsonObject { id: string; asset: string; source: string; destination: string; purpose: string; decision: SecurityPrivacyFlowDecision; legal_basis?: string; authorization_evidence?: string; }
+export interface SecurityPrivacyIdentityArgs extends JsonObject { id: string; principal: string; role: string; authentication: string; mfa?: boolean; least_privilege?: boolean; assets?: string[]; }
+export interface SecurityPrivacyThreatArgs extends JsonObject { id: string; category: string; severity: SecurityPrivacyThreatSeverity; status: SecurityPrivacyThreatStatus; control?: string; evidence_digest?: string; rationale?: string; }
+export interface SecurityPrivacyReviewArgs extends JsonObject { id: string; kind: SecurityPrivacyReviewKind; scope: string; reviewer: string; status: SecurityPrivacyReviewStatus; evidence_digest?: string; expires_at?: string; findings?: string[]; }
+export interface SecurityPrivacyControlsArgs extends JsonObject { access_control?: boolean; encryption_at_rest?: boolean; encryption_in_transit?: boolean; key_rotation?: boolean; audit_logging?: boolean; vulnerability_management?: boolean; backup_restore?: boolean; incident_response?: boolean; vendor_review?: boolean; data_subject_rights?: boolean; }
+export interface SecurityPrivacyPoliciesArgs extends JsonObject { require_asset_purpose?: boolean; require_retention?: boolean; require_flow_authorization?: boolean; require_identity_hardening?: boolean; require_threat_treatment?: boolean; require_reviews?: boolean; require_controls?: boolean; require_mfa_for_sensitive?: boolean; }
+export interface SecurityPrivacyManifestArgs extends JsonObject { schema?: "bioprism-security-privacy/0.1"; system: SecurityPrivacySystemArgs; assets?: SecurityPrivacyAssetArgs[]; flows?: SecurityPrivacyFlowArgs[]; identities?: SecurityPrivacyIdentityArgs[]; threats?: SecurityPrivacyThreatArgs[]; reviews?: SecurityPrivacyReviewArgs[]; controls?: SecurityPrivacyControlsArgs; policies?: SecurityPrivacyPoliciesArgs; }
+
+export interface SecurityPrivacyIssueResult extends JsonObject { code: string; severity: SecurityPrivacyIssueSeverity; subject: string; detail: string; remediation: string; }
+export interface SecurityPrivacyAssetAuditResult extends JsonObject { asset_id: string; purpose_valid: boolean; retention_valid: boolean; residency_valid: boolean; deletion_valid: boolean; sensitive: boolean; ready: boolean; }
+export interface SecurityPrivacyFlowAuditResult extends JsonObject { flow_id: string; asset_valid: boolean; purpose_valid: boolean; legal_basis_present: boolean; authorization_present: boolean; allowed: boolean; ready: boolean; }
+export interface SecurityPrivacyIdentityAuditResult extends JsonObject { identity_id: string; assets_valid: boolean; authentication_valid: boolean; mfa: boolean; least_privilege: boolean; sensitive_access: boolean; ready: boolean; }
+export interface SecurityPrivacyThreatAuditResult extends JsonObject { threat_id: string; high_or_worse: boolean; treated: boolean; control_present: boolean; evidence_valid: boolean; rationale_present: boolean; ready: boolean; }
+export interface SecurityPrivacyReviewAuditResult extends JsonObject { review_id: string; reviewer_independent: boolean; evidence_valid: boolean; current: boolean; complete: boolean; ready: boolean; }
+export interface SecurityPrivacyControlAuditResult extends JsonObject { control: string; enabled: boolean; required: boolean; ready: boolean; }
+export interface SecurityPrivacyCountsResult extends JsonObject { assets: number; sensitive_assets: number; flows: number; allowed_flows: number; identities: number; hardened_identities: number; threats: number; high_or_worse_threats: number; treated_threats: number; reviews: number; current_reviews: number; controls: number; enabled_controls: number; }
+export interface SecurityPrivacyAuditResult extends JsonObject { schema: "bioprism-security-privacy-audit/0.1"; manifest_schema: string; digest: string; valid: boolean; system_id: string; counts: SecurityPrivacyCountsResult; asset_audits: SecurityPrivacyAssetAuditResult[]; flow_audits: SecurityPrivacyFlowAuditResult[]; identity_audits: SecurityPrivacyIdentityAuditResult[]; threat_audits: SecurityPrivacyThreatAuditResult[]; review_audits: SecurityPrivacyReviewAuditResult[]; control_audits: SecurityPrivacyControlAuditResult[]; issues: SecurityPrivacyIssueResult[]; guarantees: string[]; limitations: string[]; }
+export interface SecurityPrivacyToolResult extends JsonObject { ok: boolean; schema: "bioprism-security-privacy-audit/0.1"; workflow: "security_privacy_audit"; manifest_digest: string; valid: boolean; security_privacy_ready: boolean; blocking_issue_count: number; warning_count: number; audit: SecurityPrivacyAuditResult; guarantees: string[]; limitations: string[]; stage?: string; refusal?: string; fail_closed?: boolean; }
+
 export interface DeveloperPlatformStatusArgs extends JsonObject {
   include_details?: boolean;
   max_items?: number;

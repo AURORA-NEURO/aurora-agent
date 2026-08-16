@@ -918,6 +918,15 @@ runbooks, incident timelines/postmortems, and on-call/observability/backup/acces
 an operator was paged, a fallback or restore was executed, an incident system was updated, or a
 deployment was authorized. See docs/OPERATIONAL_READINESS_AUDIT.md.
 
+## Security/privacy governance audit
+
+The `security_privacy_audit` route adds an artifact-level governance contract over data-asset
+classification, purpose/retention/residency/deletion, authorized flows, identity hardening,
+high-risk threat treatment, independent review evidence, and required security/privacy controls.
+`security_privacy_ready` is derived from named blocking issues; it is not legal compliance, a live
+security scan, proof of authentication or encryption, executed red-team evidence, or a data-erasure
+claim. See docs/SECURITY_PRIVACY_AUDIT.md.
+
 ## License
 
 Apache-2.0

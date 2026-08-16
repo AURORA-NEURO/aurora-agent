@@ -132,8 +132,9 @@ use bioprism_devplat::{
     CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
     EngineeringManifest, OperationalReadinessManifest, ReleasePipelineManifest,
+    SecurityPrivacyManifest,
     CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
-    RELEASE_PIPELINE_AUDIT_SCHEMA, MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA, MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1468,6 +1469,7 @@ impl Server {
             "engineering_manifest_audit" => self.engineering_manifest_audit(&arguments),
             "release_pipeline_audit" => self.release_pipeline_audit(&arguments),
             "operational_readiness_audit" => self.operational_readiness_audit(&arguments),
+            "security_privacy_audit" => self.security_privacy_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
@@ -24219,6 +24221,54 @@ impl Server {
         }))
     }
 
+    fn security_privacy_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_manifest = arguments
+            .get("manifest")
+            .cloned()
+            .ok_or("manifest is required and must be a serialized SecurityPrivacyManifest")?;
+        let encoded = serde_json::to_vec(&raw_manifest)
+            .map_err(|error| format!("cannot measure security/privacy manifest: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("manifest exceeds the 20000000-byte safety bound".into());
+        }
+        let manifest: SecurityPrivacyManifest = serde_json::from_value(raw_manifest)
+            .map_err(|error| format!("invalid security/privacy manifest: {error}"))?;
+        let audit = manifest
+            .audit()
+            .map_err(|error| format!("cannot audit security/privacy manifest: {error}"))?;
+        let blocking_issue_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Blocking)
+            .count();
+        let warning_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Warning)
+            .count();
+        Ok(json!({
+            "ok": true,
+            "workflow": "security_privacy_audit",
+            "schema": SECURITY_PRIVACY_AUDIT_SCHEMA,
+            "manifest_digest": audit.digest,
+            "valid": audit.valid,
+            "security_privacy_ready": audit.valid,
+            "blocking_issue_count": blocking_issue_count,
+            "warning_count": warning_count,
+            "audit": audit,
+            "guarantees": [
+                "asset classification, purpose, retention, residency, and deletion remain explicit",
+                "permitted flows, identity hardening, threat treatment, independent reviews, and controls are audited as separate layers",
+                "high and critical untreated threats cannot be converted into a clean posture by a caller-supplied boolean",
+            ],
+            "limitations": [
+                "the route does not scan infrastructure, authenticate identities, verify a legal basis, or erase data",
+                "the route does not execute red-team actions, test encryption, contact vendors, or mutate access systems",
+                "evidence digests, classifications, review status, control state, and authorization records are caller-declared",
+            ],
+        }))
+    }
+
     fn developer_delivery_audit(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery input: {error}"))?;
@@ -26547,7 +26597,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -28723,6 +28773,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "manifest": { "type": "object", "description": "Serialized bioprism-devplat OperationalReadinessManifest with service identity, contracts, indicators, dependencies, runbooks, incidents, controls, and explicit policies." }
+                },
+                "required": ["manifest"]
+            }
+        }),
+        json!({
+            "name": "security_privacy_audit",
+            "description": "Validate a bounded machine-readable security and privacy governance manifest. It audits data-asset classification, purpose, retention and residency, authorized flows, identity hardening, threat treatment, independent review evidence, and required controls; it returns deterministic security/privacy readiness without scanning infrastructure, authenticating people, executing red-team actions, or asserting legal compliance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifest": { "type": "object", "description": "Serialized bioprism-devplat SecurityPrivacyManifest with system identity, assets, flows, identities, threats, reviews, controls, and explicit policies." }
                 },
                 "required": ["manifest"]
             }

@@ -662,3 +662,12 @@ fallbacks, runbook review, incident closure, control audits, counts, and stable 
 issue rows. `operationally_ready` is an artifact-derived posture, not evidence of live telemetry,
 reachable on-call staff, exercised fallbacks/restores, incident-system mutation, or deployment.
 See OPERATIONAL_READINESS_AUDIT.md.
+
+## Security/privacy governance audit
+
+`ApiClient.securityPrivacyAudit(...)` accepts `SecurityPrivacyManifestArgs` and returns
+`SecurityPrivacyToolResult`. Types retain classification, retention/deletion, flow authorization,
+MFA/least-privilege, threat treatment, independent review, control audits, counts, and stable
+warning/blocking issue rows. `security_privacy_ready` is a declaration-derived posture, not proof
+of live security controls, legal compliance, authentication, erasure, or executed red-team work.
+See SECURITY_PRIVACY_AUDIT.md.

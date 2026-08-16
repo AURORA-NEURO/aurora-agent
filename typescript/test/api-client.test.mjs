@@ -658,6 +658,32 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         },
         guarantees: ["layers remain separate"], limitations: ["artifact only"],
       } } } });
+      if (path === "/v1/tools/security_privacy_audit") return jsonResponse({ ok: true, tool: "security_privacy_audit", request_id: "r15securityprivacy", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-security-privacy-audit/0.1",
+        workflow: "security_privacy_audit",
+        manifest_digest: "a".repeat(64),
+        valid: true,
+        security_privacy_ready: true,
+        blocking_issue_count: 0,
+        warning_count: 0,
+        audit: {
+          schema: "bioprism-security-privacy-audit/0.1",
+          manifest_schema: "bioprism-security-privacy/0.1",
+          digest: "a".repeat(64),
+          valid: true,
+          system_id: "aurora-api",
+          counts: { assets: 1, sensitive_assets: 1, flows: 1, allowed_flows: 1, identities: 1, hardened_identities: 1, threats: 1, high_or_worse_threats: 1, treated_threats: 1, reviews: 1, current_reviews: 1, controls: 10, enabled_controls: 10 },
+          asset_audits: [{ asset_id: "patient-records", purpose_valid: true, retention_valid: true, residency_valid: true, deletion_valid: true, sensitive: true, ready: true }],
+          flow_audits: [{ flow_id: "api-to-vendor", asset_valid: true, purpose_valid: true, legal_basis_present: true, authorization_present: true, allowed: true, ready: true }],
+          identity_audits: [{ identity_id: "researcher", assets_valid: true, authentication_valid: true, mfa: true, least_privilege: true, sensitive_access: true, ready: true }],
+          threat_audits: [{ threat_id: "exfiltration", high_or_worse: true, treated: true, control_present: true, evidence_valid: true, rationale_present: false, ready: true }],
+          review_audits: [{ review_id: "pia-1", reviewer_independent: true, evidence_valid: true, current: true, complete: true, ready: true }],
+          control_audits: [{ control: "encryption_at_rest", enabled: true, required: true, ready: true }],
+          issues: [], guarantees: ["layers remain separate"], limitations: ["artifact only"],
+        },
+        guarantees: ["layers remain separate"], limitations: ["artifact only"],
+      } } } });
       if (path === "/v1/tools/operational_readiness_audit") return jsonResponse({ ok: true, tool: "operational_readiness_audit", request_id: "r15operational", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-operational-readiness-audit/0.1",
@@ -1542,6 +1568,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(releasePipeline.mcp.result.structuredContent.schema, "bioprism-release-pipeline-audit/0.1");
   assert.equal(releasePipeline.mcp.result.structuredContent.release_ready, true);
   assert.equal(releasePipeline.mcp.result.structuredContent.audit.promotion_audits[0].rollback_present, true);
+  const securityPrivacy = await client.securityPrivacyAudit({
+    system: { id: "aurora-api", version: "0.1.0", owner: "platform" },
+    assets: [{ id: "patient-records", name: "records", classification: "regulated", owner: "privacy", purpose: "care research", retention_days: 365, residency: "us", deletion_process: "erase" }],
+    flows: [{ id: "api-to-vendor", asset: "patient-records", source: "api", destination: "approved-vendor", purpose: "care research", legal_basis: "consent", decision: "allow", authorization_evidence: "a".repeat(64) }],
+    identities: [{ id: "researcher", principal: "team", role: "research", authentication: "oidc", mfa: true, least_privilege: true, assets: ["patient-records"] }],
+    threats: [{ id: "exfiltration", category: "data-exfiltration", severity: "high", status: "mitigated", control: "dlp", evidence_digest: "a".repeat(64) }],
+    reviews: [{ id: "pia-1", kind: "privacy_impact", scope: "patient-records", reviewer: "independent", status: "complete", evidence_digest: "a".repeat(64) }],
+    controls: { access_control: true, encryption_at_rest: true, encryption_in_transit: true, key_rotation: true, audit_logging: true, vulnerability_management: true, backup_restore: true, incident_response: true, vendor_review: true, data_subject_rights: true },
+  });
+  assert.equal(securityPrivacy.mcp.result.structuredContent.schema, "bioprism-security-privacy-audit/0.1");
+  assert.equal(securityPrivacy.mcp.result.structuredContent.security_privacy_ready, true);
+  assert.equal(securityPrivacy.mcp.result.structuredContent.audit.flow_audits[0].authorization_present, true);
+  assert.equal(securityPrivacy.mcp.result.structuredContent.audit.threat_audits[0].treated, true);
   const operational = await client.operationalReadinessAudit({
     service: { id: "aurora-api", version: "0.1.0", owner: "platform", criticality: "critical" },
     contracts: [{ id: "availability", kind: "availability", objective: "serve requests", target: "99.9%", required: true }],
