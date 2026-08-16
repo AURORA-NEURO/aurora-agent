@@ -130,6 +130,20 @@ impl EntityMapping {
         self.fates.get(label)
     }
 
+    /// Return the complete caller-declared label mapping for audit projections.
+    ///
+    /// The mapping remains declarative: exposing it does not make a split or retired label
+    /// resolve to one successor. Callers must still pass the mapping through
+    /// [`comparable_cohorts`].
+    pub fn fates(&self) -> &BTreeMap<EntityLabel, LabelFate> {
+        &self.fates
+    }
+
+    /// Number of labels for which the caller supplied a fate.
+    pub fn fate_count(&self) -> usize {
+        self.fates.len()
+    }
+
     fn relates(&self, left: &ClassificationVersion, right: &ClassificationVersion) -> bool {
         (&self.from == left && &self.to == right) || (&self.from == right && &self.to == left)
     }

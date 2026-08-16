@@ -1647,6 +1647,43 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
           limitations: [],
         },
         oncoworlds_clonal_history_check: { ok: true, schema: "bioprism-mcp/oncoworlds-clonal-history-check/0.1", compatible_count: 1, rejected_count: 0, candidate_count: 1, compatible: [{ edges: [] }], rejected: [], rejected_records: [], unique_history: { ok: true, history: { edges: [] } }, unique_status: "unique", guarantees: [], limitations: [] },
+        oncoworlds_era_shift_check: {
+          ok: true,
+          schema: "bioprism-mcp/oncoworlds-era-shift-check/0.1",
+          outcome_kind: "comparable",
+          comparable: true,
+          evidence: {
+            left: { name: "historical", site: "site-a", classification_version: "criteria-a", entities: ["entity-1"] },
+            right: { name: "current", site: "site-b", classification_version: "criteria-b", entities: ["entity-1a"] },
+            mapping: { from: "criteria-a", to: "criteria-b", fates: { "entity-1": { fate: "renamed", to: "entity-1a" } } },
+            mapping_declared: true,
+            mapping_fate_count: 1,
+            mapping_versions_match: true,
+            same_classification_version: false,
+            left_entity_count: 1,
+            right_entity_count: 1,
+            assay_contexts: [{ site: "site-b", assay: "methylation", availability: { availability: "unavailable_at_site" }, observation: {}, negative_call_supported: false, negative_call_refusal: { refusal: "resource_absence_read_as_biology" }, negative_call_refusal_kind: "resource_absence_read_as_biology" }],
+            assay_context_count: 1,
+            descriptor_checks: [{ descriptor: "self_reported_race_or_ethnicity", descriptor_label: "self-reported race or ethnicity", use: "stratification", use_label: "a stratification variable", administrative: true, allowed: true }],
+            descriptor_check_count: 1,
+          },
+          guarantees: [],
+          limitations: [],
+        },
+        oncoworlds_equity_check: {
+          ok: true,
+          schema: "bioprism-mcp/oncoworlds-equity-check/0.1",
+          outcome_kind: "equity_report",
+          equity_supported: true,
+          pooled_value: 0.91,
+          subgroups: [{ subgroup: "group-a", n: 900, estimate: 0.93, interval: { low: 0.90, high: 0.95 } }],
+          subgroup_count: 1,
+          interval_count: 1,
+          all_intervals_present: true,
+          report: { pooled: 0.91 },
+          guarantees: [],
+          limitations: [],
+        },
       }[tool];
       return jsonResponse({ ok: true, tool, request_id: "oncoworlds-1", mcp: { result: { structuredContent: projections } }, guarantee: "bounded" });
     },
@@ -1656,6 +1693,8 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
   const compare = await client.oncoworldsMethylationCompare({ left: {}, right: {} });
   const radiogenomic = await client.oncoworldsRadiogenomicCheck({ claim: {}, design: {}, observation: {}, transport: {} });
   const clonal = await client.oncoworldsClonalHistoryCheck({ population: {}, candidates: [] });
+  const eraShift = await client.oncoworldsEraShiftCheck({ left: {}, right: {} });
+  const equity = await client.oncoworldsEquityCheck({ pooled: {} });
   assert.equal(model.mcp.result.structuredContent.patient_relevant_claim.claimed_n, 3);
   assert.equal(model.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-model-transport/0.1");
   assert.equal(model.mcp.result.structuredContent.model_identity.verified_against_source, true);
@@ -1673,12 +1712,19 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
   assert.equal(clonal.mcp.result.structuredContent.unique_history.ok, true);
   assert.equal(clonal.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-clonal-history-check/0.1");
   assert.equal(clonal.mcp.result.structuredContent.unique_status, "unique");
+  assert.equal(eraShift.mcp.result.structuredContent.evidence.mapping_fate_count, 1);
+  assert.equal(eraShift.mcp.result.structuredContent.evidence.assay_contexts[0].negative_call_supported, false);
+  assert.equal(eraShift.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-era-shift-check/0.1");
+  assert.equal(equity.mcp.result.structuredContent.all_intervals_present, true);
+  assert.equal(equity.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-equity-check/0.1");
   assert.deepEqual(calls.map((call) => call.tool), [
     "oncoworlds_model_transport",
     "oncoworlds_methylation_classify",
     "oncoworlds_methylation_compare",
     "oncoworlds_radiogenomic_check",
     "oncoworlds_clonal_history_check",
+    "oncoworlds_era_shift_check",
+    "oncoworlds_equity_check",
   ]);
 });
 

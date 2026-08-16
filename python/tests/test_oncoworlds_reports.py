@@ -5,11 +5,15 @@ import unittest
 from prism_sdk import (
     ArgumentError,
     OncoWorldsClonalHistoryCheckArgs,
+    OncoWorldsEraShiftCheckArgs,
+    OncoWorldsEquityCheckArgs,
     OncoWorldsMethylationClassifyArgs,
     OncoWorldsMethylationCompareReport,
     OncoWorldsModelTransportReport,
     OncoWorldsRadiogenomicCheckReport,
     oncoworlds_clonal_history_check_report,
+    oncoworlds_era_shift_check_report,
+    oncoworlds_equity_check_report,
     oncoworlds_methylation_classify_report,
     oncoworlds_methylation_compare_report,
     oncoworlds_model_transport_report,
@@ -224,9 +228,106 @@ class OncoWorldsReportTests(unittest.TestCase):
         self.assertEqual(clonal.rejected_records[0].refusal_kind, "cyclic")
         self.assertEqual(clonal.candidate_count, 3)
 
+    def test_era_shift_and_equity_reports_preserve_resource_and_interval_boundaries(self) -> None:
+        era = oncoworlds_era_shift_check_report({
+            "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-era-shift-check/0.1",
+            "outcome_kind": "comparable",
+            "comparable": True,
+            "evidence": {
+                "left": {"name": "historical", "site": "site-a", "classification_version": "criteria-a", "entities": ["entity-1"]},
+                "right": {"name": "current", "site": "site-b", "classification_version": "criteria-b", "entities": ["entity-1a"]},
+                "mapping": {"from": "criteria-a", "to": "criteria-b", "fates": {"entity-1": {"fate": "renamed", "to": "entity-1a"}}},
+                "mapping_declared": True,
+                "mapping_fate_count": 1,
+                "mapping_versions_match": True,
+                "same_classification_version": False,
+                "left_entity_count": 1,
+                "right_entity_count": 1,
+                "assay_contexts": [{"site": "site-b", "assay": "methylation", "availability": {"availability": "unavailable_at_site"}, "observation": {"unobserved": "not_collected"}, "negative_call_supported": False, "negative_call_refusal": {"refusal": "resource_absence_read_as_biology"}, "negative_call_refusal_kind": "resource_absence_read_as_biology"}],
+                "assay_context_count": 1,
+                "descriptor_checks": [{"descriptor": "self_reported_race_or_ethnicity", "descriptor_label": "self-reported race or ethnicity", "use": "stratification", "use_label": "a stratification variable", "administrative": True, "allowed": True}, {"descriptor": "self_reported_race_or_ethnicity", "descriptor_label": "self-reported race or ethnicity", "use": "mechanistic_variable", "use_label": "a mechanistic variable", "administrative": True, "allowed": False, "refusal": {"refusal": "descriptor_used_as_mechanism"}, "refusal_kind": "descriptor_used_as_mechanism", "refusal_text": "administrative descriptor"}],
+                "descriptor_check_count": 2,
+            },
+            "guarantees": [],
+            "limitations": [],
+        })
+        self.assertTrue(era.comparable)
+        self.assertEqual(era.mapping_fate_count, 1)
+        self.assertFalse(era.assay_contexts[0].negative_call_supported)
+        self.assertEqual(era.assay_contexts[0].negative_call_refusal_kind, "resource_absence_read_as_biology")
+        self.assertFalse(era.descriptor_checks[1].allowed)
+        refused_era = oncoworlds_era_shift_check_report({
+            "ok": False,
+            "schema": "bioprism-mcp/oncoworlds-era-shift-check/0.1",
+            "outcome_kind": "refused",
+            "comparable": False,
+            "stage": "classification_era_comparability",
+            "refusal": {"refusal": "incomplete_mapping", "entity": "entity-2", "version": "criteria-a"},
+            "refusal_kind": "incomplete_mapping",
+            "refusal_text": "mapping is incomplete",
+            "fail_closed": True,
+            "evidence": {
+                "left": {"name": "historical", "site": "site-a", "classification_version": "criteria-a", "entities": ["entity-1", "entity-2"]},
+                "right": {"name": "current", "site": "site-b", "classification_version": "criteria-b", "entities": ["entity-1a"]},
+                "mapping": {"from": "criteria-a", "to": "criteria-b", "fates": {"entity-1": {"fate": "renamed", "to": "entity-1a"}}},
+                "mapping_declared": True,
+                "mapping_fate_count": 1,
+                "mapping_versions_match": True,
+                "same_classification_version": False,
+                "left_entity_count": 2,
+                "right_entity_count": 1,
+                "assay_contexts": [],
+                "assay_context_count": 0,
+                "descriptor_checks": [],
+                "descriptor_check_count": 0,
+            },
+        })
+        self.assertFalse(refused_era.ok)
+        self.assertEqual(refused_era.refusal_kind, "incomplete_mapping")
+        equity = oncoworlds_equity_check_report({
+            "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-equity-check/0.1",
+            "outcome_kind": "equity_report",
+            "equity_supported": True,
+            "pooled_value": 0.91,
+            "subgroups": [{"subgroup": "large", "n": 900, "estimate": 0.93, "interval": {"low": 0.90, "high": 0.95}}, {"subgroup": "small", "n": 3, "estimate": 0.55, "interval": {"low": 0.28, "high": 0.80}}],
+            "subgroup_count": 2,
+            "interval_count": 2,
+            "all_intervals_present": True,
+            "report": {"pooled": 0.91},
+            "guarantees": [],
+            "limitations": [],
+        })
+        self.assertTrue(equity.equity_supported)
+        self.assertEqual(equity.subgroup_count, 2)
+        self.assertTrue(equity.all_intervals_present)
+        refused_equity = oncoworlds_equity_check_report({
+            "ok": False,
+            "schema": "bioprism-mcp/oncoworlds-equity-check/0.1",
+            "outcome_kind": "refused",
+            "equity_supported": False,
+            "stage": "equity_report",
+            "refusal": {"refusal": "unquantified_subgroup", "subgroup": "small", "n": 3},
+            "refusal_kind": "unquantified_subgroup",
+            "refusal_text": "interval is absent",
+            "fail_closed": True,
+            "pooled_value": 0.91,
+            "subgroups": [{"subgroup": "small", "n": 3, "estimate": 0.55, "interval": None}],
+            "subgroup_count": 1,
+            "interval_count": 0,
+            "all_intervals_present": False,
+        })
+        self.assertFalse(refused_equity.ok)
+        self.assertEqual(refused_equity.refusal_kind, "unquantified_subgroup")
+
     def test_oncoworlds_requests_enforce_bounded_transport_shape(self) -> None:
         args = OncoWorldsClonalHistoryCheckArgs({"subclones": []}, [{"edges": []}])
         self.assertEqual(args.to_mcp_arguments()["candidates"], [{"edges": []}])
+        era_args = OncoWorldsEraShiftCheckArgs({"name": "left"}, {"name": "right"}, assay_contexts=({"site": "a"},))
+        self.assertEqual(len(era_args.to_mcp_arguments()["assay_contexts"]), 1)
+        equity_args = OncoWorldsEquityCheckArgs({"value": 0.9, "subgroups": []})
+        self.assertEqual(equity_args.to_mcp_arguments()["pooled"]["value"], 0.9)
         with self.assertRaises(ArgumentError):
             OncoWorldsMethylationClassifyArgs({}, {str(index): {} for index in range(10_001)}, {})
 

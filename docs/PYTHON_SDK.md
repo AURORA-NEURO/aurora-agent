@@ -218,6 +218,12 @@ invent defaults:
 - `OncoWorldsClonalHistoryCheckArgs`/`oncoworlds_clonal_history_check_report(...)` preserve typed
   compatible histories, per-candidate refusal kinds, candidate accounting, and unique versus
   ambiguous history status. See `docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md`.
+- `OncoWorldsEraShiftCheckArgs`/`oncoworlds_era_shift_check_report(...)` type classification-era
+  mappings, site assay availability, not-collected evidence, administrative descriptor use, and
+  cross-version comparability refusals. `OncoWorldsEquityCheckArgs`/
+  `oncoworlds_equity_check_report(...)` require complete subgroup intervals before releasing an
+  equity projection and preserve pooled-only, empty, and unquantified refusals. See
+  `docs/ONCOWORLDS_SHIFT_EQUITY.md`.
 - `OncoIdentityJoinArgs`/`onco_identity_join_report(...)` preserve the tagged join decision,
   refusal kind, identity-link count, epoch bridge warrant, and ordered checked dimensions. A
   declined join remains a typed domain result. See `docs/ONCOWORLDS_IDENTITY_JOIN.md`.
@@ -228,7 +234,7 @@ invent defaults:
   `docs/ONCOWORLDS_RADIOGENOMIC_CHECK.md`. `OncoWorldsClonalHistoryCheckArgs`/
   `oncoworlds_clonal_history_check_report(...)` reconcile candidate histories against cellular
   fractions, preserve per-candidate typed rejection reasons, and represent multiple compatible
-  histories as ambiguity rather than selecting one. All five OncoWorlds workflows are available on
+  histories as ambiguity rather than selecting one. The OncoWorlds workflows are available on
   sync/async MCP and HTTP facades, with matching TypeScript methods alongside the earlier oncology
   projections.
 - `FiberCompileRequest`, `FiberRefineRequest`, `FiberExplainRequest`, `FiberVerifyRequest`, and

@@ -9,6 +9,7 @@ identity, fidelity, calibration, split safety, scope transport, and cellular-fra
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -34,6 +35,12 @@ ONCOWORLDS_MODEL_SCHEMA = "bioprism-mcp/oncoworlds-model-transport/0.1"
 ONCOWORLDS_MODEL_OUTCOME_KINDS = frozenset({"supported", "refused"})
 ONCOWORLDS_MODEL_REFUSAL_KINDS = frozenset({"unverified_model_identity", "unmeasured_fidelity", "unmodelled_establishment_selection", "technical_replicates_as_biological", "undeclared_loss", "unstated_assumption"})
 ONCOWORLDS_MODEL_FIDELITY_AXES = frozenset({"genomic", "epigenetic", "transcriptomic", "phenotypic", "histologic"})
+ONCOWORLDS_ERA_SCHEMA = "bioprism-mcp/oncoworlds-era-shift-check/0.1"
+ONCOWORLDS_ERA_OUTCOME_KINDS = frozenset({"comparable", "refused"})
+ONCOWORLDS_ERA_REFUSAL_KINDS = frozenset({"unmapped_classification_change", "incomplete_mapping", "resource_absence_read_as_biology", "descriptor_used_as_mechanism"})
+ONCOWORLDS_EQUITY_SCHEMA = "bioprism-mcp/oncoworlds-equity-check/0.1"
+ONCOWORLDS_EQUITY_OUTCOME_KINDS = frozenset({"equity_report", "refused"})
+ONCOWORLDS_EQUITY_REFUSAL_KINDS = frozenset({"pooled_score_only", "unquantified_subgroup", "empty_subgroup"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -54,6 +61,12 @@ def _optional_text(name: str, value: Any) -> str | None:
 
 def _optional_mapping(name: str, value: Any) -> dict[str, Any] | None:
     return None if value is None else _route_mapping(name, value)
+
+
+def _number(name: str, value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        raise ArgumentError(f"{name} must be a finite number")
+    return float(value)
 
 
 def _payload(value: Mapping[str, Any], *, label: str, direct_keys: tuple[str, ...]) -> dict[str, Any]:
@@ -107,6 +120,145 @@ def _domain_refusal(raw: Mapping[str, Any], label: str) -> tuple[str, Any, str, 
 
 def _object(name: str, value: Mapping[str, Any]) -> dict[str, Any]:
     return _route_mapping(name, value)
+
+
+@dataclass(frozen=True)
+class OncoWorldsEraShiftCheckArgs:
+    left: Mapping[str, Any]
+    right: Mapping[str, Any]
+    mapping: Mapping[str, Any] | None = None
+    assay_contexts: tuple[Mapping[str, Any], ...] = ()
+    descriptor_checks: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "left", _object("left OncoWorlds cohort", self.left))
+        object.__setattr__(self, "right", _object("right OncoWorlds cohort", self.right))
+        object.__setattr__(self, "mapping", _optional_mapping("OncoWorlds entity mapping", self.mapping))
+        assays = tuple(_object(f"site assay context[{index}]", value) for index, value in enumerate(self.assay_contexts))
+        descriptors = tuple(_object(f"descriptor check[{index}]", value) for index, value in enumerate(self.descriptor_checks))
+        if len(assays) > 100 or len(descriptors) > 100:
+            raise ArgumentError("OncoWorlds era-shift evidence panels may contain at most 100 entries")
+        object.__setattr__(self, "assay_contexts", assays)
+        object.__setattr__(self, "descriptor_checks", descriptors)
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsEraShiftCheckArgs":
+        raw = _object("OncoWorlds era-shift arguments", value)
+        assays = _array("OncoWorlds assay contexts", raw.get("assay_contexts", []))
+        descriptors = _array("OncoWorlds descriptor checks", raw.get("descriptor_checks", []))
+        return cls(raw.get("left"), raw.get("right"), raw.get("mapping"), assays, descriptors)
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "left": dict(self.left),
+            "right": dict(self.right),
+            "assay_contexts": [dict(value) for value in self.assay_contexts],
+            "descriptor_checks": [dict(value) for value in self.descriptor_checks],
+        }
+        if self.mapping is not None:
+            result["mapping"] = dict(self.mapping)
+        return result
+
+
+@dataclass(frozen=True)
+class OncoWorldsEquityCheckArgs:
+    pooled: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        pooled = _object("OncoWorlds pooled score", self.pooled)
+        subgroups = _array("OncoWorlds pooled subgroups", pooled.get("subgroups", []))
+        if len(subgroups) > 10_000:
+            raise ArgumentError("OncoWorlds equity subgroup panel may contain at most 10000 entries")
+        object.__setattr__(self, "pooled", pooled)
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsEquityCheckArgs":
+        raw = _object("OncoWorlds equity arguments", value)
+        return cls(raw.get("pooled"))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"pooled": dict(self.pooled)}
+
+
+@dataclass(frozen=True)
+class OncoShiftCohortProjection:
+    raw: dict[str, Any]
+    name: str
+    site: str
+    classification_version: str
+    entities: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoShiftCohortProjection":
+        raw = _object("OncoWorlds cohort projection", value)
+        entities = _route_strings("OncoWorlds cohort entities", raw.get("entities", []))
+        return cls(
+            raw,
+            _route_text("OncoWorlds cohort name", raw.get("name")),
+            _route_text("OncoWorlds cohort site", raw.get("site")),
+            _route_text("OncoWorlds cohort classification version", raw.get("classification_version")),
+            entities,
+        )
+
+
+@dataclass(frozen=True)
+class OncoAssayShiftProjection:
+    raw: dict[str, Any]
+    site: str
+    assay: str
+    availability: dict[str, Any]
+    observation: dict[str, Any]
+    negative_call_supported: bool
+    negative_call_refusal_kind: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoAssayShiftProjection":
+        raw = _object("OncoWorlds assay shift projection", value)
+        refusal = _object("OncoWorlds assay negative-call refusal", raw.get("negative_call_refusal"))
+        refusal_kind = _route_text("OncoWorlds assay refusal kind", raw.get("negative_call_refusal_kind", refusal.get("refusal")))
+        if refusal_kind != "resource_absence_read_as_biology":
+            raise ArgumentError("OncoWorlds assay projection must retain the resource-absence refusal")
+        negative_call_supported = _bool("OncoWorlds negative-call support", raw.get("negative_call_supported"))
+        if negative_call_supported:
+            raise ArgumentError("OncoWorlds assay projection cannot support a negative call")
+        return cls(
+            raw,
+            _route_text("OncoWorlds assay site", raw.get("site")),
+            _route_text("OncoWorlds assay name", raw.get("assay")),
+            _object("OncoWorlds assay availability", raw.get("availability")),
+            _object("OncoWorlds assay observation", raw.get("observation")),
+            negative_call_supported,
+            refusal_kind,
+        )
+
+
+@dataclass(frozen=True)
+class OncoDescriptorShiftProjection:
+    raw: dict[str, Any]
+    descriptor: str
+    use: str
+    administrative: bool
+    allowed: bool
+    refusal_kind: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoDescriptorShiftProjection":
+        raw = _object("OncoWorlds descriptor shift projection", value)
+        allowed = _bool("OncoWorlds descriptor allowed", raw.get("allowed"))
+        refusal = raw.get("refusal")
+        refusal_kind = None if refusal is None else _route_text("OncoWorlds descriptor refusal kind", raw.get("refusal_kind", _object("OncoWorlds descriptor refusal", refusal).get("refusal")))
+        if allowed and refusal_kind is not None:
+            raise ArgumentError("allowed descriptor checks cannot carry refusal evidence")
+        if not allowed and refusal_kind != "descriptor_used_as_mechanism":
+            raise ArgumentError("refused descriptor checks must retain descriptor_used_as_mechanism")
+        return cls(
+            raw,
+            _route_text("OncoWorlds descriptor", raw.get("descriptor_label")),
+            _route_text("OncoWorlds descriptor use", raw.get("use_label")),
+            _bool("OncoWorlds descriptor administrative", raw.get("administrative")),
+            allowed,
+            refusal_kind,
+        )
 
 
 @dataclass(frozen=True)
@@ -932,6 +1084,187 @@ class OncoWorldsClonalHistoryCheckReport:
         return not self.unique
 
 
+@dataclass(frozen=True)
+class OncoWorldsEraShiftCheckReport:
+    raw: dict[str, Any]
+    ok: bool
+    comparable: bool
+    evidence: dict[str, Any]
+    left: OncoShiftCohortProjection
+    right: OncoShiftCohortProjection
+    mapping: dict[str, Any] | None
+    assay_contexts: tuple[OncoAssayShiftProjection, ...]
+    descriptor_checks: tuple[OncoDescriptorShiftProjection, ...]
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+    refusal_kind: str | None = None
+    refusal: dict[str, Any] | None = None
+    refusal_text: str | None = None
+    fail_closed: bool = False
+    same_classification_version: bool = False
+    mapping_declared: bool = False
+    mapping_fate_count: int = 0
+    mapping_versions_match: bool = False
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsEraShiftCheckReport":
+        raw = _payload(value, label="OncoWorlds era-shift check", direct_keys=("evidence", "refusal"))
+        ok = _bool("OncoWorlds era-shift check ok", raw.get("ok"))
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("OncoWorlds era-shift schema", schema_value)
+        if schema is not None and schema != ONCOWORLDS_ERA_SCHEMA:
+            raise ArgumentError(f"unknown OncoWorlds era-shift schema: {schema!r}")
+        comparable = _bool("OncoWorlds cohorts comparable", raw.get("comparable", ok))
+        if comparable != ok:
+            raise ArgumentError("OncoWorlds comparability does not reconcile with transport state")
+        outcome_kind_value = raw.get("outcome_kind")
+        outcome_kind = "comparable" if ok else "refused"
+        if outcome_kind_value is not None:
+            outcome_kind = _route_text("OncoWorlds era-shift outcome kind", outcome_kind_value)
+            if outcome_kind not in ONCOWORLDS_ERA_OUTCOME_KINDS or outcome_kind != ("comparable" if ok else "refused"):
+                raise ArgumentError("OncoWorlds era-shift outcome kind does not reconcile")
+        evidence = _route_mapping("OncoWorlds era-shift evidence", raw.get("evidence"))
+        left = OncoShiftCohortProjection.from_wire(evidence.get("left"))
+        right = OncoShiftCohortProjection.from_wire(evidence.get("right"))
+        mapping = _optional_mapping("OncoWorlds era-shift mapping", evidence.get("mapping"))
+        mapping_declared = _bool("OncoWorlds mapping declared", evidence.get("mapping_declared", mapping is not None))
+        if mapping_declared != (mapping is not None):
+            raise ArgumentError("OncoWorlds mapping declaration does not reconcile")
+        mapping_fate_count = _route_count("OncoWorlds mapping fate count", evidence.get("mapping_fate_count", len(mapping.get("fates", {})) if mapping else 0))
+        if mapping is not None and mapping_fate_count != len(mapping.get("fates", {})):
+            raise ArgumentError("OncoWorlds mapping fate count does not reconcile")
+        mapping_versions_match = _bool("OncoWorlds mapping version match", evidence.get("mapping_versions_match", False))
+        same_version = _bool("OncoWorlds same classification version", evidence.get("same_classification_version", left.classification_version == right.classification_version))
+        if same_version != (left.classification_version == right.classification_version):
+            raise ArgumentError("OncoWorlds same-version evidence does not reconcile with cohorts")
+        assays = tuple(OncoAssayShiftProjection.from_wire(item) for item in _array("OncoWorlds assay contexts", evidence.get("assay_contexts", [])))
+        descriptors = tuple(OncoDescriptorShiftProjection.from_wire(item) for item in _array("OncoWorlds descriptor checks", evidence.get("descriptor_checks", [])))
+        if _route_count("OncoWorlds assay context count", evidence.get("assay_context_count", len(assays))) != len(assays):
+            raise ArgumentError("OncoWorlds assay context count does not reconcile")
+        if _route_count("OncoWorlds descriptor check count", evidence.get("descriptor_check_count", len(descriptors))) != len(descriptors):
+            raise ArgumentError("OncoWorlds descriptor check count does not reconcile")
+        refusal_value = raw.get("refusal")
+        refusal = None
+        refusal_kind = None
+        refusal_text = None
+        fail_closed = False
+        guarantees: tuple[str, ...] = ()
+        limitations: tuple[str, ...] = ()
+        if not ok:
+            stage, refusal, refusal_text, fail_closed, guarantee = _domain_refusal(raw, "OncoWorlds era-shift check")
+            if stage != "classification_era_comparability":
+                raise ArgumentError("OncoWorlds era-shift refusal stage does not reconcile")
+            refusal_kind = _route_text("OncoWorlds era-shift refusal kind", raw.get("refusal_kind", refusal.get("refusal")))
+            if refusal_kind not in ONCOWORLDS_ERA_REFUSAL_KINDS or refusal_kind != refusal.get("refusal"):
+                raise ArgumentError("OncoWorlds era-shift refusal kind does not reconcile")
+            if schema is not None and raw.get("refusal_kind") is None:
+                raise ArgumentError("versioned OncoWorlds era-shift refusals require refusal_kind")
+            return cls(raw, False, False, evidence, left, right, mapping, assays, descriptors, (), (), schema, outcome_kind, refusal_kind, refusal, refusal_text, fail_closed, same_version, mapping_declared, mapping_fate_count, mapping_versions_match)
+        if raw.get("refusal") is not None or raw.get("stage") is not None or raw.get("fail_closed", False):
+            raise ArgumentError("successful OncoWorlds era-shift checks cannot carry refusal evidence")
+        if schema is not None and ("outcome_kind" not in raw or "mapping_declared" not in evidence or "mapping_fate_count" not in evidence):
+            raise ArgumentError("versioned OncoWorlds era-shift checks require mapping accounting")
+        return cls(raw, True, True, evidence, left, right, mapping, assays, descriptors, _route_strings("OncoWorlds era-shift guarantees", raw.get("guarantees")), _route_strings("OncoWorlds era-shift limitations", raw.get("limitations")), schema, outcome_kind, None, None, None, False, same_version, mapping_declared, mapping_fate_count, mapping_versions_match)
+
+
+@dataclass(frozen=True)
+class OncoEquitySubgroupProjection:
+    raw: dict[str, Any]
+    subgroup: str
+    n: int
+    estimate: float
+    interval: dict[str, Any] | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoEquitySubgroupProjection":
+        raw = _object("OncoWorlds equity subgroup", value)
+        interval_value = raw.get("interval")
+        normalized_interval = None
+        if interval_value is not None:
+            interval = _object("OncoWorlds subgroup uncertainty interval", interval_value)
+            low = _number("OncoWorlds subgroup interval low", interval.get("low"))
+            high = _number("OncoWorlds subgroup interval high", interval.get("high"))
+            if low > high:
+                raise ArgumentError("OncoWorlds subgroup interval low must not exceed high")
+            normalized_interval = dict(interval)
+            normalized_interval["low"] = low
+            normalized_interval["high"] = high
+        return cls(raw, _route_text("OncoWorlds subgroup", raw.get("subgroup")), _route_count("OncoWorlds subgroup n", raw.get("n")), _number("OncoWorlds subgroup estimate", raw.get("estimate")), normalized_interval)
+
+
+@dataclass(frozen=True)
+class OncoWorldsEquityCheckReport:
+    raw: dict[str, Any]
+    ok: bool
+    equity_supported: bool
+    pooled_value: float
+    subgroups: tuple[OncoEquitySubgroupProjection, ...]
+    subgroup_count: int
+    interval_count: int
+    all_intervals_present: bool
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+    refusal_kind: str | None = None
+    refusal: dict[str, Any] | None = None
+    refusal_text: str | None = None
+    fail_closed: bool = False
+    report: dict[str, Any] | None = None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldsEquityCheckReport":
+        raw = _payload(value, label="OncoWorlds equity check", direct_keys=("subgroups", "refusal"))
+        ok = _bool("OncoWorlds equity check ok", raw.get("ok"))
+        supported = _bool("OncoWorlds equity support", raw.get("equity_supported", ok))
+        if supported != ok:
+            raise ArgumentError("OncoWorlds equity support does not reconcile with transport state")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("OncoWorlds equity schema", schema_value)
+        if schema is not None and schema != ONCOWORLDS_EQUITY_SCHEMA:
+            raise ArgumentError(f"unknown OncoWorlds equity schema: {schema!r}")
+        outcome_kind_value = raw.get("outcome_kind")
+        outcome_kind = "equity_report" if ok else "refused"
+        if outcome_kind_value is not None:
+            outcome_kind = _route_text("OncoWorlds equity outcome kind", outcome_kind_value)
+            if outcome_kind not in ONCOWORLDS_EQUITY_OUTCOME_KINDS or outcome_kind != ("equity_report" if ok else "refused"):
+                raise ArgumentError("OncoWorlds equity outcome kind does not reconcile")
+        pooled_value = _number("OncoWorlds pooled value", raw.get("pooled_value"))
+        subgroups = tuple(OncoEquitySubgroupProjection.from_wire(item) for item in _array("OncoWorlds equity subgroups", raw.get("subgroups", [])))
+        subgroup_count = _route_count("OncoWorlds subgroup count", raw.get("subgroup_count", len(subgroups)))
+        interval_count = _route_count("OncoWorlds interval count", raw.get("interval_count", len(subgroups)))
+        actual_interval_count = sum(item.interval is not None for item in subgroups)
+        if subgroup_count != len(subgroups) or interval_count != actual_interval_count:
+            raise ArgumentError("OncoWorlds equity counts do not reconcile with retained subgroups")
+        all_intervals_present = _bool("OncoWorlds all intervals present", raw.get("all_intervals_present", interval_count == subgroup_count))
+        if all_intervals_present != (interval_count == subgroup_count):
+            raise ArgumentError("OncoWorlds interval completeness does not reconcile")
+        refusal = None
+        refusal_kind = None
+        refusal_text = None
+        fail_closed = False
+        report = None if raw.get("report") is None else _object("OncoWorlds equity report", raw.get("report"))
+        if not ok:
+            stage, refusal, refusal_text, fail_closed, guarantee = _domain_refusal(raw, "OncoWorlds equity check")
+            if stage != "equity_report":
+                raise ArgumentError("OncoWorlds equity refusal stage does not reconcile")
+            refusal_kind = _route_text("OncoWorlds equity refusal kind", raw.get("refusal_kind", refusal.get("refusal")))
+            if refusal_kind not in ONCOWORLDS_EQUITY_REFUSAL_KINDS or refusal_kind != refusal.get("refusal"):
+                raise ArgumentError("OncoWorlds equity refusal kind does not reconcile")
+            if schema is not None and raw.get("refusal_kind") is None:
+                raise ArgumentError("versioned OncoWorlds equity refusals require refusal_kind")
+            return cls(raw, False, False, pooled_value, subgroups, subgroup_count, interval_count, all_intervals_present, (), (), schema, outcome_kind, refusal_kind, refusal, refusal_text, fail_closed, report)
+        if raw.get("refusal") is not None or raw.get("stage") is not None or raw.get("fail_closed", False):
+            raise ArgumentError("successful OncoWorlds equity checks cannot carry refusal evidence")
+        if not all_intervals_present:
+            raise ArgumentError("successful OncoWorlds equity checks require intervals for every subgroup")
+        if schema is not None and ("outcome_kind" not in raw or "subgroup_count" not in raw or "interval_count" not in raw):
+            raise ArgumentError("versioned OncoWorlds equity checks require subgroup accounting")
+        return cls(raw, True, True, pooled_value, subgroups, subgroup_count, interval_count, all_intervals_present, _route_strings("OncoWorlds equity guarantees", raw.get("guarantees")), _route_strings("OncoWorlds equity limitations", raw.get("limitations")), schema, outcome_kind, None, None, None, False, report)
+
+
 def oncoworlds_model_transport_report(value: Mapping[str, Any]) -> OncoWorldsModelTransportReport:
     return OncoWorldsModelTransportReport.from_wire(value)
 
@@ -950,6 +1283,14 @@ def oncoworlds_radiogenomic_check_report(value: Mapping[str, Any]) -> OncoWorlds
 
 def oncoworlds_clonal_history_check_report(value: Mapping[str, Any]) -> OncoWorldsClonalHistoryCheckReport:
     return OncoWorldsClonalHistoryCheckReport.from_wire(value)
+
+
+def oncoworlds_era_shift_check_report(value: Mapping[str, Any]) -> OncoWorldsEraShiftCheckReport:
+    return OncoWorldsEraShiftCheckReport.from_wire(value)
+
+
+def oncoworlds_equity_check_report(value: Mapping[str, Any]) -> OncoWorldsEquityCheckReport:
+    return OncoWorldsEquityCheckReport.from_wire(value)
 
 
 __all__ = [
@@ -971,6 +1312,12 @@ __all__ = [
     "ONCOWORLDS_MODEL_OUTCOME_KINDS",
     "ONCOWORLDS_MODEL_REFUSAL_KINDS",
     "ONCOWORLDS_MODEL_SCHEMA",
+    "ONCOWORLDS_ERA_OUTCOME_KINDS",
+    "ONCOWORLDS_ERA_REFUSAL_KINDS",
+    "ONCOWORLDS_ERA_SCHEMA",
+    "ONCOWORLDS_EQUITY_OUTCOME_KINDS",
+    "ONCOWORLDS_EQUITY_REFUSAL_KINDS",
+    "ONCOWORLDS_EQUITY_SCHEMA",
     "OncoClonalHistoryProjection",
     "OncoClonalRejectedHistoryProjection",
     "OncoClonalUniqueHistoryProjection",
@@ -994,7 +1341,17 @@ __all__ = [
     "OncoRadiogenomicSupportedClaimProjection",
     "OncoWorldsRadiogenomicCheckArgs",
     "OncoWorldsRadiogenomicCheckReport",
+    "OncoWorldsEraShiftCheckArgs",
+    "OncoWorldsEraShiftCheckReport",
+    "OncoShiftCohortProjection",
+    "OncoAssayShiftProjection",
+    "OncoDescriptorShiftProjection",
+    "OncoWorldsEquityCheckArgs",
+    "OncoEquitySubgroupProjection",
+    "OncoWorldsEquityCheckReport",
     "oncoworlds_clonal_history_check_report",
+    "oncoworlds_era_shift_check_report",
+    "oncoworlds_equity_check_report",
     "oncoworlds_methylation_classify_report",
     "oncoworlds_methylation_compare_report",
     "oncoworlds_model_transport_report",

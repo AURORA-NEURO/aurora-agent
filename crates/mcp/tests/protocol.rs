@@ -302,7 +302,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 122);
+    assert_eq!(tools.len(), 124);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3918,13 +3918,13 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     let result = call(&mut server, "capability_audit", json!({}));
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
-    assert_eq!(result["total_groups"], json!(28));
-    assert_eq!(result["unique_catalog_tools"], json!(122));
-    assert_eq!(result["advertised_tool_count"], json!(122));
+    assert_eq!(result["total_groups"], json!(29));
+    assert_eq!(result["unique_catalog_tools"], json!(124));
+    assert_eq!(result["advertised_tool_count"], json!(124));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(122));
-    assert_eq!(result["schema_quality"]["valid"], json!(122));
+    assert_eq!(result["schema_quality"]["checked"], json!(124));
+    assert_eq!(result["schema_quality"]["valid"], json!(124));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -3938,7 +3938,7 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
         result["invariants"]["all_input_schemas_are_well_formed"],
         json!(true)
     );
-    assert_eq!(result["groups"].as_array().unwrap().len(), 28);
+    assert_eq!(result["groups"].as_array().unwrap().len(), 29);
 
     let compact = call(
         &mut server,
@@ -6256,6 +6256,79 @@ fn oncoworlds_clonal_history_check_preserves_rejected_and_ambiguous_histories() 
     assert_eq!(result["rejected_count"], json!(1));
     assert_eq!(result["rejected"][0][1]["refusal"], json!("cyclic"));
     assert_eq!(result["unique_history"]["ok"], json!(true));
+}
+
+#[test]
+fn oncoworlds_era_shift_and_equity_checks_preserve_mapping_resource_and_interval_evidence() {
+    let comparable = call(
+        &mut server(),
+        "oncoworlds_era_shift_check",
+        json!({
+            "left": { "name": "historical", "site": "site-a", "classification_version": "criteria-a", "entities": ["entity-1"] },
+            "right": { "name": "current", "site": "site-b", "classification_version": "criteria-b", "entities": ["entity-1a"] },
+            "mapping": { "from": "criteria-a", "to": "criteria-b", "fates": { "entity-1": { "fate": "renamed", "to": "entity-1a" } } },
+            "assay_contexts": [{ "site": "site-b", "assay": "methylation", "availability": { "availability": "unavailable_at_site" } }],
+            "descriptor_checks": [{ "descriptor": "self_reported_race_or_ethnicity", "use": "stratification" }, { "descriptor": "self_reported_race_or_ethnicity", "use": "mechanistic_variable" }]
+        }),
+    );
+    assert_eq!(comparable["ok"], json!(true));
+    assert_eq!(
+        comparable["schema"],
+        json!("bioprism-mcp/oncoworlds-era-shift-check/0.1")
+    );
+    assert_eq!(comparable["outcome_kind"], json!("comparable"));
+    assert_eq!(comparable["evidence"]["mapping_fate_count"], json!(1));
+    assert_eq!(comparable["evidence"]["mapping_versions_match"], json!(true));
+    assert_eq!(comparable["evidence"]["assay_contexts"][0]["negative_call_supported"], json!(false));
+    assert_eq!(
+        comparable["evidence"]["assay_contexts"][0]["negative_call_refusal_kind"],
+        json!("resource_absence_read_as_biology")
+    );
+    assert_eq!(comparable["evidence"]["descriptor_checks"][1]["allowed"], json!(false));
+    assert_eq!(comparable["evidence"]["descriptor_checks"][1]["refusal_kind"], json!("descriptor_used_as_mechanism"));
+
+    let refused = call(
+        &mut server(),
+        "oncoworlds_era_shift_check",
+        json!({
+            "left": { "name": "historical", "site": "site-a", "classification_version": "criteria-a", "entities": ["entity-1", "entity-2"] },
+            "right": { "name": "current", "site": "site-b", "classification_version": "criteria-b", "entities": ["entity-1a"] },
+            "mapping": { "from": "criteria-a", "to": "criteria-b", "fates": { "entity-1": { "fate": "renamed", "to": "entity-1a" } } }
+        }),
+    );
+    assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["outcome_kind"], json!("refused"));
+    assert_eq!(refused["refusal_kind"], json!("incomplete_mapping"));
+    assert_eq!(refused["fail_closed"], json!(true));
+
+    let equity = call(
+        &mut server(),
+        "oncoworlds_equity_check",
+        json!({
+            "pooled": {
+                "value": 0.91,
+                "subgroups": [
+                    { "subgroup": "large", "n": 900, "estimate": 0.93, "interval": { "low": 0.90, "high": 0.95 } },
+                    { "subgroup": "small", "n": 3, "estimate": 0.55, "interval": { "low": 0.28, "high": 0.80 } }
+                ]
+            }
+        }),
+    );
+    assert_eq!(equity["ok"], json!(true));
+    assert_eq!(equity["schema"], json!("bioprism-mcp/oncoworlds-equity-check/0.1"));
+    assert_eq!(equity["outcome_kind"], json!("equity_report"));
+    assert_eq!(equity["subgroup_count"], json!(2));
+    assert_eq!(equity["interval_count"], json!(2));
+    assert_eq!(equity["all_intervals_present"], json!(true));
+
+    let pooled_only = call(
+        &mut server(),
+        "oncoworlds_equity_check",
+        json!({ "pooled": { "value": 0.91, "subgroups": [] } }),
+    );
+    assert_eq!(pooled_only["ok"], json!(false));
+    assert_eq!(pooled_only["refusal_kind"], json!("pooled_score_only"));
+    assert_eq!(pooled_only["fail_closed"], json!(true));
 }
 
 #[test]

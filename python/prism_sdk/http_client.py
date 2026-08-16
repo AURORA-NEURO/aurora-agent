@@ -152,6 +152,10 @@ from .oncology import (
 from .oncoworlds import (
     OncoWorldsClonalHistoryCheckArgs,
     OncoWorldsClonalHistoryCheckReport,
+    OncoWorldsEraShiftCheckArgs,
+    OncoWorldsEraShiftCheckReport,
+    OncoWorldsEquityCheckArgs,
+    OncoWorldsEquityCheckReport,
     OncoWorldsMethylationClassifyArgs,
     OncoWorldsMethylationClassifyReport,
     OncoWorldsMethylationCompareArgs,
@@ -161,6 +165,8 @@ from .oncoworlds import (
     OncoWorldsRadiogenomicCheckArgs,
     OncoWorldsRadiogenomicCheckReport,
     oncoworlds_clonal_history_check_report,
+    oncoworlds_era_shift_check_report,
+    oncoworlds_equity_check_report,
     oncoworlds_methylation_classify_report,
     oncoworlds_methylation_compare_report,
     oncoworlds_model_transport_report,
@@ -1933,6 +1939,32 @@ class ApiClient:
         request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
     ) -> OncoWorldsClonalHistoryCheckReport:
         return oncoworlds_clonal_history_check_report(self.oncoworlds_clonal_history_check(request))
+
+    def oncoworlds_era_shift_check(
+        self,
+        request: OncoWorldsEraShiftCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsEraShiftCheckArgs) else OncoWorldsEraShiftCheckArgs.from_wire(request)
+        return self.call_tool("oncoworlds_era_shift_check", normalized.to_mcp_arguments())
+
+    def oncoworlds_era_shift_check_report(
+        self,
+        request: OncoWorldsEraShiftCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsEraShiftCheckReport:
+        return oncoworlds_era_shift_check_report(self.oncoworlds_era_shift_check(request))
+
+    def oncoworlds_equity_check(
+        self,
+        request: OncoWorldsEquityCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsEquityCheckArgs) else OncoWorldsEquityCheckArgs.from_wire(request)
+        return self.call_tool("oncoworlds_equity_check", normalized.to_mcp_arguments())
+
+    def oncoworlds_equity_check_report(
+        self,
+        request: OncoWorldsEquityCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsEquityCheckReport:
+        return oncoworlds_equity_check_report(self.oncoworlds_equity_check(request))
 
     def stress_profile(
         self,
@@ -3942,6 +3974,32 @@ class AsyncApiClient:
         request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
     ) -> OncoWorldsClonalHistoryCheckReport:
         return oncoworlds_clonal_history_check_report(await self.oncoworlds_clonal_history_check(request))
+
+    async def oncoworlds_era_shift_check(
+        self,
+        request: OncoWorldsEraShiftCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsEraShiftCheckArgs) else OncoWorldsEraShiftCheckArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_era_shift_check", normalized.to_mcp_arguments())
+
+    async def oncoworlds_era_shift_check_report(
+        self,
+        request: OncoWorldsEraShiftCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsEraShiftCheckReport:
+        return oncoworlds_era_shift_check_report(await self.oncoworlds_era_shift_check(request))
+
+    async def oncoworlds_equity_check(
+        self,
+        request: OncoWorldsEquityCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, OncoWorldsEquityCheckArgs) else OncoWorldsEquityCheckArgs.from_wire(request)
+        return await self.call_tool("oncoworlds_equity_check", normalized.to_mcp_arguments())
+
+    async def oncoworlds_equity_check_report(
+        self,
+        request: OncoWorldsEquityCheckArgs | Mapping[str, Any],
+    ) -> OncoWorldsEquityCheckReport:
+        return oncoworlds_equity_check_report(await self.oncoworlds_equity_check(request))
 
     async def stress_profile(
         self,

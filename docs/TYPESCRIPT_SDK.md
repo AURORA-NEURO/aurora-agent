@@ -360,8 +360,11 @@ change, and version-conditioned disagreement explicit.
 mechanism strata, and transport assumptions, plus a versioned support/refusal state, blocked claim,
 design summary, refusal kind, and typed supported-claim envelope; `oncoworldsClonalHistoryCheck` returns compatible and
 rejected histories with typed reasons and preserves ambiguity when more than one history survives.
-These methods are projections only: they do not perform clinical classification, patient transport,
-or clonal-history selection.
+`oncoworldsEraShiftCheck` adds versioned cohort mapping, site-resource, and population-descriptor
+evidence; `oncoworldsEquityCheck` keeps pooled-only and incomplete-interval results refused while
+retaining every subgroup. These methods are projections only: they do not perform clinical
+classification, patient transport, era harmonisation, or equity estimation. See
+`docs/ONCOWORLDS_SHIFT_EQUITY.md`.
 `stressProfile` and `stressReport` add the biological-stress boundary with typed family identity,
 identifiability, intensity-ladder sweep points, effective sample size, unresolved measurements,
 required-versus-probed findings, generator defects, and a nullable guarded worst-family projection.

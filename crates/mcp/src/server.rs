@@ -131,13 +131,19 @@ use bioprism_onco::{
     Timepoint, TreatmentContext, TumourWorldline,
 };
 use bioprism_oncoworlds::{
-    assert_claim as onco_assert_radiogenomic_claim, classify as onco_classify_methylation,
+    as_negative_call as onco_as_negative_call,
+    assert_claim as onco_assert_radiogenomic_claim,
+    classify as onco_classify_methylation,
     compatible_histories as onco_compatible_histories, joinable_with_bridge,
+    comparable_cohorts as onco_comparable_cohorts,
+    equity_report as onco_equity_report,
     reconcile_versions as onco_reconcile_methylation,
     transport_to_patients as onco_transport_model, AnalysisUnit, Artifact, ClassifierVersion,
-    ClonalHistory, DeclaredTransport, EpochBridge, EstablishmentCohort, EvaluationDesign,
-    FidelityEvidence, IdentityEvidence, JoinReport, JoinVerdict, MethylationClass, ModelResult,
-    RadiogenomicClaim, SampleContext, TumourPopulation, VersionedResult,
+    ClonalHistory, Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse, EntityMapping, EpochBridge,
+    EstablishmentCohort, EvaluationDesign, FidelityEvidence, IdentityEvidence, JoinReport,
+    JoinVerdict, MethylationClass, ModelResult, PopulationDescriptor, PooledScore,
+    RadiogenomicClaim, SampleContext, SiteAssayContext, TumourPopulation,
+    use_descriptor as onco_use_descriptor, VersionedResult,
 };
 use bioprism_oncoworlds::models::REQUIRED_ASSUMPTIONS as MODEL_REQUIRED_ASSUMPTIONS;
 use bioprism_oncoworlds::radiogenomics::{MECHANISM_STRATA, REQUIRED_ASSUMPTIONS};
@@ -1281,6 +1287,8 @@ impl Server {
             "oncoworlds_methylation_compare" => self.oncoworlds_methylation_compare(&arguments),
             "oncoworlds_radiogenomic_check" => self.oncoworlds_radiogenomic_check(&arguments),
             "oncoworlds_clonal_history_check" => self.oncoworlds_clonal_history_check(&arguments),
+            "oncoworlds_era_shift_check" => self.oncoworlds_era_shift_check(&arguments),
+            "oncoworlds_equity_check" => self.oncoworlds_equity_check(&arguments),
             "stress_profile" => self.stress_profile(&arguments),
             "stress_report" => self.stress_report(&arguments),
             "bundle_verify" => self.bundle_verify(&arguments),
@@ -10732,6 +10740,259 @@ impl Server {
         }))
     }
 
+    fn oncoworlds_era_shift_check(&self, arguments: &Value) -> Result<Value, String> {
+        let left: OncoShiftCohort = serde_json::from_value(
+            arguments
+                .get("left")
+                .cloned()
+                .ok_or("left is required and must be a serialized OncoWorlds Cohort")?,
+        )
+        .map_err(|error| format!("invalid left OncoWorlds cohort: {error}"))?;
+        let right: OncoShiftCohort = serde_json::from_value(
+            arguments
+                .get("right")
+                .cloned()
+                .ok_or("right is required and must be a serialized OncoWorlds Cohort")?,
+        )
+        .map_err(|error| format!("invalid right OncoWorlds cohort: {error}"))?;
+        if left.entities.len() > 10_000 || right.entities.len() > 10_000 {
+            return Err("OncoWorlds cohort entity sets exceed the 10000-label safety bound".into());
+        }
+        let mapping: Option<EntityMapping> = arguments
+            .get("mapping")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid OncoWorlds entity mapping: {error}"))?;
+        if mapping.as_ref().is_some_and(|item| item.fate_count() > 10_000) {
+            return Err("OncoWorlds entity mapping exceeds the 10000-label safety bound".into());
+        }
+        let assays: Vec<SiteAssayContext> = arguments
+            .get("assay_contexts")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid site assay contexts: {error}"))?
+            .unwrap_or_default();
+        if assays.len() > 100 {
+            return Err("site assay context panel exceeds the 100-context safety bound".into());
+        }
+        let assay_projections: Vec<Value> = assays
+            .iter()
+            .map(|context| {
+                let availability = serde_json::to_value(&context.availability)
+                    .map_err(|error| error.to_string())?;
+                let observation = serde_json::to_value(context.observation())
+                    .map_err(|error| error.to_string())?;
+                let refusal = onco_as_negative_call(context).expect_err("negative conversion always refuses");
+                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                Ok(json!({
+                    "site": context.site,
+                    "assay": context.assay,
+                    "availability": availability,
+                    "observation": observation,
+                    "negative_call_supported": false,
+                    "negative_call_refusal": refusal_value,
+                    "negative_call_refusal_kind": refusal_value["refusal"]
+                }))
+            })
+            .collect::<Result<_, String>>()?;
+        let descriptor_values = arguments
+            .get("descriptor_checks")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if descriptor_values.len() > 100 {
+            return Err("population descriptor check panel exceeds the 100-check safety bound".into());
+        }
+        let descriptor_projections: Vec<Value> = descriptor_values
+            .iter()
+            .map(|value| {
+                let descriptor: PopulationDescriptor = serde_json::from_value(
+                    value
+                        .get("descriptor")
+                        .cloned()
+                        .ok_or("descriptor check requires descriptor")?,
+                )
+                .map_err(|error| format!("invalid population descriptor: {error}"))?;
+                let use_: DescriptorUse = serde_json::from_value(
+                    value
+                        .get("use")
+                        .cloned()
+                        .ok_or("descriptor check requires use")?,
+                )
+                .map_err(|error| format!("invalid population descriptor use: {error}"))?;
+                let descriptor_value = serde_json::to_value(descriptor).map_err(|error| error.to_string())?;
+                let use_value = serde_json::to_value(use_).map_err(|error| error.to_string())?;
+                match onco_use_descriptor(descriptor, use_) {
+                    Ok(()) => Ok(json!({
+                        "descriptor": descriptor_value,
+                        "descriptor_label": descriptor.as_str(),
+                        "use": use_value,
+                        "use_label": use_.as_str(),
+                        "administrative": descriptor.is_administrative(),
+                        "allowed": true
+                    })),
+                    Err(refusal) => {
+                        let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                        Ok(json!({
+                            "descriptor": descriptor_value,
+                            "descriptor_label": descriptor.as_str(),
+                            "use": use_value,
+                            "use_label": use_.as_str(),
+                            "administrative": descriptor.is_administrative(),
+                            "allowed": false,
+                            "refusal": refusal_value,
+                            "refusal_kind": refusal_value["refusal"],
+                            "refusal_text": refusal.to_string()
+                        }))
+                    }
+                }
+            })
+            .collect::<Result<_, String>>()?;
+        let left_value = serde_json::to_value(&left).map_err(|error| error.to_string())?;
+        let right_value = serde_json::to_value(&right).map_err(|error| error.to_string())?;
+        let mapping_value = mapping
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        let same_classification_version =
+            left.classification_version == right.classification_version;
+        let mapping_versions_match = mapping.as_ref().is_some_and(|item| {
+            (item.from == left.classification_version && item.to == right.classification_version)
+                || (item.from == right.classification_version
+                    && item.to == left.classification_version)
+        });
+        let shared = json!({
+            "left": left_value,
+            "right": right_value,
+            "mapping": mapping_value,
+            "mapping_declared": mapping.is_some(),
+            "mapping_fate_count": mapping.as_ref().map(EntityMapping::fate_count).unwrap_or(0),
+            "mapping_versions_match": mapping_versions_match,
+            "same_classification_version": same_classification_version,
+            "left_entity_count": left.entities.len(),
+            "right_entity_count": right.entities.len(),
+            "assay_contexts": assay_projections,
+            "assay_context_count": assays.len(),
+            "descriptor_checks": descriptor_projections,
+            "descriptor_check_count": descriptor_values.len()
+        });
+        match onco_comparable_cohorts(&left, &right, mapping.as_ref()) {
+            Ok(()) => Ok(json!({
+                "ok": true,
+                "schema": "bioprism-mcp/oncoworlds-era-shift-check/0.1",
+                "outcome_kind": "comparable",
+                "comparable": true,
+                "evidence": shared,
+                "guarantees": [
+                    "same-version cohorts do not require an invented mapping",
+                    "cross-version comparison requires a stated mapping covering every label present in the older cohort",
+                    "resource absence remains not-collected and never becomes a negative molecular call",
+                    "administrative population descriptors may stratify a report but do not become biological mechanisms"
+                ],
+                "limitations": [
+                    "label mappings are caller-declared and no classification semantics are inferred",
+                    "assay and descriptor checks are evidence projections; no assay is run and no biological effect is estimated"
+                ]
+            })),
+            Err(refusal) => {
+                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/oncoworlds-era-shift-check/0.1",
+                    "outcome_kind": "refused",
+                    "stage": "classification_era_comparability",
+                    "comparable": false,
+                    "refusal_kind": refusal_value["refusal"],
+                    "refusal": refusal_value,
+                    "refusal_text": refusal.to_string(),
+                    "fail_closed": true,
+                    "evidence": shared,
+                    "guarantee": "an unmapped era change, incomplete label mapping, or unsupported shift descriptor never becomes a comparable cohort claim"
+                }))
+            }
+        }
+    }
+
+    fn oncoworlds_equity_check(&self, arguments: &Value) -> Result<Value, String> {
+        let pooled: PooledScore = serde_json::from_value(
+            arguments
+                .get("pooled")
+                .cloned()
+                .ok_or("pooled is required and must be a serialized PooledScore")?,
+        )
+        .map_err(|error| format!("invalid pooled score: {error}"))?;
+        if pooled.subgroups.len() > 10_000 {
+            return Err("equity subgroup panel exceeds the 10000-subgroup safety bound".into());
+        }
+        let pooled_value = pooled.value;
+        let subgroup_count = pooled.subgroups.len();
+        let interval_count = pooled
+            .subgroups
+            .iter()
+            .filter(|subgroup| subgroup.interval.is_some())
+            .count();
+        let subgroup_values: Vec<Value> = pooled
+            .subgroups
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()
+            .map_err(|error| error.to_string())?;
+        match onco_equity_report(pooled) {
+            Ok(report) => {
+                let claims: Vec<Value> = report
+                    .subgroups()
+                    .iter()
+                    .map(|claim| serde_json::to_value(claim.result()))
+                    .collect::<Result<_, _>>()
+                    .map_err(|error| error.to_string())?;
+                Ok(json!({
+                    "ok": true,
+                    "schema": "bioprism-mcp/oncoworlds-equity-check/0.1",
+                    "outcome_kind": "equity_report",
+                    "equity_supported": true,
+                    "pooled_value": report.pooled(),
+                    "subgroups": claims,
+                    "subgroup_count": subgroup_count,
+                    "interval_count": interval_count,
+                    "all_intervals_present": interval_count == subgroup_count,
+                    "report": report,
+                    "guarantees": [
+                        "a pooled score is never released as an equity claim without every subgroup result",
+                        "each published subgroup carries its own sample size and uncertainty interval",
+                        "small subgroups are not silently discarded; their instability remains visible in the interval"
+                    ],
+                    "limitations": [
+                        "the endpoint does not compute estimates, intervals, calibration, or fairness metrics",
+                        "an interval is evidence of uncertainty, not proof of parity or absence of bias"
+                    ]
+                }))
+            }
+            Err(refusal) => {
+                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/oncoworlds-equity-check/0.1",
+                    "outcome_kind": "refused",
+                    "stage": "equity_report",
+                    "equity_supported": false,
+                    "refusal_kind": refusal_value["refusal"],
+                    "refusal": refusal_value,
+                    "refusal_text": refusal.to_string(),
+                    "fail_closed": true,
+                    "pooled_value": pooled_value,
+                    "subgroups": subgroup_values,
+                    "subgroup_count": subgroup_count,
+                    "interval_count": interval_count,
+                    "all_intervals_present": interval_count == subgroup_count,
+                    "guarantee": "a pooled-only, empty, or unquantified subgroup result never becomes an equity claim"
+                }))
+            }
+        }
+    }
+
     fn stress_profile(&self, arguments: &Value) -> Result<Value, String> {
         let cohort: Cohort = serde_json::from_value(
             arguments
@@ -16608,7 +16869,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "biological_domains",
             "domains": ["BioIR", "oncology", "modalities", "specimen lineage", "reference worlds"],
             "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
-            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check"],
+            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -16649,6 +16910,14 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["clonal populations", "phylogeny compatibility", "resistance hypotheses"],
             "crates": ["bioprism-oncoworlds", "bioprism-onco"],
             "mcp_tools": ["oncoworlds_clonal_history_check"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "oncoworlds_shift_and_equity",
+            "domains": ["classification-era mapping", "site resource absence", "population descriptors", "subgroup equity evidence"],
+            "crates": ["bioprism-oncoworlds", "bioprism-onco"],
+            "mcp_tools": ["oncoworlds_era_shift_check", "oncoworlds_equity_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -17946,6 +18215,32 @@ pub fn tool_definitions() -> Vec<Value> {
                     "candidates": { "type": "array", "maxItems": 10000, "description": "Candidate serialized ClonalHistory values." }
                 },
                 "required": ["population", "candidates"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_era_shift_check",
+            "description": "Audit serialized OncoWorlds cohorts across classification-era and site/resource boundaries. It requires complete caller-declared label mappings, preserves not-collected assay evidence, and refuses administrative descriptors used as biological mechanisms.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "left": { "type": "object", "description": "Serialized bioprism-oncoworlds Cohort on the left side of the comparison." },
+                    "right": { "type": "object", "description": "Serialized bioprism-oncoworlds Cohort on the right side of the comparison." },
+                    "mapping": { "type": ["object", "null"], "description": "Optional serialized EntityMapping; required when classification versions differ." },
+                    "assay_contexts": { "type": "array", "maxItems": 100, "description": "Optional serialized SiteAssayContext evidence. Unavailable assays remain not-collected and cannot become negatives." },
+                    "descriptor_checks": { "type": "array", "maxItems": 100, "description": "Optional checks of {descriptor, use}; administrative descriptors are refused in mechanistic roles." }
+                },
+                "required": ["left", "right"]
+            }
+        }),
+        json!({
+            "name": "oncoworlds_equity_check",
+            "description": "Audit a serialized pooled score before it is described as an equity result. It requires a per-subgroup breakdown with sample sizes and uncertainty intervals, preserving pooled-only and unquantified refusals.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pooled": { "type": "object", "description": "Serialized PooledScore with value and per-subgroup results." }
+                },
+                "required": ["pooled"]
             }
         }),
         json!({

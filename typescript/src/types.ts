@@ -5366,6 +5366,115 @@ export interface OncoWorldsClonalHistoryCheckResult extends JsonObject {
   limitations: string[];
 }
 
+export interface OncoWorldsEraShiftCheckArgs extends JsonObject {
+  left: JsonObject;
+  right: JsonObject;
+  mapping?: JsonObject | null;
+  assay_contexts?: JsonObject[];
+  descriptor_checks?: JsonObject[];
+}
+
+export type OncoWorldsEraShiftOutcomeKind = "comparable" | "refused";
+
+export type OncoWorldsEraShiftRefusalKind =
+  | "unmapped_classification_change"
+  | "incomplete_mapping"
+  | "resource_absence_read_as_biology"
+  | "descriptor_used_as_mechanism";
+
+export interface OncoShiftCohortResult extends JsonObject {
+  name: string;
+  site: string;
+  classification_version: string;
+  entities: string[];
+}
+
+export interface OncoAssayShiftResult extends JsonObject {
+  site: string;
+  assay: string;
+  availability: JsonObject;
+  observation: JsonObject;
+  negative_call_supported: false;
+  negative_call_refusal: JsonObject;
+  negative_call_refusal_kind: "resource_absence_read_as_biology";
+}
+
+export interface OncoDescriptorShiftResult extends JsonObject {
+  descriptor: string;
+  descriptor_label: string;
+  use: string;
+  use_label: string;
+  administrative: boolean;
+  allowed: boolean;
+  refusal?: JsonObject;
+  refusal_kind?: "descriptor_used_as_mechanism";
+  refusal_text?: string;
+}
+
+export interface OncoWorldsEraShiftEvidence extends JsonObject {
+  left: OncoShiftCohortResult;
+  right: OncoShiftCohortResult;
+  mapping: JsonObject | null;
+  mapping_declared: boolean;
+  mapping_fate_count: number;
+  mapping_versions_match: boolean;
+  same_classification_version: boolean;
+  left_entity_count: number;
+  right_entity_count: number;
+  assay_contexts: OncoAssayShiftResult[];
+  assay_context_count: number;
+  descriptor_checks: OncoDescriptorShiftResult[];
+  descriptor_check_count: number;
+}
+
+export interface OncoWorldsEraShiftCheckResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-era-shift-check/0.1";
+  outcome_kind?: OncoWorldsEraShiftOutcomeKind;
+  comparable: boolean;
+  evidence: OncoWorldsEraShiftEvidence;
+  refusal?: JsonObject;
+  refusal_kind?: OncoWorldsEraShiftRefusalKind;
+  refusal_text?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface OncoWorldsEquityCheckArgs extends JsonObject {
+  pooled: JsonObject;
+}
+
+export type OncoWorldsEquityOutcomeKind = "equity_report" | "refused";
+
+export type OncoWorldsEquityRefusalKind = "pooled_score_only" | "unquantified_subgroup" | "empty_subgroup";
+
+export interface OncoEquitySubgroupResult extends JsonObject {
+  subgroup: string;
+  n: number;
+  estimate: number;
+  interval: { low: number; high: number } & JsonObject;
+}
+
+export interface OncoWorldsEquityCheckResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-equity-check/0.1";
+  outcome_kind?: OncoWorldsEquityOutcomeKind;
+  equity_supported: boolean;
+  pooled_value: number;
+  subgroups: OncoEquitySubgroupResult[];
+  subgroup_count: number;
+  interval_count: number;
+  all_intervals_present: boolean;
+  report?: JsonObject;
+  refusal?: JsonObject;
+  refusal_kind?: OncoWorldsEquityRefusalKind;
+  refusal_text?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface StressProfileArgs extends JsonObject {
   cohort: JsonObject;
   stress: JsonObject;

@@ -614,9 +614,11 @@ exposure, and complete versus informative bias flags; see [`docs/ONCO_OUTCOME_AN
 `oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and keeps
 multiple compatible histories as typed ambiguity rather than selecting one; its versioned projection
 retains per-candidate refusal kinds and candidate accounting (see [`docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md`](docs/ONCOWORLDS_CLONAL_HISTORY_CHECK.md)).
-The Python and TypeScript SDKs expose all five OncoWorlds workflows as typed MCP and HTTP
-projections, retaining domain refusals, QC abstention, version-conditioned disagreement, transport
-assumptions, and clonal ambiguity without claiming clinical classification or patient-level truth.
+The Python and TypeScript SDKs expose the OncoWorlds workflows as typed MCP and HTTP projections,
+retaining domain refusals, QC abstention, version-conditioned disagreement, transport assumptions,
+clonal ambiguity, era/site comparability, resource absence, descriptor boundaries, and subgroup
+intervals without claiming clinical classification or patient-level truth. See
+[`docs/ONCOWORLDS_SHIFT_EQUITY.md`](docs/ONCOWORLDS_SHIFT_EQUITY.md).
 `stress_profile` and `stress_report` sweep biological stress families and report breaking points,
 generator defects, confounding, effective sample size, and unresolved measurements without reducing
 robustness to a single score.
