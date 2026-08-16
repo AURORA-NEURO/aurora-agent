@@ -435,6 +435,11 @@ invent defaults:
   schema findings, and optional per-group coverage. Use `report.catalogue_complete` and
   `report.schema_quality.fully_valid` as explicit inspection signals; they are evidence for planning,
   not authorization or domain validity.
+- `capability_dashboard(...)` returns a bounded, digest-bound projection of the selected catalogue
+  groups. `CapabilityDashboardReport.from_wire(...)` plus the sync/async Workspace and HTTP helpers
+  expose separate crate, CLI, Python, MCP-membership, and schema-backed counts, callable/partial/
+  declared-only readiness, explicit gap labels, filter provenance, and truncation warnings. A ready
+  dashboard is a transport-coverage signal only; it does not execute or authorize a tool.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates. Its raw result also
   includes per-need candidate domains and a `route_coverage` ledger for resolved/unresolved needs.

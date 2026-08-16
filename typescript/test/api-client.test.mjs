@@ -914,6 +914,27 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         },
         groups: [{ id: "testing", domains: ["verification"], status: "implemented", declared_tool_memberships: 1, unique_tools: 1, schemas_found: 1, missing_schemas: [] }],
       } } } });
+      if (path === "/v1/tools/capability_dashboard") return jsonResponse({ ok: true, tool: "capability_dashboard", request_id: "r7dashboard", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "capability_dashboard",
+        schema: "bioprism-devplat-capability-dashboard/0.1",
+        catalog_digest: "c".repeat(64),
+        dashboard_digest: "d".repeat(64),
+        capability_dashboard_ready: true,
+        duplicate_schema_names: [],
+        audit: {
+          schema: "bioprism-devplat-capability-dashboard/0.1",
+          catalog_digest: "c".repeat(64),
+          dashboard_digest: "d".repeat(64),
+          query: { domain: "verification", max_groups: 128, include_tools: true, include_gaps: true },
+          total_group_count: 1, selected_group_count: 1, available_group_count: 1,
+          callable_group_count: 1, partial_group_count: 0, declared_only_group_count: 0,
+          selected_tool_memberships: 1, selected_unique_tools: 1, schema_backed_unique_tools: 1,
+          readiness_counts: { callable: 1 }, gap_counts: {},
+          groups: [{ id: "testing", domains: ["verification"], status: "implemented", readiness: "callable", surfaces: { crates: 1, mcp_tools: 1, cli_entrypoints: 1, python_artifacts: 1 }, tool_count: 1, callable_tool_count: 1, schema_backed_tool_count: 1, missing_transport_schemas: [], invalid_transport_schemas: [], tools: ["echo"], gaps: [] }],
+          warnings: [], guarantees: [], limitations: [], ready: true,
+        },
+      } } } });
       if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started", route_coverage: { needs_total: 1, needs_resolved: 1, needs_unresolved: 0, candidate_group_count: 1, candidate_groups: ["testing"], candidate_domain_count: 1, candidate_domains: ["verification"], candidate_tool_count: 1, posture: "routing evidence only" } } } } });
       if (path === "/v1/tools/capability_route_review") return jsonResponse({ ok: true, tool: "capability_route_review", request_id: "r9", mcp: { result: { structuredContent: { workflow: "capability_route_review", review_id: "v".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [["oncology"]], schema_review: { requested: true, checked: 1, valid: true, fully_checked: true } } } } });
       if (path === "/v1/tools/adapter_plan") return jsonResponse({ ok: true, tool: "adapter_plan", request_id: "r10", mcp: { result: { structuredContent: {
@@ -1831,6 +1852,11 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(capabilityAudit.mcp.result.structuredContent.healthy, true);
   assert.equal(capabilityAudit.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilityAudit.mcp.result.structuredContent.schema_quality.valid, 1);
+  const capabilityDashboard = await client.capabilityDashboard({ domain: "verification", include_tools: true });
+  assert.equal(capabilityDashboard.mcp.result.structuredContent.workflow, "capability_dashboard");
+  assert.equal(capabilityDashboard.mcp.result.structuredContent.capability_dashboard_ready, true);
+  assert.equal(capabilityDashboard.mcp.result.structuredContent.audit.groups[0].readiness, "callable");
+  assert.equal(capabilityDashboard.mcp.result.structuredContent.audit.groups[0].tools[0], "echo");
   assert.equal(route.mcp.result.structuredContent.workflow, "capability_route");
   assert.equal(route.mcp.result.structuredContent.execution, "not_started");
   assert.equal(route.mcp.result.structuredContent.route_coverage.needs_resolved, 1);

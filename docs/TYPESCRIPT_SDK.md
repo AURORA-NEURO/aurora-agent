@@ -162,11 +162,16 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of 122 tool schemas. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 169-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
-invariant flags, duplicate memberships, and optional per-group coverage; `bioCapabilityEvidenceAudit`
+invariant flags, duplicate memberships, and optional per-group coverage.
+`capabilityDashboard` returns typed `CapabilityDashboardResult` rows with callable/partial/
+declared-only readiness, separate crate/CLI/Python/MCP surface counts, schema-backed tool totals,
+explicit gap labels, query provenance, and bounded inventory warnings. Its ready flag describes
+transport coverage only and is not permission, execution, scientific, or deployment readiness.
+`bioCapabilityEvidenceAudit`
 returns typed `BioCapabilityEvidenceAuditResult` evidence rows, dimension rollups, claim blockers,
 omission accounting, optional subaudits, and explicit release posture; `developerDeliveryAudit`
 returns typed `DeveloperDeliveryAuditResult` readiness gates, explicit target blockers, release

@@ -30,6 +30,11 @@ from .capability import (
     capability_route_report,
     capability_route_review_report,
 )
+from .capability_dashboard import (
+    CapabilityDashboardQueryArgs,
+    CapabilityDashboardReport,
+    capability_dashboard_report,
+)
 from .conformance import ConformanceRunArgs, ConformanceRunReport, conformance_run_report
 from .context_requests import (
     ContextLayer,
@@ -1460,6 +1465,17 @@ class Workspace:
         """Return validated parity and schema-quality diagnostics for the capability catalogue."""
 
         return capability_audit_report(self.capability_audit(include_groups=include_groups))
+
+    def capability_dashboard(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Return a bounded cross-domain surface dashboard through MCP."""
+
+        normalized = request if isinstance(request, CapabilityDashboardQueryArgs) else CapabilityDashboardQueryArgs(**dict(request or {}))
+        return self.tool("capability_dashboard", normalized.to_mcp_arguments())
+
+    def capability_dashboard_report(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> CapabilityDashboardReport:
+        """Return typed callable, partial, declared-only, and surface-gap evidence."""
+
+        return capability_dashboard_report(self.capability_dashboard(request))
 
     def capability_discover_report(
         self,
@@ -4229,6 +4245,17 @@ class AsyncWorkspace:
         return capability_audit_report(
             await self.capability_audit(include_groups=include_groups)
         )
+
+    async def capability_dashboard(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.capability_dashboard`."""
+
+        normalized = request if isinstance(request, CapabilityDashboardQueryArgs) else CapabilityDashboardQueryArgs(**dict(request or {}))
+        return await self.tool("capability_dashboard", normalized.to_mcp_arguments())
+
+    async def capability_dashboard_report(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> CapabilityDashboardReport:
+        """Return typed dashboard evidence through async MCP."""
+
+        return capability_dashboard_report(await self.capability_dashboard(request))
 
     async def capability_discover_report(
         self,

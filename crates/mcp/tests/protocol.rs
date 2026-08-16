@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 168);
+    assert_eq!(tools.len(), 169);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4501,12 +4501,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(168));
-    assert_eq!(result["advertised_tool_count"], json!(168));
+    assert_eq!(result["unique_catalog_tools"], json!(169));
+    assert_eq!(result["advertised_tool_count"], json!(169));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(168));
-    assert_eq!(result["schema_quality"]["valid"], json!(168));
+    assert_eq!(result["schema_quality"]["checked"], json!(169));
+    assert_eq!(result["schema_quality"]["valid"], json!(169));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -4534,6 +4534,59 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
         &mut server,
         "capability_audit",
         json!({"include_groups": "yes"}),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert_eq!(refused["ok"], json!(false));
+}
+
+#[test]
+fn capability_dashboard_separates_domain_surfaces_and_bounded_inventory() {
+    let mut server = server();
+    let oncology = call(
+        &mut server,
+        "capability_dashboard",
+        json!({"domain": "oncology", "include_tools": true, "include_gaps": true}),
+    );
+    assert_eq!(oncology["workflow"], json!("capability_dashboard"));
+    assert_eq!(
+        oncology["schema"],
+        json!("bioprism-devplat-capability-dashboard/0.1")
+    );
+    assert_eq!(oncology["audit"]["selected_group_count"], json!(1));
+    assert_eq!(
+        oncology["audit"]["groups"][0]["id"],
+        json!("biological_domains")
+    );
+    assert_eq!(
+        oncology["audit"]["groups"][0]["readiness"],
+        json!("callable")
+    );
+    assert!(oncology["audit"]["groups"][0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool == "onco_response_assess"));
+    assert_eq!(oncology["capability_dashboard_ready"], json!(true));
+    assert_eq!(oncology["catalog_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(oncology["dashboard_digest"].as_str().unwrap().len(), 64);
+
+    let bounded = call(
+        &mut server,
+        "capability_dashboard",
+        json!({"max_groups": 1, "include_tools": false}),
+    );
+    assert_eq!(bounded["audit"]["selected_group_count"], json!(1));
+    assert!(bounded["audit"]["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("bounded")));
+    assert!(bounded["audit"]["groups"][0].get("tools").is_none());
+
+    let refused = call(
+        &mut server,
+        "capability_dashboard",
+        json!({"max_groups": 0}),
     );
     assert_eq!(refused["__isError"], json!(true));
     assert_eq!(refused["ok"], json!(false));

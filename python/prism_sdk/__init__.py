@@ -97,6 +97,15 @@ from .capability import (
     capability_route_report,
     capability_route_review_report,
 )
+from .capability_dashboard import (
+    CAPABILITY_DASHBOARD_SCHEMA,
+    DEFAULT_DASHBOARD_GROUPS,
+    MAX_DASHBOARD_GROUPS,
+    CapabilityDashboardGroupReport,
+    CapabilityDashboardQueryArgs,
+    CapabilityDashboardReport,
+    capability_dashboard_report,
+)
 from .conformance import (
     ConformanceCaseReport,
     ConformanceOutcomeReport,
@@ -2214,6 +2223,13 @@ __all__ = [
     "capability_route_review_report",
     "capability_discover_report",
     "capability_audit_report",
+    "CAPABILITY_DASHBOARD_SCHEMA",
+    "DEFAULT_DASHBOARD_GROUPS",
+    "MAX_DASHBOARD_GROUPS",
+    "CapabilityDashboardQueryArgs",
+    "CapabilityDashboardGroupReport",
+    "CapabilityDashboardReport",
+    "capability_dashboard_report",
     "DeliveryTargetReport",
     "DeliveryReadinessReport",
     "DeliveryExternalSurfaceReport",

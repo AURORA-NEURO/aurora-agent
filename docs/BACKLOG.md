@@ -263,6 +263,11 @@ still requires mission preflight. Optional authoritative schema validation adds 
 bounded issue paths without granting execution permission or validating domain meaning. The review
 also emits a deterministic content-addressed `review_id`, allowing route handoff evidence to be
 joined across MCP, REST, SDK, event, and webhook records without timestamp coupling.
+The companion `capability_dashboard` provides the missing operator inventory: it binds catalogue
+groups to the authoritative `tools/list` schemas, separates callable/partial/declared-only rows,
+keeps crate, CLI, Python, MCP-membership, and schema-backed counts independent, and reports explicit
+gaps. Its bounded filters, truncation warnings, and dashboard digest make surface coverage
+reproducible without claiming that a declared local artifact has been installed or executed.
 The adapter registry now gives the same treatment to biological source boundaries: `adapter_plan`
 selects native or Python-delegated routes by explicit format and source shape, carries the closed
 semantic-loss vocabulary and scope dimensions, and reports dependency missingness versus dependency

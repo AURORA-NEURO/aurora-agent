@@ -3816,6 +3816,15 @@ export interface CapabilityAuditArgs extends JsonObject {
   include_groups?: boolean;
 }
 
+export interface CapabilityDashboardArgs extends JsonObject {
+  group_id?: string;
+  domain?: string;
+  status?: string;
+  max_groups?: number;
+  include_tools?: boolean;
+  include_gaps?: boolean;
+}
+
 export interface CapabilityGroupResult extends JsonObject {
   id: string;
   domains: string[];
@@ -3882,6 +3891,57 @@ export interface CapabilityAuditResult extends JsonObject {
   schema_quality: CapabilitySchemaQualityResult;
   invariants: JsonObject;
   groups?: CapabilityAuditGroupResult[];
+}
+
+export interface CapabilityDashboardGroupResult extends JsonObject {
+  id: string;
+  domains: string[];
+  status: string;
+  readiness: "callable" | "partial" | "declared_only" | string;
+  surfaces: { crates: number; mcp_tools: number; cli_entrypoints: number; python_artifacts: number };
+  tool_count: number;
+  callable_tool_count: number;
+  schema_backed_tool_count: number;
+  missing_transport_schemas: string[];
+  invalid_transport_schemas: string[];
+  tools?: string[];
+  gaps?: string[];
+}
+
+export interface CapabilityDashboardAuditResult extends JsonObject {
+  schema: "bioprism-devplat-capability-dashboard/0.1";
+  catalog_digest: string;
+  dashboard_digest: string;
+  query: JsonObject;
+  total_group_count: number;
+  selected_group_count: number;
+  available_group_count: number;
+  callable_group_count: number;
+  partial_group_count: number;
+  declared_only_group_count: number;
+  selected_tool_memberships: number;
+  selected_unique_tools: number;
+  schema_backed_unique_tools: number;
+  readiness_counts: Record<string, number>;
+  gap_counts: Record<string, number>;
+  groups: CapabilityDashboardGroupResult[];
+  warnings: string[];
+  guarantees: string[];
+  limitations: string[];
+  ready: boolean;
+}
+
+export interface CapabilityDashboardResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_dashboard";
+  schema: "bioprism-devplat-capability-dashboard/0.1";
+  catalog_digest: string;
+  dashboard_digest: string;
+  capability_dashboard_ready: boolean;
+  audit: CapabilityDashboardAuditResult;
+  duplicate_schema_names?: string[];
+  guarantees?: string[];
+  limitations?: string[];
 }
 
 export interface CapabilityRouteNeed extends JsonObject {

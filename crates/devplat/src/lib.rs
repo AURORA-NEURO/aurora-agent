@@ -203,6 +203,7 @@
 
 pub mod audit;
 pub mod capability;
+pub mod capability_dashboard;
 pub mod citations;
 pub mod claim;
 pub mod classify;
@@ -230,6 +231,11 @@ pub use audit::{
 pub use capability::{
     CapabilityCatalogue, CapabilityError, CapabilityGroup, CapabilityMatch, CapabilityQuery,
     CapabilityRouteNeed, CapabilityRouteRequest, CapabilitySearch, CAPABILITY_SCHEMA_VERSION,
+};
+pub use capability_dashboard::{
+    build_dashboard, CapabilityDashboardAudit, CapabilityDashboardError, CapabilityDashboardGroup,
+    CapabilityDashboardQuery, CapabilityDashboardSurfaces, CAPABILITY_DASHBOARD_SCHEMA,
+    DEFAULT_DASHBOARD_GROUPS, MAX_DASHBOARD_GROUPS,
 };
 pub use citations::{audit as audit_citations, scan as scan_citations, CitationAudit};
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};

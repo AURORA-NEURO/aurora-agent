@@ -128,8 +128,9 @@ use bioprism_dataops::{
     DataClass, Plane, TenantPattern,
 };
 use bioprism_devplat::{
-    apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
-    CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
+    apply_binding, build_dashboard, plan_mission, run_workbench, standard_walkthroughs,
+    CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
+    DevPlatReport, MissionReport, MissionRequest,
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
@@ -1482,6 +1483,7 @@ impl Server {
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
+            "capability_dashboard" => self.capability_dashboard(&arguments),
             "capability_discover" => self.capability_discover(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
@@ -22412,6 +22414,64 @@ impl Server {
         Ok(output)
     }
 
+    /// Produce a bounded operator dashboard over catalogue groups and the authoritative MCP
+    /// schema set. This is a coverage projection, not a permission or scientific-readiness gate.
+    fn capability_dashboard(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode capability dashboard input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("capability dashboard input exceeds the 20000000-byte safety bound".into());
+        }
+        let query: CapabilityDashboardQuery = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid capability dashboard input: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("capability catalogue refused: {error}"))?;
+        let mut schema_quality = BTreeMap::new();
+        let mut duplicate_names = BTreeSet::new();
+        for definition in tool_definitions() {
+            let Some(name) = definition.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let quality = dashboard_schema_is_valid(&definition);
+            if schema_quality.insert(name.to_string(), quality).is_some() {
+                duplicate_names.insert(name.to_string());
+            }
+        }
+        let duplicate_schema_names = duplicate_names.iter().cloned().collect::<Vec<_>>();
+        for name in duplicate_names {
+            schema_quality.insert(name, false);
+        }
+        let audit = build_dashboard(&catalogue, &schema_quality, &query)
+            .map_err(|error| format!("capability dashboard refused: {error}"))?;
+        let output = json!({
+            "ok": true,
+            "workflow": "capability_dashboard",
+            "schema": bioprism_devplat::CAPABILITY_DASHBOARD_SCHEMA,
+            "catalog_digest": audit.catalog_digest,
+            "dashboard_digest": audit.dashboard_digest,
+            "capability_dashboard_ready": audit.ready,
+            "audit": audit,
+            "schema_source": "authoritative tools/list definitions",
+            "duplicate_schema_names": duplicate_schema_names,
+            "guarantees": [
+                "domain rows are sorted and bound to the catalogue digest and query",
+                "MCP callable status requires a present, well-formed authoritative input schema",
+                "crate, CLI, Python, and MCP surfaces are reported independently rather than collapsed into one score"
+            ],
+            "limitations": [
+                "declared crate, CLI, and Python surfaces are not executed or import-checked",
+                "callable means transport-schema availability, not permission, scientific validity, or execution success",
+                "filtered or bounded output must not be interpreted as a complete inventory without its warnings"
+            ]
+        });
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure capability dashboard result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err("capability dashboard result exceeds the 20000000-byte safety bound".into());
+        }
+        Ok(output)
+    }
+
     /// Batch multiple cross-domain needs into one digest-bound candidate report.
     ///
     /// A route is intentionally a proposal, not a mission: explicit tool filters are marked as
@@ -26575,6 +26635,38 @@ pub fn resource_definitions() -> Vec<Value> {
 /// `mcp_tools` contains only callable tools, while `cli_entrypoints` and `crates` identify the
 /// available local surfaces. A consumer can therefore plan across all domains without confusing
 /// a library's existence with a transport it can invoke remotely.
+fn dashboard_schema_is_valid(definition: &Value) -> bool {
+    const MAX_SCHEMA_BYTES: usize = 1_000_000;
+    let Some(schema) = definition.get("inputSchema") else {
+        return false;
+    };
+    let Ok(encoded) = serde_json::to_vec(schema) else {
+        return false;
+    };
+    if encoded.len() > MAX_SCHEMA_BYTES {
+        return false;
+    }
+    let Some(object) = schema.as_object() else {
+        return false;
+    };
+    if object.get("type").and_then(Value::as_str) != Some("object") {
+        return false;
+    }
+    let properties = object.get("properties").and_then(Value::as_object);
+    object
+        .get("required")
+        .map(|required| {
+            required.as_array().is_some_and(|required| {
+                required.iter().all(|name| {
+                    name.as_str().is_some_and(|name| {
+                        properties.is_some_and(|properties| properties.contains_key(name))
+                    })
+                })
+            })
+        })
+        .unwrap_or(true)
+}
+
 pub fn workspace_capabilities() -> Value {
     json!([
         {
@@ -26797,7 +26889,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_discover", "capability_route", "capability_route_review", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29238,6 +29330,22 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "workspace_capabilities",
             "description": "Return the stable domain catalog: which biological, reasoning, safety, evaluation, mutation, orchestration, operations, and documentation surfaces exist, and whether each is callable through MCP, the CLI, or only as a library.",
             "inputSchema": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "capability_dashboard",
+            "description": "Build a bounded digest-bound dashboard over every selected capability group. It separates callable MCP tools, authoritative schema coverage, crate ownership, CLI entrypoints, Python artifacts, readiness classes, and explicit gaps; it does not grant permission, execute tools, or claim scientific or deployment readiness.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Optional case-insensitive group-id prefix filter." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive substring filter over declared domain labels." },
+                    "status": { "type": "string", "description": "Optional exact status filter such as available or planned." },
+                    "max_groups": { "type": "integer", "minimum": 1, "maximum": 512, "description": "Maximum groups returned; defaults to 128." },
+                    "include_tools": { "type": "boolean", "description": "Include sorted MCP tool names in each group row; defaults false." },
+                    "include_gaps": { "type": "boolean", "description": "Include explicit surface-gap labels in each group row; defaults true." }
+                },
+                "required": []
+            }
         }),
         json!({
             "name": "repository_catalog",

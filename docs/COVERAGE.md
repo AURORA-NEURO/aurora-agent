@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 122 callable tools. That count is intentionally
+The MCP integration layer currently exposes 169 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -44,6 +44,11 @@ ordering, stale-input audit, evidence-aware capability dashboard query, and dete
 Actions YAML planning surface. It preserves notebook holes and release refusal predicates rather
 than treating generated YAML or a local audit as executed CI, a hosted authoring UI, or a public
 dashboard. The TypeScript and Python clients expose this contract without cloning the Rust model.
+The standalone `capability_dashboard` route projects the same catalogue into bounded, digest-bound
+coverage rows: callable, partial, and declared-only readiness are separated; crate, CLI, Python,
+MCP-membership, and authoritative-schema counts remain independent; and missing surfaces are
+reported as explicit gaps. Filtering and truncation are part of the audit evidence, so a clean row
+never implies that a local CLI, Python import, permission check, or deployment exists.
 `developer_delivery_audit` composes the platform, repository, SDK, conformance, provider,
 governance, and release checks into independently inspectable readiness gates. Its typed Python and
 TypeScript projections preserve explicit release targets, blockers, fail-closed/no-implicit-release
