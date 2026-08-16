@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 156);
+    assert_eq!(tools.len(), 157);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(156));
-    assert_eq!(result["advertised_tool_count"], json!(156));
+    assert_eq!(result["unique_catalog_tools"], json!(157));
+    assert_eq!(result["advertised_tool_count"], json!(157));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(156));
-    assert_eq!(result["schema_quality"]["valid"], json!(156));
+    assert_eq!(result["schema_quality"]["checked"], json!(157));
+    assert_eq!(result["schema_quality"]["valid"], json!(157));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6566,6 +6566,76 @@ fn bioeval_mesh_audit_collapses_shared_inputs_and_separates_disagreement_kinds()
     );
     assert_eq!(independence_refusal["ok"], json!(false));
     assert_eq!(independence_refusal["stage"], json!("independence_policy"));
+}
+
+#[test]
+fn bioeval_burden_audit_preserves_inherited_residuals_waste_and_fork_refusals() {
+    let result = call(
+        &mut server(),
+        "bioeval_burden_audit",
+        json!({
+            "root": "root",
+            "resources": [
+                { "id": "biopsy", "class": "tissue_aliquot", "initial": 100, "unit": "uL" },
+                { "id": "compute", "class": "compute_and_money", "initial": 10, "unit": "hour" }
+            ],
+            "branches": [
+                { "id": "candidate-a", "parent": "root" },
+                { "id": "candidate-b", "parent": "root" }
+            ],
+            "draws": [
+                { "branch": "root", "action": "extract", "resource": "biopsy", "amount": 30, "unit": "uL", "outcome": "wasted", "destructive": true },
+                { "branch": "candidate-a", "action": "sequence-a", "resource": "biopsy", "amount": 60, "unit": "uL", "outcome": "productive", "destructive": true },
+                { "branch": "candidate-b", "action": "sequence-b", "resource": "biopsy", "amount": 60, "unit": "uL", "outcome": "productive", "destructive": true },
+                { "branch": "candidate-a", "action": "retry", "resource": "compute", "amount": 2, "unit": "hour", "outcome": "wasted", "destructive": false }
+            ],
+            "inspect_branches": ["root", "candidate-a", "candidate-b"],
+            "joint_branches": ["candidate-a", "candidate-b"],
+            "max_items": 10
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-burden-audit/0.1"));
+    assert_eq!(result["burden"]["resource_count"], json!(2));
+    assert_eq!(result["burden"]["branch_count"], json!(3));
+    assert_eq!(result["burden"]["draw_count"], json!(4));
+    assert_eq!(result["joint_feasibility"]["status"], json!("refused"));
+    assert_eq!(result["findings"]["joint_feasibility_refused"], json!(true));
+    assert_eq!(result["wasted_nonrenewable"]["total"], json!(1));
+    assert_eq!(result["findings"]["failed_draws_still_counted"], json!(2));
+    assert_eq!(result["branches"]["rows"][1]["residual"]["biopsy"], json!(10));
+
+    let joint_policy_refusal = call(
+        &mut server(),
+        "bioeval_burden_audit",
+        json!({
+            "root": "root",
+            "resources": [{ "id": "biopsy", "class": "tissue_aliquot", "initial": 100, "unit": "uL" }],
+            "branches": [{ "id": "a" }, { "id": "b" }],
+            "draws": [
+                { "branch": "a", "action": "a", "resource": "biopsy", "amount": 80, "unit": "uL", "outcome": "productive", "destructive": true },
+                { "branch": "b", "action": "b", "resource": "biopsy", "amount": 80, "unit": "uL", "outcome": "productive", "destructive": true }
+            ],
+            "joint_branches": ["a", "b"],
+            "require_joint_feasible": true
+        }),
+    );
+    assert_eq!(joint_policy_refusal["ok"], json!(false));
+    assert_eq!(joint_policy_refusal["stage"], json!("joint_feasibility_policy"));
+    assert_eq!(joint_policy_refusal["fail_closed"], json!(true));
+
+    let unit_refusal = call(
+        &mut server(),
+        "bioeval_burden_audit",
+        json!({
+            "root": "root",
+            "resources": [{ "id": "biopsy", "class": "tissue_aliquot", "initial": 10, "unit": "uL" }],
+            "draws": [{ "branch": "root", "action": "bad-unit", "resource": "biopsy", "amount": 1, "unit": "mL", "outcome": "productive", "destructive": true }]
+        }),
+    );
+    assert_eq!(unit_refusal["ok"], json!(false));
+    assert_eq!(unit_refusal["stage"], json!("draw_admission"));
 }
 
 #[test]

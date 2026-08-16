@@ -3010,3 +3010,43 @@ test("client exposes evaluator mesh independence classes and disagreement postur
   assert.equal(result.mcp.result.structuredContent.disagreements.across_class_count, 1);
   assert.equal(result.mcp.result.structuredContent.findings.rating_projection_refused, false);
 });
+
+test("client exposes burden residuals, failed draws, and fork feasibility", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_burden_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.resources[0].class, "tissue_aliquot");
+      assert.equal(body.draws[0].outcome, "wasted");
+      return jsonResponse({ ok: true, tool: "bioeval_burden_audit", request_id: "burden-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-burden-audit/0.1",
+        workflow: "bioeval_burden_audit",
+        burden: { root: "root", resource_count: 1, branch_count: 3, draw_count: 2, nonrenewable_resource_count: 1 },
+        resources: { rows: [], returned: 0, total: 1, omitted: 1 },
+        branches: { rows: [], returned: 0, total: 3, omitted: 3 },
+        draws: { rows: [], returned: 0, total: 2, omitted: 2 },
+        joint_feasibility: { status: "refused", branches: ["a", "b"], refusal: "fork double spend" },
+        wasted_nonrenewable: { rows: [], returned: 0, total: 1, omitted: 1 },
+        findings: { wasted_nonrenewable_actions: { ids: ["extract"], total: 1, omitted: 0 }, joint_feasibility_refused: true },
+        guarantees: ["failed draws remain visible"],
+        limitations: ["no pricing"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalBurdenAudit({
+    root: "root",
+    resources: [{ id: "biopsy", class: "tissue_aliquot", initial: 100, unit: "uL" }],
+    branches: [{ id: "a" }, { id: "b" }],
+    draws: [
+      { branch: "a", action: "extract", resource: "biopsy", amount: 60, unit: "uL", outcome: "wasted", destructive: true },
+      { branch: "b", action: "extract-b", resource: "biopsy", amount: 60, unit: "uL", outcome: "productive", destructive: true },
+    ],
+    joint_branches: ["a", "b"],
+    require_joint_feasible: false,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-burden-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.joint_feasibility.status, "refused");
+  assert.equal(result.mcp.result.structuredContent.findings.joint_feasibility_refused, true);
+});

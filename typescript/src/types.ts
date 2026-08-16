@@ -5373,6 +5373,69 @@ export interface BioevalMeshAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export type BioevalBurdenResourceClass =
+  | "tissue_aliquot"
+  | "viable_cells"
+  | "assay_capacity"
+  | "expert_time"
+  | "participant_burden"
+  | "privacy_access"
+  | "compute_and_money";
+
+export type BioevalBurdenDrawOutcome = "productive" | "wasted";
+
+export interface BioevalBurdenResourceArgs extends JsonObject {
+  id: string;
+  class: BioevalBurdenResourceClass;
+  initial: number;
+  unit: string;
+}
+
+export interface BioevalBurdenBranchArgs extends JsonObject {
+  id: string;
+  parent?: string;
+}
+
+export interface BioevalBurdenDrawArgs extends JsonObject {
+  branch: string;
+  action: string;
+  resource: string;
+  amount: number;
+  unit: string;
+  outcome?: BioevalBurdenDrawOutcome;
+  destructive?: boolean;
+}
+
+export interface BioevalBurdenAuditArgs extends JsonObject {
+  root: string;
+  resources: BioevalBurdenResourceArgs[];
+  branches?: BioevalBurdenBranchArgs[];
+  draws?: BioevalBurdenDrawArgs[];
+  inspect_branches?: string[];
+  joint_branches?: string[];
+  max_items?: number;
+  require_joint_feasible?: boolean;
+  require_no_wasted_nonrenewable?: boolean;
+}
+
+export interface BioevalBurdenAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-burden-audit/0.1";
+  workflow?: "bioeval_burden_audit";
+  burden?: JsonObject;
+  resources?: JsonObject;
+  branches?: JsonObject;
+  draws?: JsonObject;
+  joint_feasibility?: JsonObject;
+  wasted_nonrenewable?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;

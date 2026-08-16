@@ -421,5 +421,7 @@ rather than manufacturing component effects from unmatched arms;
 the evaluator-mesh kernel is also exposed through bioeval_mesh_audit, preserving transitive
 shared-input classes, circular-oracle refusals, within-class versus across-class witnesses, and
 abstentions rather than counting correlated evaluators as independent votes;
+the nonrenewable-resource kernel is also exposed through bioeval_burden_audit, preserving
+inherited residuals, exact-unit draws, failed-action waste, and fork double-spend refusals;
 the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
-evaluator-health, scoring-plane, metamorphic, waiver, design, or mesh wrapper.
+evaluator-health, scoring-plane, metamorphic, waiver, design, mesh, or burden wrapper.

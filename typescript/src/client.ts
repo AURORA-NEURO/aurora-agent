@@ -142,6 +142,8 @@ import type {
   BioevalDesignAuditResult,
   BioevalMeshAuditArgs,
   BioevalMeshAuditResult,
+  BioevalBurdenAuditArgs,
+  BioevalBurdenAuditResult,
   EvaluationWorldlineArgs,
   EvaluationWorldlineResult,
   EvaluationReproductionArgs,
@@ -878,6 +880,10 @@ export class ApiClient {
 
   async bioevalMeshAudit(args: BioevalMeshAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalMeshAuditResult>> {
     return this.callTool<BioevalMeshAuditResult>("bioeval_mesh_audit", args, options);
+  }
+
+  async bioevalBurdenAudit(args: BioevalBurdenAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalBurdenAuditResult>> {
+    return this.callTool<BioevalBurdenAuditResult>("bioeval_burden_audit", args, options);
   }
 
   async evaluationWorldlineAudit(args: EvaluationWorldlineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EvaluationWorldlineResult>> {

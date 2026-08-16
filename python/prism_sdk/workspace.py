@@ -259,6 +259,7 @@ from .bioeval_metamorphic import BioevalMetamorphicAuditArgs, BioevalMetamorphic
 from .bioeval_waiver import BioevalWaiverAuditArgs, BioevalWaiverAuditReport, bioeval_waiver_audit_report
 from .bioeval_design import BioevalDesignAuditArgs, BioevalDesignAuditReport, bioeval_design_audit_report
 from .bioeval_mesh import BioevalMeshAuditArgs, BioevalMeshAuditReport, bioeval_mesh_audit_report
+from .bioeval_burden import BioevalBurdenAuditArgs, BioevalBurdenAuditReport, bioeval_burden_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -2056,6 +2057,26 @@ class Workspace:
         """Return typed independence classes, disagreement witnesses, and abstentions."""
 
         return bioeval_mesh_audit_report(self.bioeval_mesh_audit(request))
+
+    def bioeval_burden_audit(
+        self,
+        request: BioevalBurdenAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit nonrenewable resources, inherited residuals, and branch feasibility."""
+
+        normalized = request if isinstance(request, BioevalBurdenAuditArgs) else BioevalBurdenAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioeval_burden_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioeval_burden_audit_report(
+        self,
+        request: BioevalBurdenAuditArgs | Mapping[str, Any],
+    ) -> BioevalBurdenAuditReport:
+        """Return typed resource, draw, residual, and fork evidence."""
+
+        return bioeval_burden_audit_report(self.bioeval_burden_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4665,6 +4686,26 @@ class AsyncWorkspace:
         """Return async typed evaluator-mesh evidence."""
 
         return bioeval_mesh_audit_report(await self.bioeval_mesh_audit(request))
+
+    async def bioeval_burden_audit(
+        self,
+        request: BioevalBurdenAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async burden audit with explicit fail-closed policies."""
+
+        normalized = request if isinstance(request, BioevalBurdenAuditArgs) else BioevalBurdenAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioeval_burden_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioeval_burden_audit_report(
+        self,
+        request: BioevalBurdenAuditArgs | Mapping[str, Any],
+    ) -> BioevalBurdenAuditReport:
+        """Return async typed nonrenewable-resource evidence."""
+
+        return bioeval_burden_audit_report(await self.bioeval_burden_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

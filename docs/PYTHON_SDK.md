@@ -1003,6 +1003,13 @@ distinct from independent-class count and exposes require_independence and
 require_independent_ratings as explicit fail-closed policies. See
 [docs/BIOEVAL_MESH_AUDIT.md](BIOEVAL_MESH_AUDIT.md).
 
+BioevalBurdenResourceArgs, BioevalBurdenBranchArgs, BioevalBurdenDrawArgs,
+BioevalBurdenAuditArgs, and bioeval_burden_audit_report(...) type integer resource pools,
+ordered branch inheritance, exact units, productive versus wasted draws, residuals, nonrenewable
+fork feasibility, and failed-action waste. The typed layer exposes require_joint_feasible and
+require_no_wasted_nonrenewable as explicit fail-closed policies without inventing prices or
+utility. See [docs/BIOEVAL_BURDEN_AUDIT.md](BIOEVAL_BURDEN_AUDIT.md).
+
 `StressProfileArgs` / `stress_profile_report(...)` and `StressReportArgs` /
 `stress_report_projection(...)` expose the biological-stress engine without pretending that a
 single robustness score is meaningful. The typed reports retain family, blueprint module, stress

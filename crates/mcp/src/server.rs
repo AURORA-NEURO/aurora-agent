@@ -60,6 +60,10 @@ use bioprism_bioevalx::acquisition::{
     Action as AcquisitionTraceAction, AcquisitionKind, Obligation as AcquisitionObligation,
     ReferencePolicy as AcquisitionReferencePolicy, Trace as AcquisitionTrace,
 };
+use bioprism_bioevalx::burden::{
+    BranchLedger as BioevalBranchLedger, Draw as BioevalDraw, Ledger as BioevalLedger,
+    Resource as BioevalResource,
+};
 use bioprism_bioevalx::grounding::{
     ClaimState as GroundingClaimState, EdgeKind as GroundingEdgeKind,
     Evidence as GroundingEvidence, Grounding,
@@ -1385,6 +1389,7 @@ impl Server {
             "bioeval_waiver_audit" => self.bioeval_waiver_audit(&arguments),
             "bioeval_design_audit" => self.bioeval_design_audit(&arguments),
             "bioeval_mesh_audit" => self.bioeval_mesh_audit(&arguments),
+            "bioeval_burden_audit" => self.bioeval_burden_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -15944,6 +15949,440 @@ impl Server {
         }))
     }
 
+    fn bioeval_burden_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-burden-audit/0.1";
+        const MAX_RESOURCES: usize = 4_096;
+        const MAX_BRANCHES: usize = 4_096;
+        const MAX_DRAWS: usize = 16_384;
+        const MAX_ID_BYTES: usize = 256;
+        const MAX_INPUT_BYTES: usize = 20_000_000;
+
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_burden_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "failed actions retain their resource draws",
+                    "units are compared by declared equality with no invented conversion",
+                    "nonrenewable fork double-spends remain explicit",
+                    "residual quantities are computed from inherited branch history",
+                ],
+                "limitations": [
+                    "the route does not assign utility, optimize a policy, or price a resource",
+                    "a declared draw is treated as caller-supplied evidence and is not verified against an external inventory",
+                    "branch feasibility is a logical check, not proof that the branch was physically executed",
+                ],
+            })
+        };
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure burden audit input: {error}"))?;
+        if encoded.len() > MAX_INPUT_BYTES {
+            return Err(format!(
+                "burden audit input exceeds the {MAX_INPUT_BYTES}-byte safety bound"
+            ));
+        }
+        let bounded_text = |name: &str, value: Option<&Value>| -> Result<String, String> {
+            let value = value
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("{name} must be a string"))?;
+            if value.trim().is_empty() || value.len() > MAX_ID_BYTES {
+                return Err(format!(
+                    "{name} must contain 1 to {MAX_ID_BYTES} bytes"
+                ));
+            }
+            Ok(value.to_string())
+        };
+        let root = bounded_text("root", arguments.get("root"))?;
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let policy = |name: &str| -> Result<bool, String> {
+            match arguments.get(name) {
+                None => Ok(false),
+                Some(value) => value
+                    .as_bool()
+                    .ok_or_else(|| format!("{name} must be a boolean")),
+            }
+        };
+        let require_joint = policy("require_joint_feasible")?;
+        let require_no_waste = policy("require_no_wasted_nonrenewable")?;
+        let raw_resources = arguments
+            .get("resources")
+            .and_then(Value::as_array)
+            .ok_or("resources is required and must be an array")?;
+        if raw_resources.is_empty() || raw_resources.len() > MAX_RESOURCES {
+            return Err("resources must contain 1 to 4096 rows".into());
+        }
+        let raw_branches = arguments
+            .get("branches")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if raw_branches.len() > MAX_BRANCHES {
+            return Err("branches are bounded at 4096 rows".into());
+        }
+        let raw_draws = arguments
+            .get("draws")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if raw_draws.len() > MAX_DRAWS {
+            return Err("draws are bounded at 16384 rows".into());
+        }
+
+        let mut ledger = BioevalLedger::new(root.clone());
+        let mut resource_ids = BTreeSet::new();
+        let mut resources = Vec::with_capacity(raw_resources.len());
+        for (index, raw) in raw_resources.iter().enumerate() {
+            let resource: BioevalResource = match serde_json::from_value(raw.clone()) {
+                Ok(resource) => resource,
+                Err(error) => {
+                    return Ok(refusal(
+                        "resource_deserialization",
+                        format!("resources[{index}] is not a valid Resource: {error}"),
+                    ))
+                }
+            };
+            if resource.id.trim().is_empty()
+                || resource.id.len() > MAX_ID_BYTES
+                || resource.unit.trim().is_empty()
+                || resource.unit.len() > MAX_ID_BYTES
+            {
+                return Ok(refusal(
+                    "resource_validation",
+                    format!("resources[{index}] id and unit must be bounded non-empty strings"),
+                ));
+            }
+            if !resource_ids.insert(resource.id.clone()) {
+                return Ok(refusal(
+                    "resource_validation",
+                    format!("resource {:?} appears more than once", resource.id),
+                ));
+            }
+            if let Err(error) = ledger.declare(resource.clone()) {
+                return Ok(refusal("resource_declaration", error.to_string()));
+            }
+            resources.push(resource);
+        }
+
+        let mut branch_ids = BTreeSet::from([root.clone()]);
+        let mut branch_parents = BTreeMap::from([(root.clone(), None::<String>)]);
+        for (index, raw) in raw_branches.iter().enumerate() {
+            let Some(object) = raw.as_object() else {
+                return Ok(refusal(
+                    "branch_deserialization",
+                    format!("branches[{index}] must be an object"),
+                ));
+            };
+            let id = match bounded_text(
+                &format!("branches[{index}].id"),
+                object.get("id"),
+            ) {
+                Ok(id) => id,
+                Err(error) => return Ok(refusal("branch_validation", error)),
+            };
+            let parent = match object.get("parent") {
+                None | Some(Value::Null) => root.clone(),
+                Some(value) => match bounded_text(&format!("branches[{index}].parent"), Some(value)) {
+                    Ok(parent) => parent,
+                    Err(error) => return Ok(refusal("branch_validation", error)),
+                },
+            };
+            if !branch_ids.insert(id.clone()) {
+                return Ok(refusal(
+                    "branch_validation",
+                    format!("branch {:?} appears more than once", id),
+                ));
+            }
+            if !branch_ids.contains(&parent) {
+                return Ok(refusal(
+                    "branch_validation",
+                    format!("branch {:?} names undeclared parent {:?}", id, parent),
+                ));
+            }
+            if let Err(error) = ledger.fork(&parent, id.clone()) {
+                return Ok(refusal("branch_declaration", error.to_string()));
+            }
+            branch_parents.insert(id, Some(parent));
+        }
+
+        let mut draw_rows = Vec::with_capacity(raw_draws.len());
+        for (index, raw) in raw_draws.iter().enumerate() {
+            let Some(object) = raw.as_object() else {
+                return Ok(refusal(
+                    "draw_deserialization",
+                    format!("draws[{index}] must be an object"),
+                ));
+            };
+            let branch = match bounded_text(
+                &format!("draws[{index}].branch"),
+                object.get("branch"),
+            ) {
+                Ok(branch) => branch,
+                Err(error) => return Ok(refusal("draw_validation", error)),
+            };
+            let draw: BioevalDraw = match serde_json::from_value(raw.clone()) {
+                Ok(draw) => draw,
+                Err(error) => {
+                    return Ok(refusal(
+                        "draw_deserialization",
+                        format!("draws[{index}] is not a valid Draw: {error}"),
+                    ))
+                }
+            };
+            if draw.action.trim().is_empty()
+                || draw.action.len() > MAX_ID_BYTES
+                || draw.resource.trim().is_empty()
+                || draw.resource.len() > MAX_ID_BYTES
+                || draw.unit.trim().is_empty()
+                || draw.unit.len() > MAX_ID_BYTES
+            {
+                return Ok(refusal(
+                    "draw_validation",
+                    format!("draws[{index}] action, resource, and unit must be bounded strings"),
+                ));
+            }
+            if let Err(error) = ledger.draw(&branch, draw.clone()) {
+                return Ok(refusal("draw_admission", error.to_string()));
+            }
+            draw_rows.push((branch, draw));
+        }
+
+        let parse_branch_list = |name: &str| -> Result<Option<Vec<String>>, String> {
+            let Some(raw) = arguments.get(name) else {
+                return Ok(None);
+            };
+            let values = raw
+                .as_array()
+                .ok_or_else(|| format!("{name} must be an array of branch ids"))?;
+            let mut ids = Vec::with_capacity(values.len());
+            let mut seen = BTreeSet::new();
+            for (index, value) in values.iter().enumerate() {
+                let id = bounded_text(&format!("{name}[{index}]"), Some(value))?;
+                if !seen.insert(id.clone()) {
+                    return Err(format!("{name} must contain unique branch ids"));
+                }
+                if !branch_ids.contains(&id) {
+                    return Err(format!("{name} names undeclared branch {id:?}"));
+                }
+                ids.push(id);
+            }
+            Ok(Some(ids))
+        };
+        let inspect_branches = match parse_branch_list("inspect_branches") {
+            Ok(Some(ids)) => ids,
+            Ok(None) => branch_ids.iter().cloned().collect(),
+            Err(error) => return Ok(refusal("branch_selection", error)),
+        };
+        let joint_branches = match parse_branch_list("joint_branches") {
+            Ok(ids) => ids,
+            Err(error) => return Ok(refusal("joint_selection", error)),
+        };
+        if require_joint && joint_branches.is_none() {
+            return Ok(refusal(
+                "joint_feasibility_policy",
+                "require_joint_feasible was true but joint_branches was not supplied".into(),
+            ));
+        }
+        let (joint_status, joint_refusal) = match joint_branches.as_ref() {
+            None => ("not_requested", Value::Null),
+            Some(branches) => {
+                let refs = branches.iter().map(String::as_str).collect::<Vec<_>>();
+                match ledger.joint_feasibility(&refs) {
+                    Ok(()) => ("accepted", Value::Null),
+                    Err(error) => ("refused", json!(error.to_string())),
+                }
+            }
+        };
+        if require_joint && joint_status != "accepted" {
+            return Ok(refusal(
+                "joint_feasibility_policy",
+                format!(
+                    "the selected branches are not jointly feasible: {}",
+                    joint_refusal.as_str().unwrap_or("unknown refusal")
+                ),
+            ));
+        }
+
+        let mut wasted_rows = Vec::new();
+        for branch in &inspect_branches {
+            let draws = match ledger.wasted_nonrenewable(branch) {
+                Ok(draws) => draws,
+                Err(error) => return Ok(refusal("waste_analysis", error.to_string())),
+            };
+            for draw in draws {
+                wasted_rows.push(json!({
+                    "branch": branch,
+                    "action": draw.action,
+                    "resource": draw.resource,
+                    "amount": draw.amount,
+                    "unit": draw.unit,
+                    "outcome": draw.outcome,
+                    "destructive": draw.destructive,
+                }));
+            }
+        }
+        if require_no_waste && !wasted_rows.is_empty() {
+            return Ok(refusal(
+                "waste_policy",
+                format!(
+                    "selected branches contain {} wasted destructive nonrenewable draw(s)",
+                    wasted_rows.len()
+                ),
+            ));
+        }
+
+        let class_counts = resources.iter().fold(BTreeMap::<String, usize>::new(), |mut counts, resource| {
+            let class = serde_json::to_value(resource.class)
+                .expect("resource class serializes")
+                .as_str()
+                .expect("resource class is a string")
+                .to_string();
+            *counts.entry(class).or_default() += 1;
+            counts
+        });
+        let nonrenewable_resources = resources
+            .iter()
+            .filter(|resource| resource.class.is_nonrenewable())
+            .count();
+        let bounded_strings = |values: BTreeSet<String>| {
+            json!({
+                "ids": values.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": values.len(),
+                "omitted": values.len().saturating_sub(max_items),
+            })
+        };
+        let branch_rows = inspect_branches
+            .iter()
+            .take(max_items)
+            .map(|branch| {
+                let branch_ledger: &BioevalBranchLedger =
+                    ledger.branch(branch).expect("branch selection was validated");
+                let residual = ledger.residual(branch).expect("branch residual is valid");
+                let consumed = resources
+                    .iter()
+                    .map(|resource| (resource.id.clone(), branch_ledger.consumed(&resource.id)))
+                    .collect::<BTreeMap<_, _>>();
+                let wasted = resources
+                    .iter()
+                    .map(|resource| (resource.id.clone(), branch_ledger.wasted(&resource.id)))
+                    .collect::<BTreeMap<_, _>>();
+                json!({
+                    "id": branch,
+                    "parent": branch_parents.get(branch).cloned().flatten(),
+                    "draw_count": branch_ledger.draws().len(),
+                    "consumed": consumed,
+                    "wasted": wasted,
+                    "residual": residual,
+                })
+            })
+            .collect::<Vec<_>>();
+        let resource_rows = resources
+            .iter()
+            .take(max_items)
+            .map(|resource| {
+                json!({
+                    "id": resource.id,
+                    "class": resource.class,
+                    "initial": resource.initial,
+                    "unit": resource.unit,
+                    "nonrenewable": resource.class.is_nonrenewable(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let draw_projection = draw_rows
+            .iter()
+            .take(max_items)
+            .map(|(branch, draw)| {
+                json!({
+                    "branch": branch,
+                    "action": draw.action,
+                    "resource": draw.resource,
+                    "amount": draw.amount,
+                    "unit": draw.unit,
+                    "outcome": draw.outcome,
+                    "destructive": draw.destructive,
+                })
+            })
+            .collect::<Vec<_>>();
+        let wasted_actions = wasted_rows
+            .iter()
+            .filter_map(|row| row.get("action").and_then(Value::as_str).map(String::from));
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_burden_audit",
+            "burden": {
+                "root": root,
+                "resource_count": resources.len(),
+                "branch_count": branch_ids.len(),
+                "draw_count": draw_rows.len(),
+                "nonrenewable_resource_count": nonrenewable_resources,
+                "resource_class_counts": class_counts,
+                "inspected_branch_count": inspect_branches.len(),
+                "policies": {
+                    "require_joint_feasible": require_joint,
+                    "require_no_wasted_nonrenewable": require_no_waste,
+                },
+            },
+            "resources": {
+                "rows": resource_rows,
+                "returned": resources.len().min(max_items),
+                "total": resources.len(),
+                "omitted": resources.len().saturating_sub(max_items),
+            },
+            "branches": {
+                "rows": branch_rows,
+                "returned": inspect_branches.len().min(max_items),
+                "total": inspect_branches.len(),
+                "omitted": inspect_branches.len().saturating_sub(max_items),
+            },
+            "draws": {
+                "rows": draw_projection,
+                "returned": draw_rows.len().min(max_items),
+                "total": draw_rows.len(),
+                "omitted": draw_rows.len().saturating_sub(max_items),
+            },
+            "joint_feasibility": {
+                "status": joint_status,
+                "branches": joint_branches,
+                "refusal": joint_refusal,
+            },
+            "wasted_nonrenewable": {
+                "rows": wasted_rows.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "returned": wasted_rows.len().min(max_items),
+                "total": wasted_rows.len(),
+                "omitted": wasted_rows.len().saturating_sub(max_items),
+            },
+            "findings": {
+                "wasted_nonrenewable_actions": bounded_strings(wasted_actions.collect()),
+                "joint_feasibility_refused": joint_status == "refused",
+                "failed_draws_still_counted": draw_rows.iter().filter(|(_, draw)| draw.outcome == bioprism_bioevalx::burden::DrawOutcome::Wasted).count(),
+            },
+            "guarantees": [
+                "failed actions retain their resource consumption",
+                "branch residuals include inherited ancestor draws",
+                "nonrenewable fork double-spends remain refusals rather than plausible totals",
+                "unit mismatch is refused without guessing a conversion",
+                "wasted destructive nonrenewable draws remain visible",
+            ],
+            "limitations": [
+                "no utility, price, optimal policy, or accuracy trade-off is inferred",
+                "declared resources and draws are not independently authenticated",
+                "joint feasibility only evaluates the selected branch set",
+            ],
+        }))
+    }
+
     fn bioeval_plane_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-plane-audit/0.1";
         const MAX_DIMENSIONS: usize = 4_096;
@@ -24755,9 +25194,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "evaluation_and_baselines",
-            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling"],
+            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -24787,9 +25226,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluator independence", "shared-input classes", "disagreement witnesses", "abstention preservation", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluator independence", "shared-input classes", "disagreement witnesses", "abstention preservation", "nonrenewable resource accounting", "branch inheritance", "unit-safe draws", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -26213,6 +26652,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "require_independent_ratings": { "type": "boolean", "description": "Fail closed when a shared-input class disagrees internally and cannot be collapsed to one rating." }
                 },
                 "required": ["evaluators"]
+            }
+        }),
+        json!({
+            "name": "bioeval_burden_audit",
+            "description": "Audit a serialized bioevalx nonrenewable-resource ledger while preserving branch inheritance, unit-safe draws, failed-action waste, residual quantities, and fork double-spend refusals. It never prices resources, optimizes a policy, or treats mutually exclusive branches as a joint experiment.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "root": { "type": "string", "description": "Root branch identifier." },
+                    "resources": { "type": "array", "minItems": 1, "maxItems": 4096, "description": "Serialized Resource values with id, class, integer initial quantity, and exact unit." },
+                    "branches": { "type": "array", "maxItems": 4096, "description": "Optional ordered branch declarations {id, parent}; an omitted parent forks from root." },
+                    "draws": { "type": "array", "maxItems": 16384, "description": "Optional branch-tagged Draw values. Productive and wasted draws both consume the ledger; destructive controls nonrenewable feasibility." },
+                    "inspect_branches": { "type": "array", "maxItems": 4096, "description": "Optional branch ids to project. Omitted means every branch." },
+                    "joint_branches": { "type": "array", "maxItems": 4096, "description": "Optional branch set for joint_feasibility. The result distinguishes not requested, accepted, and refused." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum resource, branch, draw, and waste rows returned." },
+                    "require_joint_feasible": { "type": "boolean", "description": "Fail closed unless the supplied joint_branches set is jointly feasible." },
+                    "require_no_wasted_nonrenewable": { "type": "boolean", "description": "Fail closed when inspected branches contain a wasted destructive nonrenewable draw." }
+                },
+                "required": ["root", "resources"]
             }
         }),
         json!({

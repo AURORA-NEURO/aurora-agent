@@ -553,6 +553,12 @@ ratings, and optional ladder contributions. It keeps evaluator count distinct fr
 class count and preserves require_independence and require_independent_ratings as explicit
 fail-closed policies. See [docs/BIOEVAL_MESH_AUDIT.md](../docs/BIOEVAL_MESH_AUDIT.md).
 
+bioevalBurdenAudit types integer resource pools, ordered branch inheritance, exact units,
+productive versus wasted draws, residuals, nonrenewable fork feasibility, and failed-action waste.
+It preserves require_joint_feasible and require_no_wasted_nonrenewable as explicit fail-closed
+policies without inventing prices or utility. See
+[docs/BIOEVAL_BURDEN_AUDIT.md](../docs/BIOEVAL_BURDEN_AUDIT.md).
+
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,
