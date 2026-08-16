@@ -617,6 +617,20 @@ bounded trajectory properties. The same projections are available on `Workspace`
 `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`; nested oracle/evaluation records remain
 authoritative JSON objects rather than being flattened into lossy SDK guesses.
 
+## Biological stress profiling
+
+`StressProfileArgs` / `stress_profile_report(...)` and `StressReportArgs` /
+`stress_report_projection(...)` expose the biological-stress engine without pretending that a
+single robustness score is meaningful. The typed reports retain family, blueprint module, stress
+and cohort digests, identifiability, every intensity-ladder sweep point, effective rather than
+nominal sample size, unresolved measurements, required-versus-probed conclusion findings, and
+generator postcondition defects. A confounded batch is represented as non-informative, and a
+generator defect is not converted into a fragile biological finding. `StressReportProjection`
+keeps the guarded `worst_family` comparison nullable: non-identifiable or defective profiles are
+not silently ranked. Inputs keep serialized Cohort, Stress, and Procedure values authoritative,
+while the SDK bounds custom panels and programs to the server’s 100-entry limits. The facades are
+available synchronously and asynchronously over MCP and HTTP.
+
 ## Runtime and bioethics safety workflows
 
 The runtime projection is split into request authoring and evidence parsing so callers can inspect

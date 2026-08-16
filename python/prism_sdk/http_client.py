@@ -161,6 +161,14 @@ from .oncoworlds import (
     oncoworlds_model_transport_report,
     oncoworlds_radiogenomic_check_report,
 )
+from .stress import (
+    StressProfileArgs,
+    StressProfileReport,
+    StressReportArgs,
+    StressReportProjection,
+    stress_profile_report,
+    stress_report_projection,
+)
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -1539,6 +1547,32 @@ class ApiClient:
         request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
     ) -> OncoWorldsClonalHistoryCheckReport:
         return oncoworlds_clonal_history_check_report(self.oncoworlds_clonal_history_check(request))
+
+    def stress_profile(
+        self,
+        request: StressProfileArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, StressProfileArgs) else StressProfileArgs.from_wire(request)
+        return self.call_tool("stress_profile", normalized.to_mcp_arguments())
+
+    def stress_profile_report(
+        self,
+        request: StressProfileArgs | Mapping[str, Any],
+    ) -> StressProfileReport:
+        return stress_profile_report(self.stress_profile(request))
+
+    def stress_report(
+        self,
+        request: StressReportArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, StressReportArgs) else StressReportArgs.from_wire(request)
+        return self.call_tool("stress_report", normalized.to_mcp_arguments())
+
+    def stress_report_projection(
+        self,
+        request: StressReportArgs | Mapping[str, Any],
+    ) -> StressReportProjection:
+        return stress_report_projection(self.stress_report(request))
 
     def lab_plan(
         self,
@@ -3043,6 +3077,32 @@ class AsyncApiClient:
         request: OncoWorldsClonalHistoryCheckArgs | Mapping[str, Any],
     ) -> OncoWorldsClonalHistoryCheckReport:
         return oncoworlds_clonal_history_check_report(await self.oncoworlds_clonal_history_check(request))
+
+    async def stress_profile(
+        self,
+        request: StressProfileArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, StressProfileArgs) else StressProfileArgs.from_wire(request)
+        return await self.call_tool("stress_profile", normalized.to_mcp_arguments())
+
+    async def stress_profile_report(
+        self,
+        request: StressProfileArgs | Mapping[str, Any],
+    ) -> StressProfileReport:
+        return stress_profile_report(await self.stress_profile(request))
+
+    async def stress_report(
+        self,
+        request: StressReportArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, StressReportArgs) else StressReportArgs.from_wire(request)
+        return await self.call_tool("stress_report", normalized.to_mcp_arguments())
+
+    async def stress_report_projection(
+        self,
+        request: StressReportArgs | Mapping[str, Any],
+    ) -> StressReportProjection:
+        return stress_report_projection(await self.stress_report(request))
 
     async def lab_plan(
         self,

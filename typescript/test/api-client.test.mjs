@@ -833,3 +833,48 @@ test("client exposes the complete typed OncoWorlds transport family", async () =
     "oncoworlds_clonal_history_check",
   ]);
 });
+
+test("client exposes typed biological stress profile and report workflows", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    bearerToken: "0123456789abcdef",
+    fetch: async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/tools/stress_profile") {
+        return jsonResponse({ ok: true, tool: "stress_profile", request_id: "stress-1", mcp: { result: { structuredContent: {
+          ok: true,
+          headline: "batch effect profile",
+          profile: {
+            family: "batch_effect",
+            blueprint_module: "32.06",
+            stress_id: "site-offset",
+            cohort_id: "cohort-1",
+            parent_digest: "sha256:parent",
+            identifiability: { identifiability: "separable", batch: "site-a", overlap: 0.5 },
+            sweep: [{ magnitude: 125, effective_n: 4, nominal_n: 4, unresolved: 0, analysable_prevalence: 0.5, abandoned: false }],
+            findings: [],
+            generator_defects: [],
+            caveat: "finite ladder",
+          },
+          guarantees: [],
+          limitations: [],
+        } } } });
+      }
+      if (path === "/v1/tools/stress_report") {
+        return jsonResponse({ ok: true, tool: "stress_report", request_id: "stress-2", mcp: { result: { structuredContent: {
+          ok: true,
+          headline: "stress report",
+          report: { cohort_id: "cohort-1", profiles: [] },
+          worst_family: null,
+          guarantees: [],
+          limitations: [],
+        } } } });
+      }
+      throw new Error(`unexpected path ${path}`);
+    },
+  });
+  const profile = await client.stressProfile({ cohort: {}, stress: {} });
+  assert.equal(profile.mcp.result.structuredContent.profile.family, "batch_effect");
+  const report = await client.stressReport({ cohort: {}, stresses: [] });
+  assert.equal(report.mcp.result.structuredContent.report.cohort_id, "cohort-1");
+});

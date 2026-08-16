@@ -74,6 +74,10 @@ import type {
   OncoWorldsRadiogenomicCheckResult,
   OncoWorldsClonalHistoryCheckArgs,
   OncoWorldsClonalHistoryCheckResult,
+  StressProfileArgs,
+  StressProfileToolResult,
+  StressReportArgs,
+  StressReportToolResult,
   OracleCombineArgs,
   OracleCombineResult,
   OracleReferencePanelArgs,
@@ -478,6 +482,14 @@ export class ApiClient {
 
   async oncoworldsClonalHistoryCheck(args: OncoWorldsClonalHistoryCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoWorldsClonalHistoryCheckResult>> {
     return this.callTool<OncoWorldsClonalHistoryCheckResult>("oncoworlds_clonal_history_check", args, options);
+  }
+
+  async stressProfile(args: StressProfileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<StressProfileToolResult>> {
+    return this.callTool<StressProfileToolResult>("stress_profile", args, options);
+  }
+
+  async stressReport(args: StressReportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<StressReportToolResult>> {
+    return this.callTool<StressReportToolResult>("stress_report", args, options);
   }
 
   async oracleCombine(args: OracleCombineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleCombineResult>> {

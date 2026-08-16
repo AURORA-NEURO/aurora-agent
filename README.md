@@ -524,6 +524,10 @@ assumptions, and clonal ambiguity without claiming clinical classification or pa
 `stress_profile` and `stress_report` sweep biological stress families and report breaking points,
 generator defects, confounding, effective sample size, and unresolved measurements without reducing
 robustness to a single score.
+The Python and TypeScript SDKs expose both stress workflows with bounded serialized request types
+and typed projections for the intensity ladder, identifiability, required/probed relations, and
+guarded worst-family comparison; defective or non-identifiable families remain excluded from that
+comparison rather than being ranked as if they were evidence.
 `developer_platform_status` verifies the cookbook, walkthrough standing, diagnostics, exit-code
 audit and declared change-impact surfaces while keeping foreign SDK/CI artifacts explicit.
 `sdk_registry_check` validates serialized plugin manifests, computes whole/core digests, reports

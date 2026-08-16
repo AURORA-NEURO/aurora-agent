@@ -241,6 +241,11 @@ mechanism strata, and transport assumptions; `oncoworldsClonalHistoryCheck` retu
 rejected histories with typed reasons and preserves ambiguity when more than one history survives.
 These methods are projections only: they do not perform clinical classification, patient transport,
 or clonal-history selection.
+`stressProfile` and `stressReport` add the biological-stress boundary with typed family identity,
+identifiability, intensity-ladder sweep points, effective sample size, unresolved measurements,
+required-versus-probed findings, generator defects, and a nullable guarded worst-family projection.
+They preserve the kernel’s breaking-point semantics instead of collapsing distribution-shift and
+assay-degradation evidence into a scalar robustness score.
 `oracleCombine` retains tiered decisions, underdetermination, suppressed overrides, inadmissible
 and withheld ledgers, and nullable deciding/confidence evidence. `oracleReferencePanel` and
 `oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and

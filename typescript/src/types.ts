@@ -2635,4 +2635,96 @@ export interface OncoWorldsClonalHistoryCheckResult extends JsonObject {
   limitations: string[];
 }
 
+export interface StressProfileArgs extends JsonObject {
+  cohort: JsonObject;
+  stress: JsonObject;
+  procedures?: JsonObject[];
+}
+
+export interface StressReportArgs extends JsonObject {
+  cohort: JsonObject;
+  stresses: JsonObject[];
+  procedures?: JsonObject[];
+}
+
+export type StressFamily = "prevalence_shift" | "batch_effect" | "assay_degradation" | "segmentation_jitter";
+
+export interface StressIdentifiabilityResult extends JsonObject {
+  identifiability: "not_applicable" | "separable" | "confounded";
+  batch?: string;
+  overlap?: number;
+  only?: "positive" | "negative";
+}
+
+export interface StressSweepPointResult extends JsonObject {
+  magnitude: number;
+  effective_n: number;
+  nominal_n: number;
+  unresolved: number;
+  analysable_prevalence: number;
+  abandoned: boolean;
+}
+
+export interface StressFindingResult extends JsonObject {
+  conclusion_id: string;
+  character: "discriminative" | "calibrated" | "geometric";
+  obligation: "required" | "probed";
+  relation: string;
+  rationale: string;
+  held_through: number | null;
+  broke_at: number | null;
+  expected_at_break?: string | null;
+  observed_at_break?: string | null;
+}
+
+export interface StressGeneratorDefectResult extends JsonObject {
+  magnitude: number;
+  invariant: string;
+  expected: string;
+  observed: string;
+}
+
+export interface StressProfileResult extends JsonObject {
+  family: StressFamily;
+  blueprint_module: string;
+  stress_id: string;
+  cohort_id: string;
+  parent_digest: string;
+  identifiability: StressIdentifiabilityResult;
+  sweep: StressSweepPointResult[];
+  findings: StressFindingResult[];
+  generator_defects: StressGeneratorDefectResult[];
+  caveat: string;
+}
+
+export interface StressProfileToolResult extends JsonObject {
+  ok: boolean;
+  headline?: string;
+  profile?: StressProfileResult;
+  guarantees?: string[];
+  limitations?: string[];
+  stage?: "stress_profile";
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+}
+
+export interface StressReportBodyResult extends JsonObject {
+  cohort_id: string;
+  profiles: StressProfileResult[];
+}
+
+export interface StressReportToolResult extends JsonObject {
+  ok: boolean;
+  headline?: string;
+  report?: StressReportBodyResult;
+  worst_family?: StressProfileResult | null;
+  guarantees?: string[];
+  limitations?: string[];
+  stage?: "stress_report";
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+}
+
 export type ToolArguments = JsonObject;
