@@ -423,5 +423,8 @@ shared-input classes, circular-oracle refusals, within-class versus across-class
 abstentions rather than counting correlated evaluators as independent votes;
 the nonrenewable-resource kernel is also exposed through bioeval_burden_audit, preserving
 inherited residuals, exact-unit draws, failed-action waste, and fork double-spend refusals;
+the prospective seal/reveal kernel is also exposed through bioeval_reveal_audit, preserving
+rubric and commitment digests, one-shot state locks, uncommitted outcomes, and selective
+publication rather than treating a partial reveal as a complete score;
 the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
-evaluator-health, scoring-plane, metamorphic, waiver, design, mesh, or burden wrapper.
+evaluator-health, scoring-plane, metamorphic, waiver, design, mesh, burden, or reveal wrapper.

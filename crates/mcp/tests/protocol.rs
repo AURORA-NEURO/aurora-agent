@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 157);
+    assert_eq!(tools.len(), 158);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(157));
-    assert_eq!(result["advertised_tool_count"], json!(157));
+    assert_eq!(result["unique_catalog_tools"], json!(158));
+    assert_eq!(result["advertised_tool_count"], json!(158));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(157));
-    assert_eq!(result["schema_quality"]["valid"], json!(157));
+    assert_eq!(result["schema_quality"]["checked"], json!(158));
+    assert_eq!(result["schema_quality"]["valid"], json!(158));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6636,6 +6636,69 @@ fn bioeval_burden_audit_preserves_inherited_residuals_waste_and_fork_refusals() 
     );
     assert_eq!(unit_refusal["ok"], json!(false));
     assert_eq!(unit_refusal["stage"], json!("draw_admission"));
+}
+
+#[test]
+fn bioeval_reveal_audit_freezes_rubric_and_retains_unrevealed_commitments() {
+    let result = call(
+        &mut server(),
+        "bioeval_reveal_audit",
+        json!({
+            "study": "prospective-2026",
+            "commitments": [
+                { "target": "case-a", "prediction": { "class": "stable" }, "analysis_plan": "plan-v1" },
+                { "target": "case-b", "prediction": { "class": "progression" }, "analysis_plan": "plan-v1" }
+            ],
+            "rubric": { "version": 1, "rules": ["predeclared"] },
+            "sealed_at": "2026-08-16T12:00:00Z",
+            "outcomes": [{ "target": "case-a", "observed": { "class": "stable" } }],
+            "score_rubric": { "version": 1, "rules": ["predeclared"] }
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-reveal-audit/0.1"));
+    assert_eq!(result["commitments"]["total"], json!(2));
+    assert_eq!(result["outcomes"]["total"], json!(1));
+    assert_eq!(result["scoring"]["status"], json!("accepted"));
+    assert_eq!(result["scoring"]["complete"], json!(false));
+    assert_eq!(result["findings"]["selective_publication"], json!(true));
+    assert_eq!(result["findings"]["unrevealed_commitments"]["ids"], json!(["case-b"]));
+    assert_eq!(result["seal_lock"]["status"], json!("refused"));
+    assert_eq!(result["reveal_lock"]["status"], json!("refused"));
+
+    let rubric_refusal = call(
+        &mut server(),
+        "bioeval_reveal_audit",
+        json!({
+            "study": "prospective-2026",
+            "commitments": [{ "target": "case-a", "prediction": "stable", "analysis_plan": "plan-v1" }],
+            "rubric": { "version": 1 },
+            "sealed_at": "2026-08-16T12:00:00Z",
+            "outcomes": [{ "target": "case-a", "observed": "stable" }],
+            "score_rubric": { "version": 2 },
+            "require_rubric_match": true
+        }),
+    );
+    assert_eq!(rubric_refusal["ok"], json!(false));
+    assert_eq!(rubric_refusal["stage"], json!("rubric_integrity_policy"));
+    assert_eq!(rubric_refusal["fail_closed"], json!(true));
+
+    let uncommitted = call(
+        &mut server(),
+        "bioeval_reveal_audit",
+        json!({
+            "study": "prospective-2026",
+            "commitments": [{ "target": "case-a", "prediction": "stable", "analysis_plan": "plan-v1" }],
+            "rubric": { "version": 1 },
+            "sealed_at": "2026-08-16T12:00:00Z",
+            "outcomes": [{ "target": "new-case", "observed": "stable" }],
+            "score_rubric": { "version": 1 }
+        }),
+    );
+    assert_eq!(uncommitted["ok"], json!(true));
+    assert_eq!(uncommitted["scoring"]["status"], json!("refused"));
+    assert_eq!(uncommitted["findings"]["uncommitted_outcome_refused"], json!(true));
 }
 
 #[test]

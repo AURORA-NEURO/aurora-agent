@@ -46,7 +46,7 @@ fn main() {
                      fabric_synthesize,\n\
                      interweave_workflow_catalogue,\n\
                      atlas_report, bundle_verify, adaptive_panel, posterior_gate, oracle_combine,\n\
-                     oracle_reference_panel, oracle_missingness, bioeval_reference_audit, bioeval_acquisition_audit, bioeval_grounding_audit, bioeval_estimand_audit, bioeval_evaluator_audit, bioeval_plane_audit, bioeval_metamorphic_audit, bioeval_waiver_audit, bioeval_design_audit, bioeval_mesh_audit, bioeval_burden_audit,\n\
+                     oracle_reference_panel, oracle_missingness, bioeval_reference_audit, bioeval_acquisition_audit, bioeval_grounding_audit, bioeval_estimand_audit, bioeval_evaluator_audit, bioeval_plane_audit, bioeval_metamorphic_audit, bioeval_waiver_audit, bioeval_design_audit, bioeval_mesh_audit, bioeval_burden_audit, bioeval_reveal_audit,\n\
                      evaluation_worldline_audit,\n\
                      evaluation_reproduction_check, evaluation_trajectory_check,\n\
                      runtime_effect_check, runtime_tape_verify, runtime_execution_simulate, onco_boundary_check,\n\

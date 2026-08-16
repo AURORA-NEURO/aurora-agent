@@ -5436,6 +5436,49 @@ export interface BioevalBurdenAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface BioevalRevealCommitmentArgs extends JsonObject {
+  target: string;
+  prediction: JsonValue;
+  analysis_plan: string;
+}
+
+export interface BioevalRevealOutcomeArgs extends JsonObject {
+  target: string;
+  observed: JsonValue;
+}
+
+export interface BioevalRevealAuditArgs extends JsonObject {
+  study: string;
+  commitments: BioevalRevealCommitmentArgs[];
+  rubric: JsonValue;
+  sealed_at: string;
+  outcomes?: BioevalRevealOutcomeArgs[];
+  score_rubric?: JsonValue;
+  require_scoring?: boolean;
+  require_rubric_match?: boolean;
+  require_complete?: boolean;
+}
+
+export interface BioevalRevealAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-reveal-audit/0.1";
+  workflow?: "bioeval_reveal_audit";
+  study?: string;
+  sealed_at?: string;
+  digests?: JsonObject;
+  commitments?: JsonObject;
+  outcomes?: JsonObject;
+  seal_lock?: JsonObject;
+  reveal_lock?: JsonObject;
+  scoring?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;

@@ -216,6 +216,7 @@ from .bioeval_waiver import BioevalWaiverAuditArgs, BioevalWaiverAuditReport, bi
 from .bioeval_design import BioevalDesignAuditArgs, BioevalDesignAuditReport, bioeval_design_audit_report
 from .bioeval_mesh import BioevalMeshAuditArgs, BioevalMeshAuditReport, bioeval_mesh_audit_report
 from .bioeval_burden import BioevalBurdenAuditArgs, BioevalBurdenAuditReport, bioeval_burden_audit_report
+from .bioeval_reveal import BioevalRevealAuditArgs, BioevalRevealAuditReport, bioeval_reveal_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1921,6 +1922,23 @@ class ApiClient:
         """Return typed HTTP burden and fork-feasibility evidence."""
 
         return bioeval_burden_audit_report(self.bioeval_burden_audit(request))
+
+    def bioeval_reveal_audit(
+        self,
+        request: BioevalRevealAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit prospective commitments and rubric integrity through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BioevalRevealAuditArgs) else BioevalRevealAuditArgs.from_wire(request)
+        return self.call_tool("bioeval_reveal_audit", normalized.to_mcp_arguments())
+
+    def bioeval_reveal_audit_report(
+        self,
+        request: BioevalRevealAuditArgs | Mapping[str, Any],
+    ) -> BioevalRevealAuditReport:
+        """Return typed HTTP seal/reveal evidence."""
+
+        return bioeval_reveal_audit_report(self.bioeval_reveal_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4495,6 +4513,23 @@ class AsyncApiClient:
         """Return async typed burden evidence."""
 
         return bioeval_burden_audit_report(await self.bioeval_burden_audit(request))
+
+    async def bioeval_reveal_audit(
+        self,
+        request: BioevalRevealAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP prospective reveal audit."""
+
+        normalized = request if isinstance(request, BioevalRevealAuditArgs) else BioevalRevealAuditArgs.from_wire(request)
+        return await self.call_tool("bioeval_reveal_audit", normalized.to_mcp_arguments())
+
+    async def bioeval_reveal_audit_report(
+        self,
+        request: BioevalRevealAuditArgs | Mapping[str, Any],
+    ) -> BioevalRevealAuditReport:
+        """Return async typed seal/reveal evidence."""
+
+        return bioeval_reveal_audit_report(await self.bioeval_reveal_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

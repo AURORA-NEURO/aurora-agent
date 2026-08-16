@@ -3050,3 +3050,46 @@ test("client exposes burden residuals, failed draws, and fork feasibility", asyn
   assert.equal(result.mcp.result.structuredContent.joint_feasibility.status, "refused");
   assert.equal(result.mcp.result.structuredContent.findings.joint_feasibility_refused, true);
 });
+
+test("client exposes prospective reveal locks and rubric digest policy", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_reveal_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.commitments[0].analysis_plan, "plan-v1");
+      assert.equal(body.rubric.version, 1);
+      return jsonResponse({ ok: true, tool: "bioeval_reveal_audit", request_id: "reveal-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-reveal-audit/0.1",
+        workflow: "bioeval_reveal_audit",
+        study: "prospective-2026",
+        sealed_at: "2026-08-16T12:00:00Z",
+        digests: { rubric: "rubric-digest", commitments: "commitment-digest" },
+        commitments: { rows: [], returned: 0, total: 2, omitted: 2 },
+        outcomes: { rows: [], returned: 0, total: 1, omitted: 1 },
+        seal_lock: { status: "refused", refusal: "already sealed" },
+        reveal_lock: { status: "refused", refusal: "already revealed" },
+        scoring: { status: "accepted", value: {}, refusal: null, complete: false },
+        findings: { unrevealed_commitments: { ids: ["case-b"], total: 1, omitted: 0 }, selective_publication: true, rubric_match_refused: false },
+        guarantees: ["commitment digest frozen"],
+        limitations: ["no timestamp attestation"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalRevealAudit({
+    study: "prospective-2026",
+    commitments: [
+      { target: "case-a", prediction: { class: "stable" }, analysis_plan: "plan-v1" },
+      { target: "case-b", prediction: { class: "progression" }, analysis_plan: "plan-v1" },
+    ],
+    rubric: { version: 1, rules: ["predeclared"] },
+    sealed_at: "2026-08-16T12:00:00Z",
+    outcomes: [{ target: "case-a", observed: { class: "stable" } }],
+    score_rubric: { version: 1, rules: ["predeclared"] },
+    require_rubric_match: true,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-reveal-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.scoring.complete, false);
+  assert.equal(result.mcp.result.structuredContent.findings.selective_publication, true);
+});

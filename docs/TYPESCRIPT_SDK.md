@@ -559,6 +559,12 @@ It preserves require_joint_feasible and require_no_wasted_nonrenewable as explic
 policies without inventing prices or utility. See
 [docs/BIOEVAL_BURDEN_AUDIT.md](../docs/BIOEVAL_BURDEN_AUDIT.md).
 
+bioevalRevealAudit types frozen commitment targets, opaque predictions, analysis plans, rubric and
+commitment digests, one-shot seal/reveal locks, uncommitted outcomes, unrevealed commitments, and
+selective publication. It preserves require_scoring, require_rubric_match, and require_complete as
+explicit fail-closed policies. See
+[docs/BIOEVAL_REVEAL_AUDIT.md](../docs/BIOEVAL_REVEAL_AUDIT.md).
+
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

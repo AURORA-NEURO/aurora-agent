@@ -81,6 +81,9 @@ use bioprism_bioevalx::evaluator::{
 use bioprism_bioevalx::plane::{
     Cell as BioevalCell, FoldPolicy as BioevalFoldPolicy, ScorePlane as BioevalScorePlane,
 };
+use bioprism_bioevalx::reveal::{
+    Commitment as BioevalCommitment, Outcome as BioevalOutcome, Registration as BioevalRegistration,
+};
 use bioprism_bioevalx::metamorphic::{
     verdict as bioeval_metamorphic_verdict, Family as BioevalMetamorphicFamily,
     Relation as BioevalMetamorphicRelation, Suite as BioevalMetamorphicSuite,
@@ -1390,6 +1393,7 @@ impl Server {
             "bioeval_design_audit" => self.bioeval_design_audit(&arguments),
             "bioeval_mesh_audit" => self.bioeval_mesh_audit(&arguments),
             "bioeval_burden_audit" => self.bioeval_burden_audit(&arguments),
+            "bioeval_reveal_audit" => self.bioeval_reveal_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -16383,6 +16387,298 @@ impl Server {
         }))
     }
 
+    fn bioeval_reveal_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-reveal-audit/0.1";
+        const MAX_COMMITMENTS: usize = 4_096;
+        const MAX_OUTCOMES: usize = 4_096;
+        const MAX_ID_BYTES: usize = 256;
+        const MAX_TEXT_BYTES: usize = 4_096;
+        const MAX_INPUT_BYTES: usize = 20_000_000;
+
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_reveal_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "commitments are sealed before outcomes are revealed",
+                    "a rubric digest mismatch never becomes a score",
+                    "uncommitted outcomes and unrevealed commitments remain visible",
+                    "a revealed state cannot be revealed a second time",
+                ],
+                "limitations": [
+                    "the route records caller-supplied timestamps but does not attest them",
+                    "the route does not sign submissions or search external preprints for leakage",
+                    "prediction-versus-outcome scoring is not invented; the route only certifies admissible pairs",
+                ],
+            })
+        };
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure reveal audit input: {error}"))?;
+        if encoded.len() > MAX_INPUT_BYTES {
+            return Err(format!(
+                "reveal audit input exceeds the {MAX_INPUT_BYTES}-byte safety bound"
+            ));
+        }
+        let bounded_text = |name: &str, value: Option<&Value>, limit: usize| -> Result<String, String> {
+            let value = value
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("{name} must be a string"))?;
+            if value.trim().is_empty() || value.len() > limit {
+                return Err(format!("{name} must contain 1 to {limit} bytes"));
+            }
+            Ok(value.to_string())
+        };
+        let study = bounded_text("study", arguments.get("study"), MAX_ID_BYTES)?;
+        let sealed_at_text = bounded_text("sealed_at", arguments.get("sealed_at"), MAX_TEXT_BYTES)?;
+        let sealed_at = match bioprism_scope::Timestamp::parse(&sealed_at_text) {
+            Ok(timestamp) => timestamp,
+            Err(error) => {
+                return Ok(refusal(
+                    "timestamp_validation",
+                    format!("sealed_at is not a valid timestamp: {error}"),
+                ))
+            }
+        };
+        let rubric = arguments
+            .get("rubric")
+            .cloned()
+            .ok_or("rubric is required and may be any JSON value")?;
+        let raw_commitments = arguments
+            .get("commitments")
+            .and_then(Value::as_array)
+            .ok_or("commitments is required and must be an array")?;
+        if raw_commitments.is_empty() || raw_commitments.len() > MAX_COMMITMENTS {
+            return Err("commitments must contain 1 to 4096 rows".into());
+        }
+        let raw_outcomes = arguments
+            .get("outcomes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if raw_outcomes.len() > MAX_OUTCOMES {
+            return Err("outcomes are bounded at 4096 rows".into());
+        }
+        let score_rubric = arguments.get("score_rubric").cloned();
+        let policy = |name: &str| -> Result<bool, String> {
+            match arguments.get(name) {
+                None => Ok(false),
+                Some(value) => value
+                    .as_bool()
+                    .ok_or_else(|| format!("{name} must be a boolean")),
+            }
+        };
+        let require_scoring = policy("require_scoring")?;
+        let require_rubric_match = policy("require_rubric_match")?;
+        let require_complete = policy("require_complete")?;
+        if require_scoring && score_rubric.is_none() {
+            return Ok(refusal(
+                "scoring_policy",
+                "require_scoring was true but score_rubric was not supplied".into(),
+            ));
+        }
+
+        let mut registration = BioevalRegistration::open(study.clone());
+        let mut commitment_ids = BTreeSet::new();
+        let mut commitment_rows = Vec::with_capacity(raw_commitments.len());
+        for (index, raw) in raw_commitments.iter().enumerate() {
+            let commitment: BioevalCommitment = match serde_json::from_value(raw.clone()) {
+                Ok(commitment) => commitment,
+                Err(error) => {
+                    return Ok(refusal(
+                        "commitment_deserialization",
+                        format!("commitments[{index}] is not a valid Commitment: {error}"),
+                    ))
+                }
+            };
+            if commitment.target.trim().is_empty()
+                || commitment.target.len() > MAX_ID_BYTES
+                || commitment.analysis_plan.trim().is_empty()
+                || commitment.analysis_plan.len() > MAX_TEXT_BYTES
+            {
+                return Ok(refusal(
+                    "commitment_validation",
+                    format!(
+                        "commitments[{index}] target and analysis_plan exceed their declared bounds"
+                    ),
+                ));
+            }
+            if !commitment_ids.insert(commitment.target.clone()) {
+                return Ok(refusal(
+                    "commitment_admission",
+                    format!("commitment {:?} appears more than once", commitment.target),
+                ));
+            }
+            if let Err(error) = registration.commit(commitment.clone()) {
+                return Ok(refusal("commitment_admission", error.to_string()));
+            }
+            commitment_rows.push(commitment);
+        }
+        let sealed = match registration.seal(&rubric, sealed_at) {
+            Ok(sealed) => sealed,
+            Err(error) => return Ok(refusal("seal", error.to_string())),
+        };
+
+        let mut outcome_ids = BTreeSet::new();
+        let mut outcomes = Vec::with_capacity(raw_outcomes.len());
+        for (index, raw) in raw_outcomes.iter().enumerate() {
+            let outcome: BioevalOutcome = match serde_json::from_value(raw.clone()) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    return Ok(refusal(
+                        "outcome_deserialization",
+                        format!("outcomes[{index}] is not a valid Outcome: {error}"),
+                    ))
+                }
+            };
+            if outcome.target.trim().is_empty() || outcome.target.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "outcome_validation",
+                    format!("outcomes[{index}].target must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            if !outcome_ids.insert(outcome.target.clone()) {
+                return Ok(refusal(
+                    "outcome_validation",
+                    format!("outcome {:?} appears more than once", outcome.target),
+                ));
+            }
+            outcomes.push(outcome);
+        }
+        let seal_lock = match sealed.commit(BioevalCommitment::new(
+            "__post-seal-probe__",
+            Value::Null,
+            "__post-seal-probe__",
+        )) {
+            Ok(()) => json!({ "status": "accepted", "refusal": Value::Null }),
+            Err(error) => json!({ "status": "refused", "refusal": error.to_string() }),
+        };
+        let sealed_at_value = json!(sealed.sealed_at());
+        let rubric_digest = sealed.rubric_digest().to_string();
+        let commitment_digest = sealed.commitment_digest().to_string();
+        let revealed = sealed.reveal(outcomes.clone());
+        let reveal_lock = match revealed.reveal(Vec::new()) {
+            Ok(()) => json!({ "status": "accepted", "refusal": Value::Null }),
+            Err(error) => json!({ "status": "refused", "refusal": error.to_string() }),
+        };
+        let (scoring_status, scoring_value, scoring_refusal, scoring_complete, unrevealed_targets) =
+            match score_rubric.as_ref() {
+                None => ("not_requested", Value::Null, Value::Null, Value::Null, Vec::new()),
+                Some(score_rubric) => match revealed.score_under(score_rubric) {
+                    Ok(scoring) => {
+                        let complete = scoring.complete();
+                        let unrevealed = scoring.unrevealed.clone();
+                        (
+                            "accepted",
+                            serde_json::to_value(scoring).expect("scoring serializes"),
+                            Value::Null,
+                            json!(complete),
+                            unrevealed,
+                        )
+                    }
+                    Err(error) => (
+                        "refused",
+                        Value::Null,
+                        json!(error.to_string()),
+                        Value::Null,
+                        Vec::new(),
+                    ),
+                },
+            };
+        if require_rubric_match && scoring_status != "accepted" {
+            return Ok(refusal(
+                "rubric_integrity_policy",
+                format!(
+                    "require_rubric_match was true but scoring was not admitted: {}",
+                    scoring_refusal.as_str().unwrap_or("scoring was not requested")
+                ),
+            ));
+        }
+        if require_complete && (scoring_status != "accepted" || scoring_complete != json!(true)) {
+            return Ok(refusal(
+                "completeness_policy",
+                "require_complete was true but the admitted scoring projection is not complete".into(),
+            ));
+        }
+        let bounded_ids = |values: BTreeSet<String>| {
+            json!({
+                "ids": values.iter().take(1000).cloned().collect::<Vec<_>>(),
+                "total": values.len(),
+                "omitted": values.len().saturating_sub(1000),
+            })
+        };
+        let commitment_projection = commitment_rows
+            .iter()
+            .take(1000)
+            .map(|commitment| {
+                json!({
+                    "target": commitment.target,
+                    "prediction": commitment.prediction,
+                    "analysis_plan": commitment.analysis_plan,
+                })
+            })
+            .collect::<Vec<_>>();
+        let outcome_projection = outcomes
+            .iter()
+            .take(1000)
+            .map(|outcome| json!({ "target": outcome.target, "observed": outcome.observed }))
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_reveal_audit",
+            "study": study,
+            "sealed_at": sealed_at_value,
+            "digests": {
+                "rubric": rubric_digest,
+                "commitments": commitment_digest,
+            },
+            "commitments": {
+                "rows": commitment_projection,
+                "returned": commitment_rows.len().min(1000),
+                "total": commitment_rows.len(),
+                "omitted": commitment_rows.len().saturating_sub(1000),
+            },
+            "outcomes": {
+                "rows": outcome_projection,
+                "returned": outcomes.len().min(1000),
+                "total": outcomes.len(),
+                "omitted": outcomes.len().saturating_sub(1000),
+            },
+            "seal_lock": seal_lock,
+            "reveal_lock": reveal_lock,
+            "scoring": {
+                "status": scoring_status,
+                "value": scoring_value,
+                "refusal": scoring_refusal,
+                "complete": scoring_complete,
+            },
+            "findings": {
+                "unrevealed_commitments": bounded_ids(unrevealed_targets.into_iter().collect()),
+                "selective_publication": scoring_status == "accepted" && scoring_complete == json!(false),
+                "rubric_match_refused": scoring_status == "refused",
+                "uncommitted_outcome_refused": scoring_refusal.as_str().is_some_and(|text| text.contains("no commitment")),
+                "seal_lock_refused": seal_lock["status"] == json!("refused"),
+                "reveal_lock_refused": reveal_lock["status"] == json!("refused"),
+            },
+            "guarantees": [
+                "the rubric and commitment set are content-addressed at seal time",
+                "outcomes are revealed only after the commitment set is frozen",
+                "a changed rubric cannot produce an admitted scoring projection",
+                "unrevealed commitments remain visible instead of disappearing from the denominator",
+                "second reveal and post-seal commitment probes are refused by the state machine",
+            ],
+            "limitations": [
+                "sealed_at is a caller assertion and not an external timestamp attestation",
+                "the route does not sign commitments or search public artifacts for prior leakage",
+                "prediction-versus-outcome correctness is left to a separate scoring contract",
+            ],
+        }))
+    }
+
     fn bioeval_plane_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-plane-audit/0.1";
         const MAX_DIMENSIONS: usize = 4_096;
@@ -25194,9 +25490,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "evaluation_and_baselines",
-            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste"],
+            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -25226,9 +25522,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluator independence", "shared-input classes", "disagreement witnesses", "abstention preservation", "nonrenewable resource accounting", "branch inheritance", "unit-safe draws", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluator independence", "shared-input classes", "disagreement witnesses", "abstention preservation", "nonrenewable resource accounting", "branch inheritance", "unit-safe draws", "prospective commitments", "rubric digest integrity", "selective publication", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -26671,6 +26967,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "require_no_wasted_nonrenewable": { "type": "boolean", "description": "Fail closed when inspected branches contain a wasted destructive nonrenewable draw." }
                 },
                 "required": ["root", "resources"]
+            }
+        }),
+        json!({
+            "name": "bioeval_reveal_audit",
+            "description": "Audit a sealed prospective bioevalx registration while preserving commitment digests, rubric immutability, one-shot reveal, uncommitted-outcome refusals, and unrevealed commitments. It certifies admissible pairing but does not invent prediction accuracy or timestamp attestation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "study": { "type": "string", "description": "Study or evaluation registration identifier." },
+                    "commitments": { "type": "array", "minItems": 1, "maxItems": 4096, "description": "Commitment values with unique target, opaque prediction, and analysis_plan." },
+                    "rubric": { "description": "JSON rubric content whose canonical digest is sealed before reveal." },
+                    "sealed_at": { "type": "string", "description": "Caller-supplied RFC-3339 seal instant; recorded, not externally attested." },
+                    "outcomes": { "type": "array", "maxItems": 4096, "description": "Optional Outcome values revealed after the commitment set is frozen." },
+                    "score_rubric": { "description": "Optional rubric presented at scoring. A digest mismatch becomes a nested refusal." },
+                    "require_scoring": { "type": "boolean", "description": "Fail closed when score_rubric is absent or scoring is refused." },
+                    "require_rubric_match": { "type": "boolean", "description": "Fail closed unless score_rubric hashes to the sealed rubric." },
+                    "require_complete": { "type": "boolean", "description": "Fail closed unless every commitment has a revealed outcome under an admitted rubric." }
+                },
+                "required": ["study", "commitments", "rubric", "sealed_at"]
             }
         }),
         json!({

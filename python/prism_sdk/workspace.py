@@ -260,6 +260,7 @@ from .bioeval_waiver import BioevalWaiverAuditArgs, BioevalWaiverAuditReport, bi
 from .bioeval_design import BioevalDesignAuditArgs, BioevalDesignAuditReport, bioeval_design_audit_report
 from .bioeval_mesh import BioevalMeshAuditArgs, BioevalMeshAuditReport, bioeval_mesh_audit_report
 from .bioeval_burden import BioevalBurdenAuditArgs, BioevalBurdenAuditReport, bioeval_burden_audit_report
+from .bioeval_reveal import BioevalRevealAuditArgs, BioevalRevealAuditReport, bioeval_reveal_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -2077,6 +2078,26 @@ class Workspace:
         """Return typed resource, draw, residual, and fork evidence."""
 
         return bioeval_burden_audit_report(self.bioeval_burden_audit(request))
+
+    def bioeval_reveal_audit(
+        self,
+        request: BioevalRevealAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit prospective commitments, seal locks, and rubric integrity."""
+
+        normalized = request if isinstance(request, BioevalRevealAuditArgs) else BioevalRevealAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioeval_reveal_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioeval_reveal_audit_report(
+        self,
+        request: BioevalRevealAuditArgs | Mapping[str, Any],
+    ) -> BioevalRevealAuditReport:
+        """Return typed prospective evaluation evidence."""
+
+        return bioeval_reveal_audit_report(self.bioeval_reveal_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4706,6 +4727,26 @@ class AsyncWorkspace:
         """Return async typed nonrenewable-resource evidence."""
 
         return bioeval_burden_audit_report(await self.bioeval_burden_audit(request))
+
+    async def bioeval_reveal_audit(
+        self,
+        request: BioevalRevealAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async prospective reveal audit with fail-closed policies."""
+
+        normalized = request if isinstance(request, BioevalRevealAuditArgs) else BioevalRevealAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioeval_reveal_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioeval_reveal_audit_report(
+        self,
+        request: BioevalRevealAuditArgs | Mapping[str, Any],
+    ) -> BioevalRevealAuditReport:
+        """Return async typed prospective reveal evidence."""
+
+        return bioeval_reveal_audit_report(await self.bioeval_reveal_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

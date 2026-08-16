@@ -1010,6 +1010,13 @@ fork feasibility, and failed-action waste. The typed layer exposes require_joint
 require_no_wasted_nonrenewable as explicit fail-closed policies without inventing prices or
 utility. See [docs/BIOEVAL_BURDEN_AUDIT.md](BIOEVAL_BURDEN_AUDIT.md).
 
+BioevalRevealCommitmentArgs, BioevalRevealOutcomeArgs, BioevalRevealAuditArgs, and
+bioeval_reveal_audit_report(...) type frozen commitment targets, opaque predictions, analysis
+plans, rubric and commitment digests, one-shot seal/reveal locks, uncommitted outcomes,
+unrevealed commitments, and selective publication. The typed layer exposes require_scoring,
+require_rubric_match, and require_complete as explicit fail-closed policies. See
+[docs/BIOEVAL_REVEAL_AUDIT.md](BIOEVAL_REVEAL_AUDIT.md).
+
 `StressProfileArgs` / `stress_profile_report(...)` and `StressReportArgs` /
 `stress_report_projection(...)` expose the biological-stress engine without pretending that a
 single robustness score is meaningful. The typed reports retain family, blueprint module, stress
