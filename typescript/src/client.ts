@@ -138,6 +138,8 @@ import type {
   BenchmarkTraceAnalysisResult,
   BenchmarkDecisionAuditArgs,
   BenchmarkDecisionAuditResult,
+  BenchmarkIntegrityAuditArgs,
+  BenchmarkIntegrityAuditResult,
   FoundationContractCheckArgs,
   FoundationContractCheckResult,
   PackCatalogueArgs,
@@ -466,6 +468,10 @@ export class ApiClient {
 
   async benchmarkDecisionAudit(args: BenchmarkDecisionAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkDecisionAuditResult>> {
     return this.callTool<BenchmarkDecisionAuditResult>("benchmark_decision_audit", args, options);
+  }
+
+  async benchmarkIntegrityAudit(args: BenchmarkIntegrityAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkIntegrityAuditResult>> {
+    return this.callTool<BenchmarkIntegrityAuditResult>("benchmark_integrity_audit", args, options);
   }
 
   async foundationContractCheck(args: FoundationContractCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FoundationContractCheckResult>> {

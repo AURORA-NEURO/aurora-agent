@@ -129,6 +129,11 @@ invent defaults:
   JSON projections; future-derived actions cannot become agent-visible, uncited claims remain
   hypotheses, and bounded omission counts survive every sync/async MCP, HTTP, and workspace
   facade.
+- `BenchmarkIntegrityAuditArgs` and `benchmark_integrity_audit_report(...)` expose portfolio-level
+  deduplication, deterministic holdouts, declared contamination probes, calibration denominators,
+  safety-veto labels, and effective diversity through the same facades. The typed report keeps
+  admissible-clean counts separate from unassessed or leaked instances, raw volume separate from
+  effective sample size, and every bounded row projection's omission count visible.
 - `FoundationContractCheckArgs` and `foundation_contract_check_report(...)` type the foundation
   declaration gate across sync MCP, async MCP, and HTTP. `FoundationContractGateReport`,
   `FoundationParentRelationReport`, `FoundationEnvelopeReport`, `FoundationWorldReport`, and

@@ -244,6 +244,7 @@ from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_c
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
+from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
@@ -2055,6 +2056,26 @@ class Workspace:
         """Return typed decision-cell, firewall, and failure-card evidence."""
 
         return benchmark_decision_audit_report(self.benchmark_decision_audit(request))
+
+    def benchmark_integrity_audit(
+        self,
+        request: BenchmarkIntegrityAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit benchmark portfolio integrity through the workspace MCP client."""
+
+        normalized = request if isinstance(request, BenchmarkIntegrityAuditArgs) else BenchmarkIntegrityAuditArgs.from_wire(request)
+        result = self.client.call_tool("benchmark_integrity_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def benchmark_integrity_audit_report(
+        self,
+        request: BenchmarkIntegrityAuditArgs | Mapping[str, Any],
+    ) -> BenchmarkIntegrityAuditReport:
+        """Return typed portfolio integrity evidence."""
+
+        return benchmark_integrity_audit_report(self.benchmark_integrity_audit(request))
 
     def foundation_contract_check(
         self,
@@ -4198,6 +4219,26 @@ class AsyncWorkspace:
         """Return typed async decision-cell evidence."""
 
         return benchmark_decision_audit_report(await self.benchmark_decision_audit(request))
+
+    async def benchmark_integrity_audit(
+        self,
+        request: BenchmarkIntegrityAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit benchmark portfolio integrity through the async workspace MCP client."""
+
+        normalized = request if isinstance(request, BenchmarkIntegrityAuditArgs) else BenchmarkIntegrityAuditArgs.from_wire(request)
+        result = await self.client.call_tool("benchmark_integrity_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def benchmark_integrity_audit_report(
+        self,
+        request: BenchmarkIntegrityAuditArgs | Mapping[str, Any],
+    ) -> BenchmarkIntegrityAuditReport:
+        """Return typed async portfolio integrity evidence."""
+
+        return benchmark_integrity_audit_report(await self.benchmark_integrity_audit(request))
 
     async def foundation_contract_check(
         self,

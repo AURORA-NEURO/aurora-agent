@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 132);
+    assert_eq!(tools.len(), 133);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(132));
-    assert_eq!(result["advertised_tool_count"], json!(132));
+    assert_eq!(result["unique_catalog_tools"], json!(133));
+    assert_eq!(result["advertised_tool_count"], json!(133));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(132));
-    assert_eq!(result["schema_quality"]["valid"], json!(132));
+    assert_eq!(result["schema_quality"]["checked"], json!(133));
+    assert_eq!(result["schema_quality"]["valid"], json!(133));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -7801,6 +7801,68 @@ fn benchmark_decision_audit_preserves_firewall_coverage_and_failure_evidence() {
     );
     assert_eq!(invalid["__isError"], json!(true));
     assert!(invalid["error"].as_str().unwrap().contains("max_items"));
+}
+
+#[test]
+fn benchmark_integrity_audit_keeps_duplicates_leaks_holdouts_and_effective_denominators_separate() {
+    let result = call(
+        &mut server(),
+        "benchmark_integrity_audit",
+        json!({
+            "instances": [
+                { "instance_id": "a", "content": { "world": "W", "sample": "A" }, "acceptable_verdicts": ["pass"], "required_witnesses": ["w"], "identifiers": ["A"] },
+                { "instance_id": "b", "content": { "world": "W", "sample": "A" }, "acceptable_verdicts": ["pass"], "required_witnesses": ["w"], "identifiers": ["A"] },
+                { "instance_id": "c", "content": { "world": "W", "sample": "B" }, "acceptable_verdicts": ["pass"], "required_witnesses": ["w"], "identifiers": ["B"] },
+                { "instance_id": "d", "content": { "world": "W2", "sample": "D" }, "acceptable_verdicts": ["pass"], "required_witnesses": ["w"], "identifiers": ["D"] },
+                { "instance_id": "e", "content": { "world": "W3", "sample": "E" }, "acceptable_verdicts": ["pass"], "required_witnesses": ["w"], "identifiers": ["E"] }
+            ],
+            "panel_runs": [
+                { "instance_id": "a", "architecture": "strong", "tier": "strong", "passed": true },
+                { "instance_id": "a", "architecture": "weak", "tier": "weak", "passed": false },
+                { "instance_id": "d", "architecture": "weak", "tier": "weak", "passed": true },
+                { "instance_id": "e", "architecture": "strong", "tier": "strong", "passed": true }
+            ],
+            "known_instances": ["a", "b", "c", "d", "e", "unmeasured"],
+            "safety_vetoes": ["e"],
+            "bench_instances": [
+                { "instance_id": "x1", "parent_digest": "p1", "mutation_family": "f1", "oracle_signature": "o1" },
+                { "instance_id": "x2", "parent_digest": "p1", "mutation_family": "f1", "oracle_signature": "o1" },
+                { "instance_id": "x3", "parent_digest": "p1", "mutation_family": "f2", "oracle_signature": "o1" },
+                { "instance_id": "x4", "parent_digest": "p2", "mutation_family": "f1", "oracle_signature": "o2" }
+            ],
+            "exposure": {
+                "a": { "published": true, "repositories": ["repo-a"], "answer_searchable": false, "first_published": "2025-01-01", "assessed": true },
+                "b": { "published": true, "repositories": ["repo-b"], "answer_searchable": true, "first_published": "2025-01-01", "assessed": true },
+                "e": { "published": false, "repositories": [], "answer_searchable": false, "first_published": null, "assessed": true }
+            },
+            "probes": {
+                "d": [{ "channel": "metadata_only", "solved": true, "note": "metadata disclosed the answer" }],
+                "e": [{ "channel": "filename_only", "solved": false, "note": "probe did not solve" }]
+            },
+            "private_share": 100,
+            "max_items": 10
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/benchmark-integrity-audit/0.1"));
+    assert_eq!(result["counts"]["instances"], json!(5));
+    assert_eq!(result["dedup"]["examined"], json!(5));
+    assert_eq!(result["dedup"]["distinct"], json!(3));
+    assert!(result["dedup"]["groups"].as_array().unwrap().len() >= 2);
+    assert_eq!(result["holdout"]["counts"]["private"], json!(5));
+    assert_eq!(result["contamination"]["counts"]["unassessed"], json!(1));
+    assert_eq!(result["contamination"]["counts"]["leaks_through_channel"], json!(1));
+    assert_eq!(result["contamination"]["admissible"], json!(1));
+    assert_eq!(result["calibration"]["unmeasured"], json!(3));
+    assert_eq!(result["calibration"]["safety_vetoes"], json!(1));
+    assert_eq!(result["effective_diversity"]["instances"], json!(4));
+    assert_eq!(result["effective_diversity"]["equivalence_classes"], json!(3));
+    assert!(result["guarantees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("semantic similarity")));
 }
 
 #[test]

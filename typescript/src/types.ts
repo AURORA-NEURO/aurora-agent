@@ -1756,6 +1756,35 @@ export interface BenchmarkDecisionAuditResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface BenchmarkIntegrityAuditArgs extends JsonObject {
+  instances: JsonObject[];
+  panel_runs?: JsonObject[];
+  bench_instances?: JsonObject[];
+  known_instances?: string[];
+  safety_vetoes?: string[];
+  exposure?: JsonObject;
+  probes?: JsonObject;
+  private_share?: number;
+  rotating_panels?: number;
+  max_items?: number;
+}
+
+export interface BenchmarkIntegrityAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/benchmark-integrity-audit/0.1";
+  instance_digest?: string;
+  counts?: { instances: number; panel_runs: number; bench_instances: number; known_instances: number; safety_vetoes: number };
+  dedup?: JsonObject;
+  holdout?: { private_share: number; rotating_panels: number; counts: JsonObject; rows: JsonObject[]; omitted: number };
+  contamination?: { counts: JsonObject; admissible: number; inadmissible: number; rows: JsonObject[]; omitted: number };
+  calibration?: JsonObject;
+  effective_diversity?: { instances: number; parents: number; families: number; signatures: number; equivalence_classes: number; inflation_ratio: number; caveat: string };
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+}
+
 export interface FoundationContractCheckArgs extends JsonObject {
   contract: JsonObject;
   parent?: JsonObject;

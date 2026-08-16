@@ -29,9 +29,15 @@ use bioprism_atlasx::{named_in_scope, ATLASX_SCHEMA_VERSION, DEFINED_HERE, NAMED
 use bioprism_backends::{Budget as InfluenceBudget, QueryRegion, RegionFactor};
 use bioprism_benchcompiler::{
     analyse as analyse_benchmark, boundaries as benchmark_boundaries,
+    assess_contamination as benchmark_assess_contamination,
+    assign_holdout as benchmark_assign_holdout, calibrate as benchmark_calibrate,
+    deduplicate as benchmark_deduplicate, effective_diversity as benchmark_effective_diversity,
     episodes as benchmark_episodes, failure_card as benchmark_failure_card,
     repetitions as benchmark_repetitions, Assertion as BenchmarkAssertion,
-    CandidateAction as BenchmarkCandidateAction, CandidateActionSet as BenchmarkCandidateActionSet,
+    BenchInstance as BenchmarkBenchInstance, CandidateAction as BenchmarkCandidateAction,
+    CandidateActionSet as BenchmarkCandidateActionSet, ContaminationRisk as BenchmarkContaminationRisk,
+    ExposureLedger as BenchmarkExposureLedger, Instance as BenchmarkInstance,
+    LeakProbe as BenchmarkLeakProbe, PanelRun as BenchmarkPanelRun,
     ConstraintRecord as BenchmarkConstraintRecord,
 };
 use bioprism_bioethics::action::{refer as refer_physical_action, ActionPlan, Authorisation};
@@ -1332,6 +1338,7 @@ impl Server {
             "epistemic_voi" => self.epistemic_voi(&arguments),
             "benchmark_trace_analyze" => self.benchmark_trace_analyze(&arguments),
             "benchmark_decision_audit" => self.benchmark_decision_audit(&arguments),
+            "benchmark_integrity_audit" => self.benchmark_integrity_audit(&arguments),
             "pack_catalogue" => self.pack_catalogue(&arguments),
             "pack_health_assess" => self.pack_health_assess(&arguments),
             "foundation_contract_check" => self.foundation_contract_check(&arguments),
@@ -8396,6 +8403,287 @@ impl Server {
                 "causal localization refuses environment-produced divergence instead of moving blame to a nearby action",
                 "uncited failure claims remain hypotheses and cannot become evidenced findings",
                 "the endpoint produces bounded review material; it does not replay tools, fork an architecture, approve an oracle, or publish a benchmark",
+            ],
+        }))
+    }
+
+    fn benchmark_integrity_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_instances = arguments
+            .get("instances")
+            .cloned()
+            .ok_or("instances is required and must be an array of benchmark Instance values")?;
+        let raw_panel_runs = arguments
+            .get("panel_runs")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let raw_bench_instances = arguments
+            .get("bench_instances")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let raw_known_instances = arguments
+            .get("known_instances")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let raw_safety_vetoes = arguments
+            .get("safety_vetoes")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let raw_exposure = arguments
+            .get("exposure")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let raw_probes = arguments
+            .get("probes")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+
+        let max_items = match arguments.get("max_items") {
+            None => 100,
+            Some(value) => value
+                .as_u64()
+                .ok_or("max_items must be a non-negative integer")?,
+        };
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let private_share = match arguments.get("private_share") {
+            None => 20,
+            Some(value) => value
+                .as_u64()
+                .ok_or("private_share must be a non-negative integer")?,
+        };
+        if private_share > 100 {
+            return Err("private_share must be between 0 and 100".into());
+        }
+        let rotating_panels = match arguments.get("rotating_panels") {
+            None => 0,
+            Some(value) => value
+                .as_u64()
+                .ok_or("rotating_panels must be a non-negative integer")?,
+        };
+        if rotating_panels > 1_000 {
+            return Err("rotating_panels must be between 0 and 1000".into());
+        }
+
+        let encoded = serde_json::to_vec(&json!({
+            "instances": raw_instances.clone(),
+            "panel_runs": raw_panel_runs.clone(),
+            "bench_instances": raw_bench_instances.clone(),
+            "known_instances": raw_known_instances.clone(),
+            "safety_vetoes": raw_safety_vetoes.clone(),
+            "exposure": raw_exposure.clone(),
+            "probes": raw_probes.clone(),
+        }))
+        .map_err(|error| format!("cannot measure benchmark integrity envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("benchmark integrity input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let instances: Vec<BenchmarkInstance> = serde_json::from_value(raw_instances)
+            .map_err(|error| format!("invalid benchmark instance: {error}"))?;
+        if instances.len() > 100_000 {
+            return Err("instances are bounded at 100000 items".into());
+        }
+        let mut instance_ids = BTreeSet::new();
+        for instance in &instances {
+            if !instance_ids.insert(instance.instance_id.clone()) {
+                return Err(format!("duplicate instance_id {:?}", instance.instance_id));
+            }
+        }
+        let panel_runs: Vec<BenchmarkPanelRun> = serde_json::from_value(raw_panel_runs)
+            .map_err(|error| format!("invalid panel run: {error}"))?;
+        if panel_runs.len() > 100_000 {
+            return Err("panel_runs are bounded at 100000 items".into());
+        }
+        let bench_instances: Vec<BenchmarkBenchInstance> = serde_json::from_value(raw_bench_instances)
+            .map_err(|error| format!("invalid effective-diversity instance: {error}"))?;
+        if bench_instances.len() > 100_000 {
+            return Err("bench_instances are bounded at 100000 items".into());
+        }
+
+        let mut known_instances: BTreeSet<String> = BTreeSet::new();
+        let known_array = raw_known_instances
+            .as_array()
+            .ok_or("known_instances must be an array of strings")?;
+        if known_array.len() > 100_000 {
+            return Err("known_instances are bounded at 100000 items".into());
+        }
+        for value in known_array {
+            let id = value
+                .as_str()
+                .ok_or("known_instances must be an array of strings")?;
+            known_instances.insert(id.to_string());
+        }
+        known_instances.extend(instance_ids.iter().cloned());
+
+        let mut safety_vetoes = BTreeSet::new();
+        let safety_array = raw_safety_vetoes
+            .as_array()
+            .ok_or("safety_vetoes must be an array of strings")?;
+        if safety_array.len() > 100_000 {
+            return Err("safety_vetoes are bounded at 100000 items".into());
+        }
+        for value in safety_array {
+            safety_vetoes.insert(
+                value
+                    .as_str()
+                    .ok_or("safety_vetoes must be an array of strings")?
+                    .to_string(),
+            );
+        }
+
+        let exposure: BTreeMap<String, BenchmarkExposureLedger> = serde_json::from_value(raw_exposure)
+            .map_err(|error| format!("invalid exposure ledger map: {error}"))?;
+        if exposure.len() > 100_000 {
+            return Err("exposure is bounded at 100000 instance entries".into());
+        }
+        let probes: BTreeMap<String, Vec<BenchmarkLeakProbe>> = serde_json::from_value(raw_probes)
+            .map_err(|error| format!("invalid contamination probe map: {error}"))?;
+        if probes.len() > 100_000 {
+            return Err("probes are bounded at 100000 instance entries".into());
+        }
+
+        let dedup = benchmark_deduplicate(&instances);
+        let dedup_group_total = dedup.groups.len();
+        let dedup_groups = dedup
+            .groups
+            .iter()
+            .take(max_items as usize)
+            .cloned()
+            .collect::<Vec<_>>();
+        let removed = dedup.removed();
+        let removed_total = removed.len();
+
+        let mut holdout_rows = Vec::with_capacity(instances.len().min(max_items as usize));
+        let mut holdout_counts: BTreeMap<String, usize> = BTreeMap::new();
+        for instance in &instances {
+            let fingerprint = bioprism_benchcompiler::content_fingerprint(instance);
+            let holdout = benchmark_assign_holdout(
+                instance,
+                private_share as u8,
+                rotating_panels as usize,
+            );
+            let label = match &holdout {
+                bioprism_benchcompiler::Holdout::Public => "public",
+                bioprism_benchcompiler::Holdout::Private => "private",
+                bioprism_benchcompiler::Holdout::Rotating { .. } => "rotating",
+            };
+            *holdout_counts.entry(label.to_string()).or_default() += 1;
+            if holdout_rows.len() < max_items as usize {
+                holdout_rows.push(json!({
+                    "instance_id": instance.instance_id,
+                    "content_fingerprint": fingerprint,
+                    "holdout": holdout,
+                }));
+            }
+        }
+
+        let mut contamination_rows = Vec::with_capacity(instances.len().min(max_items as usize));
+        let mut contamination_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut admissible = 0usize;
+        for instance in &instances {
+            let ledger = exposure
+                .get(&instance.instance_id)
+                .cloned()
+                .unwrap_or_default();
+            let ledger_provided = exposure.contains_key(&instance.instance_id);
+            let probe_rows = probes
+                .get(&instance.instance_id)
+                .cloned()
+                .unwrap_or_default();
+            let report = benchmark_assess_contamination(instance, &ledger, &probe_rows);
+            let risk_label = match &report.risk {
+                BenchmarkContaminationRisk::LeaksThroughChannel { .. } => "leaks_through_channel",
+                BenchmarkContaminationRisk::AnswerSearchable { .. } => "answer_searchable",
+                BenchmarkContaminationRisk::PublishedAndUnprobed => "published_and_unprobed",
+                BenchmarkContaminationRisk::Unassessed => "unassessed",
+                BenchmarkContaminationRisk::Clean => "clean",
+            };
+            *contamination_counts
+                .entry(risk_label.to_string())
+                .or_default() += 1;
+            if report.risk.admissible() {
+                admissible += 1;
+            }
+            if contamination_rows.len() < max_items as usize {
+                contamination_rows.push(json!({
+                    "instance_id": instance.instance_id,
+                    "ledger_provided": ledger_provided,
+                    "report": report,
+                    "admissible": report.risk.admissible(),
+                }));
+            }
+        }
+
+        let calibration = benchmark_calibrate(&panel_runs, &known_instances, &safety_vetoes);
+        let calibration_total = calibration.instances.len();
+        let calibration_instances = calibration
+            .instances
+            .iter()
+            .take(max_items as usize)
+            .cloned()
+            .collect::<Vec<_>>();
+        let diversity = benchmark_effective_diversity(&bench_instances);
+        let instance_digest = bioprism_ids::ContentHash::of_value(
+            &serde_json::to_value(&instances)
+                .map_err(|error| format!("cannot serialize instance digest input: {error}"))?,
+        )
+        .map_err(|error| format!("cannot hash benchmark instances: {error}"))?
+        .as_str()
+        .to_string();
+
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/benchmark-integrity-audit/0.1",
+            "instance_digest": instance_digest,
+            "counts": {
+                "instances": instances.len(),
+                "panel_runs": panel_runs.len(),
+                "bench_instances": bench_instances.len(),
+                "known_instances": known_instances.len(),
+                "safety_vetoes": safety_vetoes.len(),
+            },
+            "dedup": {
+                "examined": dedup.examined,
+                "distinct": dedup.distinct,
+                "groups": dedup_groups,
+                "groups_omitted": dedup_group_total.saturating_sub(max_items as usize),
+                "removed": removed.iter().take(max_items as usize).collect::<Vec<_>>(),
+                "removed_omitted": removed_total.saturating_sub(max_items as usize),
+                "caveat": dedup.caveat,
+            },
+            "holdout": {
+                "private_share": private_share,
+                "rotating_panels": rotating_panels,
+                "counts": holdout_counts,
+                "rows": holdout_rows,
+                "omitted": instances.len().saturating_sub(max_items as usize),
+            },
+            "contamination": {
+                "counts": contamination_counts,
+                "admissible": admissible,
+                "inadmissible": instances.len().saturating_sub(admissible),
+                "rows": contamination_rows,
+                "omitted": instances.len().saturating_sub(max_items as usize),
+            },
+            "calibration": {
+                "discriminating": calibration.discriminating,
+                "trivial_cue": calibration.trivial_cue,
+                "universally_passed": calibration.universally_passed,
+                "universally_failed": calibration.universally_failed,
+                "unmeasured": calibration.unmeasured,
+                "safety_vetoes": calibration.safety_vetoes,
+                "instances": calibration_instances,
+                "omitted": calibration_total.saturating_sub(max_items as usize),
+            },
+            "effective_diversity": diversity,
+            "guarantees": [
+                "content and structural deduplication exclude labels from exact fingerprints and report oracle-equivalent groups without silently deleting them",
+                "holdout assignment is deterministic from content rather than random state, so a second site can reproduce the split",
+                "contamination is assessed in declared severity order; a missing ledger is unassessed, never clean",
+                "unmeasured calibration is distinct from universal failure, and safety vetoes remain labelled rather than pruned",
+                "effective diversity counts independent (parent, mutation family, oracle signature) classes rather than raw instance volume",
+                "bounded projections carry omitted counts and this endpoint does not discover publication, run leak probes, fit difficulty models, or compute semantic similarity",
             ],
         }))
     }
@@ -18301,7 +18589,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "trajectory_and_decision_cells",
             "domains": ["JSONL trajectory ingestion", "OTLP JSON span ingestion", "semantic-loss accounting", "divergence localization", "decision segmentation", "review-gated cell proposals"],
             "crates": ["bioprism-trace", "bioprism-prism", "bioprism-benchcompiler"],
-            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit"],
+            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18317,7 +18605,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "benchmark_pack_portfolio",
             "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
             "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
-            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "mutation_family", "scale_family_split_verify"],
+            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "mutation_family", "scale_family_split_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -20046,6 +20334,26 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows retained per bounded projection; defaults to 100." }
                 },
                 "required": ["trace"]
+            }
+        }),
+        json!({
+            "name": "benchmark_integrity_audit",
+            "description": "Audit a bounded benchmark portfolio for exact and structural duplicates, oracle-equivalent review groups, deterministic public/private/rotating holdouts, declared contamination probes, unassessed exposure, panel calibration, safety vetoes, and effective diversity. Returns omission counts and explicit limits; it does not discover publication, run agents, fit a hierarchical difficulty model, or compute semantic similarity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "instances": { "type": "array", "maxItems": 100000, "description": "Serialized bioprism-benchcompiler Instance values used for exact/structural/oracle-equivalent deduplication and holdout assignment." },
+                    "panel_runs": { "type": "array", "maxItems": 100000, "description": "Optional serialized PanelRun values with instance, architecture, capability tier, and pass outcome." },
+                    "bench_instances": { "type": "array", "maxItems": 100000, "description": "Optional serialized BenchInstance values used for independent effective-diversity classes." },
+                    "known_instances": { "type": "array", "maxItems": 100000, "items": { "type": "string" }, "description": "Optional instance ids that must remain visible as unmeasured when no panel run touched them." },
+                    "safety_vetoes": { "type": "array", "maxItems": 100000, "items": { "type": "string" }, "description": "Optional ids intentionally retained as safety-veto cases even when easy." },
+                    "exposure": { "type": "object", "description": "Optional map from instance id to serialized ExposureLedger; absent entries are unassessed, not clean." },
+                    "probes": { "type": "object", "description": "Optional map from instance id to serialized LeakProbe arrays; solved probes are blocking contamination findings." },
+                    "private_share": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Deterministic hash-bucket percentage assigned to the private holdout; defaults to 20." },
+                    "rotating_panels": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "Optional number of rotating panels for non-private even hash buckets; defaults to 0." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows per bounded dedup, holdout, contamination, and calibration projection; defaults to 100." }
+                },
+                "required": ["instances"]
             }
         }),
         json!({

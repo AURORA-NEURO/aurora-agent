@@ -446,6 +446,15 @@ from .benchmark_decision import (
     BenchmarkFailureCardReport,
     benchmark_decision_audit_report,
 )
+from .benchmark_integrity import (
+    BENCHMARK_INTEGRITY_AUDIT_SCHEMA,
+    MAX_INTEGRITY_INPUT_BYTES,
+    MAX_INTEGRITY_ITEMS,
+    MAX_INTEGRITY_RECORDS,
+    BenchmarkIntegrityAuditArgs,
+    BenchmarkIntegrityAuditReport,
+    benchmark_integrity_audit_report,
+)
 from .foundation import (
     COUNTERFACTUAL_CLAIMS,
     FOUNDATION_MAX_INPUT_BYTES,
@@ -1550,6 +1559,13 @@ __all__ = [
     "BenchmarkFailureCardReport",
     "BenchmarkDecisionAuditReport",
     "benchmark_decision_audit_report",
+    "BENCHMARK_INTEGRITY_AUDIT_SCHEMA",
+    "MAX_INTEGRITY_ITEMS",
+    "MAX_INTEGRITY_RECORDS",
+    "MAX_INTEGRITY_INPUT_BYTES",
+    "BenchmarkIntegrityAuditArgs",
+    "BenchmarkIntegrityAuditReport",
+    "benchmark_integrity_audit_report",
     "FOUNDATION_MAX_INPUT_BYTES",
     "COUNTERFACTUAL_CLAIMS",
     "FOUNDATION_VERDICTS",

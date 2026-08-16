@@ -192,6 +192,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         failure_card_omitted: {},
         guarantees: ["future options are validation-only"],
       } } } });
+      if (path === "/v1/tools/benchmark_integrity_audit") return jsonResponse({ ok: true, tool: "benchmark_integrity_audit", request_id: "r20c", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/benchmark-integrity-audit/0.1",
+        instance_digest: "a".repeat(64),
+        counts: { instances: 3, panel_runs: 2, bench_instances: 3, known_instances: 3, safety_vetoes: 1 },
+        dedup: { examined: 3, distinct: 2, groups: [], groups_omitted: 0, removed: ["duplicate"], removed_omitted: 0, caveat: "no semantic similarity" },
+        holdout: { private_share: 20, rotating_panels: 0, counts: { private: 1, public: 2 }, rows: [], omitted: 3 },
+        contamination: { counts: { clean: 1, unassessed: 1, leaks_through_channel: 1 }, admissible: 1, inadmissible: 2, rows: [], omitted: 3 },
+        calibration: { discriminating: 1, trivial_cue: 0, universally_passed: 0, universally_failed: 0, unmeasured: 2, safety_vetoes: 0, instances: [], omitted: 3 },
+        effective_diversity: { instances: 3, parents: 2, families: 2, signatures: 2, equivalence_classes: 2, inflation_ratio: 1.5, caveat: "independent classes" },
+        guarantees: ["unmeasured is not zero"],
+      } } } });
       if (path === "/v1/tools/foundation_contract_check") return jsonResponse({ ok: true, tool: "foundation_contract_check", request_id: "r21", mcp: { result: { structuredContent: {
         ok: true,
         verdict: "refused",
@@ -1169,6 +1181,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(decisionAudit.mcp.result.structuredContent.schema, "bioprism-mcp/benchmark-decision-audit/0.1");
   assert.equal(decisionAudit.mcp.result.structuredContent.decision.coverage.validation_only, 1);
   assert.equal(decisionAudit.mcp.result.structuredContent.failure_card.blame.blame, "agent");
+  const integrityAudit = await client.benchmarkIntegrityAudit({
+    instances: [{ instance_id: "a", content: {}, acceptable_verdicts: [], required_witnesses: [] }],
+    private_share: 20,
+    max_items: 10,
+  });
+  assert.equal(integrityAudit.mcp.result.structuredContent.schema, "bioprism-mcp/benchmark-integrity-audit/0.1");
+  assert.equal(integrityAudit.mcp.result.structuredContent.contamination.admissible, 1);
+  assert.equal(integrityAudit.mcp.result.structuredContent.effective_diversity.equivalence_classes, 2);
   const foundation = await client.foundationContractCheck({
     contract: { id: "fbc:test:001", intent: "check", falsifiers: ["disagree"], actions: ["inspect"], claim_schema: "typed", reference_standard: "fixture", terminations: ["success"] },
     claim: "real_treatment_effect",

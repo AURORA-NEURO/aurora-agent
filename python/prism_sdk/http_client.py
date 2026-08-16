@@ -200,6 +200,7 @@ from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_c
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
+from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
@@ -802,6 +803,23 @@ class ApiClient:
         """Return typed HTTP decision-cell, firewall, and failure-card evidence."""
 
         return benchmark_decision_audit_report(self.benchmark_decision_audit(request))
+
+    def benchmark_integrity_audit(
+        self,
+        request: BenchmarkIntegrityAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit benchmark portfolio integrity through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BenchmarkIntegrityAuditArgs) else BenchmarkIntegrityAuditArgs.from_wire(request)
+        return self.call_tool("benchmark_integrity_audit", normalized.to_mcp_arguments())
+
+    def benchmark_integrity_audit_report(
+        self,
+        request: BenchmarkIntegrityAuditArgs | Mapping[str, Any],
+    ) -> BenchmarkIntegrityAuditReport:
+        """Return typed HTTP dedup, contamination, holdout, calibration, and diversity evidence."""
+
+        return benchmark_integrity_audit_report(self.benchmark_integrity_audit(request))
 
     def foundation_contract_check(
         self,
@@ -2951,6 +2969,23 @@ class AsyncApiClient:
         """Return typed async HTTP decision-cell evidence."""
 
         return benchmark_decision_audit_report(await self.benchmark_decision_audit(request))
+
+    async def benchmark_integrity_audit(
+        self,
+        request: BenchmarkIntegrityAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit benchmark portfolio integrity through the async HTTP gateway."""
+
+        normalized = request if isinstance(request, BenchmarkIntegrityAuditArgs) else BenchmarkIntegrityAuditArgs.from_wire(request)
+        return await self.call_tool("benchmark_integrity_audit", normalized.to_mcp_arguments())
+
+    async def benchmark_integrity_audit_report(
+        self,
+        request: BenchmarkIntegrityAuditArgs | Mapping[str, Any],
+    ) -> BenchmarkIntegrityAuditReport:
+        """Return typed async HTTP benchmark integrity evidence."""
+
+        return benchmark_integrity_audit_report(await self.benchmark_integrity_audit(request))
 
     async def foundation_contract_check(
         self,

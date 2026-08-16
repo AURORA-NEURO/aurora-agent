@@ -198,6 +198,11 @@ step, including causal alignment, recorded and caller-supplied action projection
 agent-visible versus future validation options, coverage counts, input digests, and the typed
 failure-card projection. Future provenance, environment divergences, uncited claims, bounded
 omissions, and the no-replay/no-approval boundary remain explicit in the result.
+`benchmarkIntegrityAudit` returns `BenchmarkIntegrityAuditResult` for corpus-level deduplication,
+deterministic holdout assignment, declared contamination, panel calibration, and effective
+diversity. It preserves clean-versus-unassessed/leaking counts, raw-versus-effective denominators,
+and bounded omission metadata without implying semantic deduplication, execution, or release
+readiness.
 `foundationContractCheck` returns typed `FoundationContractCheckResult` evidence with separate
 contract, parent-refinement, applicability/maturity, world-class, and transition-plane gates. A
 top-level `ok` transport result does not imply admission: callers must inspect the explicit
