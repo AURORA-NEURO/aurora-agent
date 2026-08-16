@@ -53,6 +53,8 @@ if (result.mcp.result?.isError) {
   not-runnable reasons, and the distinct passed/failed/indeterminate verdict structure.
 - `atlasReport` returns typed measured entries, explicit holes and coverage debt, family/depth
   evidence, inconsistency rows, bounded omissions, and fail-closed composite eligibility.
+- `adaptivePanel` returns typed clustered audit totals, coverage shortfalls, stopping and estimate
+  evidence, deterministic candidate selection, comparisons, and refusal states.
 - `ledgerIngest` keeps recorded, duplicate, and quarantined admission unions, causal releases,
   chain/clock evidence, temporal cuts, and digest-only latest-by-subject projections typed without
   turning the Fetch client into a durable event store.

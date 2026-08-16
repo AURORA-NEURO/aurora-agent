@@ -260,6 +260,7 @@ from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledge
 from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
 from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
 from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
+from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .tooling import ToolCallPlan, ToolCatalogue
 
 
@@ -2213,6 +2214,17 @@ class ApiClient:
         """Return typed atlas coverage, debt, and composite evidence through HTTP."""
 
         return atlas_report_parser(self.atlas_report(request))
+
+    def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit and query a serialized adaptive panel through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AdaptivePanelRunArgs) else AdaptivePanelRunArgs.from_wire(request)
+        return self.call_tool("adaptive_panel", normalized.to_mcp_arguments())
+
+    def adaptive_panel_report(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> AdaptivePanelReport:
+        """Return typed adaptive audit and selection evidence through HTTP."""
+
+        return adaptive_panel_report(self.adaptive_panel(request))
 
     def fiber_compile(
         self,
@@ -4200,6 +4212,17 @@ class AsyncApiClient:
         """Return async typed atlas coverage, debt, and composite evidence."""
 
         return atlas_report_parser(await self.atlas_report(request))
+
+    async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async adaptive panel audit through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AdaptivePanelRunArgs) else AdaptivePanelRunArgs.from_wire(request)
+        return await self.call_tool("adaptive_panel", normalized.to_mcp_arguments())
+
+    async def adaptive_panel_report(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> AdaptivePanelReport:
+        """Return async typed adaptive audit and selection evidence through HTTP."""
+
+        return adaptive_panel_report(await self.adaptive_panel(request))
 
     async def fiber_compile(
         self,

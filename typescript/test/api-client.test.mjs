@@ -464,6 +464,20 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["unmeasured capabilities remain holes and are never rendered as zero"],
         limitations: ["the atlas indexes caller-supplied evidence; it does not run trials"],
       } } } });
+      if (path === "/v1/tools/adaptive_panel") return jsonResponse({ ok: true, tool: "adaptive_panel", request_id: "r15d", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/adaptive-panel/0.1",
+        audit: { trials: 0, scored_trials: 0, abstentions: 0, total_cost: 0, capabilities: [], caveat: "clustered evidence caveat" },
+        audit_summary: { trials: 0, scored_trials: 0, abstentions: 0, total_cost: 0, capabilities: 0, reported: 0, withheld: 0, effective_trials: 0, headline: "empty" },
+        audit_digest: null,
+        selection: { ok: true, value: { mode: "next", record: { chosen: { instance: "inst-1", capability: "capability-a", parent: "parent-1", score: 0.5, expected_variance_reduction: 0.1, independence_weight: 1, cost: 1, parent_trials_before: 0 }, eligible: 1, already_run: 0, coverage_gated_out: 0, gated_by: null, runners_up: [], icc_used: 0.5, icc_source: "assumed", caveat: "greedy" } } },
+        capability: { capability: "capability-a", coverage: { capability: "capability-a", trials: 0, parents: 0, qualifying_parents: 0, abstentions: 0, shortfalls: [{ kind: "trials", have: 0, need: 30 }] }, stopping: null, stopping_refusal: "no recorded trials", estimate: null, estimate_refusal: "no recorded trials", fail_closed: true },
+        comparison: null,
+        finished: false,
+        finished_refusal: null,
+        guarantees: ["abstentions are retained and costed but never counted as failures"],
+        limitations: ["selection never executes candidates"],
+      } } } });
       if (path === "/v1/tools/trace_otel_ingest") return jsonResponse({ ok: true, tool: "trace_otel_ingest", request_id: "r16", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/trace-otel-ingest/0.1",
@@ -856,6 +870,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     gate: { name: "release-gate", checks: { age_range: { InRange: { column: "age", min: 0, max: 120 } } } },
   });
   const atlas = await client.atlasReport({ atlas: { ontology: {}, cells: {}, failures: [] }, max_items: 10 });
+  const adaptive = await client.adaptivePanel({ panel: { config: {}, ledger: {} }, candidates: [{ instance: "inst-1", capability: "capability-a", parent: "parent-1", cost: 1 }], capability: "capability-a" });
   const otel = await client.traceOtelIngest({ trace_id: "otel-ts", otlp_json: '{"resourceSpans":[]}', include_events: true });
   assert.equal(catalog.mcp.result.structuredContent.workflow, "repository_catalog");
   assert.equal(bundle.mcp.result.structuredContent.policy, "exhaustive");
@@ -872,6 +887,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(atlas.mcp.result.structuredContent.schema, "bioprism-mcp/atlas-report/0.1");
   assert.equal(atlas.mcp.result.structuredContent.holes[0].reason, "not_attempted");
   assert.equal(atlas.mcp.result.structuredContent.composite.fail_closed, true);
+  assert.equal(adaptive.mcp.result.structuredContent.schema, "bioprism-mcp/adaptive-panel/0.1");
+  assert.equal(adaptive.mcp.result.structuredContent.selection.value.record.chosen.instance, "inst-1");
+  assert.equal(adaptive.mcp.result.structuredContent.capability.estimate, null);
   assert.equal(otel.mcp.result.structuredContent.schema, "bioprism-mcp/trace-otel-ingest/0.1");
   assert.equal(otel.mcp.result.structuredContent.mapping.accepted_span_count, 1);
   assert.equal(otel.mcp.result.structuredContent.events[0].kind, "goal");

@@ -85,6 +85,9 @@ Convenience methods currently cover:
 - `atlasReport`: typed capability coverage, measured-entry depth, hole/influence records, family
   and divergence histograms, coverage debt, internal inconsistencies, and eligible-versus-refused
   composite results with omission counts kept in the REST/MCP envelope;
+- `adaptivePanel`: typed panel audit totals, parent-aware coverage shortfalls, stopping verdicts,
+  reportable estimates with naive/clustered intervals, deterministic selection records, optional
+  capability/comparison projections, and explicit refusal/finished states;
 - `metricsProfileAudit` and `metricsAnalyticsAudit`: missingness-aware capability profiles plus
   bounded scalar, paired-contrast, cost/latency, replicate, and calibration analytics;
 - `telemetryProject`: canonical-event redaction with a typed `TelemetryProjectionResult`; its

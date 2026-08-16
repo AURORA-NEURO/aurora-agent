@@ -252,6 +252,12 @@ invent defaults:
   measured-versus-unmeasured holes, claim-blocking influence, dark families, coverage debt,
   failure inconsistencies, bounded histograms, and eligible-versus-refused composites. Omitted
   rows reconcile to authoritative totals, and no hole is converted into a numeric zero.
+- `AdaptivePanelRunArgs` and `adaptive_panel_report(...)` expose the serialized adaptive panel
+  across sync/async MCP and HTTP. The report keeps raw/scored/abstained audit totals, parent-aware
+  coverage shortfalls, stopping reasons, naive and clustered intervals, inflation, optional
+  bootstrap evidence, withheld estimates, deterministic selection records, capability views,
+  comparison refusals, and finished-state refusals. It never treats dispatch or a withheld estimate
+  as evidence.
 - `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,

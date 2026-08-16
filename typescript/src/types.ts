@@ -760,6 +760,170 @@ export interface AtlasReportResult extends JsonObject {
   limitations: string[];
 }
 
+export interface AdaptivePanelRunArgs extends JsonObject {
+  panel: JsonObject;
+  candidates?: JsonObject[];
+  batch_size?: number;
+  capability?: string;
+  left?: string;
+  right?: string;
+  max_items?: number;
+}
+
+export interface AdaptiveIntervalResult extends JsonObject {
+  lo: number;
+  hi: number;
+  credibility: number;
+}
+
+export interface AdaptiveShortfallResult extends JsonObject {
+  kind: string;
+  have?: number;
+  need?: number;
+  parent?: string;
+  share?: number;
+  cap?: number;
+}
+
+export interface AdaptiveCoverageResult extends JsonObject {
+  capability: string;
+  trials: number;
+  parents: number;
+  qualifying_parents: number;
+  abstentions: number;
+  shortfalls: AdaptiveShortfallResult[];
+}
+
+export interface AdaptiveIccResult extends JsonObject {
+  kind: string;
+  rho?: number;
+  raw?: number;
+  assumed?: number;
+  reason?: string;
+}
+
+export interface AdaptiveBetaPosteriorResult extends JsonObject {
+  alpha: number;
+  beta: number;
+}
+
+export interface AdaptiveEstimateResult extends JsonObject {
+  capability: string;
+  trials: number;
+  successes: number;
+  abstentions: number;
+  parents: number;
+  posterior_mean: number;
+  icc: AdaptiveIccResult;
+  design_effect: number;
+  effective_trials: number;
+  naive_posterior: AdaptiveBetaPosteriorResult;
+  clustered_posterior: AdaptiveBetaPosteriorResult;
+  naive_interval: AdaptiveIntervalResult;
+  clustered_interval: AdaptiveIntervalResult;
+  bootstrap_interval?: AdaptiveIntervalResult | null;
+  inflation: number;
+  caveat: string;
+}
+
+export interface AdaptiveStoppingResult extends JsonObject {
+  capability: string;
+  reason: string;
+  stop: boolean;
+  conclusive: boolean;
+  trials: number;
+  effective_trials: number;
+  design_effect: number;
+  remaining_budget: number;
+  interval: AdaptiveIntervalResult;
+  best_case_width: number;
+  detail: string;
+}
+
+export interface AdaptiveCapabilityAuditResult extends JsonObject {
+  capability: string;
+  cost: number;
+  coverage: AdaptiveCoverageResult;
+  stopping: AdaptiveStoppingResult;
+  estimate: AdaptiveEstimateResult | null;
+  withheld?: string | null;
+}
+
+export interface AdaptivePanelAuditResult extends JsonObject {
+  trials: number;
+  scored_trials: number;
+  abstentions: number;
+  total_cost: number;
+  capabilities: AdaptiveCapabilityAuditResult[];
+  caveat: string;
+}
+
+export interface AdaptiveScoredCandidateResult extends JsonObject {
+  instance: string;
+  capability: string;
+  parent: string;
+  score: number;
+  expected_variance_reduction: number;
+  independence_weight: number;
+  cost: number;
+  parent_trials_before: number;
+}
+
+export interface AdaptiveSelectionRecordResult extends JsonObject {
+  chosen: AdaptiveScoredCandidateResult;
+  eligible: number;
+  already_run: number;
+  coverage_gated_out: number;
+  gated_by?: JsonObject | null;
+  runners_up: AdaptiveScoredCandidateResult[];
+  icc_used: number;
+  icc_source: string;
+  caveat: string;
+}
+
+export type AdaptiveSelectionResult =
+  | { ok: true; value: { mode: "next"; record: AdaptiveSelectionRecordResult } }
+  | { ok: true; value: { mode: "batch"; records: AdaptiveSelectionRecordResult[]; omitted: number } }
+  | { ok: false; refusal: string; fail_closed: true };
+
+export interface AdaptiveCapabilityViewResult extends JsonObject {
+  capability: string;
+  coverage: AdaptiveCoverageResult;
+  stopping: AdaptiveStoppingResult | null;
+  stopping_refusal?: string | null;
+  estimate: AdaptiveEstimateResult | null;
+  estimate_refusal?: string | null;
+  fail_closed: boolean;
+}
+
+export interface AdaptiveComparisonResult extends JsonObject {
+  left: string;
+  right: string;
+  left_mean: number;
+  right_mean: number;
+  left_effective_trials: number;
+  right_effective_trials: number;
+  probability_left_exceeds_right: number;
+  naive_probability_left_exceeds_right: number;
+  intervals_disjoint: boolean;
+  caveat: string;
+}
+
+export interface AdaptivePanelResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-mcp/adaptive-panel/0.1";
+  audit: AdaptivePanelAuditResult;
+  audit_summary: JsonObject;
+  audit_digest?: string | null;
+  selection: AdaptiveSelectionResult | null;
+  capability: AdaptiveCapabilityViewResult | null;
+  comparison: { ok: true; value: AdaptiveComparisonResult } | { ok: false; refusal: string; fail_closed: true } | null;
+  finished?: boolean | null;
+  finished_refusal?: string | null;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface MetricsProfileAuditArgs extends JsonObject {
   vectors: JsonValue[];
   waived_dimensions?: string[];

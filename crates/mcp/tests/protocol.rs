@@ -4740,6 +4740,7 @@ fn adaptive_panel_preserves_clustered_audit_and_selection_refusals() {
     );
 
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/adaptive-panel/0.1"));
     assert_eq!(result["audit_summary"]["trials"], json!(0));
     assert_eq!(result["selection"]["ok"], json!(true));
     assert_eq!(

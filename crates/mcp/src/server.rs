@@ -8762,6 +8762,7 @@ impl Server {
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/adaptive-panel/0.1",
             "audit": audit,
             "audit_summary": audit_summary,
             "audit_digest": audit_digest,

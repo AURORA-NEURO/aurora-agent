@@ -543,7 +543,9 @@ unrecomputed, and provenance-limited entries explicit; it does not claim public-
 blinding, and unresolved splits. `oracle_missingness` checks missingness informativeness,
 complete-case admissibility, and small-cell egress under an explicit caller policy.
 `adaptive_panel` audits clustered evaluation evidence, selects the next bounded candidate batch,
-and refuses reportable estimates below coverage or stopping floors. `posterior_gate` keeps
+and refuses reportable estimates below coverage or stopping floors; the Python and TypeScript SDKs
+preserve audit totals, coverage shortfalls, withheld estimates, clustered-versus-naive intervals,
+selection records, and comparison refusals. `posterior_gate` keeps
 capability-level posterior vectors separate from rationale-bearing release scalars, coverage
 floors, vetoes, and sensitivity. `oracle_combine` combines tiered judgements without majority
 voting, retaining underdetermination, suppressed overrides, inadmissible evidence, and

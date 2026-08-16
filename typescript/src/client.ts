@@ -201,6 +201,8 @@ import type {
   QualityGateRunResult,
   AtlasReportArgs,
   AtlasReportResult,
+  AdaptivePanelRunArgs,
+  AdaptivePanelResult,
   ToolCallPlan,
   ToolArguments,
   ToolsResponse,
@@ -406,6 +408,10 @@ export class ApiClient {
 
   async atlasReport(args: AtlasReportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AtlasReportResult>> {
     return this.callTool<AtlasReportResult>("atlas_report", args, options);
+  }
+
+  async adaptivePanel(args: AdaptivePanelRunArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptivePanelResult>> {
+    return this.callTool<AdaptivePanelResult>("adaptive_panel", args, options);
   }
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {
