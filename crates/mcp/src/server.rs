@@ -8522,6 +8522,7 @@ impl Server {
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/atlas-report/0.1",
             "ontology_version": report.ontology_version.as_str(),
             "summary": {
                 "measured": report.measured.len(),

@@ -532,7 +532,9 @@ cues, ranks discriminating evidence, and keeps resolved, not-yet-examined, and u
 distinct without choosing a correct modality.
 `lab_plan` orders caller-declared evidence acquisitions against dependency-aware obligations,
 privacy boundaries, and budget stop rules, while `atlas_report` preserves capability coverage debt,
-failure inconsistencies, measured-versus-unmeasured holes, and optional gated composites.
+failure inconsistencies, measured-versus-unmeasured holes, and optional gated composites; the
+Python and TypeScript SDKs keep hole omission, evidence depth, family darkness, and composite
+refusals visible without rendering unmeasured capabilities as zero.
 `ops_acceptance` reports typed operational acceptance findings without turning unverifiable criteria
 into passes. `ops_capacity` projects qualified work and demand, refusing unbounded work or silent
 degradation. `bundle_verify` recomputes carried result-bundle content and keeps referenced,

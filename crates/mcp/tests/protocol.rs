@@ -5129,6 +5129,7 @@ fn atlas_report_preserves_holes_and_gates_composites() {
     );
 
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/atlas-report/0.1"));
     assert_eq!(result["summary"]["measured"], json!(1));
     assert_eq!(result["summary"]["holes"], json!(2));
     assert_eq!(result["composite"]["ok"], json!(false));

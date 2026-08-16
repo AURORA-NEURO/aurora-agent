@@ -247,6 +247,11 @@ invent defaults:
   row/column witnesses, all four not-runnable reasons, check-level outcomes, and the three-way
   passed/failed/indeterminate verdict with failed and obstructed check names separate. A Python
   `passed` value is never a score and never includes an indeterminate run.
+- `AtlasReportArgs` and `atlas_report_typed(...)` expose `atlas_report` across sync/async MCP and
+  HTTP. The typed projection keeps measured scores attached to depth/effective evidence,
+  measured-versus-unmeasured holes, claim-blocking influence, dark families, coverage debt,
+  failure inconsistencies, bounded histograms, and eligible-versus-refused composites. Omitted
+  rows reconcile to authoritative totals, and no hole is converted into a numeric zero.
 - `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,

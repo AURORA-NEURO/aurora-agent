@@ -82,6 +82,9 @@ Convenience methods currently cover:
   outcome and verdict unions. `Pass` keeps examined counts, `Fail` keeps a concrete witness,
   `NotRunnable` keeps missing-column/null-only/type/reference reasons, and `Failed` retains its
   separate `not_runnable` set; the client never promotes an indeterminate run to pass;
+- `atlasReport`: typed capability coverage, measured-entry depth, hole/influence records, family
+  and divergence histograms, coverage debt, internal inconsistencies, and eligible-versus-refused
+  composite results with omission counts kept in the REST/MCP envelope;
 - `metricsProfileAudit` and `metricsAnalyticsAudit`: missingness-aware capability profiles plus
   bounded scalar, paired-contrast, cost/latency, replicate, and calibration analytics;
 - `telemetryProject`: canonical-event redaction with a typed `TelemetryProjectionResult`; its

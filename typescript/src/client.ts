@@ -199,6 +199,8 @@ import type {
   LedgerIngestResult,
   QualityGateRunArgs,
   QualityGateRunResult,
+  AtlasReportArgs,
+  AtlasReportResult,
   ToolCallPlan,
   ToolArguments,
   ToolsResponse,
@@ -400,6 +402,10 @@ export class ApiClient {
 
   async qualityGateRun(args: QualityGateRunArgs, options?: ClientRequestOptions): Promise<RestToolResponse<QualityGateRunResult>> {
     return this.callTool<QualityGateRunResult>("quality_gate_run", args, options);
+  }
+
+  async atlasReport(args: AtlasReportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AtlasReportResult>> {
+    return this.callTool<AtlasReportResult>("atlas_report", args, options);
   }
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {

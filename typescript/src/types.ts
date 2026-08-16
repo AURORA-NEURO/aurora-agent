@@ -659,6 +659,107 @@ export interface QualityGateRunResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface AtlasReportArgs extends JsonObject {
+  atlas: JsonObject;
+  weighting?: JsonObject;
+  max_items?: number;
+}
+
+export interface AtlasMeasuredEntryResult extends JsonObject {
+  capability: string;
+  family: string;
+  score: number;
+  depth: string;
+  evaluable: number;
+  excluded: number;
+  effective_size: number;
+  generated_instances: number;
+  permitted_claim: string;
+}
+
+export interface AtlasHoleResult extends JsonObject {
+  capability: string;
+  family: string;
+  reason: string;
+  influence: string;
+  aggregate: boolean;
+  blocks_claims_for: string[];
+}
+
+export interface AtlasFamilyCoverageResult extends JsonObject {
+  family: string;
+  total: number;
+  measured: number;
+  holes: number;
+}
+
+export interface AtlasHistogramEntryResult extends JsonObject {
+  depth?: string;
+  stage?: string;
+  count: number;
+}
+
+export interface AtlasCoverageDebtResult extends JsonObject {
+  total_capabilities: number;
+  measured: number;
+  unmeasured: number;
+  closed_by_declaration: number;
+  dark_families: string[];
+  unclassified_failures: number;
+  undiagnosed_failures: number;
+}
+
+export interface AtlasInconsistencyResult extends JsonObject {
+  kind: string;
+  capability?: string;
+  failure_id?: string;
+  failures_recorded?: number;
+  failed_trials?: number;
+}
+
+export interface AtlasCompositeValueResult extends JsonObject {
+  intended_use: string;
+  value: number;
+  weighted_capabilities: number;
+  tier: string;
+}
+
+export type AtlasCompositeResult =
+  | null
+  | { ok: true; value: AtlasCompositeValueResult }
+  | { ok: false; refusal: string; fail_closed: true; guarantee?: string };
+
+export interface AtlasSummaryResult extends JsonObject {
+  measured: number;
+  holes: number;
+  families: number;
+  inconsistencies: number;
+  coverage_debt_ratio: number;
+  has_holes: boolean;
+  coverage_supports_aggregation: boolean;
+}
+
+export interface AtlasReportResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-mcp/atlas-report/0.1";
+  ontology_version: string;
+  summary: AtlasSummaryResult;
+  debt: AtlasCoverageDebtResult;
+  measured: AtlasMeasuredEntryResult[];
+  omitted_measured: number;
+  holes: AtlasHoleResult[];
+  omitted_holes: number;
+  family_coverage: AtlasFamilyCoverageResult[];
+  omitted_families: number;
+  depth_histogram: AtlasHistogramEntryResult[];
+  stage_histogram: AtlasHistogramEntryResult[];
+  inconsistencies: AtlasInconsistencyResult[];
+  omitted_inconsistencies: number;
+  composite: AtlasCompositeResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface MetricsProfileAuditArgs extends JsonObject {
   vectors: JsonValue[];
   waived_dimensions?: string[];

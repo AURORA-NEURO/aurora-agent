@@ -444,6 +444,26 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         },
         guarantees: ["pass requires every named check to run and hold", "failed checks carry a concrete row and expected value witness"],
       } } } });
+      if (path === "/v1/tools/atlas_report") return jsonResponse({ ok: true, tool: "atlas_report", request_id: "r15c", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/atlas-report/0.1",
+        ontology_version: "atlas-test/1",
+        summary: { measured: 1, holes: 2, families: 3, inconsistencies: 0, coverage_debt_ratio: 0.667, has_holes: true, coverage_supports_aggregation: false },
+        debt: { total_capabilities: 3, measured: 1, unmeasured: 2, closed_by_declaration: 0, dark_families: ["tool_use"], unclassified_failures: 0, undiagnosed_failures: 0 },
+        measured: [{ capability: "measured", family: "verification", score: 1, depth: "single", evaluable: 1, excluded: 0, effective_size: 1, generated_instances: 0, permitted_claim: "unit_conformance" }],
+        omitted_measured: 0,
+        holes: [{ capability: "unmeasured", family: "tool_use", reason: "not_attempted", influence: "unknown", aggregate: false, blocks_claims_for: ["agent"] }, { capability: "agent", family: "domain_reasoning", reason: "not_attempted", influence: "unknown", aggregate: true, blocks_claims_for: [] }],
+        omitted_holes: 0,
+        family_coverage: [{ family: "domain_reasoning", total: 1, measured: 0, holes: 1 }, { family: "tool_use", total: 1, measured: 0, holes: 1 }, { family: "verification", total: 1, measured: 1, holes: 0 }],
+        omitted_families: 0,
+        depth_histogram: [{ depth: "single", count: 1 }],
+        stage_histogram: [],
+        inconsistencies: [],
+        omitted_inconsistencies: 0,
+        composite: { ok: false, refusal: "unmeasured capability", fail_closed: true },
+        guarantees: ["unmeasured capabilities remain holes and are never rendered as zero"],
+        limitations: ["the atlas indexes caller-supplied evidence; it does not run trials"],
+      } } } });
       if (path === "/v1/tools/trace_otel_ingest") return jsonResponse({ ok: true, tool: "trace_otel_ingest", request_id: "r16", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/trace-otel-ingest/0.1",
@@ -835,6 +855,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     dataset: { name: "release-quality", columns: { age: [41, 42], subject: ["s-1", "s-1"] }, rows: 2 },
     gate: { name: "release-gate", checks: { age_range: { InRange: { column: "age", min: 0, max: 120 } } } },
   });
+  const atlas = await client.atlasReport({ atlas: { ontology: {}, cells: {}, failures: [] }, max_items: 10 });
   const otel = await client.traceOtelIngest({ trace_id: "otel-ts", otlp_json: '{"resourceSpans":[]}', include_events: true });
   assert.equal(catalog.mcp.result.structuredContent.workflow, "repository_catalog");
   assert.equal(bundle.mcp.result.structuredContent.policy, "exhaustive");
@@ -848,6 +869,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(quality.mcp.result.structuredContent.schema, "bioprism-mcp/quality-gate/0.1");
   assert.equal(quality.mcp.result.structuredContent.report.outcomes.subject_unique.Fail.witness.row, 1);
   assert.equal(quality.mcp.result.structuredContent.report.outcomes.foreign_site.NotRunnable.reason.MissingReferenceSet.reference, "sites");
+  assert.equal(atlas.mcp.result.structuredContent.schema, "bioprism-mcp/atlas-report/0.1");
+  assert.equal(atlas.mcp.result.structuredContent.holes[0].reason, "not_attempted");
+  assert.equal(atlas.mcp.result.structuredContent.composite.fail_closed, true);
   assert.equal(otel.mcp.result.structuredContent.schema, "bioprism-mcp/trace-otel-ingest/0.1");
   assert.equal(otel.mcp.result.structuredContent.mapping.accepted_span_count, 1);
   assert.equal(otel.mcp.result.structuredContent.events[0].kind, "goal");

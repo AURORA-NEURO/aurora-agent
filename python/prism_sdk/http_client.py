@@ -259,6 +259,7 @@ from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry
 from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledger_ingest_report
 from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
 from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
+from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
 from .tooling import ToolCallPlan, ToolCatalogue
 
 
@@ -2201,6 +2202,17 @@ class ApiClient:
         """Return typed quality verdicts, witnesses, and run obstructions through HTTP."""
 
         return quality_gate_run_report(self.quality_gate_run(request))
+
+    def atlas_report(self, request: AtlasReportArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Run bounded capability-atlas reporting through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AtlasReportArgs) else AtlasReportArgs.from_wire(request)
+        return self.call_tool("atlas_report", normalized.to_mcp_arguments())
+
+    def atlas_report_typed(self, request: AtlasReportArgs | Mapping[str, Any]) -> AtlasReport:
+        """Return typed atlas coverage, debt, and composite evidence through HTTP."""
+
+        return atlas_report_parser(self.atlas_report(request))
 
     def fiber_compile(
         self,
@@ -4177,6 +4189,17 @@ class AsyncApiClient:
         """Return async typed quality evidence through HTTP."""
 
         return quality_gate_run_report(await self.quality_gate_run(request))
+
+    async def atlas_report(self, request: AtlasReportArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async bounded capability-atlas reporting through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AtlasReportArgs) else AtlasReportArgs.from_wire(request)
+        return await self.call_tool("atlas_report", normalized.to_mcp_arguments())
+
+    async def atlas_report_typed(self, request: AtlasReportArgs | Mapping[str, Any]) -> AtlasReport:
+        """Return async typed atlas coverage, debt, and composite evidence."""
+
+        return atlas_report_parser(await self.atlas_report(request))
 
     async def fiber_compile(
         self,

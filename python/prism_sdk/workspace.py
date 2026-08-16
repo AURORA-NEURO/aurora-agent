@@ -76,6 +76,7 @@ from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry
 from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledger_ingest_report
 from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
 from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
+from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
 from .tooling import ToolCallPlan, ToolCatalogue
 from .oracle import (
     EvidenceTier,
@@ -2246,6 +2247,18 @@ class Workspace:
         normalized = request if isinstance(request, QualityGateRunArgs) else QualityGateRunArgs.from_wire(request)
         return quality_gate_run_report(self.tool("quality_gate_run", normalized.to_mcp_arguments()))
 
+    def atlas_report(self, request: AtlasReportArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Run bounded capability-atlas coverage reporting through MCP."""
+
+        normalized = request if isinstance(request, AtlasReportArgs) else AtlasReportArgs.from_wire(request)
+        return self.tool("atlas_report", normalized.to_mcp_arguments())
+
+    def atlas_report_typed(self, request: AtlasReportArgs | Mapping[str, Any]) -> AtlasReport:
+        """Return typed coverage debt, holes, histograms, and composite evidence."""
+
+        normalized = request if isinstance(request, AtlasReportArgs) else AtlasReportArgs.from_wire(request)
+        return atlas_report_parser(self.tool("atlas_report", normalized.to_mcp_arguments()))
+
 
 class AsyncWorkspace:
     """Async convenience facade mirroring :class:`Workspace`."""
@@ -4199,6 +4212,18 @@ class AsyncWorkspace:
 
         normalized = request if isinstance(request, QualityGateRunArgs) else QualityGateRunArgs.from_wire(request)
         return quality_gate_run_report((await self.client.call_tool("quality_gate_run", normalized.to_mcp_arguments())).require_ok())
+
+    async def atlas_report(self, request: AtlasReportArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.atlas_report`."""
+
+        normalized = request if isinstance(request, AtlasReportArgs) else AtlasReportArgs.from_wire(request)
+        return (await self.client.call_tool("atlas_report", normalized.to_mcp_arguments())).require_ok()
+
+    async def atlas_report_typed(self, request: AtlasReportArgs | Mapping[str, Any]) -> AtlasReport:
+        """Async counterpart to :meth:`Workspace.atlas_report_typed`."""
+
+        normalized = request if isinstance(request, AtlasReportArgs) else AtlasReportArgs.from_wire(request)
+        return atlas_report_parser((await self.client.call_tool("atlas_report", normalized.to_mcp_arguments())).require_ok())
 
 
 def _developer_delivery_arguments(kwargs: Mapping[str, Any]) -> dict[str, Any]:

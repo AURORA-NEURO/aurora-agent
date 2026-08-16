@@ -51,6 +51,8 @@ if (result.mcp.result?.isError) {
   ledger, and compilation-readiness state; it never implies OTLP export or collector connectivity.
 - `qualityGateRun` returns typed serialized quality check unions, concrete failure witnesses,
   not-runnable reasons, and the distinct passed/failed/indeterminate verdict structure.
+- `atlasReport` returns typed measured entries, explicit holes and coverage debt, family/depth
+  evidence, inconsistency rows, bounded omissions, and fail-closed composite eligibility.
 - `ledgerIngest` keeps recorded, duplicate, and quarantined admission unions, causal releases,
   chain/clock evidence, temporal cuts, and digest-only latest-by-subject projections typed without
   turning the Fetch client into a durable event store.
