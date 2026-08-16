@@ -2662,3 +2662,43 @@ test("client exposes bioeval acquisition stopping and named regret evidence", as
   assert.equal(result.mcp.result.structuredContent.status, "admissible");
   assert.equal(result.mcp.result.structuredContent.regret.like_for_like, true);
 });
+
+test("client exposes bioeval grounding state, locator, and staleness evidence", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_grounding_audit");
+      return jsonResponse({ ok: true, tool: "bioeval_grounding_audit", request_id: "grounding-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-grounding-audit/0.1",
+        workflow: "bioeval_grounding_audit",
+        claims: { rows: [], returned: 0, total: 2, omitted: 0 },
+        evidence: { rows: [], returned: 0, total: 2, omitted: 0 },
+        edges: { rows: [], returned: 0, total: 3, omitted: 0 },
+        census: { claims: 2, supported: 1, contested: 1, fully_grounded: false },
+        graph: { claim_count: 2, evidence_count: 2, edge_count: 3 },
+        locator_census: { resolved: 1, not_checked: 1, unresolvable: 0 },
+        staleness: { requested: true, stale_count: 0 },
+        findings: { contested_claims: { ids: ["contested"], total: 1, omitted: 0 } },
+        guarantees: ["states remain distinct"],
+        limitations: ["no dereference"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalGroundingAudit({
+    claims: [{ id: "supported" }, { id: "contested" }],
+    evidence: [
+      { id: "source", last_modified: "2026-01-01T00:00:00Z", lineage: ["specimen-1"], locator_status: { locator: "resolved", digest: "sha256:source" } },
+      { id: "asserted", last_modified: "2026-01-01T00:00:00Z", locator_status: { locator: "not_checked" } },
+    ],
+    edges: [
+      { claim: "supported", evidence: "source", kind: "supports" },
+      { claim: "contested", evidence: "source", kind: "supports" },
+      { claim: "contested", evidence: "asserted", kind: "contradicts" },
+    ],
+    stale_against: "2026-03-01T00:00:00Z",
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-grounding-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.census.contested, 1);
+  assert.equal(result.mcp.result.structuredContent.staleness.requested, true);
+});

@@ -4948,6 +4948,60 @@ export interface BioevalAcquisitionAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface BioevalGroundingClaimArgs extends JsonObject {
+  id: string;
+}
+
+export type BioevalGroundingLocator = "resolved" | "not_checked" | "unresolvable";
+
+export interface BioevalGroundingLocatorStatusArgs extends JsonObject {
+  locator: BioevalGroundingLocator;
+  digest?: string;
+  detail?: string;
+}
+
+export interface BioevalGroundingEvidenceArgs extends JsonObject {
+  id: string;
+  last_modified: string;
+  lineage?: string[];
+  locator_status?: BioevalGroundingLocatorStatusArgs;
+}
+
+export type BioevalGroundingEdgeKind = "supports" | "contradicts" | "adjacent";
+
+export interface BioevalGroundingEdgeArgs extends JsonObject {
+  claim: string;
+  evidence: string;
+  kind: BioevalGroundingEdgeKind;
+}
+
+export interface BioevalGroundingAuditArgs extends JsonObject {
+  claims: BioevalGroundingClaimArgs[];
+  evidence: BioevalGroundingEvidenceArgs[];
+  edges: BioevalGroundingEdgeArgs[];
+  stale_against?: string;
+  max_items?: number;
+}
+
+export interface BioevalGroundingAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-grounding-audit/0.1";
+  workflow?: "bioeval_grounding_audit";
+  claims?: JsonObject;
+  evidence?: JsonObject;
+  edges?: JsonObject;
+  census?: JsonObject;
+  graph?: JsonObject;
+  locator_census?: JsonObject;
+  staleness?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;

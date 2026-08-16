@@ -513,6 +513,10 @@ transitions, and bounded suffix completeness; see
 redundancy, deferred decisive cost, and named-policy regret. It preserves the no-execution
 boundary and does not turn an admissible trace into biological validity. See
 [`docs/BIOEVAL_ACQUISITION_AUDIT.md`](../docs/BIOEVAL_ACQUISITION_AUDIT.md).
+`bioevalGroundingAudit` types claim/evidence declarations, locator states, support/contradiction/
+adjacent edges, the five-way grounding census, freeze-relative staleness, lineage gaps, orphan
+evidence, and bounded omission metadata without dereferencing external artifacts. See
+[`docs/BIOEVAL_GROUNDING_AUDIT.md`](../docs/BIOEVAL_GROUNDING_AUDIT.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

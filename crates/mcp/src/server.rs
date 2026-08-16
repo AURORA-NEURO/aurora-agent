@@ -60,6 +60,11 @@ use bioprism_bioevalx::acquisition::{
     Action as AcquisitionTraceAction, AcquisitionKind, Obligation as AcquisitionObligation,
     ReferencePolicy as AcquisitionReferencePolicy, Trace as AcquisitionTrace,
 };
+use bioprism_bioevalx::grounding::{
+    ClaimState as GroundingClaimState, EdgeKind as GroundingEdgeKind,
+    Evidence as GroundingEvidence, Grounding,
+    LocatorStatus as GroundingLocatorStatus, SupportEdge as GroundingSupportEdge,
+};
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
@@ -1345,6 +1350,7 @@ impl Server {
             "evaluation_trajectory_check" => self.evaluation_trajectory_check(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
+            "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -13528,6 +13534,517 @@ impl Server {
         }))
     }
 
+    fn bioeval_grounding_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-grounding-audit/0.1";
+        const MAX_GRAPH_ROWS: usize = 4096;
+        const MAX_ID_BYTES: usize = 256;
+
+        let raw_claims = arguments
+            .get("claims")
+            .and_then(Value::as_array)
+            .ok_or("claims is required and must be an array of {id} objects")?;
+        let raw_evidence = arguments
+            .get("evidence")
+            .and_then(Value::as_array)
+            .ok_or("evidence is required and must be an array of evidence objects")?;
+        let raw_edges = arguments
+            .get("edges")
+            .and_then(Value::as_array)
+            .ok_or("edges is required and must be an array of support-edge objects")?;
+        if raw_claims.len() > MAX_GRAPH_ROWS
+            || raw_evidence.len() > MAX_GRAPH_ROWS
+            || raw_edges.len() > MAX_GRAPH_ROWS
+        {
+            return Err("claims, evidence, and edges are each bounded at 4096 rows".into());
+        }
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure grounding audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("grounding audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_grounding_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "claims, evidence, and typed edges are validated before any grounding state is reported",
+                    "domain-invalid graphs never become partially grounded success projections",
+                    "unverified, contradicted, contested, and unsupported claims remain distinct states",
+                ],
+                "limitations": [
+                    "the route does not dereference locators, verify digests, extract claims, or judge assay compatibility",
+                    "staleness is evaluated only against an explicit caller-supplied freeze",
+                    "lineage completeness is a recorded-chain predicate, not a specimen registry lookup",
+                ],
+            })
+        };
+
+        let mut graph = Grounding::new();
+        for (index, raw) in raw_claims.iter().enumerate() {
+            let id = match raw.get("id").and_then(Value::as_str) {
+                Some(id) if !id.trim().is_empty() && id.len() <= MAX_ID_BYTES => id,
+                Some(_) => {
+                    return Ok(refusal(
+                        "claim_validation",
+                        format!("claims[{index}].id must contain 1 to {MAX_ID_BYTES} bytes"),
+                    ));
+                }
+                None => {
+                    return Ok(refusal(
+                        "claim_validation",
+                        format!("claims[{index}] requires an id string"),
+                    ));
+                }
+            };
+            if let Err(error) = graph.claim(id) {
+                return Ok(refusal("claim_validation", error.to_string()));
+            }
+        }
+
+        let mut evidence_records: BTreeMap<
+            String,
+            (FactoryTimestamp, Vec<String>, GroundingLocatorStatus),
+        > = BTreeMap::new();
+        for (index, raw) in raw_evidence.iter().enumerate() {
+            let id = match raw.get("id").and_then(Value::as_str) {
+                Some(id) if !id.trim().is_empty() && id.len() <= MAX_ID_BYTES => id,
+                Some(_) => {
+                    return Ok(refusal(
+                        "evidence_validation",
+                        format!("evidence[{index}].id must contain 1 to {MAX_ID_BYTES} bytes"),
+                    ));
+                }
+                None => {
+                    return Ok(refusal(
+                        "evidence_validation",
+                        format!("evidence[{index}] requires an id string"),
+                    ));
+                }
+            };
+            let last_modified = match raw.get("last_modified").and_then(Value::as_str) {
+                Some(value) => match FactoryTimestamp::parse(value) {
+                    Ok(timestamp) => timestamp,
+                    Err(error) => {
+                        return Ok(refusal(
+                            "evidence_validation",
+                            format!("evidence[{index}].last_modified is invalid: {error}"),
+                        ));
+                    }
+                },
+                None => {
+                    return Ok(refusal(
+                        "evidence_validation",
+                        format!("evidence[{index}] requires last_modified as RFC-3339 text"),
+                    ));
+                }
+            };
+            let lineage = match raw.get("lineage") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(value) => {
+                    let values = match value.as_array() {
+                        Some(values) => values,
+                        None => {
+                            return Ok(refusal(
+                                "evidence_validation",
+                                format!("evidence[{index}].lineage must be an array of strings"),
+                            ));
+                        }
+                    };
+                    if values.len() > MAX_GRAPH_ROWS {
+                        return Ok(refusal(
+                            "evidence_validation",
+                            format!("evidence[{index}].lineage is bounded at {MAX_GRAPH_ROWS} entries"),
+                        ));
+                    }
+                    let mut lineage = Vec::with_capacity(values.len());
+                    for (lineage_index, value) in values.iter().enumerate() {
+                        let ancestor = match value.as_str() {
+                            Some(ancestor) if !ancestor.trim().is_empty() && ancestor.len() <= MAX_ID_BYTES => ancestor,
+                            _ => {
+                                return Ok(refusal(
+                                    "evidence_validation",
+                                    format!("evidence[{index}].lineage[{lineage_index}] must be a non-empty string of at most {MAX_ID_BYTES} bytes"),
+                                ));
+                            }
+                        };
+                        lineage.push(ancestor.to_string());
+                    }
+                    lineage
+                }
+            };
+            let locator = match raw.get("locator_status") {
+                None | Some(Value::Null) => GroundingLocatorStatus::NotChecked,
+                Some(value) => match serde_json::from_value::<GroundingLocatorStatus>(value.clone()) {
+                    Ok(locator) => locator,
+                    Err(error) => {
+                        return Ok(refusal(
+                            "evidence_validation",
+                            format!("evidence[{index}].locator_status is invalid: {error}"),
+                        ));
+                    }
+                },
+            };
+            let evidence = GroundingEvidence {
+                id: id.to_string(),
+                lineage: lineage.clone(),
+                last_modified,
+                locator_status: locator.clone(),
+            };
+            if let Err(error) = graph.evidence(evidence) {
+                return Ok(refusal("evidence_validation", error.to_string()));
+            }
+            evidence_records.insert(id.to_string(), (last_modified, lineage, locator));
+        }
+
+        for (index, raw) in raw_edges.iter().enumerate() {
+            let claim = match raw.get("claim").and_then(Value::as_str) {
+                Some(claim) if !claim.trim().is_empty() && claim.len() <= MAX_ID_BYTES => claim,
+                Some(_) => {
+                    return Ok(refusal(
+                        "edge_validation",
+                        format!("edges[{index}].claim must contain 1 to {MAX_ID_BYTES} bytes"),
+                    ));
+                }
+                None => {
+                    return Ok(refusal(
+                        "edge_validation",
+                        format!("edges[{index}] requires a claim string"),
+                    ));
+                }
+            };
+            let evidence = match raw.get("evidence").and_then(Value::as_str) {
+                Some(evidence) if !evidence.trim().is_empty() && evidence.len() <= MAX_ID_BYTES => evidence,
+                Some(_) => {
+                    return Ok(refusal(
+                        "edge_validation",
+                        format!("edges[{index}].evidence must contain 1 to {MAX_ID_BYTES} bytes"),
+                    ));
+                }
+                None => {
+                    return Ok(refusal(
+                        "edge_validation",
+                        format!("edges[{index}] requires an evidence string"),
+                    ));
+                }
+            };
+            let kind = match raw.get("kind") {
+                Some(value) => match serde_json::from_value::<GroundingEdgeKind>(value.clone()) {
+                    Ok(kind) => kind,
+                    Err(error) => {
+                        return Ok(refusal(
+                            "edge_validation",
+                            format!("edges[{index}].kind is invalid: {error}"),
+                        ));
+                    }
+                },
+                None => {
+                    return Ok(refusal(
+                        "edge_validation",
+                        format!("edges[{index}] requires kind: supports, contradicts, or adjacent"),
+                    ));
+                }
+            };
+            if let Err(error) = graph.link(GroundingSupportEdge {
+                claim: claim.to_string(),
+                evidence: evidence.to_string(),
+                kind,
+            }) {
+                return Ok(refusal("edge_validation", error.to_string()));
+            }
+        }
+
+        let freeze = match arguments.get("stale_against") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let raw = value.as_str().ok_or("stale_against must be an RFC-3339 string")?;
+                match FactoryTimestamp::parse(raw) {
+                    Ok(timestamp) => Some(timestamp),
+                    Err(error) => {
+                        return Ok(refusal(
+                            "staleness_validation",
+                            format!("stale_against is invalid: {error}"),
+                        ));
+                    }
+                }
+            }
+        };
+
+        let state_name = |state: &GroundingClaimState| match state {
+            GroundingClaimState::Supported => "supported",
+            GroundingClaimState::Contested => "contested",
+            GroundingClaimState::Contradicted => "contradicted",
+            GroundingClaimState::Unsupported => "unsupported",
+            GroundingClaimState::SupportUnverified => "support_unverified",
+        };
+        let kind_name = |kind: GroundingEdgeKind| match kind {
+            GroundingEdgeKind::Supports => "supports",
+            GroundingEdgeKind::Contradicts => "contradicts",
+            GroundingEdgeKind::Adjacent => "adjacent",
+        };
+        let stale_ids: BTreeSet<String> = freeze
+            .map(|timestamp| {
+                graph
+                    .stale_against(timestamp)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let lineage_gap_ids: BTreeSet<String> = graph
+            .lineage_gaps()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let mut claim_ids = graph
+            .states()
+            .keys()
+            .map(|claim| (*claim).to_string())
+            .collect::<Vec<_>>();
+        claim_ids.sort();
+
+        let all_claim_rows = claim_ids
+            .iter()
+            .map(|claim| {
+                let state = graph.state(claim).expect("claim came from graph states");
+                let mut supports = Vec::new();
+                let mut contradictions = Vec::new();
+                let mut adjacent = Vec::new();
+                let mut resolved_supports = 0usize;
+                for edge in graph.edges().iter().filter(|edge| edge.claim == *claim) {
+                    match edge.kind {
+                        GroundingEdgeKind::Supports => {
+                            supports.push(edge.evidence.clone());
+                            if evidence_records
+                                .get(&edge.evidence)
+                                .map(|(_, _, locator)| locator.is_resolved())
+                                .unwrap_or(false)
+                            {
+                                resolved_supports += 1;
+                            }
+                        }
+                        GroundingEdgeKind::Contradicts => contradictions.push(edge.evidence.clone()),
+                        GroundingEdgeKind::Adjacent => adjacent.push(edge.evidence.clone()),
+                    }
+                }
+                json!({
+                    "id": claim,
+                    "state": state_name(&state),
+                    "grounded": state == GroundingClaimState::Supported,
+                    "support_evidence_ids": supports,
+                    "contradicting_evidence_ids": contradictions,
+                    "adjacent_evidence_ids": adjacent,
+                    "support_edge_count": supports.len(),
+                    "resolved_support_edge_count": resolved_supports,
+                    "unresolved_support_edge_count": supports.len().saturating_sub(resolved_supports),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let all_evidence_rows = evidence_records
+            .iter()
+            .map(|(id, (last_modified, lineage, locator))| {
+                let related = graph.edges().iter().filter(|edge| edge.evidence == *id);
+                let mut claims = BTreeSet::new();
+                let mut support_edges = 0usize;
+                let mut contradiction_edges = 0usize;
+                let mut adjacent_edges = 0usize;
+                for edge in related {
+                    claims.insert(edge.claim.clone());
+                    match edge.kind {
+                        GroundingEdgeKind::Supports => support_edges += 1,
+                        GroundingEdgeKind::Contradicts => contradiction_edges += 1,
+                        GroundingEdgeKind::Adjacent => adjacent_edges += 1,
+                    }
+                }
+                json!({
+                    "id": id,
+                    "last_modified": last_modified.to_rfc3339(),
+                    "lineage": lineage,
+                    "lineage_gap": lineage_gap_ids.contains(id),
+                    "locator_status": serde_json::to_value(locator).expect("locator serializes"),
+                    "resolved": locator.is_resolved(),
+                    "stale": stale_ids.contains(id),
+                    "linked_claim_ids": claims,
+                    "edge_count": support_edges + contradiction_edges + adjacent_edges,
+                    "support_edge_count": support_edges,
+                    "contradiction_edge_count": contradiction_edges,
+                    "adjacent_edge_count": adjacent_edges,
+                    "orphan": claims.is_empty(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let all_edge_rows = graph
+            .edges()
+            .iter()
+            .enumerate()
+            .map(|(index, edge)| {
+                let locator_status = evidence_records
+                    .get(&edge.evidence)
+                    .map(|(_, _, locator)| locator)
+                    .expect("graph edges have declared evidence");
+                json!({
+                    "index": index,
+                    "claim": edge.claim,
+                    "evidence": edge.evidence,
+                    "kind": kind_name(edge.kind),
+                    "locator_resolved": locator_status.is_resolved(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut edge_multiplicity: BTreeMap<(String, String, GroundingEdgeKind), usize> =
+            BTreeMap::new();
+        for edge in graph.edges() {
+            *edge_multiplicity
+                .entry((edge.claim.clone(), edge.evidence.clone(), edge.kind))
+                .or_default() += 1;
+        }
+        let duplicate_edge_count = edge_multiplicity
+            .values()
+            .map(|count| count.saturating_sub(1))
+            .sum::<usize>();
+
+        let contested_ids = claim_ids
+            .iter()
+            .filter(|claim| graph.state(claim) == Some(GroundingClaimState::Contested))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let contradicted_ids = claim_ids
+            .iter()
+            .filter(|claim| graph.state(claim) == Some(GroundingClaimState::Contradicted))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let unsupported_ids = claim_ids
+            .iter()
+            .filter(|claim| graph.state(claim) == Some(GroundingClaimState::Unsupported))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let unverified_ids = claim_ids
+            .iter()
+            .filter(|claim| graph.state(claim) == Some(GroundingClaimState::SupportUnverified))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let orphan_ids = evidence_records
+            .keys()
+            .filter(|id| !graph.edges().iter().any(|edge| edge.evidence == **id))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let bounded_ids = |ids: &BTreeSet<String>| {
+            json!({
+                "ids": ids.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": ids.len(),
+                "omitted": ids.len().saturating_sub(max_items),
+            })
+        };
+        let bounded_rows = |rows: &[Value]| {
+            json!({
+                "rows": rows.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "returned": rows.len().min(max_items),
+                "total": rows.len(),
+                "omitted": rows.len().saturating_sub(max_items),
+            })
+        };
+        let census = graph.census();
+        let resolved_count = evidence_records
+            .values()
+            .filter(|(_, _, locator)| locator.is_resolved())
+            .count();
+        let not_checked_count = evidence_records
+            .values()
+            .filter(|(_, _, locator)| matches!(locator, GroundingLocatorStatus::NotChecked))
+            .count();
+        let unresolvable_count = evidence_records
+            .values()
+            .filter(|(_, _, locator)| matches!(locator, GroundingLocatorStatus::Unresolvable { .. }))
+            .count();
+        let support_edge_count = graph
+            .edges()
+            .iter()
+            .filter(|edge| edge.kind == GroundingEdgeKind::Supports)
+            .count();
+        let contradiction_edge_count = graph
+            .edges()
+            .iter()
+            .filter(|edge| edge.kind == GroundingEdgeKind::Contradicts)
+            .count();
+
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_grounding_audit",
+            "claims": bounded_rows(&all_claim_rows),
+            "evidence": bounded_rows(&all_evidence_rows),
+            "edges": bounded_rows(&all_edge_rows),
+            "census": {
+                "claims": census.claims(),
+                "supported": census.supported,
+                "contested": census.contested,
+                "contradicted": census.contradicted,
+                "unsupported": census.unsupported,
+                "support_unverified": census.support_unverified,
+                "adjacent_citations": census.adjacent_citations,
+                "fully_grounded": census.fully_grounded(),
+            },
+            "graph": {
+                "claim_count": claim_ids.len(),
+                "evidence_count": evidence_records.len(),
+                "edge_count": graph.edges().len(),
+                "support_edge_count": support_edge_count,
+                "contradiction_edge_count": contradiction_edge_count,
+                "adjacent_edge_count": census.adjacent_citations,
+                "duplicate_edge_count": duplicate_edge_count,
+            },
+            "locator_census": {
+                "resolved": resolved_count,
+                "not_checked": not_checked_count,
+                "unresolvable": unresolvable_count,
+            },
+            "staleness": {
+                "requested": freeze.is_some(),
+                "freeze": freeze.map(|timestamp| timestamp.to_rfc3339()),
+                "stale_count": stale_ids.len(),
+                "stale_evidence": bounded_ids(&stale_ids),
+            },
+            "findings": {
+                "contested_claims": bounded_ids(&contested_ids),
+                "contradicted_claims": bounded_ids(&contradicted_ids),
+                "unsupported_claims": bounded_ids(&unsupported_ids),
+                "support_unverified_claims": bounded_ids(&unverified_ids),
+                "lineage_gap_evidence": bounded_ids(&lineage_gap_ids),
+                "orphan_evidence": bounded_ids(&orphan_ids),
+                "adjacent_citation_count": census.adjacent_citations,
+                "duplicate_edge_count": duplicate_edge_count,
+            },
+            "guarantees": [
+                "claim states are the grounding kernel's five-way partition; support is not averaged into a citation percentage",
+                "a claim with both support and contradiction remains contested even when supporting evidence is resolved",
+                "not_checked and unresolvable locators are not promoted to resolved support",
+                "staleness is reproducible because it is measured against the explicit freeze, never against the wall clock",
+                "all bounded projections carry total and omitted counts so truncation cannot look like absence",
+            ],
+            "limitations": [
+                "the route audits caller-declared atomic claims and evidence; it does not extract claims from prose",
+                "locators and digests are recorded states only; no network, filesystem, or artifact dereference occurs",
+                "lineage gaps identify empty recorded ancestry and do not establish biological provenance or assay compatibility",
+                "a fully grounded graph is a provenance predicate, not biological truth, clinical validity, or causal identification",
+            ],
+        }))
+    }
+
     fn bioeval_acquisition_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-acquisition-audit/0.1";
         let raw_obligations = arguments
@@ -22115,7 +22632,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -22145,9 +22662,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -23443,6 +23960,21 @@ pub fn tool_definitions() -> Vec<Value> {
                     "require_reference": { "type": "boolean", "description": "When true, refuse unless reference_policy is supplied." }
                 },
                 "required": ["obligations", "actions"]
+            }
+        }),
+        json!({
+            "name": "bioeval_grounding_audit",
+            "description": "Audit a serialized bioevalx claim-evidence graph. It preserves the five-way claim-state partition, typed support/contradiction/adjacent edges, locator verification state, freeze-relative staleness, lineage gaps, orphan evidence, duplicate edges, and bounded omission counts without dereferencing artifacts or extracting claims.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "claims": { "type": "array", "maxItems": 4096, "description": "Atomic claim declarations [{id}]. Claims are identifiers supplied by the caller; this route does not extract them from prose." },
+                    "evidence": { "type": "array", "maxItems": 4096, "description": "Evidence declarations [{id, last_modified, lineage?, locator_status?}]. locator_status is {locator: resolved, digest} | {locator: not_checked} | {locator: unresolvable, detail}." },
+                    "edges": { "type": "array", "maxItems": 4096, "description": "Typed graph edges [{claim, evidence, kind}], where kind is supports, contradicts, or adjacent." },
+                    "stale_against": { "type": "string", "description": "Optional RFC-3339 benchmark freeze. Evidence modified after this instant is reported stale; omission means staleness was not requested." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum rows and finding identifiers returned in each bounded projection; total and omitted counts remain explicit." }
+                },
+                "required": ["claims", "evidence", "edges"]
             }
         }),
         json!({

@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 148);
+    assert_eq!(tools.len(), 149);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(148));
-    assert_eq!(result["advertised_tool_count"], json!(148));
+    assert_eq!(result["unique_catalog_tools"], json!(149));
+    assert_eq!(result["advertised_tool_count"], json!(149));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(148));
-    assert_eq!(result["schema_quality"]["valid"], json!(148));
+    assert_eq!(result["schema_quality"]["checked"], json!(149));
+    assert_eq!(result["schema_quality"]["valid"], json!(149));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5960,6 +5960,70 @@ fn bioeval_acquisition_audit_preserves_obligation_stopping_and_named_regret() {
     assert_eq!(missing_reference["ok"], json!(false));
     assert_eq!(missing_reference["stage"], json!("reference_policy"));
     assert_eq!(missing_reference["fail_closed"], json!(true));
+}
+
+#[test]
+fn bioeval_grounding_audit_preserves_states_locators_staleness_and_lineage() {
+    let result = call(
+        &mut server(),
+        "bioeval_grounding_audit",
+        json!({
+            "claims": [
+                { "id": "supported" },
+                { "id": "contested" },
+                { "id": "unverified" },
+                { "id": "contradicted" },
+                { "id": "unsupported" }
+            ],
+            "evidence": [
+                { "id": "shown", "last_modified": "2026-01-01T00:00:00Z", "lineage": ["specimen-1"], "locator_status": { "locator": "resolved", "digest": "sha256:shown" } },
+                { "id": "changed", "last_modified": "2026-06-01T00:00:00Z", "lineage": ["specimen-2"], "locator_status": { "locator": "resolved", "digest": "sha256:changed" } },
+                { "id": "asserted", "last_modified": "2026-01-01T00:00:00Z", "locator_status": { "locator": "not_checked" } },
+                { "id": "opposed", "last_modified": "2026-01-01T00:00:00Z", "lineage": ["specimen-3"], "locator_status": { "locator": "unresolvable", "detail": "fixture missing" } },
+                { "id": "adjacent", "last_modified": "2026-01-01T00:00:00Z", "lineage": ["specimen-4"], "locator_status": { "locator": "resolved", "digest": "sha256:adjacent" } },
+                { "id": "orphan", "last_modified": "2026-06-01T00:00:00Z", "locator_status": { "locator": "not_checked" } }
+            ],
+            "edges": [
+                { "claim": "supported", "evidence": "shown", "kind": "supports" },
+                { "claim": "contested", "evidence": "changed", "kind": "supports" },
+                { "claim": "contested", "evidence": "opposed", "kind": "contradicts" },
+                { "claim": "unverified", "evidence": "asserted", "kind": "supports" },
+                { "claim": "contradicted", "evidence": "opposed", "kind": "contradicts" },
+                { "claim": "unsupported", "evidence": "adjacent", "kind": "adjacent" }
+            ],
+            "stale_against": "2026-03-01T00:00:00Z",
+            "max_items": 3
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-grounding-audit/0.1"));
+    assert_eq!(result["census"]["supported"], json!(1));
+    assert_eq!(result["census"]["contested"], json!(1));
+    assert_eq!(result["census"]["support_unverified"], json!(1));
+    assert_eq!(result["census"]["contradicted"], json!(1));
+    assert_eq!(result["census"]["unsupported"], json!(1));
+    assert_eq!(result["census"]["adjacent_citations"], json!(1));
+    assert_eq!(result["census"]["fully_grounded"], json!(false));
+    assert_eq!(result["staleness"]["stale_count"], json!(2));
+    assert_eq!(result["findings"]["lineage_gap_evidence"]["ids"], json!(["asserted", "orphan"]));
+    assert_eq!(result["findings"]["orphan_evidence"]["ids"], json!(["orphan"]));
+    assert_eq!(result["claims"]["omitted"], json!(2));
+    assert_eq!(result["graph"]["duplicate_edge_count"], json!(0));
+
+    let invalid = call(
+        &mut server(),
+        "bioeval_grounding_audit",
+        json!({
+            "claims": [{ "id": "claim" }],
+            "evidence": [],
+            "edges": [{ "claim": "claim", "evidence": "missing", "kind": "supports" }]
+        }),
+    );
+    assert_eq!(invalid["__isError"], json!(false));
+    assert_eq!(invalid["ok"], json!(false));
+    assert_eq!(invalid["stage"], json!("edge_validation"));
+    assert_eq!(invalid["fail_closed"], json!(true));
 }
 
 #[test]

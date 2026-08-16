@@ -954,6 +954,11 @@ traces with typed required/optional obligations, action kinds, voluntary stoppin
 deferred decisive cost, and named-policy regret. The report never treats obligation closure as
 proof that a retrieval or assay executed. See
 [`docs/BIOEVAL_ACQUISITION_AUDIT.md`](BIOEVAL_ACQUISITION_AUDIT.md).
+`BioevalGroundingAuditArgs` / `bioeval_grounding_audit_report(...)` expose the claim-evidence graph
+with five-way claim states, typed support/contradiction/adjacent edges, locator status, staleness
+against an explicit freeze, lineage gaps, orphan evidence, duplicate-edge findings, and bounded
+omission counts. The report does not dereference artifacts or convert citations into a score. See
+[`docs/BIOEVAL_GROUNDING_AUDIT.md`](BIOEVAL_GROUNDING_AUDIT.md).
 
 ## Biological stress profiling
 
