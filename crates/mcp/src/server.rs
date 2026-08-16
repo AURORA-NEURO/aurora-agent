@@ -126,6 +126,7 @@ use bioprism_lab::{
     expand as expand_acquisitions, separate as separate_hypotheses, AcquisitionAction,
     AcquisitionCost, HypothesisSet as LabHypothesisSet,
     pareto::{ParetoFront, Profile as LabParetoProfile},
+    risk::{BranchLedger, BranchOutcome, BranchPolicy, RiskFeatures},
     Observations,
 };
 use bioprism_ledger::{ClassCounts, Event, EventLedger, SubjectLatest, TemporalCut};
@@ -1272,6 +1273,7 @@ impl Server {
             "contradiction_review" => self.contradiction_review(&arguments),
             "lab_plan" => self.lab_plan(&arguments),
             "lab_pareto_audit" => self.lab_pareto_audit(&arguments),
+            "lab_branch_audit" => self.lab_branch_audit(&arguments),
             "obligation_gate_check" => self.obligation_gate_check(&arguments),
             "lens_catalogue" => Ok(json!({
                 "ok": true,
@@ -7137,6 +7139,156 @@ impl Server {
                 "objective directions and profile values are caller-declared point measurements; no statistical uncertainty or replication model is inferred",
                 "the archive describes candidate declarations and does not execute components, select providers, or validate biological performance",
                 "a Pareto front is a decision surface, not a release approval, safety gate, or evidence of a deployable architecture"
+            ]
+        }))
+    }
+
+    fn lab_branch_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure branch-audit input: {error}"))?;
+        if encoded.len() > 10_000_000 {
+            return Err("branch-audit input exceeds the 10000000-byte safety bound".into());
+        }
+        let raw_policy = arguments
+            .get("policy")
+            .cloned()
+            .ok_or("policy is required and must be a serialized BranchPolicy")?;
+        let serialized_policy: BranchPolicy = serde_json::from_value(raw_policy)
+            .map_err(|error| format!("invalid branch policy: {error}"))?;
+        let policy = match BranchPolicy::new(
+            serialized_policy.ceiling,
+            serialized_policy.on_undetermined,
+            serialized_policy.rules().to_vec(),
+        ) {
+            Ok(policy) => policy,
+            Err(error) => {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "branch_policy_error_serialization_failed"
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-branch-audit/0.1",
+                    "stage": "policy_validation",
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "guarantees": [
+                        "vacuous triggers and rules over hard ceilings are rejected before any decision is planned",
+                        "a policy-validation refusal emits no partial branch ledger"
+                    ]
+                }));
+            }
+        };
+
+        let raw_decisions = arguments
+            .get("decisions")
+            .and_then(Value::as_array)
+            .ok_or("decisions is required and must be an array")?;
+        if raw_decisions.is_empty() || raw_decisions.len() > 512 {
+            return Err("decisions must contain between 1 and 512 objects".into());
+        }
+        let max_rows = arguments
+            .get("max_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_rows == 0 || max_rows > 1_000 {
+            return Err("max_rows must be between 1 and 1000".into());
+        }
+        let max_rows = max_rows as usize;
+        let mut ledger = BranchLedger::new();
+        let mut rows = Vec::with_capacity(raw_decisions.len());
+        for (index, raw_decision) in raw_decisions.iter().enumerate() {
+            let object = raw_decision
+                .as_object()
+                .ok_or_else(|| format!("decisions[{index}] must be an object"))?;
+            let decision = object
+                .get("decision")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("decisions[{index}].decision must be a string"))?;
+            if decision.trim().is_empty() || decision.len() > 512 {
+                return Err(format!(
+                    "decisions[{index}].decision must contain between 1 and 512 bytes"
+                ));
+            }
+            let features: RiskFeatures = serde_json::from_value(
+                object
+                    .get("features")
+                    .cloned()
+                    .ok_or_else(|| format!("decisions[{index}].features is required"))?,
+            )
+            .map_err(|error| format!("invalid decisions[{index}].features: {error}"))?;
+            if features
+                .historical_failure_rate
+                .is_some_and(|rate| !rate.is_finite() || !(0.0..=1.0).contains(&rate))
+            {
+                return Err(format!(
+                    "decisions[{index}].features.historical_failure_rate must be finite and lie in [0, 1]"
+                ));
+            }
+            let plan = policy.plan(&features);
+            let mut outcome = BranchOutcome::new(decision, plan);
+            if let Some(caught) = object.get("caught") {
+                let caught = caught
+                    .as_object()
+                    .ok_or_else(|| format!("decisions[{index}].caught must be an object"))?;
+                let what = caught
+                    .get("what")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("decisions[{index}].caught.what must be a string"))?;
+                let would_have_been = caught
+                    .get("would_have_been")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        format!("decisions[{index}].caught.would_have_been must be a string")
+                    })?;
+                if what.trim().is_empty() || would_have_been.trim().is_empty() {
+                    return Err(format!(
+                        "decisions[{index}].caught fields must be non-empty"
+                    ));
+                }
+                outcome = outcome.catching(what, would_have_been);
+            }
+            if let Some(escaped) = object.get("escaped") {
+                let escaped = escaped
+                    .as_str()
+                    .ok_or_else(|| format!("decisions[{index}].escaped must be a string"))?;
+                if escaped.trim().is_empty() {
+                    return Err(format!("decisions[{index}].escaped must be non-empty"));
+                }
+                outcome = outcome.with_escape(escaped);
+            }
+            rows.push(json!({
+                "index": index,
+                "decision": decision,
+                "features": features,
+                "outcome": outcome,
+            }));
+            ledger.record(outcome);
+        }
+
+        let yielded = ledger.report();
+        let verdict = yielded.verdict();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/lab-branch-audit/0.1",
+            "policy": policy,
+            "decision_count": yielded.decisions,
+            "yield": yielded,
+            "verdict": verdict,
+            "rows": rows.iter().take(max_rows).collect::<Vec<_>>(),
+            "rows_omitted": rows.len().saturating_sub(max_rows),
+            "max_rows": max_rows,
+            "guarantees": [
+                "the first matching stated rule controls each decision and its trigger prose remains attached",
+                "undetermined historical risk is reported separately and follows the declared escalation policy",
+                "the denominator includes decisions where no rule fired, not only escalations",
+                "spent branches, verifier calls, catches, wasted escalations, and escaped harms remain separate",
+                "a caught harm carries the counterfactual single-path outcome it claims to have prevented"
+            ],
+            "limitations": [
+                "this endpoint plans and audits branching; it does not fork execution, invoke a verifier, or execute a tool",
+                "risk features, trigger thresholds, catches, escapes, and counterfactual descriptions are caller-supplied",
+                "the ledger measures declared branch utility and does not calibrate a learned risk model or infer causal benefit"
             ]
         }))
     }
@@ -20054,7 +20206,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "inference_lab",
             "domains": ["hypothesis separation", "evidence acquisition", "holdout-aware improvement", "risk-triggered research"],
             "crates": ["bioprism-lab", "bioprism-obligation", "bioprism-routing", "bioprism-evalengine"],
-            "mcp_tools": ["lab_plan", "lab_pareto_audit", "routing_decide", "routing_lab_run"],
+            "mcp_tools": ["lab_plan", "lab_pareto_audit", "lab_branch_audit", "routing_decide", "routing_lab_run"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -20888,6 +21040,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum admission, archive, and relation rows returned; omission counts remain explicit. Defaults to 100." }
                 },
                 "required": ["objectives", "profiles"]
+            }
+        }),
+        json!({
+            "name": "lab_branch_audit",
+            "description": "Audit risk-triggered branching over serialized risk features and a declared BranchPolicy. It preserves trigger prose, undetermined-risk escalation, spent branch and verifier budgets, catches, wasted escalations, escaped harms, and the full decision denominator without executing a fork or verifier.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "policy": { "type": "object", "description": "Serialized bioprism-lab BranchPolicy with hard ceilings, undetermined policy, ordered rules, triggers, actions, and per-rule BranchCost." },
+                    "decisions": { "type": "array", "minItems": 1, "maxItems": 512, "description": "Decision objects: {decision, features: RiskFeatures, optional caught: {what, would_have_been}, optional escaped} ." },
+                    "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum decision rows returned; omission counts remain explicit. Defaults to 100." }
+                },
+                "required": ["policy", "decisions"]
             }
         }),
         json!({

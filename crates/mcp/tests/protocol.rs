@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 141);
+    assert_eq!(tools.len(), 142);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(141));
-    assert_eq!(result["advertised_tool_count"], json!(141));
+    assert_eq!(result["unique_catalog_tools"], json!(142));
+    assert_eq!(result["advertised_tool_count"], json!(142));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(141));
-    assert_eq!(result["schema_quality"]["valid"], json!(141));
+    assert_eq!(result["schema_quality"]["checked"], json!(142));
+    assert_eq!(result["schema_quality"]["valid"], json!(142));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5372,6 +5372,120 @@ fn lab_pareto_audit_preserves_tradeoffs_holes_archive_and_ambiguous_selection() 
     assert_eq!(refused["__isError"], json!(false));
     assert_eq!(refused["ok"], json!(false));
     assert_eq!(refused["stage"], json!("profile_insertion"));
+    assert_eq!(refused["fail_closed"], json!(true));
+}
+
+#[test]
+fn lab_branch_audit_keeps_undetermined_escalation_cost_catches_and_escapes_separate() {
+    let result = call(
+        &mut server(),
+        "lab_branch_audit",
+        json!({
+            "policy": {
+                "ceiling": { "max_branches": 4, "max_verifier_calls": 2 },
+                "on_undetermined": "escalate",
+                "rules": [
+                    {
+                        "id": "irreversible",
+                        "trigger": { "trigger": "reversibility_at_least", "level": "irreversible" },
+                        "action": "fork_suffixes",
+                        "cost": { "branches": 2, "verifier_calls": 1 }
+                    },
+                    {
+                        "id": "unmeasured-failure",
+                        "trigger": { "trigger": "historical_failure_rate_at_least", "rate": 0.2 },
+                        "action": "invoke_verifier",
+                        "cost": { "branches": 1, "verifier_calls": 1 }
+                    }
+                ]
+            },
+            "decisions": [
+                {
+                    "decision": "external-write",
+                    "features": {
+                        "reversibility": "irreversible",
+                        "permission": "external_effect",
+                        "value_at_stake": "severe",
+                        "unseparated_hypotheses": 2,
+                        "unmet_mandatory_obligations": 1,
+                        "historical_failure_rate": 0.8,
+                        "verifier_available": false
+                    },
+                    "caught": { "what": "unsafe suffix", "would_have_been": "write would proceed" },
+                    "escaped": "a secondary harm remained"
+                },
+                {
+                    "decision": "benign-read",
+                    "features": {
+                        "reversibility": "reversible",
+                        "permission": "read_only",
+                        "value_at_stake": "negligible",
+                        "unseparated_hypotheses": 0,
+                        "unmet_mandatory_obligations": 0,
+                        "historical_failure_rate": 0.0,
+                        "verifier_available": true
+                    }
+                },
+                {
+                    "decision": "unmeasured-class",
+                    "features": {
+                        "reversibility": "reversible",
+                        "permission": "write_scoped",
+                        "value_at_stake": "moderate",
+                        "unseparated_hypotheses": 1,
+                        "unmet_mandatory_obligations": 0,
+                        "historical_failure_rate": null,
+                        "verifier_available": true
+                    },
+                    "escaped": "harm escaped without a measured failure rate"
+                }
+            ],
+            "max_rows": 2
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/lab-branch-audit/0.1"));
+    assert_eq!(result["yield"]["decisions"], json!(3));
+    assert_eq!(result["yield"]["escalations"], json!(2));
+    assert_eq!(result["yield"]["escalations_on_undetermined"], json!(1));
+    assert_eq!(result["yield"]["catches"], json!(1));
+    assert_eq!(result["yield"]["wasted_escalations"], json!(1));
+    assert_eq!(result["verdict"]["verdict"], json!("mixed"));
+    assert_eq!(result["rows"].as_array().unwrap().len(), 2);
+    assert_eq!(result["rows_omitted"], json!(1));
+
+    let refused = call(
+        &mut server(),
+        "lab_branch_audit",
+        json!({
+            "policy": {
+                "ceiling": { "max_branches": 1, "max_verifier_calls": 1 },
+                "on_undetermined": "escalate",
+                "rules": [{
+                    "id": "over-budget",
+                    "trigger": { "trigger": "no_verifier_available" },
+                    "action": "invoke_verifier",
+                    "cost": { "branches": 2, "verifier_calls": 0 }
+                }]
+            },
+            "decisions": [{
+                "decision": "one",
+                "features": {
+                    "reversibility": "reversible",
+                    "permission": "read_only",
+                    "value_at_stake": "negligible",
+                    "unseparated_hypotheses": 0,
+                    "unmet_mandatory_obligations": 0,
+                    "historical_failure_rate": 0.0,
+                    "verifier_available": true
+                }
+            }]
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(false));
+    assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["stage"], json!("policy_validation"));
     assert_eq!(refused["fail_closed"], json!(true));
 }
 

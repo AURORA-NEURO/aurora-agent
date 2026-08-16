@@ -195,6 +195,7 @@ from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_
 from .routing import RoutingDecisionReport, routing_decision_report
 from .routing_lab import RoutingLabRunArgs, RoutingLabRunReport, routing_lab_run_report
 from .lab_pareto import LabParetoAuditArgs, LabParetoAuditReport, lab_pareto_audit_report
+from .lab_branch import LabBranchAuditArgs, LabBranchAuditReport, lab_branch_audit_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
@@ -2283,6 +2284,23 @@ class ApiClient:
         """Return typed front, archive, hole, and selection evidence."""
 
         return lab_pareto_audit_report(self.lab_pareto_audit(request))
+
+    def lab_branch_audit(
+        self,
+        request: LabBranchAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit risk-triggered branch accounting through HTTP."""
+
+        normalized = request if isinstance(request, LabBranchAuditArgs) else LabBranchAuditArgs.from_wire(request)
+        return self.call_tool("lab_branch_audit", normalized.to_mcp_arguments())
+
+    def lab_branch_audit_report(
+        self,
+        request: LabBranchAuditArgs | Mapping[str, Any],
+    ) -> LabBranchAuditReport:
+        """Return typed branch cost, catch, escape, and undetermined-risk evidence."""
+
+        return lab_branch_audit_report(self.lab_branch_audit(request))
 
     def provider_capability_gate(
         self,
@@ -4579,6 +4597,23 @@ class AsyncApiClient:
         """Return typed front, archive, hole, and selection evidence."""
 
         return lab_pareto_audit_report(await self.lab_pareto_audit(request))
+
+    async def lab_branch_audit(
+        self,
+        request: LabBranchAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit risk-triggered branch accounting through async HTTP."""
+
+        normalized = request if isinstance(request, LabBranchAuditArgs) else LabBranchAuditArgs.from_wire(request)
+        return await self.call_tool("lab_branch_audit", normalized.to_mcp_arguments())
+
+    async def lab_branch_audit_report(
+        self,
+        request: LabBranchAuditArgs | Mapping[str, Any],
+    ) -> LabBranchAuditReport:
+        """Return typed branch cost, catch, escape, and undetermined-risk evidence."""
+
+        return lab_branch_audit_report(await self.lab_branch_audit(request))
 
     async def provider_capability_gate(
         self,

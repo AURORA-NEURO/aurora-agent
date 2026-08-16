@@ -6252,6 +6252,50 @@ export interface LabParetoAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface LabBranchAuditArgs extends JsonObject {
+  policy: JsonObject;
+  decisions: JsonObject[];
+  max_rows?: number;
+}
+
+export interface LabBranchYieldResult extends JsonObject {
+  decisions: number;
+  escalations: number;
+  escalations_on_undetermined: number;
+  spent: JsonObject;
+  catches: number;
+  wasted_escalations: number;
+  escaped_after_escalation: number;
+  escaped_without_escalation: number;
+  branches_per_catch: number | null;
+}
+
+export interface LabBranchVerdictResult extends JsonObject {
+  verdict: "nothing_triggered" | "paid_and_caught_nothing" | "mixed" | "every_escalation_caught_something";
+  spent?: JsonObject;
+  escalations?: number;
+  catches?: number;
+  wasted_escalations?: number;
+}
+
+export interface LabBranchAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/lab-branch-audit/0.1";
+  policy?: JsonObject;
+  decision_count?: number;
+  yield?: LabBranchYieldResult;
+  verdict?: LabBranchVerdictResult;
+  rows?: JsonObject[];
+  rows_omitted?: number;
+  max_rows?: number;
+  stage?: string;
+  refusal?: string;
+  error?: JsonObject;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface ProviderCapabilityGateArgs extends JsonObject {
   card: JsonObject;
   required: string[];

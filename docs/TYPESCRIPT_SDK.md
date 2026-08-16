@@ -456,6 +456,10 @@ not a production routing or deployment approval. See [`docs/ROUTING_LAB_RUN.md`]
 dominated candidates, displaced members, measured-versus-unmeasured axes, front-only relations,
 unresolved holes, and `unique`/`ambiguous`/`empty` selection without scalarizing the front. See
 [`docs/LAB_PARETO_AUDIT.md`](../docs/LAB_PARETO_AUDIT.md).
+`labBranchAudit` exposes the ordered risk-triggered branch ledger with undetermined-risk posture,
+hard branch/verifier ceilings, trigger plans, catches, wasted escalations, escaped harms, and
+explicit row omissions. It is planning evidence, not verifier execution or safety clearance. See
+[`docs/LAB_BRANCH_AUDIT.md`](../docs/LAB_BRANCH_AUDIT.md).
 `providerCapabilityGate` preserves untested/failed/passed provider states, conjunctive gate
 outcomes, measurement counts, reproducible run evidence, and indeterminate cross-provider drift;
 performance observations remain measurements rather than invented pass/fail claims.

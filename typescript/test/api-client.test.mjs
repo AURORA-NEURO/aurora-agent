@@ -2330,6 +2330,46 @@ test("client exposes typed inference-lab Pareto trade-offs and holes", async () 
   assert.equal(result.mcp.result.structuredContent.relations[0].relation.relation, "incomparable");
 });
 
+test("client exposes risk-triggered branch cost and escaped harm accounting", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/lab_branch_audit");
+      return jsonResponse({ ok: true, tool: "lab_branch_audit", request_id: "branch-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/lab-branch-audit/0.1",
+        policy: {},
+        decision_count: 1,
+        yield: {
+          decisions: 1,
+          escalations: 1,
+          escalations_on_undetermined: 1,
+          spent: { branches: 1, verifier_calls: 1 },
+          catches: 0,
+          wasted_escalations: 1,
+          escaped_after_escalation: 1,
+          escaped_without_escalation: 0,
+          branches_per_catch: null,
+        },
+        verdict: { verdict: "paid_and_caught_nothing", spent: { branches: 1, verifier_calls: 1 }, escalations: 1 },
+        rows: [{ index: 0, decision: "uncertain" }],
+        rows_omitted: 0,
+        max_rows: 100,
+        guarantees: ["undetermined risk escalates"],
+        limitations: ["planning only"],
+      } } } });
+    },
+  });
+  const result = await client.labBranchAudit({
+    policy: {},
+    decisions: [{ decision: "uncertain", features: { historical_failure_rate: null } }],
+    max_rows: 1,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/lab-branch-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.verdict.verdict, "paid_and_caught_nothing");
+  assert.equal(result.mcp.result.structuredContent.yield.escalations_on_undetermined, 1);
+});
+
 test("client exposes provider gate states and differential indeterminacy", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

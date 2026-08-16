@@ -225,6 +225,11 @@ invent defaults:
   and displaced candidates, front-only relations, unresolved holes, and ambiguous selection.
   The parser rejects partial-front refusals presented as success and reconciles every bounded row
   omission. See [`docs/LAB_PARETO_AUDIT.md`](LAB_PARETO_AUDIT.md).
+- `LabBranchAuditArgs` / `lab_branch_audit_report(...)` expose ordered risk-triggered branching
+  with typed policy-validation refusals, undetermined-risk escalation, branch/verifier spend,
+  catches, wasted escalations, escaped harms, and the complete decision denominator. A catch's
+  single-path counterfactual remains explicit; the parser does not treat a verifier invocation as
+  a success claim. See [`docs/LAB_BRANCH_AUDIT.md`](LAB_BRANCH_AUDIT.md).
 - `OncoBoundaryArgs` and `onco_boundary_report(...)` preserve oncology's partial-release contract:
   aggregate research uses can remain released while individual clinical uses are refused and
   escalated, and direct-identifier refusals remain fail-closed without echoing request data. The

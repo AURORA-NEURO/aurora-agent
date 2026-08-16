@@ -104,6 +104,8 @@ import type {
   RoutingLabRunResult,
   LabParetoAuditArgs,
   LabParetoAuditResult,
+  LabBranchAuditArgs,
+  LabBranchAuditResult,
   ProviderCapabilityGateArgs,
   ProviderCapabilityGateResult,
   SdkRegistryCheckArgs,
@@ -764,6 +766,10 @@ export class ApiClient {
 
   async labParetoAudit(args: LabParetoAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LabParetoAuditResult>> {
     return this.callTool<LabParetoAuditResult>("lab_pareto_audit", args, options);
+  }
+
+  async labBranchAudit(args: LabBranchAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LabBranchAuditResult>> {
+    return this.callTool<LabBranchAuditResult>("lab_branch_audit", args, options);
   }
 
   async providerCapabilityGate(args: ProviderCapabilityGateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ProviderCapabilityGateResult>> {

@@ -374,6 +374,16 @@ from .lab_pareto import (
     LabParetoAuditReport,
     lab_pareto_audit_report,
 )
+from .lab_branch import (
+    LAB_BRANCH_SCHEMA,
+    LAB_BRANCH_VERDICTS,
+    MAX_LAB_BRANCH_DECISIONS,
+    MAX_LAB_BRANCH_INPUT_BYTES,
+    MAX_LAB_BRANCH_ROWS,
+    LabBranchAuditArgs,
+    LabBranchAuditReport,
+    lab_branch_audit_report,
+)
 from .provider import (
     CHECK_NAMES,
     PASS_FAIL_CHECKS,
@@ -1509,6 +1519,14 @@ __all__ = [
     "LabParetoAuditArgs",
     "LabParetoAuditReport",
     "lab_pareto_audit_report",
+    "LAB_BRANCH_SCHEMA",
+    "LAB_BRANCH_VERDICTS",
+    "MAX_LAB_BRANCH_DECISIONS",
+    "MAX_LAB_BRANCH_ROWS",
+    "MAX_LAB_BRANCH_INPUT_BYTES",
+    "LabBranchAuditArgs",
+    "LabBranchAuditReport",
+    "lab_branch_audit_report",
     "WorldClaimCheckRequest",
     "MAX_DOMAIN_REQUEST_BYTES",
     "MAX_LAB_ACTIONS",
