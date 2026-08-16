@@ -1562,6 +1562,170 @@ export interface MeasurementCompareResult extends JsonObject {
   limitations: string[];
 }
 
+export interface LineageAuditArgs extends JsonObject {
+  registry: JsonObject;
+  max_items?: number;
+}
+
+export type LineageFingerprintState = "consistent" | "mismatch" | "no_evidence_available";
+
+export interface LineageFingerprintResult extends JsonObject {
+  fingerprint: LineageFingerprintState;
+  specimen: string;
+  declared_donor?: string;
+  fingerprint_donor?: string;
+}
+
+export interface LineageFindingResult extends JsonObject {
+  finding: "lineage_cycle" | "mass_not_conserved" | "temporal_implausibility" | "duplicate_content" | "identity_mismatch" | "artifacts_disagree";
+  specimen?: string;
+  child?: string;
+  parent?: string;
+  left?: string;
+  right?: string;
+  parent_mass_ug?: number;
+  child_total_ug?: number;
+  artifacts?: string[];
+  fingerprint?: LineageFingerprintResult;
+}
+
+export interface LineageAuditResult extends JsonObject {
+  ok: boolean;
+  specimen_count: number;
+  artifact_count: number;
+  finding_count: number;
+  clean: boolean;
+  identity_complete: boolean;
+  fingerprint_count: number;
+  fingerprints: LineageFingerprintResult[];
+  omitted_fingerprints: number;
+  unchecked_identity_count: number;
+  unchecked_identity: string[];
+  finding_count_returned: number;
+  findings: LineageFindingResult[];
+  omitted_findings: number;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface PreanalyticApplyArgs extends JsonObject {
+  specimen: JsonObject;
+  mutation: JsonObject;
+  available_actions?: string[];
+  family?: JsonObject[];
+  family_name?: string;
+  qc_field?: string;
+  alert_at?: number;
+}
+
+export interface PreanalyticCheckResult extends JsonObject {
+  ok: boolean;
+  family?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface PreanalyticDetectabilityResult extends JsonObject {
+  qc_field: string;
+  alert_at: number;
+  intensity: number;
+}
+
+export interface PreanalyticFaultedResult extends JsonObject {
+  mutation: string;
+  specimen: JsonObject;
+  qc_signature: Record<string, number>;
+  measurability_lost: Record<string, number>;
+  stage: string;
+}
+
+export interface PreanalyticApplyResult extends JsonObject {
+  ok: boolean;
+  applied: boolean;
+  mutation: JsonObject;
+  stage?: string;
+  faulted?: PreanalyticFaultedResult;
+  biology_digest_before: string;
+  biology_digest_after?: string;
+  biology_unchanged?: boolean;
+  specimen_digest_before: string;
+  specimen_digest_after?: string;
+  has_signature?: boolean;
+  response_check?: PreanalyticCheckResult | null;
+  family_validation?: PreanalyticCheckResult | null;
+  detectability?: PreanalyticDetectabilityResult | null;
+  refusal?: string;
+  fail_closed: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface ContradictionReviewArgs extends JsonObject {
+  left: JsonObject;
+  right: JsonObject;
+  intent: "expected" | "resolvable" | "irreducible";
+  hypotheses: JsonObject[];
+  actions?: JsonObject[];
+  missing_evidence?: JsonObject[];
+  references?: JsonObject[];
+  examine?: string[];
+  notable_below_per_ten_thousand?: number;
+  max_items?: number;
+}
+
+export type ContradictionStateName = "resolved" | "not_yet_examined" | "unresolvable";
+
+export interface ContradictionRankedActionResult extends JsonObject {
+  evidence: string;
+  refutes?: string[];
+  refutes_live?: number;
+  cost: number;
+}
+
+export interface ContradictionStateResult extends JsonObject {
+  state: ContradictionStateName;
+  available?: ContradictionRankedActionResult[];
+  examined?: string[];
+  would_resolve?: JsonObject[];
+  by?: string[];
+  surviving?: JsonObject;
+}
+
+export interface ContradictionExpectednessResult extends JsonObject {
+  ok: boolean;
+  value?: JsonObject;
+  threshold: number;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface ContradictionReviewResult extends JsonObject {
+  ok: boolean;
+  validated?: boolean;
+  stage?: string;
+  refusal?: string;
+  fail_closed: boolean;
+  contradiction?: JsonObject;
+  intent?: "expected" | "resolvable" | "irreducible";
+  declared_hypothesis_count?: number;
+  admissible_hypothesis_count?: number;
+  admissible_hypotheses?: Record<string, JsonObject>;
+  validation_intent_check?: JsonObject;
+  post_examination_intent_check?: JsonObject;
+  examined?: string[];
+  state?: ContradictionStateResult;
+  state_name?: ContradictionStateName;
+  live_hypothesis_count?: number;
+  next_actions?: ContradictionRankedActionResult[];
+  omitted_next_actions?: number;
+  cue_count?: number;
+  cues?: JsonObject[];
+  omitted_cues?: number;
+  expectedness?: ContradictionExpectednessResult | null;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface OpsAcceptanceArgs extends JsonObject {
   max_items?: number;
 }

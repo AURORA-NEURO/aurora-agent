@@ -109,6 +109,9 @@ from .hub import (
     hub_resolve_report,
     hub_search_report,
 )
+from .lineage import LineageAuditArgs, LineageAuditReport, lineage_audit_report
+from .preanalytic import PreanalyticApplyArgs, PreanalyticApplyReport, preanalytic_apply_report
+from .contradiction import ContradictionReviewArgs, ContradictionReviewReport, contradiction_review_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -307,6 +310,63 @@ class Workspace:
         """Return typed grounded evidence or the kernel's fail-closed refusal."""
 
         return world_claim_check_report(self.world_claim_check(provenance, claim))
+
+    def lineage_audit(
+        self,
+        request: LineageAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit specimen ancestry, material, artifact, and identity evidence with bounded output."""
+
+        normalized = request if isinstance(request, LineageAuditArgs) else LineageAuditArgs.from_wire(request)
+        return self.tool("lineage_audit", normalized.to_mcp_arguments())
+
+    def lineage_audit_report(
+        self,
+        request: LineageAuditArgs | Mapping[str, Any],
+    ) -> LineageAuditReport:
+        """Return typed lineage findings while keeping missing identity evidence non-passing."""
+
+        return lineage_audit_report(self.lineage_audit(request))
+
+    def preanalytic_apply(
+        self,
+        request: PreanalyticApplyArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply a declared pre-analytic fault and preserve biological/refusal postconditions."""
+
+        normalized = request if isinstance(request, PreanalyticApplyArgs) else PreanalyticApplyArgs.from_wire(request)
+        result = self.client.call_tool("preanalytic_apply", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def preanalytic_apply_report(
+        self,
+        request: PreanalyticApplyArgs | Mapping[str, Any],
+    ) -> PreanalyticApplyReport:
+        """Return typed admitted fault evidence or a fail-closed pre-analytic refusal."""
+
+        return preanalytic_apply_report(self.preanalytic_apply(request))
+
+    def contradiction_review(
+        self,
+        request: ContradictionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Pose and review a contradiction without selecting a modality as the winner."""
+
+        normalized = request if isinstance(request, ContradictionReviewArgs) else ContradictionReviewArgs.from_wire(request)
+        result = self.client.call_tool("contradiction_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def contradiction_review_report(
+        self,
+        request: ContradictionReviewArgs | Mapping[str, Any],
+    ) -> ContradictionReviewReport:
+        """Return typed hypotheses, resolution state, next actions, cues, or refusal."""
+
+        return contradiction_review_report(self.contradiction_review(request))
 
     def lab_plan(
         self,
@@ -1329,6 +1389,57 @@ class AsyncWorkspace:
         """Return typed async grounded evidence or refusal."""
 
         return world_claim_check_report(await self.world_claim_check(provenance, claim))
+
+    async def lineage_audit(
+        self,
+        request: LineageAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.lineage_audit`."""
+
+        normalized = request if isinstance(request, LineageAuditArgs) else LineageAuditArgs.from_wire(request)
+        return await self.tool("lineage_audit", normalized.to_mcp_arguments())
+
+    async def lineage_audit_report(
+        self,
+        request: LineageAuditArgs | Mapping[str, Any],
+    ) -> LineageAuditReport:
+        return lineage_audit_report(await self.lineage_audit(request))
+
+    async def preanalytic_apply(
+        self,
+        request: PreanalyticApplyArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.preanalytic_apply`."""
+
+        normalized = request if isinstance(request, PreanalyticApplyArgs) else PreanalyticApplyArgs.from_wire(request)
+        result = await self.client.call_tool("preanalytic_apply", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def preanalytic_apply_report(
+        self,
+        request: PreanalyticApplyArgs | Mapping[str, Any],
+    ) -> PreanalyticApplyReport:
+        return preanalytic_apply_report(await self.preanalytic_apply(request))
+
+    async def contradiction_review(
+        self,
+        request: ContradictionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.contradiction_review`."""
+
+        normalized = request if isinstance(request, ContradictionReviewArgs) else ContradictionReviewArgs.from_wire(request)
+        result = await self.client.call_tool("contradiction_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def contradiction_review_report(
+        self,
+        request: ContradictionReviewArgs | Mapping[str, Any],
+    ) -> ContradictionReviewReport:
+        return contradiction_review_report(await self.contradiction_review(request))
 
     async def lab_plan(
         self,

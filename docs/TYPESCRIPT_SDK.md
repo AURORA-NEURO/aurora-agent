@@ -99,6 +99,12 @@ calls or parallel batches;
   and defined-versus-undefined metric-debt evidence;
 - `opsAcceptance`: typed `met`/`refuted`/`unverifiable` operational acceptance findings without
   fabricating a release percentage.
+- `measurementCompare`, `hubSearch`, `hubResolve`, and `hubLock`: standards comparability and
+  federated authority/freshness/dependency evidence with bounded omission accounting;
+- `worldClaimCheck` and `observedWorldDeclare`: provenance-limited claims and pinned observed-world
+  declarations;
+- `lineageAudit`, `preanalyticApply`, and `contradictionReview`: typed specimen identity gaps,
+  biology-preserving pre-analytic mutations, and set-valued multimodal contradiction review.
 
 The complete live tool surface is also available through `toolCatalogue()`, `planTool()`, and
 `toolChecked()`. The catalogue is bounded and SHA-256 addressed from `/v1/tools`; plans are
@@ -205,6 +211,13 @@ synthetic or simulator evidence to biological validity.
 public versus controlled access, cohort strata, selection, outcome labels, controlled-source
 names, and the observed-only provenance projection remain explicit instead of being inferred from
 an identifier or a green transport response.
+`lineageAudit` types bounded specimen-registry audits, keeping ancestry/material findings separate
+from incomplete fingerprint identity evidence and preserving omitted-row counts. `preanalyticApply`
+types admitted biology-preserving fault signatures as well as fail-closed mutation refusals;
+response checks, family null controls, and detectability evidence remain separate fields.
+`contradictionReview` keeps typed hypotheses, discriminating actions, answer-cue diagnostics, and
+the resolved/not-yet-examined/unresolvable state machine in the REST/MCP envelope without choosing
+a correct modality. Nested domain records remain JSON objects where the Rust kernel is authoritative.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

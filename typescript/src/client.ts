@@ -44,6 +44,12 @@ import type {
   ObservedWorldDeclareResult,
   MeasurementCompareArgs,
   MeasurementCompareResult,
+  LineageAuditArgs,
+  LineageAuditResult,
+  PreanalyticApplyArgs,
+  PreanalyticApplyResult,
+  ContradictionReviewArgs,
+  ContradictionReviewResult,
   OpsAcceptanceArgs,
   OpsAcceptanceResult,
   BioAtlasPublicationAuditArgs,
@@ -359,6 +365,18 @@ export class ApiClient {
 
   async measurementCompare(args: MeasurementCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MeasurementCompareResult>> {
     return this.callTool<MeasurementCompareResult>("measurement_compare", args, options);
+  }
+
+  async lineageAudit(args: LineageAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LineageAuditResult>> {
+    return this.callTool<LineageAuditResult>("lineage_audit", args, options);
+  }
+
+  async preanalyticApply(args: PreanalyticApplyArgs, options?: ClientRequestOptions): Promise<RestToolResponse<PreanalyticApplyResult>> {
+    return this.callTool<PreanalyticApplyResult>("preanalytic_apply", args, options);
+  }
+
+  async contradictionReview(args: ContradictionReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ContradictionReviewResult>> {
+    return this.callTool<ContradictionReviewResult>("contradiction_review", args, options);
   }
 
   async opsAcceptance(args: OpsAcceptanceArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OpsAcceptanceResult>> {

@@ -90,6 +90,18 @@ invent defaults:
   declaration boundary: source versions/access policies, controlled-source names, cohort/stratum
   reconciliation, selection, unsupported counterfactuals, outcome labels, and observed-only
   provenance are all reconciled before callers treat the declaration as a usable artifact.
+- `LineageAuditArgs` and `lineage_audit_report(...)` preserve the specimen registry audit as two
+  independent gates: typed ancestry/material/artifact findings and a three-state identity ledger
+  where missing fingerprints never count as consistent. Bounded fingerprint/finding omissions,
+  donor mismatch evidence, and `ready_for_identity_claim` remain explicit.
+- `PreanalyticApplyArgs` and `preanalytic_apply_report(...)` carry admitted fault records, signed QC
+  deltas, measurability loss, biology-before/after digests, family false-positive validation,
+  response availability, and optional detectability floors. Structured mutation refusals remain
+  fail-closed values rather than transport errors.
+- `ContradictionReviewArgs` and `contradiction_review_report(...)` expose the complete multimodal
+  review program: pose/validation/examination refusals, admissible hypotheses, discriminating
+  actions, cue scans, expectedness evidence, and the distinct resolved, not-yet-examined, and
+  unresolvable states. No helper selects a winning modality.
 - `FiberCompileRequest`, `FiberRefineRequest`, `FiberExplainRequest`, `FiberVerifyRequest`, and
   `ProjectionBundleRequest` make the full FIBER progressive-disclosure lifecycle typed across sync
   MCP, async MCP, and HTTP. `Workspace.fiber_compile(...)` validates relative world/query paths and

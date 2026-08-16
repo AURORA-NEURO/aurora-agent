@@ -110,6 +110,9 @@ from .hub import (
     hub_resolve_report,
     hub_search_report,
 )
+from .lineage import LineageAuditArgs, LineageAuditReport, lineage_audit_report
+from .preanalytic import PreanalyticApplyArgs, PreanalyticApplyReport, preanalytic_apply_report
+from .contradiction import ContradictionReviewArgs, ContradictionReviewReport, contradiction_review_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .world import (
     ObservedWorldDeclareArgs,
@@ -1024,6 +1027,51 @@ class ApiClient:
         """Return typed HTTP grounded evidence or structured refusal."""
 
         return world_claim_check_report(self.world_claim_check(provenance, claim))
+
+    def lineage_audit(
+        self,
+        request: LineageAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit bounded specimen lineage through the HTTP gateway."""
+
+        normalized = request if isinstance(request, LineageAuditArgs) else LineageAuditArgs.from_wire(request)
+        return self.call_tool("lineage_audit", normalized.to_mcp_arguments())
+
+    def lineage_audit_report(
+        self,
+        request: LineageAuditArgs | Mapping[str, Any],
+    ) -> LineageAuditReport:
+        return lineage_audit_report(self.lineage_audit(request))
+
+    def preanalytic_apply(
+        self,
+        request: PreanalyticApplyArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply a declared pre-analytic mutation through the HTTP gateway."""
+
+        normalized = request if isinstance(request, PreanalyticApplyArgs) else PreanalyticApplyArgs.from_wire(request)
+        return self.call_tool("preanalytic_apply", normalized.to_mcp_arguments())
+
+    def preanalytic_apply_report(
+        self,
+        request: PreanalyticApplyArgs | Mapping[str, Any],
+    ) -> PreanalyticApplyReport:
+        return preanalytic_apply_report(self.preanalytic_apply(request))
+
+    def contradiction_review(
+        self,
+        request: ContradictionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Review a bounded contradiction program through the HTTP gateway."""
+
+        normalized = request if isinstance(request, ContradictionReviewArgs) else ContradictionReviewArgs.from_wire(request)
+        return self.call_tool("contradiction_review", normalized.to_mcp_arguments())
+
+    def contradiction_review_report(
+        self,
+        request: ContradictionReviewArgs | Mapping[str, Any],
+    ) -> ContradictionReviewReport:
+        return contradiction_review_report(self.contradiction_review(request))
 
     def lab_plan(
         self,
@@ -2085,6 +2133,51 @@ class AsyncApiClient:
         """Return typed async HTTP grounded evidence or refusal."""
 
         return world_claim_check_report(await self.world_claim_check(provenance, claim))
+
+    async def lineage_audit(
+        self,
+        request: LineageAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.lineage_audit`."""
+
+        normalized = request if isinstance(request, LineageAuditArgs) else LineageAuditArgs.from_wire(request)
+        return await self.call_tool("lineage_audit", normalized.to_mcp_arguments())
+
+    async def lineage_audit_report(
+        self,
+        request: LineageAuditArgs | Mapping[str, Any],
+    ) -> LineageAuditReport:
+        return lineage_audit_report(await self.lineage_audit(request))
+
+    async def preanalytic_apply(
+        self,
+        request: PreanalyticApplyArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.preanalytic_apply`."""
+
+        normalized = request if isinstance(request, PreanalyticApplyArgs) else PreanalyticApplyArgs.from_wire(request)
+        return await self.call_tool("preanalytic_apply", normalized.to_mcp_arguments())
+
+    async def preanalytic_apply_report(
+        self,
+        request: PreanalyticApplyArgs | Mapping[str, Any],
+    ) -> PreanalyticApplyReport:
+        return preanalytic_apply_report(await self.preanalytic_apply(request))
+
+    async def contradiction_review(
+        self,
+        request: ContradictionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.contradiction_review`."""
+
+        normalized = request if isinstance(request, ContradictionReviewArgs) else ContradictionReviewArgs.from_wire(request)
+        return await self.call_tool("contradiction_review", normalized.to_mcp_arguments())
+
+    async def contradiction_review_report(
+        self,
+        request: ContradictionReviewArgs | Mapping[str, Any],
+    ) -> ContradictionReviewReport:
+        return contradiction_review_report(await self.contradiction_review(request))
 
     async def lab_plan(
         self,
