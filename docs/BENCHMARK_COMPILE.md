@@ -20,6 +20,13 @@ The output stops before human review. `benchmark_oracle_review` is a separate ga
 transport path that can turn the proposal into a reviewed oracle, grade an observed verdict, or
 package a reviewed `DecisionCell`.
 
+For callers that want the complete authoring transaction, `benchmark_compile_review` accepts the
+same compiler inputs plus `reviewer`, world/query `InputRef` values, and an optional grade. It
+delegates to the assembled compiler and then to `Compilation::approve`; it cannot bypass the
+proposal-to-reviewed-oracle type gate. Compiler refusals remain at `stage: benchmark_compile`,
+while missing review, weak/exploited oracle, or absent causal cell refusals are reported at
+`stage: oracle_review`.
+
 ## Inputs
 
 `trace` is a serialized `bioprism_trace::Trace`; `reference` is an optional comparison trace. The
@@ -80,4 +87,6 @@ separate compiler and evaluation responsibilities.
 Python exposes `BenchmarkCompileArgs`, `BenchmarkCompileReport`, and
 `benchmark_compile_report(...)` through sync/async MCP, HTTP, and workspace facades. TypeScript
 exposes `BenchmarkCompileArgs`, `BenchmarkCompileResult`, and
-`client.benchmarkCompile(...)`.
+`client.benchmarkCompile(...)`. The end-to-end surface additionally exposes
+`BenchmarkCompileReviewArgs`, `BenchmarkCompileReviewReport`, and
+`client.benchmarkCompileReview(...)` / `benchmark_compile_review_report(...)`.

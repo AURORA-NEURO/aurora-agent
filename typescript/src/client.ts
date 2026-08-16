@@ -146,6 +146,8 @@ import type {
   BenchmarkOracleReviewResult,
   BenchmarkCompileArgs,
   BenchmarkCompileResult,
+  BenchmarkCompileReviewArgs,
+  BenchmarkCompileReviewResult,
   FoundationContractCheckArgs,
   FoundationContractCheckResult,
   PackCatalogueArgs,
@@ -490,6 +492,10 @@ export class ApiClient {
 
   async benchmarkCompile(args: BenchmarkCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkCompileResult>> {
     return this.callTool<BenchmarkCompileResult>("benchmark_compile", args, options);
+  }
+
+  async benchmarkCompileReview(args: BenchmarkCompileReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkCompileReviewResult>> {
+    return this.callTool<BenchmarkCompileReviewResult>("benchmark_compile_review", args, options);
   }
 
   async foundationContractCheck(args: FoundationContractCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FoundationContractCheckResult>> {

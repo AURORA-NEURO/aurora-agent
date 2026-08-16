@@ -482,6 +482,13 @@ from .benchmark_compile import (
     BenchmarkCompileReport,
     benchmark_compile_report,
 )
+from .benchmark_compile_review import (
+    BENCHMARK_COMPILE_REVIEW_SCHEMA,
+    MAX_BENCHMARK_COMPILE_REVIEW_INPUT_BYTES,
+    BenchmarkCompileReviewArgs,
+    BenchmarkCompileReviewReport,
+    benchmark_compile_review_report,
+)
 from .foundation import (
     COUNTERFACTUAL_CLAIMS,
     FOUNDATION_MAX_INPUT_BYTES,
@@ -1614,6 +1621,11 @@ __all__ = [
     "BenchmarkCompileArgs",
     "BenchmarkCompileReport",
     "benchmark_compile_report",
+    "BENCHMARK_COMPILE_REVIEW_SCHEMA",
+    "MAX_BENCHMARK_COMPILE_REVIEW_INPUT_BYTES",
+    "BenchmarkCompileReviewArgs",
+    "BenchmarkCompileReviewReport",
+    "benchmark_compile_review_report",
     "FOUNDATION_MAX_INPUT_BYTES",
     "COUNTERFACTUAL_CLAIMS",
     "FOUNDATION_VERDICTS",

@@ -248,6 +248,7 @@ from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrity
 from .benchmark_counterfactual import BenchmarkCounterfactualCheckArgs, BenchmarkCounterfactualCheckReport, benchmark_counterfactual_check_report
 from .benchmark_oracle import BenchmarkOracleReviewArgs, BenchmarkOracleReviewReport, benchmark_oracle_review_report
 from .benchmark_compile import BenchmarkCompileArgs, BenchmarkCompileReport, benchmark_compile_report
+from .benchmark_compile_review import BenchmarkCompileReviewArgs, BenchmarkCompileReviewReport, benchmark_compile_review_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
@@ -2139,6 +2140,26 @@ class Workspace:
         """Return typed benchmark compiler pipeline evidence."""
 
         return benchmark_compile_report(self.benchmark_compile(request))
+
+    def benchmark_compile_review(
+        self,
+        request: BenchmarkCompileReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the complete reviewed benchmark-cell workflow through workspace MCP."""
+
+        normalized = request if isinstance(request, BenchmarkCompileReviewArgs) else BenchmarkCompileReviewArgs.from_wire(request)
+        result = self.client.call_tool("benchmark_compile_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def benchmark_compile_review_report(
+        self,
+        request: BenchmarkCompileReviewArgs | Mapping[str, Any],
+    ) -> BenchmarkCompileReviewReport:
+        """Return typed reviewed benchmark-cell evidence."""
+
+        return benchmark_compile_review_report(self.benchmark_compile_review(request))
 
     def foundation_contract_check(
         self,
@@ -4362,6 +4383,26 @@ class AsyncWorkspace:
         """Return typed async benchmark compiler evidence."""
 
         return benchmark_compile_report(await self.benchmark_compile(request))
+
+    async def benchmark_compile_review(
+        self,
+        request: BenchmarkCompileReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the complete reviewed benchmark-cell workflow through async workspace MCP."""
+
+        normalized = request if isinstance(request, BenchmarkCompileReviewArgs) else BenchmarkCompileReviewArgs.from_wire(request)
+        result = await self.client.call_tool("benchmark_compile_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def benchmark_compile_review_report(
+        self,
+        request: BenchmarkCompileReviewArgs | Mapping[str, Any],
+    ) -> BenchmarkCompileReviewReport:
+        """Return typed async reviewed benchmark-cell evidence."""
+
+        return benchmark_compile_review_report(await self.benchmark_compile_review(request))
 
     async def foundation_contract_check(
         self,

@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 136);
+    assert_eq!(tools.len(), 137);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(136));
-    assert_eq!(result["advertised_tool_count"], json!(136));
+    assert_eq!(result["unique_catalog_tools"], json!(137));
+    assert_eq!(result["advertised_tool_count"], json!(137));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(136));
-    assert_eq!(result["schema_quality"]["valid"], json!(136));
+    assert_eq!(result["schema_quality"]["checked"], json!(137));
+    assert_eq!(result["schema_quality"]["valid"], json!(137));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -8076,7 +8076,7 @@ fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_e
     assert_eq!(refused["fail_closed"], json!(true));
     assert!(refused["refusal"].as_str().unwrap().contains("observation"));
 
-    let mut malformed_claim = arguments;
+    let mut malformed_claim = arguments.clone();
     malformed_claim["claims"] = json!([{
         "status": "evidenced",
         "claim": "the panel caused the failure",
@@ -8087,6 +8087,19 @@ fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_e
     assert_eq!(claim_refused["ok"], json!(false));
     assert_eq!(claim_refused["stage"], json!("claim_attribution"));
     assert_eq!(claim_refused["fail_closed"], json!(true));
+
+    let mut reviewed_arguments = arguments;
+    reviewed_arguments["reviewer"] = json!("reviewer-1");
+    reviewed_arguments["world"] = json!({ "locator": "world.json", "sha256": "a".repeat(64) });
+    reviewed_arguments["query"] = json!({ "locator": "query.json", "sha256": "b".repeat(64) });
+    reviewed_arguments["grade"] = json!({ "verdict": "invalid", "witnesses": ["identity_leakage"], "closure_complete": true });
+    let reviewed = call(&mut server(), "benchmark_compile_review", reviewed_arguments);
+    assert_eq!(reviewed["__isError"], json!(false));
+    assert_eq!(reviewed["ok"], json!(true));
+    assert_eq!(reviewed["schema"], json!("bioprism-mcp/benchmark-compile-review/0.1"));
+    assert_eq!(reviewed["reviewer"], json!("reviewer-1"));
+    assert_eq!(reviewed["grade"]["acceptance"]["outcome"], json!("passed"));
+    assert_eq!(reviewed["cell"]["cell_id"], json!("dc_run_fail#step3"));
 }
 
 #[test]

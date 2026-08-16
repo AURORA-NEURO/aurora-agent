@@ -250,6 +250,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["no execution"],
         limitations: ["no mutation generation"],
       } } } });
+      if (path === "/v1/tools/benchmark_compile_review") return jsonResponse({ ok: true, tool: "benchmark_compile_review", request_id: "r20g", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/benchmark-compile-review/0.1",
+        compile: { trace_id: "run_fail", class: { class: "candidate_research_cell" } },
+        reviewed_oracle: { inner: { oracle_id: "oracle-run-fail" }, reviewer: "reviewer-1", review_digest: "d".repeat(64) },
+        reviewer: "reviewer-1",
+        review_digest: "d".repeat(64),
+        grade: { acceptance: { outcome: "passed" }, passed: true },
+        cell: { cell_id: "dc_run_fail#step3", acceptable_verdicts: ["invalid"], required_witnesses: ["identity_leakage"] },
+        guarantees: ["reviewed before packaging"],
+        limitations: ["no execution"],
+      } } } });
       if (path === "/v1/tools/foundation_contract_check") return jsonResponse({ ok: true, tool: "foundation_contract_check", request_id: "r21", mcp: { result: { structuredContent: {
         ok: true,
         verdict: "refused",
@@ -1262,6 +1274,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(benchmarkCompile.mcp.result.structuredContent.schema, "bioprism-mcp/benchmark-compile/0.1");
   assert.equal(benchmarkCompile.mcp.result.structuredContent.class.class, "candidate_research_cell");
   assert.equal(benchmarkCompile.mcp.result.structuredContent.minimization.reduction_ratio, 0.5);
+  const benchmarkCompileReview = await client.benchmarkCompileReview({
+    trace: { trace_id: "run_fail", succeeded: false, events: [{ step: 0, kind: "goal", payload: { summary: "rank" } }] },
+    context: [{ id: "panel_manifest", tier: "artifact", guard: "removable" }],
+    probe_observations: [{ kept: ["panel_manifest"], signature: { verdict: "invalid", witnesses: ["identity_leakage"], divergence_step: 3 } }],
+    reviewer: "reviewer-1",
+    world: { locator: "world", sha256: "a".repeat(64) },
+    query: { locator: "query", sha256: "b".repeat(64) },
+    grade: { verdict: "invalid", witnesses: ["identity_leakage"], closure_complete: true },
+  });
+  assert.equal(benchmarkCompileReview.mcp.result.structuredContent.schema, "bioprism-mcp/benchmark-compile-review/0.1");
+  assert.equal(benchmarkCompileReview.mcp.result.structuredContent.cell.cell_id, "dc_run_fail#step3");
+  assert.equal(benchmarkCompileReview.mcp.result.structuredContent.grade.acceptance.outcome, "passed");
   const foundation = await client.foundationContractCheck({
     contract: { id: "fbc:test:001", intent: "check", falsifiers: ["disagree"], actions: ["inspect"], claim_schema: "typed", reference_standard: "fixture", terminations: ["success"] },
     claim: "real_treatment_effect",

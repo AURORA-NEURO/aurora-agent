@@ -152,6 +152,10 @@ invent defaults:
   the report refuses when any subset requested by minimization is missing instead of interpolating
   a preservation proof. It returns an unreviewed proposal only, with fail-closed causal,
   nondeterministic-probe, budget, and property-loss outcomes preserved across all facades.
+- `BenchmarkCompileReviewArgs` and `benchmark_compile_review_report(...)` close that path into a
+  single review-gated authoring call. They require reviewer identity plus world/query `InputRef`
+  values, preserve optional four-way grading, and only return a packaged cell after the real
+  `Compilation::approve` gate succeeds; compiler and oracle refusals remain distinct.
 - `FoundationContractCheckArgs` and `foundation_contract_check_report(...)` type the foundation
   declaration gate across sync MCP, async MCP, and HTTP. `FoundationContractGateReport`,
   `FoundationParentRelationReport`, `FoundationEnvelopeReport`, `FoundationWorldReport`, and

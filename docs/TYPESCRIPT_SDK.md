@@ -217,6 +217,10 @@ Its input carries an explicit bounded `probe_observations` table; missing subset
 fail-closed minimization-probe refusal rather than being guessed. The result keeps the unreviewed
 oracle proposal, reduction ratio, confidence decomposition, unmeasured stages, provenance, and
 non-execution limitations visible.
+`benchmarkCompileReview` extends that request with reviewer identity and world/query references,
+then returns `BenchmarkCompileReviewResult` only after the kernel review gate packages a
+`DecisionCell`. Compilation-stage and oracle-stage refusals remain explicit, and optional grading
+retains the typed acceptance outcome.
 `foundationContractCheck` returns typed `FoundationContractCheckResult` evidence with separate
 contract, parent-refinement, applicability/maturity, world-class, and transition-plane gates. A
 top-level `ok` transport result does not imply admission: callers must inspect the explicit

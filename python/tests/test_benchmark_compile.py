@@ -11,8 +11,11 @@ from prism_sdk import (
     AsyncWorkspace,
     BenchmarkCompileArgs,
     BenchmarkCompileReport,
+    BenchmarkCompileReviewArgs,
+    BenchmarkCompileReviewReport,
     Workspace,
     benchmark_compile_report,
+    benchmark_compile_review_report,
 )
 from prism_sdk.errors import ArgumentError
 from prism_sdk.models import ToolResult
@@ -71,6 +74,21 @@ def compile_payload() -> dict:
     }
 
 
+def compile_review_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-mcp/benchmark-compile-review/0.1",
+        "compile": {"trace_id": "run_fail", "class": {"class": "candidate_research_cell"}},
+        "reviewed_oracle": {"inner": {"oracle_id": "oracle-run-fail"}, "reviewer": "reviewer-1", "review_digest": "d" * 64},
+        "reviewer": "reviewer-1",
+        "review_digest": "d" * 64,
+        "grade": {"acceptance": {"outcome": "passed"}, "passed": True},
+        "cell": {"cell_id": "dc_run_fail#step3", "acceptable_verdicts": ["invalid"], "required_witnesses": ["identity_leakage"]},
+        "guarantees": ["reviewed before packaging"],
+        "limitations": ["no execution"],
+    }
+
+
 class _SyncTool:
     def __init__(self, payload: dict) -> None:
         self.payload = payload
@@ -122,3 +140,19 @@ class BenchmarkCompileTests(unittest.TestCase):
 
         asyncio.run(run())
 
+    def test_end_to_end_review_args_report_and_workspace_facade(self) -> None:
+        wire = compile_request()
+        wire.update({"reviewer": "reviewer-1", "world": {"locator": "world", "sha256": "a" * 64}, "query": {"locator": "query", "sha256": "b" * 64}, "grade": {"verdict": "invalid", "witnesses": ["identity_leakage"], "closure_complete": True}})
+        request = BenchmarkCompileReviewArgs.from_wire(wire)
+        self.assertEqual(request.to_mcp_arguments()["reviewer"], "reviewer-1")
+        report = benchmark_compile_review_report(compile_review_payload())
+        self.assertIsInstance(report, BenchmarkCompileReviewReport)
+        self.assertTrue(report.accepted)
+        self.assertTrue(report.packaged)
+        self.assertTrue(report.passed)
+        self.assertEqual(report.acceptance_outcome, "passed")
+        self.assertEqual(Workspace(_SyncTool(compile_review_payload())).benchmark_compile_review_report(request).cell["cell_id"], "dc_run_fail#step3")  # type: ignore[index]
+        with patch.object(ApiClient, "call_tool", return_value=compile_review_payload()) as call:
+            result = ApiClient("http://127.0.0.1:1").benchmark_compile_review_report(request)
+        self.assertEqual(result.reviewer, "reviewer-1")
+        call.assert_called_once_with("benchmark_compile_review", request.to_mcp_arguments())

@@ -36,6 +36,7 @@ use bioprism_benchcompiler::{
     episodes as benchmark_episodes, failure_card as benchmark_failure_card,
     compile as benchmark_compile, ContextItem as BenchmarkContextItem,
     InterestSignature as BenchmarkInterestSignature, MinimizeBudget as BenchmarkMinimizeBudget,
+    Compilation as BenchmarkCompilation,
     repetitions as benchmark_repetitions, Assertion as BenchmarkAssertion,
     BenchInstance as BenchmarkBenchInstance, CandidateAction as BenchmarkCandidateAction,
     CandidateActionSet as BenchmarkCandidateActionSet, ContaminationRisk as BenchmarkContaminationRisk,
@@ -1349,6 +1350,7 @@ impl Server {
             "benchmark_counterfactual_check" => self.benchmark_counterfactual_check(&arguments),
             "benchmark_oracle_review" => self.benchmark_oracle_review(&arguments),
             "benchmark_compile" => self.benchmark_compile(&arguments),
+            "benchmark_compile_review" => self.benchmark_compile_review(&arguments),
             "pack_catalogue" => self.pack_catalogue(&arguments),
             "pack_health_assess" => self.pack_health_assess(&arguments),
             "foundation_contract_check" => self.foundation_contract_check(&arguments),
@@ -9199,6 +9201,133 @@ impl Server {
             "limitations": [
                 "the MCP boundary replays no world and accepts no executable probe; callers must provide an exact observation row for every subset requested",
                 "the pipeline does not generate mutations, run exploit attacks, validate realism, or publish a benchmark pack",
+            ],
+        }))
+    }
+
+    fn benchmark_compile_review(&self, arguments: &Value) -> Result<Value, String> {
+        let reviewer = arguments
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .ok_or("reviewer is required and must be a string")?;
+        let world: bioprism_prism::InputRef = serde_json::from_value(
+            arguments
+                .get("world")
+                .cloned()
+                .ok_or("world is required and must be a serialized InputRef")?,
+        )
+        .map_err(|error| format!("invalid reviewed-cell world InputRef: {error}"))?;
+        let query: bioprism_prism::InputRef = serde_json::from_value(
+            arguments
+                .get("query")
+                .cloned()
+                .ok_or("query is required and must be a serialized InputRef")?,
+        )
+        .map_err(|error| format!("invalid reviewed-cell query InputRef: {error}"))?;
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure compile-review input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("benchmark compile-review input exceeds the 20000000-byte safety bound".into());
+        }
+        let compiled = self.benchmark_compile(arguments)?;
+        if compiled.get("ok") != Some(&Value::Bool(true)) {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/benchmark-compile-review/0.1",
+                "stage": "benchmark_compile",
+                "compile": compiled,
+                "refusal": "benchmark compilation refused before the review gate",
+                "fail_closed": true,
+                "guarantees": [
+                    "a failed compilation cannot be promoted into a reviewed cell",
+                    "compiler-stage refusals and review-stage refusals remain distinguishable",
+                ],
+            }));
+        }
+        let compilation: BenchmarkCompilation = serde_json::from_value(
+            compiled
+                .get("compilation")
+                .cloned()
+                .ok_or("benchmark compilation returned no Compilation projection")?,
+        )
+        .map_err(|error| format!("invalid internal benchmark Compilation projection: {error}"))?;
+        let (cell, reviewed) = match compilation.approve(reviewer, world, query) {
+            Ok(result) => result,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/benchmark-compile-review/0.1",
+                    "stage": "oracle_review",
+                    "compile": compiled,
+                    "reviewer": reviewer,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "a compilation without a causal cell and reviewed oracle cannot be packaged",
+                        "unattributed, weak, exploited, or gap-free oracle proposals remain blocking",
+                    ],
+                }));
+            }
+        };
+        let grade = match arguments.get("grade") {
+            None => Value::Null,
+            Some(raw_grade) => {
+                let grade = raw_grade
+                    .as_object()
+                    .ok_or("grade must be an object")?;
+                let verdict = grade
+                    .get("verdict")
+                    .and_then(Value::as_str)
+                    .ok_or("grade.verdict must be a string")?;
+                let witnesses = grade
+                    .get("witnesses")
+                    .and_then(Value::as_array)
+                    .ok_or("grade.witnesses must be an array of strings")?;
+                let mut witness_set = BTreeSet::new();
+                for witness in witnesses {
+                    witness_set.insert(
+                        witness
+                            .as_str()
+                            .ok_or("grade.witnesses must be an array of strings")?
+                            .to_string(),
+                    );
+                }
+                let closure_complete = grade
+                    .get("closure_complete")
+                    .and_then(Value::as_bool)
+                    .ok_or("grade.closure_complete must be a boolean")?;
+                let acceptance = reviewed.grade(verdict, &witness_set, closure_complete);
+                json!({
+                    "verdict": verdict,
+                    "witnesses": witness_set,
+                    "closure_complete": closure_complete,
+                    "acceptance": acceptance,
+                    "passed": acceptance.passed(),
+                    "reason": acceptance.reason(),
+                })
+            }
+        };
+        let reviewed_value = serde_json::to_value(&reviewed)
+            .map_err(|error| format!("cannot serialize reviewed oracle: {error}"))?;
+        let cell_value = serde_json::to_value(&cell)
+            .map_err(|error| format!("cannot serialize reviewed DecisionCell: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/benchmark-compile-review/0.1",
+            "compile": compiled,
+            "reviewed_oracle": reviewed_value,
+            "reviewer": reviewed.reviewer(),
+            "review_digest": reviewed.review_digest(),
+            "grade": grade,
+            "cell": cell_value,
+            "guarantees": [
+                "the assembled compiler output is reviewed before a DecisionCell is packaged",
+                "the cell carries the reviewed set-valued verdict and witness contract",
+                "the optional grade preserves wrong-verdict, missing-witness, closure-incomplete, and passed outcomes",
+            ],
+            "limitations": [
+                "the compiler still uses caller-supplied probe observations and executes no world, model, or architecture",
+                "review does not run exploit generation, realism validation, mutation calibration, or pack publication",
             ],
         }))
     }
@@ -19104,7 +19233,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "trajectory_and_decision_cells",
             "domains": ["JSONL trajectory ingestion", "OTLP JSON span ingestion", "semantic-loss accounting", "divergence localization", "decision segmentation", "review-gated cell proposals"],
             "crates": ["bioprism-trace", "bioprism-prism", "bioprism-benchcompiler"],
-            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile"],
+            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -19120,7 +19249,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "benchmark_pack_portfolio",
             "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
             "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
-            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "mutation_family", "scale_family_split_verify"],
+            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "mutation_family", "scale_family_split_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -19136,7 +19265,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "mutation_and_causal_discovery",
             "domains": ["metamorphic testing", "causal divergence", "robustness"],
             "crates": ["bioprism-mutation", "bioprism-benchcompiler", "bioprism-stress", "bioprism-influence"],
-            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "stress_profile", "stress_report", "influence_analyze"],
+            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "stress_profile", "stress_report", "influence_analyze"],
             "cli_entrypoints": ["mutate family"],
             "status": "available"
         },
@@ -20916,6 +21045,27 @@ pub fn tool_definitions() -> Vec<Value> {
                     "claims": { "type": "array", "maxItems": 10000, "description": "Optional serialized Assertion values; uncited hypotheses remain outside backed failure findings." }
                 },
                 "required": ["trace"]
+            }
+        }),
+        json!({
+            "name": "benchmark_compile_review",
+            "description": "Run the complete review-gated benchmark authoring path: compile a failing Trace with an exact caller-observed probe table, require a named reviewer, optionally grade the observed verdict, and package the reviewed oracle into a DecisionCell. Compiler, probe, oracle, and packaging refusals remain typed and fail closed; no world or architecture executes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "trace": { "type": "object", "description": "Serialized failing bioprism_trace Trace." },
+                    "reference": { "type": ["object", "null"], "description": "Optional serialized reference Trace for causal comparison." },
+                    "context": { "type": "array", "maxItems": 5000, "description": "Serialized ContextItem values to minimize." },
+                    "probe_observations": { "type": "array", "maxItems": 100000, "description": "Exact caller-observed InterestSignature rows for subsets requested by minimization." },
+                    "budget": { "type": "object", "description": "Optional bounded {max_evaluations}." },
+                    "ledger": { "type": "array", "maxItems": 10000, "description": "Optional serialized ConstraintRecord values." },
+                    "claims": { "type": "array", "maxItems": 10000, "description": "Optional cited Assertion values; evidenced claims require non-empty citations." },
+                    "reviewer": { "type": "string", "description": "Named reviewer required before cell packaging." },
+                    "world": { "type": "object", "description": "InputRef for the reviewed DecisionCell world." },
+                    "query": { "type": "object", "description": "InputRef for the reviewed DecisionCell query." },
+                    "grade": { "type": "object", "description": "Optional observed grade with verdict, witnesses, and closure_complete." }
+                },
+                "required": ["trace", "reviewer", "world", "query"]
             }
         }),
         json!({

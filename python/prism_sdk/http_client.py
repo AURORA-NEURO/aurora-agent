@@ -204,6 +204,7 @@ from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrity
 from .benchmark_counterfactual import BenchmarkCounterfactualCheckArgs, BenchmarkCounterfactualCheckReport, benchmark_counterfactual_check_report
 from .benchmark_oracle import BenchmarkOracleReviewArgs, BenchmarkOracleReviewReport, benchmark_oracle_review_report
 from .benchmark_compile import BenchmarkCompileArgs, BenchmarkCompileReport, benchmark_compile_report
+from .benchmark_compile_review import BenchmarkCompileReviewArgs, BenchmarkCompileReviewReport, benchmark_compile_review_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
@@ -874,6 +875,23 @@ class ApiClient:
         """Return typed causal, minimization, oracle, and confidence pipeline evidence."""
 
         return benchmark_compile_report(self.benchmark_compile(request))
+
+    def benchmark_compile_review(
+        self,
+        request: BenchmarkCompileReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run compilation, review, optional grading, and cell packaging through HTTP."""
+
+        normalized = request if isinstance(request, BenchmarkCompileReviewArgs) else BenchmarkCompileReviewArgs.from_wire(request)
+        return self.call_tool("benchmark_compile_review", normalized.to_mcp_arguments())
+
+    def benchmark_compile_review_report(
+        self,
+        request: BenchmarkCompileReviewArgs | Mapping[str, Any],
+    ) -> BenchmarkCompileReviewReport:
+        """Return typed end-to-end reviewed benchmark-cell evidence."""
+
+        return benchmark_compile_review_report(self.benchmark_compile_review(request))
 
     def foundation_contract_check(
         self,
@@ -3091,6 +3109,23 @@ class AsyncApiClient:
         """Return typed async benchmark compiler evidence."""
 
         return benchmark_compile_report(await self.benchmark_compile(request))
+
+    async def benchmark_compile_review(
+        self,
+        request: BenchmarkCompileReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run compilation, review, optional grading, and packaging through async HTTP."""
+
+        normalized = request if isinstance(request, BenchmarkCompileReviewArgs) else BenchmarkCompileReviewArgs.from_wire(request)
+        return await self.call_tool("benchmark_compile_review", normalized.to_mcp_arguments())
+
+    async def benchmark_compile_review_report(
+        self,
+        request: BenchmarkCompileReviewArgs | Mapping[str, Any],
+    ) -> BenchmarkCompileReviewReport:
+        """Return typed async reviewed benchmark-cell evidence."""
+
+        return benchmark_compile_review_report(await self.benchmark_compile_review(request))
 
     async def foundation_contract_check(
         self,
