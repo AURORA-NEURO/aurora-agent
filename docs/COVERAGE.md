@@ -471,6 +471,12 @@ than planned: frozen contracts, not design prose. 24 of its 45 modules are untou
 that worked from a §40 module had an easier time than the ones working from `Planned` text, so at
 equal size an uncovered §40 module should be preferred over an uncovered module anywhere else.
 
+The engineering surface now has a second layer beyond manifest validation: `engineering_execution_plan`
+derives bounded ticket windows, dependency-aware implementation waves, critical paths, and
+fail-closed schedule gates. This materially covers the in-repository planning semantics of §40,
+but it does not count external tracker state, real CI, staffing/effort estimates, maintainer
+authority, or release automation as implemented. Those boundaries remain explicit in the backlog.
+
 **Whole capability areas had no crate at all, and now all six do.** §13 security and safety (26),
 §42 graph-native evaluation and UI (31), §35 million-scale infrastructure (18), §41 graph-first
 navigation (16), §06 benchmark compiler (15) and §09 inference lab (11) were 117 modules — 15% of

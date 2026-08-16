@@ -209,6 +209,7 @@ pub mod classify;
 pub mod error;
 pub mod exploit;
 pub mod engineering;
+pub mod engineering_plan;
 pub mod mission;
 pub mod operational_readiness;
 pub mod report;
@@ -249,6 +250,12 @@ pub use engineering::{
     EngineeringIssue, EngineeringManifest, EngineeringPolicies, IssueSeverity, OwnershipSpec,
     PackageSpec, ProjectIdentity, TechnologyBaseline, TicketReadiness, TicketSpec, TicketStatus,
     AdrSupersession, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_MANIFEST_SCHEMA,
+};
+pub use engineering_plan::{
+    EngineeringPlanAudit, EngineeringPlanError, EngineeringPlanGate, EngineeringPlanPolicies,
+    EngineeringPlanRequest, EngineeringPlanWave, EngineeringTicketPlan,
+    ENGINEERING_PLAN_AUDIT_SCHEMA, ENGINEERING_PLAN_REQUEST_SCHEMA, MAX_PLAN_PARALLELISM,
+    MAX_PLAN_TICKETS,
 };
 pub use mission::{
     apply_binding, plan_mission, MissionBinding, MissionError, MissionPlan, MissionPolicy,

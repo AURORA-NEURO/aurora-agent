@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 167);
+    assert_eq!(tools.len(), 168);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3654,6 +3654,48 @@ fn engineering_manifest_audit_keeps_topology_ticket_readiness_and_raci_separate(
 }
 
 #[test]
+fn engineering_execution_plan_derives_waves_critical_path_and_fail_closed_manifest_gate() {
+    let mut server = server();
+    let manifest = json!({
+        "schema": "bioprism-engineering-manifest/0.1",
+        "project": { "id": "aurora-agent", "version": "0.1.0", "repository": "github.com/AURORA-NEURO/aurora-agent" },
+        "baseline": { "language": "Rust 2021", "runtime": "cargo", "api": "MCP JSON-RPC", "storage": "in-memory", "observability": "structured stderr audit", "deployment": "local process" },
+        "packages": [
+            { "id": "core", "path": "crates/core", "language": "rust", "kind": "library", "owner": "platform", "depends_on": [], "public": true },
+            { "id": "api", "path": "crates/api", "language": "rust", "kind": "service", "owner": "platform", "depends_on": ["core"], "public": true }
+        ],
+        "tickets": [
+            { "id": "T-001", "title": "ship core", "package": "core", "contract": "core-contract", "status": "done", "depends_on": [], "acceptance": ["core tests pass"] },
+            { "id": "T-002", "title": "ship api", "package": "api", "contract": "api-contract", "status": "planned", "depends_on": ["T-001"], "acceptance": ["protocol tests pass"] },
+            { "id": "T-003", "title": "publish api", "package": "api", "contract": "release-contract", "status": "planned", "depends_on": ["T-002"], "acceptance": ["release evidence exists"] }
+        ],
+        "adrs": [{ "id": "ADR-001", "title": "use rust", "status": "accepted", "decision": "Rust owns canonical semantics", "affects": ["core", "api"] }],
+        "ownership": [{ "surface": "api", "accountable": "platform-lead", "responsible": ["api-team"], "independent_reviewer": "review-board" }]
+    });
+    let request = json!({ "schema": "bioprism-engineering-plan/0.1", "manifest": manifest.clone() });
+    let result = call(&mut server, "engineering_execution_plan", json!({ "request": request.clone() }));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["engineering_plan_ready"], json!(true));
+    assert_eq!(result["audit"]["waves"].as_array().unwrap().len(), 2);
+    assert_eq!(result["audit"]["waves"][0]["ticket_ids"], json!(["T-002"]));
+    assert_eq!(result["audit"]["waves"][1]["ticket_ids"], json!(["T-003"]));
+    assert_eq!(result["audit"]["critical_path"], json!(["T-001", "T-002", "T-003"]));
+    assert_eq!(result["audit"]["planned_ticket_count"], json!(2));
+    assert_eq!(result["plan_digest"].as_str().unwrap().len(), 64);
+
+    let mut refused = request;
+    refused["manifest"]["tickets"][1]["depends_on"] = json!(["missing"]);
+    let refusal = call(&mut server, "engineering_execution_plan", json!({ "request": refused }));
+    assert_eq!(refusal["ok"], json!(true));
+    assert_eq!(refusal["valid"], json!(false));
+    assert_eq!(refusal["engineering_plan_ready"], json!(false));
+    assert_eq!(refusal["audit"]["planning_started"], json!(false));
+    assert!(refusal["audit"]["manifest_issues"].as_array().unwrap().iter().any(|issue| issue["code"] == "missing_ticket_dependency"));
+    assert!(refusal["audit"]["issues"].as_array().unwrap().iter().any(|issue| issue["code"] == "manifest_invalid"));
+}
+
+#[test]
 fn release_pipeline_audit_preserves_promotion_provenance_and_rollback_boundaries() {
     let mut server = server();
     let digest = "a".repeat(64);
@@ -4459,12 +4501,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(167));
-    assert_eq!(result["advertised_tool_count"], json!(167));
+    assert_eq!(result["unique_catalog_tools"], json!(168));
+    assert_eq!(result["advertised_tool_count"], json!(168));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(167));
-    assert_eq!(result["schema_quality"]["valid"], json!(167));
+    assert_eq!(result["schema_quality"]["checked"], json!(168));
+    assert_eq!(result["schema_quality"]["valid"], json!(168));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

@@ -645,6 +645,12 @@ readiness, ADR supersession, ownership/RACI, and warning/blocking issue evidence
 remains an artifact audit and does not imply checkout inspection, CI execution, GitHub state, or
 release authority. See ENGINEERING_MANIFEST_AUDIT.md.
 
+`ApiClient.engineeringExecutionPlan(...)` accepts `EngineeringPlanRequestArgs` and returns the
+typed `EngineeringPlanToolResult`: bounded ticket selection, dependency-aware waves, critical
+path, gate outcomes, issue severity, and plan digests. It is derived evidence only and does not
+write to a tracker, execute CI, inspect a checkout, or authorize release. See
+ENGINEERING_EXECUTION_PLAN.md.
+
 ## Release-pipeline audit
 
 `ApiClient.releasePipelineAudit(...)` accepts `ReleasePipelineManifestArgs` and returns a typed

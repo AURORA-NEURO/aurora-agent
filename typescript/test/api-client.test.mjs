@@ -664,6 +664,40 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         },
         guarantees: ["edges checked"], limitations: ["artifact only"],
       } } } });
+      if (path === "/v1/tools/engineering_execution_plan") return jsonResponse({ ok: true, tool: "engineering_execution_plan", request_id: "r15engineeringplan", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-engineering-plan-audit/0.1",
+        workflow: "engineering_execution_plan",
+        request_digest: "b".repeat(64),
+        manifest_digest: "a".repeat(64),
+        plan_digest: "c".repeat(64),
+        valid: true,
+        engineering_plan_ready: true,
+        blocking_issue_count: 0,
+        warning_count: 0,
+        audit: {
+          schema: "bioprism-engineering-plan-audit/0.1",
+          valid: true,
+          planning_started: true,
+          truncated: false,
+          ticket_count: 3,
+          planned_ticket_count: 2,
+          omitted_ticket_count: 0,
+          package_order: ["core", "api"],
+          ticket_plans: [
+            { ticket_id: "T-002", package: "api", contract: "api-contract", status: "planned", state: "ready", dependency_ids: ["T-001"], blocking_dependencies: [], dependency_ready: true, scheduled: true, wave: 0, critical_path_length: 2 },
+            { ticket_id: "T-003", package: "api", contract: "docs-contract", status: "planned", state: "ready", dependency_ids: ["T-002"], blocking_dependencies: [], dependency_ready: true, scheduled: true, wave: 1, critical_path_length: 1 },
+          ],
+          waves: [
+            { index: 0, ticket_ids: ["T-002"], package_ids: ["api"], depends_on_waves: [], parallelism: 1 },
+            { index: 1, ticket_ids: ["T-003"], package_ids: ["api"], depends_on_waves: [0], parallelism: 1 },
+          ],
+          critical_path: ["T-001", "T-002", "T-003"],
+          gates: [{ name: "manifest_admission", passed: true, required: true, detail: "valid" }],
+          manifest_issues: [], issues: [], guarantees: ["deterministic ordering"], limitations: ["artifact only"],
+        },
+        guarantees: ["deterministic ordering"], limitations: ["artifact only"],
+      } } } });
       if (path === "/v1/tools/release_pipeline_audit") return jsonResponse({ ok: true, tool: "release_pipeline_audit", request_id: "r15releasepipeline", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-release-pipeline-audit/0.1",
@@ -1645,6 +1679,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(engineering.mcp.result.structuredContent.schema, "bioprism-engineering-audit/0.1");
   assert.equal(engineering.mcp.result.structuredContent.audit.package_order[1], "api");
   assert.equal(engineering.mcp.result.structuredContent.audit.counts.actionable_tickets, 1);
+  const engineeringPlan = await client.engineeringExecutionPlan({
+    manifest: {
+      project: { id: "aurora-agent", version: "0.1.0", repository: "github.com/AURORA-NEURO/aurora-agent" },
+      baseline: { language: "Rust 2021", runtime: "cargo", api: "MCP JSON-RPC", storage: "in-memory", observability: "structured", deployment: "local" },
+      packages: [{ id: "core", path: "crates/core", language: "rust", kind: "library", owner: "platform" }],
+      tickets: [{ id: "T-001", title: "ship core", package: "core", contract: "core-contract", status: "done", acceptance: ["tests pass"] }],
+    },
+    policies: { max_tickets: 10, max_parallelism: 2 },
+  });
+  assert.equal(engineeringPlan.mcp.result.structuredContent.workflow, "engineering_execution_plan");
+  assert.equal(engineeringPlan.mcp.result.structuredContent.engineering_plan_ready, true);
+  assert.deepEqual(engineeringPlan.mcp.result.structuredContent.audit.critical_path, ["T-001", "T-002", "T-003"]);
+  assert.equal(engineeringPlan.mcp.result.structuredContent.audit.waves[1].depends_on_waves[0], 0);
   const releasePipeline = await client.releasePipelineAudit({
     project: { id: "aurora-agent", version: "0.1.0", repository: "github.com/AURORA-NEURO/aurora-agent" },
     source: { ref_name: "main", commit_digest: "a".repeat(64), workflow: "release.yml" },

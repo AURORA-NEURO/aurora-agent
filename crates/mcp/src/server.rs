@@ -131,12 +131,12 @@ use bioprism_devplat::{
     apply_binding, plan_mission, run_workbench, standard_walkthroughs, CapabilityCatalogue,
     CapabilityQuery, CapabilityRouteRequest, DevPlatReport, MissionReport, MissionRequest,
     MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
-    EngineeringManifest, OperationalReadinessManifest, ReleasePipelineManifest,
+    EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
     SandboxManifest,
     SandboxRuntimeManifest,
     SecurityProgramManifest,
-    CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
     RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA,
     SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
     MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
@@ -1472,6 +1472,7 @@ impl Server {
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "engineering_manifest_audit" => self.engineering_manifest_audit(&arguments),
+            "engineering_execution_plan" => self.engineering_execution_plan(&arguments),
             "release_pipeline_audit" => self.release_pipeline_audit(&arguments),
             "operational_readiness_audit" => self.operational_readiness_audit(&arguments),
             "security_privacy_audit" => self.security_privacy_audit(&arguments),
@@ -24133,6 +24134,60 @@ impl Server {
         }))
     }
 
+    fn engineering_execution_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_request = arguments
+            .get("request")
+            .cloned()
+            .ok_or("request is required and must be a serialized EngineeringPlanRequest")?;
+        let encoded = serde_json::to_vec(&raw_request)
+            .map_err(|error| format!("cannot measure engineering plan request: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("request exceeds the 20000000-byte safety bound".into());
+        }
+        let request: EngineeringPlanRequest = serde_json::from_value(raw_request)
+            .map_err(|error| format!("invalid engineering plan request: {error}"))?;
+        let audit = request
+            .audit()
+            .map_err(|error| format!("cannot derive engineering execution plan: {error}"))?;
+        let request_digest = request
+            .digest()
+            .map_err(|error| format!("cannot digest engineering plan request: {error}"))?
+            .to_string();
+        let blocking_issue_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::IssueSeverity::Blocking)
+            .count();
+        let warning_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::IssueSeverity::Warning)
+            .count();
+        Ok(json!({
+            "ok": true,
+            "workflow": "engineering_execution_plan",
+            "schema": ENGINEERING_PLAN_AUDIT_SCHEMA,
+            "request_digest": request_digest,
+            "manifest_digest": audit.manifest_digest,
+            "plan_digest": audit.plan_digest,
+            "valid": audit.valid,
+            "engineering_plan_ready": audit.valid,
+            "blocking_issue_count": blocking_issue_count,
+            "warning_count": warning_count,
+            "audit": audit,
+            "guarantees": [
+                "dependency waves, package serialization, ticket readiness, and critical path are derived from the authoritative manifest",
+                "omitted ticket windows and unfinished dependencies remain explicit instead of being silently scheduled",
+                "the route proposes work and never creates tickets, runs CI, mutates a repository, or declares implementation complete",
+            ],
+            "limitations": [
+                "ticket status, ownership, acceptance, and completion are caller-declared and are not verified against an external tracker",
+                "the route does not execute a wave, reserve workers, run tests, or contact GitHub, CI, or deployment systems",
+                "a valid plan is an auditable proposal, not evidence that any ticket was implemented or released",
+            ],
+        }))
+    }
+
     fn release_pipeline_audit(&self, arguments: &Value) -> Result<Value, String> {
         let raw_manifest = arguments
             .get("manifest")
@@ -26751,7 +26806,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -28907,6 +28962,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "manifest": { "type": "object", "description": "Serialized bioprism-devplat EngineeringManifest with project, baseline, packages, tickets, ADRs, ownership rows, and explicit policies." }
                 },
                 "required": ["manifest"]
+            }
+        }),
+        json!({
+            "name": "engineering_execution_plan",
+            "description": "Derive a bounded engineering execution plan from an EngineeringManifest. It returns dependency waves, package serialization, per-ticket readiness and blockers, critical path, truncation posture, gate rows, and a plan digest without creating tickets, running CI, mutating a repository, or claiming implementation completion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-devplat EngineeringPlanRequest containing an EngineeringManifest and planning policies for maximum tickets, parallelism, completed-ticket inclusion, and truncation." }
+                },
+                "required": ["request"]
             }
         }),
         json!({

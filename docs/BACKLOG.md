@@ -390,6 +390,13 @@ supersession, RACI rows, independent-review separation, canonical digest, and fa
 severity. The backlog keeps the six blueprint entries because the route does not claim to replace
 the surrounding process, repository automation, external ticket authority, or release systems.
 
+The `engineering_execution_plan` route now adds the deterministic in-repository planning layer:
+it selects a bounded ticket window, derives dependency-aware waves, computes a critical path, and
+reports manifest-admission, dependency-closure, truncation, and schedule-completeness gates. It
+does not close the six entries: external tracker synchronization, real CI execution, effort and
+staffing data, ownership authority, and release automation remain intentionally outside this
+artifact-level planner.
+
 The `release_pipeline_audit` route now adds an artifact-level contract for the CI/CD and release
 automation entry (`40.40`): it checks stage DAG closure, artifact lineage, digest-bound provenance,
 signature and approval declarations, environment protection, promotion order, and rollback

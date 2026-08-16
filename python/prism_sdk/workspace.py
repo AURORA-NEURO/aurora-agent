@@ -87,6 +87,11 @@ from .engineering_manifest import (
     EngineeringManifestArgs,
     engineering_manifest_audit_report,
 )
+from .engineering_plan import (
+    EngineeringPlanReport,
+    EngineeringPlanRequestArgs,
+    engineering_execution_plan_report,
+)
 from .release_pipeline import (
     ReleasePipelineAuditReport,
     ReleasePipelineManifestArgs,
@@ -3022,6 +3027,17 @@ class Workspace:
 
         return engineering_manifest_audit_report(self.engineering_manifest_audit(request))
 
+    def engineering_execution_plan(self, request: EngineeringPlanRequestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Derive bounded dependency waves and a critical path through MCP."""
+
+        normalized = request if isinstance(request, EngineeringPlanRequestArgs) else EngineeringPlanRequestArgs.from_wire(request)
+        return self.tool("engineering_execution_plan", normalized.to_mcp_arguments())
+
+    def engineering_execution_plan_report(self, request: EngineeringPlanRequestArgs | Mapping[str, Any]) -> EngineeringPlanReport:
+        """Return typed engineering execution waves, gates, and blockers."""
+
+        return engineering_execution_plan_report(self.engineering_execution_plan(request))
+
     def release_pipeline_audit(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit release stages, provenance, promotion policy, and rollback boundaries through MCP."""
 
@@ -5753,6 +5769,17 @@ class AsyncWorkspace:
         """Async counterpart to Workspace.engineering_manifest_audit_report."""
 
         return engineering_manifest_audit_report(await self.engineering_manifest_audit(request))
+
+    async def engineering_execution_plan(self, request: EngineeringPlanRequestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.engineering_execution_plan."""
+
+        normalized = request if isinstance(request, EngineeringPlanRequestArgs) else EngineeringPlanRequestArgs.from_wire(request)
+        return (await self.client.call_tool("engineering_execution_plan", normalized.to_mcp_arguments())).require_ok()
+
+    async def engineering_execution_plan_report(self, request: EngineeringPlanRequestArgs | Mapping[str, Any]) -> EngineeringPlanReport:
+        """Async counterpart to Workspace.engineering_execution_plan_report."""
+
+        return engineering_execution_plan_report(await self.engineering_execution_plan(request))
 
     async def release_pipeline_audit(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to Workspace.release_pipeline_audit."""

@@ -307,6 +307,7 @@ from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate
 from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
 from .atlas_surface import AtlasSurfaceAuditArgs, AtlasSurfaceAuditReport, atlas_surface_audit_report
 from .engineering_manifest import EngineeringAuditReport, EngineeringManifestArgs, engineering_manifest_audit_report
+from .engineering_plan import EngineeringPlanReport, EngineeringPlanRequestArgs, engineering_execution_plan_report
 from .release_pipeline import ReleasePipelineAuditReport, ReleasePipelineManifestArgs, release_pipeline_audit_report
 from .operational_readiness import OperationalReadinessAuditReport, OperationalReadinessManifestArgs, operational_readiness_audit_report
 from .security_privacy import SecurityPrivacyAuditReport, SecurityPrivacyManifestArgs, security_privacy_audit_report
@@ -2883,6 +2884,17 @@ class ApiClient:
         """Return typed engineering-manifest evidence through HTTP."""
 
         return engineering_manifest_audit_report(self.engineering_manifest_audit(request))
+
+    def engineering_execution_plan(self, request: EngineeringPlanRequestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Derive bounded engineering execution waves through the HTTP gateway."""
+
+        normalized = request if isinstance(request, EngineeringPlanRequestArgs) else EngineeringPlanRequestArgs.from_wire(request)
+        return self.call_tool("engineering_execution_plan", normalized.to_mcp_arguments())
+
+    def engineering_execution_plan_report(self, request: EngineeringPlanRequestArgs | Mapping[str, Any]) -> EngineeringPlanReport:
+        """Return typed engineering execution-plan evidence through HTTP."""
+
+        return engineering_execution_plan_report(self.engineering_execution_plan(request))
 
     def release_pipeline_audit(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit release provenance and promotion boundaries through the HTTP gateway."""
@@ -5573,6 +5585,17 @@ class AsyncApiClient:
         """Return async typed engineering-manifest evidence through HTTP."""
 
         return engineering_manifest_audit_report(await self.engineering_manifest_audit(request))
+
+    async def engineering_execution_plan(self, request: EngineeringPlanRequestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async engineering execution-plan request through the HTTP gateway."""
+
+        normalized = request if isinstance(request, EngineeringPlanRequestArgs) else EngineeringPlanRequestArgs.from_wire(request)
+        return await self.call_tool("engineering_execution_plan", normalized.to_mcp_arguments())
+
+    async def engineering_execution_plan_report(self, request: EngineeringPlanRequestArgs | Mapping[str, Any]) -> EngineeringPlanReport:
+        """Return async typed engineering execution-plan evidence through HTTP."""
+
+        return engineering_execution_plan_report(await self.engineering_execution_plan(request))
 
     async def release_pipeline_audit(self, request: ReleasePipelineManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async release-pipeline audit through the HTTP gateway."""

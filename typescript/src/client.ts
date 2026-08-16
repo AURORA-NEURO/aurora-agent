@@ -279,6 +279,8 @@ import type {
   AtlasSurfaceAuditResult,
   EngineeringManifestArgs,
   EngineeringManifestAuditResult,
+  EngineeringPlanRequestArgs,
+  EngineeringPlanToolResult,
   ReleasePipelineManifestArgs,
   ReleasePipelineAuditToolResult,
   OperationalReadinessManifestArgs,
@@ -508,6 +510,10 @@ export class ApiClient {
 
   async engineeringManifestAudit(args: EngineeringManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EngineeringManifestAuditResult>> {
     return this.callTool<EngineeringManifestAuditResult>("engineering_manifest_audit", args, options);
+  }
+
+  async engineeringExecutionPlan(args: EngineeringPlanRequestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EngineeringPlanToolResult>> {
+    return this.callTool<EngineeringPlanToolResult>("engineering_execution_plan", args, options);
   }
 
   async releasePipelineAudit(args: ReleasePipelineManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ReleasePipelineAuditToolResult>> {

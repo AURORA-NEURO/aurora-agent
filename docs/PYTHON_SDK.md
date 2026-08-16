@@ -1155,6 +1155,13 @@ components, ticket readiness, warning/blocking issues, independent-review collis
 non-claims about checkout state, CI, GitHub, and release authority. See
 ENGINEERING_MANIFEST_AUDIT.md.
 
+`EngineeringPlanRequestArgs` and `engineering_execution_plan_report(...)` add a typed deterministic
+execution-plan projection across sync/async MCP and HTTP. The report preserves ticket states,
+dependency-aware waves, critical path, schedule gates, truncation policy, separate manifest and
+planner issues, plan digests, and fail-closed readiness. It remains a planning artifact: it does
+not mutate a tracker, run CI, inspect a checkout, or authorize delivery. See
+ENGINEERING_EXECUTION_PLAN.md.
+
 ## Release-pipeline audit
 
 `ReleasePipelineManifestArgs` and `release_pipeline_audit_report(...)` expose the bounded

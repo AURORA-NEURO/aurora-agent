@@ -900,6 +900,11 @@ warning/blocking issue semantics. It validates declared coherence only; it does 
 checkout, run CI, query GitHub, or grant release authority. See
 docs/ENGINEERING_MANIFEST_AUDIT.md.
 
+The `engineering_execution_plan` route builds a deterministic, bounded implementation schedule on
+top of that artifact: ticket states, dependency-aware waves, critical path, truncation policy,
+and explicit schedule gates. It still does not mutate a tracker, run CI, inspect the checkout, or
+authorize delivery. See docs/ENGINEERING_EXECUTION_PLAN.md.
+
 ## Release-pipeline audit
 
 The `release_pipeline_audit` route adds a bounded delivery contract over stage DAGs, artifact

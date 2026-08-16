@@ -1460,6 +1460,87 @@ export interface EngineeringManifestAuditResult extends JsonObject {
   fail_closed?: boolean;
 }
 
+export interface EngineeringPlanPoliciesArgs extends JsonObject {
+  require_valid_manifest?: boolean;
+  allow_truncation?: boolean;
+  include_completed?: boolean;
+  serialize_same_package?: boolean;
+  max_tickets?: number;
+  max_parallelism?: number;
+}
+
+export interface EngineeringPlanRequestArgs extends JsonObject {
+  schema?: "bioprism-engineering-plan/0.1";
+  manifest: EngineeringManifestArgs;
+  policies?: EngineeringPlanPoliciesArgs;
+}
+
+export interface EngineeringTicketPlanResult extends JsonObject {
+  ticket_id: string;
+  package: string;
+  contract: string;
+  status: EngineeringTicketStatus;
+  state: string;
+  dependency_ids: string[];
+  blocking_dependencies: string[];
+  dependency_ready: boolean;
+  scheduled: boolean;
+  wave: number | null;
+  critical_path_length: number;
+}
+
+export interface EngineeringPlanWaveResult extends JsonObject {
+  index: number;
+  ticket_ids: string[];
+  package_ids: string[];
+  depends_on_waves: number[];
+  parallelism: number;
+}
+
+export interface EngineeringPlanGateResult extends JsonObject {
+  name: string;
+  passed: boolean;
+  required: boolean;
+  detail: string;
+}
+
+export interface EngineeringPlanAuditResult extends JsonObject {
+  schema: "bioprism-engineering-plan-audit/0.1";
+  valid: boolean;
+  planning_started: boolean;
+  truncated: boolean;
+  ticket_count: number;
+  planned_ticket_count: number;
+  omitted_ticket_count: number;
+  package_order: string[];
+  ticket_plans: EngineeringTicketPlanResult[];
+  waves: EngineeringPlanWaveResult[];
+  critical_path: string[];
+  gates: EngineeringPlanGateResult[];
+  manifest_issues: EngineeringIssueResult[];
+  issues: EngineeringIssueResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface EngineeringPlanToolResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-engineering-plan-audit/0.1";
+  workflow: "engineering_execution_plan";
+  request_digest?: string;
+  manifest_digest?: string;
+  plan_digest?: string;
+  valid: boolean;
+  engineering_plan_ready: boolean;
+  blocking_issue_count: number;
+  warning_count: number;
+  audit?: EngineeringPlanAuditResult;
+  guarantees?: string[];
+  limitations?: string[];
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
 export type ReleasePipelineEnvironmentClass = "development" | "staging" | "production";
 export type ReleasePipelineStageKind = "verify" | "build" | "test" | "package" | "sign" | "publish" | "deploy" | "smoke" | "rollback";
 export type ReleasePipelineArtifactKind = "source" | "binary" | "container" | "package" | "manifest" | "sbom" | "provenance";
