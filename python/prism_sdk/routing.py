@@ -194,4 +194,3 @@ class RoutingDecisionReport:
 
 def routing_decision_report(value: Mapping[str, Any]) -> RoutingDecisionReport:
     return RoutingDecisionReport.from_wire(value)
-
