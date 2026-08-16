@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 150);
+    assert_eq!(tools.len(), 151);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(150));
-    assert_eq!(result["advertised_tool_count"], json!(150));
+    assert_eq!(result["unique_catalog_tools"], json!(151));
+    assert_eq!(result["advertised_tool_count"], json!(151));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(150));
-    assert_eq!(result["schema_quality"]["valid"], json!(150));
+    assert_eq!(result["schema_quality"]["checked"], json!(151));
+    assert_eq!(result["schema_quality"]["valid"], json!(151));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6100,6 +6100,88 @@ fn bioeval_estimand_audit_preserves_claim_language_identification_and_transport(
     assert_eq!(same_model["ok"], json!(false));
     assert_eq!(same_model["stage"], json!("corroboration_validation"));
     assert_eq!(same_model["fail_closed"], json!(true));
+}
+
+#[test]
+fn bioeval_evaluator_audit_separates_harness_health_task_outcomes_and_hidden_data() {
+    let result = call(
+        &mut server(),
+        "bioeval_evaluator_audit",
+        json!({
+            "runs": [
+                {
+                    "evaluator": "grader-a",
+                    "health": { "health": "healthy" },
+                    "reached": "met",
+                    "diagnostic": { "command": "", "exit_state": "", "diff": "" }
+                },
+                {
+                    "evaluator": "grader-b",
+                    "health": { "health": "healthy" },
+                    "reached": "not_met",
+                    "diagnostic": { "command": "pytest", "exit_state": "1", "diff": "expected output missing", "logs": [], "hidden_data_access": [] }
+                },
+                {
+                    "evaluator": "grader-b",
+                    "health": { "health": "healthy" },
+                    "reached": "inapplicable",
+                    "diagnostic": { "command": "", "exit_state": "", "diff": "" }
+                },
+                {
+                    "evaluator": "grader-c",
+                    "health": { "health": "healthy" },
+                    "reached": "not_met",
+                    "diagnostic": { "command": "", "exit_state": "", "diff": "" }
+                },
+                {
+                    "evaluator": "timeout",
+                    "health": { "health": "timed_out", "after": "120s" },
+                    "reached": null,
+                    "diagnostic": { "command": "", "exit_state": "", "diff": "" }
+                },
+                {
+                    "evaluator": "broken-fixture",
+                    "health": { "health": "fixture_broken", "detail": "expected file absent" },
+                    "reached": "met",
+                    "diagnostic": { "command": "grader", "exit_state": "fixture-error", "diff": "", "logs": [], "hidden_data_access": ["read expected_outputs/"] }
+                }
+            ],
+            "max_items": 2
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-evaluator-audit/0.1"));
+    assert_eq!(result["panel"]["run_count"], json!(6));
+    assert_eq!(result["panel"]["healthy_count"], json!(4));
+    assert_eq!(result["panel"]["unhealthy_count"], json!(2));
+    assert_eq!(result["panel"]["task_evidence_count"], json!(3));
+    assert_eq!(result["panel"]["refused_task_outcome_count"], json!(3));
+    assert_eq!(result["panel"]["outcomes"]["met"], json!(1));
+    assert_eq!(result["panel"]["outcomes"]["not_met"], json!(1));
+    assert_eq!(result["panel"]["outcomes"]["inapplicable"], json!(1));
+    assert_eq!(result["panel"]["posture"], json!("review_required_hidden_data"));
+    assert_eq!(result["findings"]["duplicate_evaluator_ids"]["ids"], json!(["grader-b"]));
+    assert_eq!(result["runs"]["omitted"], json!(4));
+    assert_eq!(result["runs"]["rows"][1]["task_outcome"], json!("not_met"));
+
+    let hidden_refusal = call(
+        &mut server(),
+        "bioeval_evaluator_audit",
+        json!({
+            "runs": [{
+                "evaluator": "grader",
+                "health": { "health": "healthy" },
+                "reached": "met",
+                "diagnostic": { "command": "grader", "exit_state": "0", "diff": "", "logs": [], "hidden_data_access": ["secret"] }
+            }],
+            "fail_on_hidden_data": true
+        }),
+    );
+    assert_eq!(hidden_refusal["__isError"], json!(false));
+    assert_eq!(hidden_refusal["ok"], json!(false));
+    assert_eq!(hidden_refusal["stage"], json!("hidden_data_policy"));
+    assert_eq!(hidden_refusal["fail_closed"], json!(true));
 }
 
 #[test]

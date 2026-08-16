@@ -130,6 +130,8 @@ import type {
   BioevalGroundingAuditResult,
   BioevalEstimandAuditArgs,
   BioevalEstimandAuditResult,
+  BioevalEvaluatorAuditArgs,
+  BioevalEvaluatorAuditResult,
   EvaluationWorldlineArgs,
   EvaluationWorldlineResult,
   EvaluationReproductionArgs,
@@ -842,6 +844,10 @@ export class ApiClient {
 
   async bioevalEstimandAudit(args: BioevalEstimandAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalEstimandAuditResult>> {
     return this.callTool<BioevalEstimandAuditResult>("bioeval_estimand_audit", args, options);
+  }
+
+  async bioevalEvaluatorAudit(args: BioevalEvaluatorAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalEvaluatorAuditResult>> {
+    return this.callTool<BioevalEvaluatorAuditResult>("bioeval_evaluator_audit", args, options);
   }
 
   async evaluationWorldlineAudit(args: EvaluationWorldlineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EvaluationWorldlineResult>> {

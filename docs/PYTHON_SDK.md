@@ -963,6 +963,12 @@ omission counts. The report does not dereference artifacts or convert citations 
 estimand, association-versus-intervention claim language, evidentiary basis, not-assessed/
 declared/probed identification, external-corroboration promotion, and scope transport refusals. See
 [`docs/BIOEVAL_ESTIMAND_AUDIT.md`](BIOEVAL_ESTIMAND_AUDIT.md).
+`BioevalEvaluatorAuditArgs` / `bioeval_evaluator_audit_report(...)` keep evaluator health,
+task outcome, diagnostic completeness, hidden-data access, unscored reasons, duplicate evaluator
+identities, and bounded omission counts distinct. Timed-out, errored, and broken-fixture runs cannot
+become task failures, while healthy `not_met` rows without diagnostics remain refused by the real
+evaluator kernel. `require_task_evidence` and `fail_on_hidden_data` are explicit fail-closed policy
+gates. See [`docs/BIOEVAL_EVALUATOR_AUDIT.md`](BIOEVAL_EVALUATOR_AUDIT.md).
 
 ## Biological stress profiling
 

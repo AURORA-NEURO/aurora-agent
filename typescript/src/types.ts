@@ -5074,6 +5074,51 @@ export interface BioevalEstimandAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export type BioevalEvaluatorHealthState = "healthy" | "timed_out" | "errored" | "fixture_broken";
+export type BioevalEvaluatorTaskOutcome = "met" | "not_met" | "inapplicable";
+
+export interface BioevalEvaluatorHealthArgs extends JsonObject {
+  health: BioevalEvaluatorHealthState;
+  after?: string;
+  detail?: string;
+}
+
+export interface BioevalEvaluatorDiagnosticArgs extends JsonObject {
+  command: string;
+  exit_state: string;
+  diff: string;
+  logs?: string[];
+  hidden_data_access?: string[];
+}
+
+export interface BioevalEvaluatorRunArgs extends JsonObject {
+  evaluator: string;
+  health: BioevalEvaluatorHealthArgs;
+  reached?: BioevalEvaluatorTaskOutcome | null;
+  diagnostic?: BioevalEvaluatorDiagnosticArgs;
+}
+
+export interface BioevalEvaluatorAuditArgs extends JsonObject {
+  runs: BioevalEvaluatorRunArgs[];
+  require_task_evidence?: boolean;
+  fail_on_hidden_data?: boolean;
+  max_items?: number;
+}
+
+export interface BioevalEvaluatorAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-evaluator-audit/0.1";
+  workflow?: "bioeval_evaluator_audit";
+  runs?: JsonObject;
+  panel?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;

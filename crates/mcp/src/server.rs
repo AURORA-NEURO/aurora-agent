@@ -70,6 +70,10 @@ use bioprism_bioevalx::estimand::{
     Estimand as BioevalEstimand, Evidentiary as BioevalEvidentiary,
     Finding as BioevalFinding, Identification as BioevalIdentification,
 };
+use bioprism_bioevalx::evaluator::{
+    EvaluatorRun as BioevalEvaluatorRun, Panel as BioevalEvaluatorPanel,
+    TaskOutcome as BioevalTaskOutcome,
+};
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
@@ -1357,6 +1361,7 @@ impl Server {
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
             "bioeval_estimand_audit" => self.bioeval_estimand_audit(&arguments),
+            "bioeval_evaluator_audit" => self.bioeval_evaluator_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -14426,6 +14431,242 @@ impl Server {
         }))
     }
 
+    fn bioeval_evaluator_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-evaluator-audit/0.1";
+        const MAX_RUNS: usize = 1_024;
+        const MAX_ID_BYTES: usize = 256;
+
+        let raw_runs = arguments
+            .get("runs")
+            .and_then(Value::as_array)
+            .ok_or("runs is required and must be an array of serialized EvaluatorRun values")?;
+        if raw_runs.len() > MAX_RUNS {
+            return Err("runs are bounded at 1024 evaluator rows".into());
+        }
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure evaluator audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("evaluator audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_evaluator_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "an unhealthy evaluator cannot be projected as task evidence",
+                    "healthy NotMet outcomes without diagnostics remain refused by the evaluator kernel",
+                    "a panel with no usable task outcome never becomes a task score",
+                ],
+                "limitations": [
+                    "the route does not execute commands, sandbox evaluators, mount fixtures, or mediate hidden-data access",
+                    "diagnostics and health states are caller-supplied run records",
+                    "hidden-data access is retained as a separate review finding and is not adjudicated by this route",
+                ],
+            })
+        };
+
+        let mut panel = BioevalEvaluatorPanel::new();
+        let mut runs = Vec::with_capacity(raw_runs.len());
+        for (index, raw) in raw_runs.iter().enumerate() {
+            let run: BioevalEvaluatorRun = match serde_json::from_value(raw.clone()) {
+                Ok(run) => run,
+                Err(error) => {
+                    return Ok(refusal(
+                        "run_validation",
+                        format!("runs[{index}] is not a valid EvaluatorRun: {error}"),
+                    ));
+                }
+            };
+            if run.evaluator.trim().is_empty() || run.evaluator.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "run_validation",
+                    format!("runs[{index}].evaluator must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            panel.record(run.clone());
+            runs.push(run);
+        }
+
+        let bounded_strings = |values: &[String]| {
+            json!({
+                "items": values.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": values.len(),
+                "omitted": values.len().saturating_sub(max_items),
+            })
+        };
+        let task_outcome_name = |outcome: BioevalTaskOutcome| match outcome {
+            BioevalTaskOutcome::Met => "met",
+            BioevalTaskOutcome::NotMet => "not_met",
+            BioevalTaskOutcome::Inapplicable => "inapplicable",
+        };
+        let mut all_rows = Vec::with_capacity(runs.len());
+        let mut unhealthy_ids = BTreeSet::new();
+        let mut refused_ids = BTreeSet::new();
+        let mut hidden_ids = BTreeSet::new();
+        let mut duplicate_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut met_count = 0usize;
+        let mut not_met_count = 0usize;
+        let mut inapplicable_count = 0usize;
+        let mut task_evidence_count = 0usize;
+        for (index, run) in runs.iter().enumerate() {
+            *duplicate_counts.entry(run.evaluator.clone()).or_default() += 1;
+            if !run.health.is_healthy() {
+                unhealthy_ids.insert(run.evaluator.clone());
+            }
+            if run.hidden_data_touched() {
+                hidden_ids.insert(run.evaluator.clone());
+            }
+            let task_outcome = run.task_outcome();
+            let (outcome_value, outcome_status, outcome_refusal) = match task_outcome {
+                Ok(outcome) => {
+                    task_evidence_count += 1;
+                    match outcome {
+                        BioevalTaskOutcome::Met => met_count += 1,
+                        BioevalTaskOutcome::NotMet => not_met_count += 1,
+                        BioevalTaskOutcome::Inapplicable => inapplicable_count += 1,
+                    }
+                    (
+                        json!(task_outcome_name(outcome)),
+                        "accepted",
+                        Value::Null,
+                    )
+                }
+                Err(error) => {
+                    refused_ids.insert(run.evaluator.clone());
+                    (Value::Null, "refused", json!(error.to_string()))
+                }
+            };
+            let diagnostic = json!({
+                "command": run.diagnostic.command,
+                "exit_state": run.diagnostic.exit_state,
+                "diff": run.diagnostic.diff,
+                "logs": bounded_strings(&run.diagnostic.logs),
+                "hidden_data_access": bounded_strings(&run.diagnostic.hidden_data_access),
+                "empty": run.diagnostic.is_empty(),
+            });
+            all_rows.push(json!({
+                "index": index,
+                "evaluator": run.evaluator,
+                "health": serde_json::to_value(&run.health).expect("health serializes"),
+                "health_label": run.health.label(),
+                "healthy": run.health.is_healthy(),
+                "reached": serde_json::to_value(run.reached).expect("task outcome serializes"),
+                "task_outcome": outcome_value,
+                "task_outcome_status": outcome_status,
+                "task_outcome_refusal": outcome_refusal,
+                "unscored_reason": serde_json::to_value(run.unscored_reason()).expect("unscored reason serializes"),
+                "hidden_data_touched": run.hidden_data_touched(),
+                "diagnostic": diagnostic,
+            }));
+        }
+        let duplicate_ids = duplicate_counts
+            .iter()
+            .filter(|(_, count)| **count > 1)
+            .map(|(id, _)| id.clone())
+            .collect::<BTreeSet<_>>();
+        let no_task_evidence = !panel.says_anything();
+        if arguments
+            .get("require_task_evidence")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && no_task_evidence
+        {
+            return Ok(refusal(
+                "panel_policy",
+                "require_task_evidence was true but no evaluator produced a usable task outcome".into(),
+            ));
+        }
+        if arguments
+            .get("fail_on_hidden_data")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && !hidden_ids.is_empty()
+        {
+            return Ok(refusal(
+                "hidden_data_policy",
+                format!("fail_on_hidden_data refused {} evaluator row(s)", hidden_ids.len()),
+            ));
+        }
+        let bounded_rows = |rows: &[Value]| {
+            json!({
+                "rows": rows.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "returned": rows.len().min(max_items),
+                "total": rows.len(),
+                "omitted": rows.len().saturating_sub(max_items),
+            })
+        };
+        let bounded_ids = |ids: &BTreeSet<String>, limit: usize| {
+            json!({
+                "ids": ids.iter().take(limit).cloned().collect::<Vec<_>>(),
+                "total": ids.len(),
+                "omitted": ids.len().saturating_sub(limit),
+            })
+        };
+        let duplicate_count = duplicate_ids.len();
+        let posture = if no_task_evidence {
+            "no_task_evidence"
+        } else if !hidden_ids.is_empty() {
+            "review_required_hidden_data"
+        } else {
+            "task_evidence_available"
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_evaluator_audit",
+            "runs": bounded_rows(&all_rows),
+            "panel": {
+                "run_count": runs.len(),
+                "healthy_count": runs.iter().filter(|run| run.health.is_healthy()).count(),
+                "unhealthy_count": runs.iter().filter(|run| !run.health.is_healthy()).count(),
+                "task_evidence_count": task_evidence_count,
+                "refused_task_outcome_count": refused_ids.len(),
+                "says_anything": panel.says_anything(),
+                "no_task_evidence": no_task_evidence,
+                "hidden_data_touched_count": hidden_ids.len(),
+                "duplicate_evaluator_count": duplicate_count,
+                "outcomes": {
+                    "met": met_count,
+                    "not_met": not_met_count,
+                    "inapplicable": inapplicable_count,
+                },
+                "posture": posture,
+            },
+            "findings": {
+                "unhealthy_evaluators": bounded_ids(&unhealthy_ids, max_items),
+                "refused_task_outcomes": bounded_ids(&refused_ids, max_items),
+                "hidden_data_evaluators": bounded_ids(&hidden_ids, max_items),
+                "duplicate_evaluator_ids": bounded_ids(&duplicate_ids, max_items),
+                "unscored_evaluator_count": unhealthy_ids.len(),
+            },
+            "guarantees": [
+                "timed out, errored, and fixture-broken evaluators remain unscored rather than becoming task failures",
+                "healthy NotMet rows require diagnostic evidence through the real evaluator kernel",
+                "Met, NotMet, and Inapplicable are counted only after the evaluator was healthy enough to produce a task outcome",
+                "hidden-data access, task outcome, evaluator health, and diagnostic completeness remain separate fields",
+                "bounded rows and identifier findings retain total and omitted counts",
+            ],
+            "limitations": [
+                "the route audits caller-supplied evaluator records and never executes a command or creates a sandbox",
+                "fixture integrity, hidden-file access, logs, and exit states are not independently verified",
+                "a usable task outcome is evaluation evidence, not biological truth, clinical validity, or release approval",
+                "duplicate evaluator identifiers are surfaced as a finding but are not silently merged or majority-voted",
+            ],
+        }))
+    }
+
     fn bioeval_acquisition_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-acquisition-audit/0.1";
         let raw_obligations = arguments
@@ -23013,7 +23254,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -23043,9 +23284,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -24375,6 +24616,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "strict_transport": { "type": "boolean", "description": "Fail closed when any requested transport target is not declared; defaults false." }
                 },
                 "required": ["estimand", "kind", "basis"]
+            }
+        }),
+        json!({
+            "name": "bioeval_evaluator_audit",
+            "description": "Audit serialized bioevalx evaluator runs while keeping evaluator health separate from task outcome. It preserves timed-out, errored, and fixture-broken runs as unscored, requires diagnostics for healthy NotMet results, reports Met/NotMet/Inapplicable only from healthy evaluators, and retains hidden-data access and bounded diagnostics without executing a harness.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "runs": { "type": "array", "maxItems": 1024, "description": "Serialized EvaluatorRun values with evaluator, tagged health, optional reached outcome, and diagnostic evidence." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum run rows, diagnostic lists, and evaluator identifiers returned per bounded projection." },
+                    "require_task_evidence": { "type": "boolean", "description": "Fail closed when no healthy evaluator yields a usable task outcome." },
+                    "fail_on_hidden_data": { "type": "boolean", "description": "Fail closed when any diagnostic records hidden-data access; defaults false so the finding remains reviewable." }
+                },
+                "required": ["runs"]
             }
         }),
         json!({

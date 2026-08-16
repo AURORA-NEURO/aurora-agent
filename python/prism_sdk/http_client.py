@@ -209,6 +209,7 @@ from .epistemic_selection import EpistemicSelectionAuditArgs, EpistemicSelection
 from .bioeval_acquisition import BioevalAcquisitionAuditArgs, BioevalAcquisitionAuditReport, bioeval_acquisition_audit_report
 from .bioeval_grounding import BioevalGroundingAuditArgs, BioevalGroundingAuditReport, bioeval_grounding_audit_report
 from .bioeval_estimand import BioevalEstimandAuditArgs, BioevalEstimandAuditReport, bioeval_estimand_audit_report
+from .bioeval_evaluator import BioevalEvaluatorAuditArgs, BioevalEvaluatorAuditReport, bioeval_evaluator_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1795,6 +1796,23 @@ class ApiClient:
         """Return typed HTTP estimand and identification evidence."""
 
         return bioeval_estimand_audit_report(self.bioeval_estimand_audit(request))
+
+    def bioeval_evaluator_audit(
+        self,
+        request: BioevalEvaluatorAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit evaluator health separately from task outcomes through HTTP."""
+
+        normalized = request if isinstance(request, BioevalEvaluatorAuditArgs) else BioevalEvaluatorAuditArgs.from_wire(request)
+        return self.call_tool("bioeval_evaluator_audit", normalized.to_mcp_arguments())
+
+    def bioeval_evaluator_audit_report(
+        self,
+        request: BioevalEvaluatorAuditArgs | Mapping[str, Any],
+    ) -> BioevalEvaluatorAuditReport:
+        """Return typed HTTP evaluator-health and task-outcome evidence."""
+
+        return bioeval_evaluator_audit_report(self.bioeval_evaluator_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4250,6 +4268,23 @@ class AsyncApiClient:
         """Return async typed HTTP estimand evidence."""
 
         return bioeval_estimand_audit_report(await self.bioeval_estimand_audit(request))
+
+    async def bioeval_evaluator_audit(
+        self,
+        request: BioevalEvaluatorAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP evaluator-health audit."""
+
+        normalized = request if isinstance(request, BioevalEvaluatorAuditArgs) else BioevalEvaluatorAuditArgs.from_wire(request)
+        return await self.call_tool("bioeval_evaluator_audit", normalized.to_mcp_arguments())
+
+    async def bioeval_evaluator_audit_report(
+        self,
+        request: BioevalEvaluatorAuditArgs | Mapping[str, Any],
+    ) -> BioevalEvaluatorAuditReport:
+        """Return async typed HTTP evaluator-health evidence."""
+
+        return bioeval_evaluator_audit_report(await self.bioeval_evaluator_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

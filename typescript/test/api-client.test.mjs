@@ -2746,3 +2746,36 @@ test("client exposes bioeval estimand identification and transport evidence", as
   assert.equal(result.mcp.result.structuredContent.claim.identification_summary.status, "probed");
   assert.equal(result.mcp.result.structuredContent.transport.status, "partially_declared");
 });
+
+test("client exposes evaluator health separately from task outcomes and hidden data", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_evaluator_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.runs[0].health.health, "healthy");
+      assert.equal(body.runs[1].health.health, "timed_out");
+      return jsonResponse({ ok: true, tool: "bioeval_evaluator_audit", request_id: "evaluator-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-evaluator-audit/0.1",
+        workflow: "bioeval_evaluator_audit",
+        runs: { rows: [], returned: 0, total: 2, omitted: 2 },
+        panel: { run_count: 2, healthy_count: 1, unhealthy_count: 1, task_evidence_count: 1, posture: "review_required_hidden_data" },
+        findings: { hidden_data_evaluators: { ids: ["grader"], total: 1, omitted: 0 } },
+        guarantees: ["harness failures remain unscored"],
+        limitations: ["no harness execution"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalEvaluatorAudit({
+    runs: [
+      { evaluator: "grader", health: { health: "healthy" }, reached: "met", diagnostic: { command: "pytest", exit_state: "0", diff: "", hidden_data_access: ["read expected_outputs/"] } },
+      { evaluator: "timeout", health: { health: "timed_out", after: "120s" }, reached: null, diagnostic: { command: "", exit_state: "", diff: "" } },
+    ],
+    fail_on_hidden_data: false,
+    max_items: 2,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-evaluator-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.panel.posture, "review_required_hidden_data");
+  assert.equal(result.mcp.result.structuredContent.findings.hidden_data_evaluators.ids[0], "grader");
+});

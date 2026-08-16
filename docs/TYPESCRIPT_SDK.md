@@ -521,6 +521,10 @@ evidence, and bounded omission metadata without dereferencing external artifacts
 identification posture, external corroboration, and declared scope transport. It retains the
 kernel-rendered claim language and fail-closed policy options. See
 [`docs/BIOEVAL_ESTIMAND_AUDIT.md`](../docs/BIOEVAL_ESTIMAND_AUDIT.md).
+`bioevalEvaluatorAudit` types the evaluator-health union, task outcome, diagnostic evidence,
+hidden-data access, panel posture, unscored/refused findings, and bounded run projections. It
+keeps a broken harness separate from a task failure and retains fail-closed panel and hidden-data
+policies. See [`docs/BIOEVAL_EVALUATOR_AUDIT.md`](../docs/BIOEVAL_EVALUATOR_AUDIT.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,
