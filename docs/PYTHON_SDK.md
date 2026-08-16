@@ -238,7 +238,10 @@ invent defaults:
   witnesses, temporal-cut rows, and digest-only subject projections across sync/async MCP and HTTP.
   Payload bodies remain caller-owned and the report does not imply durable storage or a server clock.
 - `trace_otel_ingest(trace_id, otlp_json=... | document=..., ...)` invokes the bounded OTLP JSON
-  importer and preserves its semantic-loss/readiness report.
+  importer and preserves its semantic-loss/readiness report. `TraceOtelIngestArgs` and
+  `trace_otel_ingest_report(...)` additionally type the normalized Event IR preview, source-to-IR
+  mapping counts, every loss category, and the explicit no-export/no-clock limitation across
+  sync/async MCP and HTTP.
 - `developer_workbench(session, dashboard=..., ci=...)` composes the Rust authoring-session and
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,

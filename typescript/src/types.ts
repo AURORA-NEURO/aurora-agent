@@ -288,6 +288,68 @@ export interface TraceOtelIngestArgs extends JsonObject {
   max_bytes?: number;
 }
 
+export interface TraceOtelFieldLossResult extends JsonObject {
+  path: string;
+  detail: string;
+}
+
+export interface TraceOtelDroppedSpanResult extends JsonObject {
+  path: string;
+  name?: string | null;
+  detail: string;
+}
+
+export interface TraceOtelLossResult extends JsonObject {
+  dropped_spans: TraceOtelDroppedSpanResult[];
+  dropped_span_events: TraceOtelFieldLossResult[];
+  unmapped_fields: TraceOtelFieldLossResult[];
+  duplicate_attributes: TraceOtelFieldLossResult[];
+  inferred_kinds: TraceOtelFieldLossResult[];
+  missing_start_times: TraceOtelFieldLossResult[];
+  unresolved_parents: TraceOtelFieldLossResult[];
+  multiple_trace_ids: TraceOtelFieldLossResult[];
+}
+
+export interface TraceOtelMappingResult extends JsonObject {
+  format: string;
+  resource_count: number;
+  scope_count: number;
+  source_span_count: number;
+  accepted_span_count: number;
+  span_event_count: number;
+}
+
+export type TraceOtelEventKind = "goal" | "observation" | "choice" | "action" | "result" | "claim" | "termination";
+
+export interface TraceOtelEventResult extends JsonObject {
+  step: number;
+  kind: TraceOtelEventKind;
+  payload: JsonObject;
+  caused_by?: number;
+  visible?: string[];
+}
+
+export interface TraceOtelIngestResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-mcp/trace-otel-ingest/0.1";
+  trace_id: string;
+  event_count: number;
+  succeeded: boolean;
+  trace_sha256: string;
+  valid: boolean;
+  validation_error?: string | null;
+  mapping: TraceOtelMappingResult;
+  loss: TraceOtelLossResult;
+  lossless: boolean;
+  dropped_events: number;
+  compilable: boolean;
+  events_included: boolean;
+  events: TraceOtelEventResult[] | null;
+  omitted_events: number;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export type RepositoryTraversalPolicy = "normative" | "exhaustive";
 
 export interface RepositoryCatalogArgs extends JsonObject {

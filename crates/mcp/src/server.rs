@@ -5487,6 +5487,7 @@ impl Server {
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/trace-otel-ingest/0.1",
             "trace_id": ingestion.trace().trace_id,
             "event_count": event_count,
             "succeeded": ingestion.trace().succeeded,

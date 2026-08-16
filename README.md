@@ -515,7 +515,9 @@ contract workflows: they do not provide containers, restoration of external stat
 durable fencing, biological calibration, or distributed scheduling.
 `trace_analyze` ingests native JSONL trajectories with explicit import loss, while
 `trace_otel_ingest` maps bounded OTLP JSON spans into the same Event IR with source preservation,
-parent resolution, and semantic-loss accounting. The trajectory tools validate causal ordering,
+parent resolution, and semantic-loss accounting; the Python and TypeScript SDKs preserve the
+normalized event preview, mapping counts, loss categories, and compilation-readiness boundary.
+The trajectory tools validate causal ordering,
 rank decision-bearing review candidates, and compare lossless passing traces for first divergence.
 They return review-gated `CellProposal` previews; they do not replay tools, minimize state, export
 OTLP, or publish a Decision Cell.

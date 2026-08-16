@@ -423,6 +423,26 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         cut: { requested: { as_of_record: "2024-06-01T00:00:00Z" }, count: 1, entries: [{ seq: 0, id: "evt-0", class: "material", kind: "specimen.collected", subject: "patient-7/specimen-1", valid: "2025-01-01T00:00:00Z", record: "2025-01-01T00:00:00Z", release: "2025-01-01T00:00:00Z" }], omitted: 0 },
         guarantees: ["payload bodies are not returned by default; projections carry digests rather than copied payloads", "no durable storage, clock reading, network, or external side effect occurs"],
       } } } });
+      if (path === "/v1/tools/trace_otel_ingest") return jsonResponse({ ok: true, tool: "trace_otel_ingest", request_id: "r16", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/trace-otel-ingest/0.1",
+        trace_id: "otel-ts",
+        event_count: 1,
+        succeeded: false,
+        trace_sha256: "a".repeat(64),
+        valid: true,
+        validation_error: null,
+        mapping: { format: "otlp_json", resource_count: 1, scope_count: 1, source_span_count: 1, accepted_span_count: 1, span_event_count: 0 },
+        loss: { dropped_spans: [], dropped_span_events: [], unmapped_fields: [], duplicate_attributes: [], inferred_kinds: [], missing_start_times: [], unresolved_parents: [], multiple_trace_ids: [] },
+        lossless: true,
+        dropped_events: 0,
+        compilable: true,
+        events_included: true,
+        events: [{ step: 0, kind: "goal", payload: { name: "agent.goal" }, visible: [] }],
+        omitted_events: 0,
+        guarantees: ["source spans are retained"],
+        limitations: ["this is not an OTLP exporter"],
+      } } } });
       if (path === "/v1/tools/capability_discover") return jsonResponse({ ok: true, tool: "capability_discover", request_id: "r6", mcp: { result: { structuredContent: { workflow: "capability_discover", capability_schema_version: "bioprism-devplat-capability/0.1", schema_version: "bioprism-devplat-capability/0.1", catalog_digest: "c".repeat(64), total_groups: 1, query: {}, result_count: 1, matches: [{ group: { id: "testing", domains: ["verification"], crates: ["bioprism-devplat"], mcp_tools: ["echo"], cli_entrypoints: ["bioprism test"], python_artifacts: ["prism_sdk.testing"], status: "implemented" }, score: 100, matched_fields: ["domains"], matched_tools: ["echo"], tool_schemas: [] }], schema_attachment: { requested: false, returned: 0, missing: [] } } } } });
       if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: {
         ok: true,
@@ -790,6 +810,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const impact = await client.repositoryImpact({ changed: "docs/README", route: { id: "route-ts" } });
   const telemetry = await client.telemetryProject({ event: { kind: "tool.completed" }, policy: { treatments: {} }, trace: "trace-ts" });
   const ledger = await client.ledgerIngest({ events: [{ class: "material" }], include_receipts: false, max_items: 5 });
+  const otel = await client.traceOtelIngest({ trace_id: "otel-ts", otlp_json: '{"resourceSpans":[]}', include_events: true });
   assert.equal(catalog.mcp.result.structuredContent.workflow, "repository_catalog");
   assert.equal(bundle.mcp.result.structuredContent.policy, "exhaustive");
   assert.equal(impact.mcp.result.structuredContent.changed, "docs/README");
@@ -799,6 +820,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(ledger.mcp.result.structuredContent.schema, "bioprism-mcp/ledger-ingest/0.1");
   assert.equal(ledger.mcp.result.structuredContent.chain.status, "intact");
   assert.equal(ledger.mcp.result.structuredContent.latest_by_subject.items[0].payload_digest, "payload-digest");
+  assert.equal(otel.mcp.result.structuredContent.schema, "bioprism-mcp/trace-otel-ingest/0.1");
+  assert.equal(otel.mcp.result.structuredContent.mapping.accepted_span_count, 1);
+  assert.equal(otel.mcp.result.structuredContent.events[0].kind, "goal");
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
   const platform = await client.developerPlatformStatus({ include_details: false, max_items: 3 });

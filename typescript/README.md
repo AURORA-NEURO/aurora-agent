@@ -47,6 +47,8 @@ if (result.mcp.result?.isError) {
   policy, trace, and optional observed-metric boundary without silently treating projected
   telemetry as a claim. Its `TelemetryProjectionResult` keeps record metadata, exact dropped /
   coarsened loss, and the supported-versus-refused metric union typed in the REST/MCP envelope.
+- `traceOtelIngest` returns a typed normalized Event IR preview, OTLP mapping counts, loss-category
+  ledger, and compilation-readiness state; it never implies OTLP export or collector connectivity.
 - `ledgerIngest` keeps recorded, duplicate, and quarantined admission unions, causal releases,
   chain/clock evidence, temporal cuts, and digest-only latest-by-subject projections typed without
   turning the Fetch client into a durable event store.

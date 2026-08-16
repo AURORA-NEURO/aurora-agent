@@ -257,6 +257,7 @@ from .repository_requests import (
 )
 from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry_project_report
 from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledger_ingest_report
+from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
 from .tooling import ToolCallPlan, ToolCatalogue
 
 
@@ -2177,6 +2178,17 @@ class ApiClient:
         """Return typed ledger evidence through HTTP."""
 
         return ledger_ingest_report(self.ledger_ingest(request))
+
+    def trace_otel_ingest(self, request: TraceOtelIngestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Import bounded OTLP JSON through the HTTP gateway."""
+
+        normalized = request if isinstance(request, TraceOtelIngestArgs) else TraceOtelIngestArgs.from_wire(request)
+        return self.call_tool("trace_otel_ingest", normalized.to_mcp_arguments())
+
+    def trace_otel_ingest_report(self, request: TraceOtelIngestArgs | Mapping[str, Any]) -> TraceOtelIngestReport:
+        """Return typed OTLP mapping, semantic-loss, and readiness evidence through HTTP."""
+
+        return trace_otel_ingest_report(self.trace_otel_ingest(request))
 
     def fiber_compile(
         self,
@@ -4131,6 +4143,17 @@ class AsyncApiClient:
         """Return async typed ledger evidence through HTTP."""
 
         return ledger_ingest_report(await self.ledger_ingest(request))
+
+    async def trace_otel_ingest(self, request: TraceOtelIngestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async bounded OTLP JSON import through the HTTP gateway."""
+
+        normalized = request if isinstance(request, TraceOtelIngestArgs) else TraceOtelIngestArgs.from_wire(request)
+        return await self.call_tool("trace_otel_ingest", normalized.to_mcp_arguments())
+
+    async def trace_otel_ingest_report(self, request: TraceOtelIngestArgs | Mapping[str, Any]) -> TraceOtelIngestReport:
+        """Return async typed OTLP ingestion evidence through HTTP."""
+
+        return trace_otel_ingest_report(await self.trace_otel_ingest(request))
 
     async def fiber_compile(
         self,

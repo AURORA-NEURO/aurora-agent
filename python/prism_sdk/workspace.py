@@ -74,6 +74,7 @@ from .repository_requests import (
 )
 from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry_project_report
 from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledger_ingest_report
+from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
 from .tooling import ToolCallPlan, ToolCatalogue
 from .oracle import (
     EvidenceTier,
@@ -2226,6 +2227,12 @@ class Workspace:
         )
         return self.tool("trace_otel_ingest", arguments)
 
+    def trace_otel_ingest_report(self, request: TraceOtelIngestArgs | Mapping[str, Any]) -> TraceOtelIngestReport:
+        """Import OTLP JSON and return typed mapping, loss, and compilation evidence."""
+
+        normalized = request if isinstance(request, TraceOtelIngestArgs) else TraceOtelIngestArgs.from_wire(request)
+        return trace_otel_ingest_report(self.tool("trace_otel_ingest", normalized.to_mcp_arguments()))
+
 
 class AsyncWorkspace:
     """Async convenience facade mirroring :class:`Workspace`."""
@@ -4161,6 +4168,12 @@ class AsyncWorkspace:
             max_bytes=max_bytes,
         )
         return (await self.client.call_tool("trace_otel_ingest", arguments)).require_ok()
+
+    async def trace_otel_ingest_report(self, request: TraceOtelIngestArgs | Mapping[str, Any]) -> TraceOtelIngestReport:
+        """Async counterpart to :meth:`Workspace.trace_otel_ingest_report`."""
+
+        normalized = request if isinstance(request, TraceOtelIngestArgs) else TraceOtelIngestArgs.from_wire(request)
+        return trace_otel_ingest_report((await self.client.call_tool("trace_otel_ingest", normalized.to_mcp_arguments())).require_ok())
 
 
 def _developer_delivery_arguments(kwargs: Mapping[str, Any]) -> dict[str, Any]:

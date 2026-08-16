@@ -201,6 +201,7 @@ import type {
   ToolArguments,
   ToolsResponse,
   TraceOtelIngestArgs,
+  TraceOtelIngestResult,
 } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -371,8 +372,8 @@ export class ApiClient {
     return this.callTool<BioAtlasPublicationAuditResult>("bioatlas_publication_audit", args, options);
   }
 
-  async traceOtelIngest(args: TraceOtelIngestArgs, options?: ClientRequestOptions) {
-    return this.callTool("trace_otel_ingest", args, options);
+  async traceOtelIngest(args: TraceOtelIngestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<TraceOtelIngestResult>> {
+    return this.callTool<TraceOtelIngestResult>("trace_otel_ingest", args, options);
   }
 
   async repositoryCatalog(args: RepositoryCatalogArgs = {}, options?: ClientRequestOptions) {

@@ -2911,6 +2911,7 @@ fn trace_otel_ingest_maps_spans_and_reports_compilation_readiness() {
         }),
     );
     assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["schema"], json!("bioprism-mcp/trace-otel-ingest/0.1"));
     assert_eq!(payload["mapping"]["format"], json!("otlp_json"));
     assert_eq!(payload["mapping"]["accepted_span_count"], json!(2));
     assert_eq!(payload["mapping"]["span_event_count"], json!(1));

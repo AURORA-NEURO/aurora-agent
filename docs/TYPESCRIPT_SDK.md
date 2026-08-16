@@ -76,7 +76,8 @@ tools before the TypeScript package has a convenience method.
 
 Convenience methods currently cover:
 
-- `traceOtelIngest`: bounded OTLP JSON import with semantic-loss reporting;
+- `traceOtelIngest`: bounded OTLP JSON import with typed normalized events, source-to-IR mapping,
+  semantic-loss categories, and compilation-readiness reporting;
 - `metricsProfileAudit` and `metricsAnalyticsAudit`: missingness-aware capability profiles plus
   bounded scalar, paired-contrast, cost/latency, replicate, and calibration analytics;
 - `telemetryProject`: canonical-event redaction with a typed `TelemetryProjectionResult`; its
