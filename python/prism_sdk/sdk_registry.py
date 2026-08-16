@@ -192,4 +192,3 @@ class SdkRegistryCheckReport:
 
 def sdk_registry_check_report(value: Mapping[str, Any]) -> SdkRegistryCheckReport:
     return SdkRegistryCheckReport.from_wire(value)
-
