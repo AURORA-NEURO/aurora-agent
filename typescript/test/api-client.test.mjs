@@ -746,3 +746,53 @@ test("structured HTTP errors and response ceilings stay typed", async () => {
   });
   await assert.rejects(bounded.health(), ResponseTooLargeError);
 });
+
+test("client exposes runtime and bioethics safety workflows with their exact tool names", async () => {
+  const calls = [];
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const tool = path.split("/").pop();
+      calls.push({ tool, body: JSON.parse(init.body) });
+      const projections = {
+        runtime_effect_check: { ok: true, request: { kind: "clock_now" }, kind: "clock_now", class: "pure", class_label: "pure", authorization: "perform", simulated_outcome: null, guarantees: [], limitations: [] },
+        runtime_tape_verify: { ok: true, run: "run-1", lineage: null, entries: 0, head: "", chain_verified: true, checkpoint_results: [], artifacts: { consumed: [], created: {} }, simulated_steps: [], first_divergence: null, comparison_supplied: false, guarantees: [], limitations: [] },
+        runtime_execution_simulate: { ok: true, run: "run-1", request_count: 1, recorded_requests: 1, live_outcomes: [], execution_error: null, tape: {}, world: {}, policy_journal: [], budget: null, replay: { verified: true, matched: true }, fork: null, guarantees: [], limitations: [] },
+        bioethics_action_review: { ok: true, subject: "study", declared_use: "cohort_analysis", permitted_uses: ["cohort_analysis"], disposition: {}, physical_step_count: 0, in_silico_step_count: 0, requires_external_authorisation: false, referral: { executes_physical_action: false }, guarantees: [] },
+        bioethics_human_subject_screen: { ok: true, subject: "study", determination: { determination: "undetermined" }, requires_institutional_review: false, triggers: [], consent: { status: "not_run" }, return_of_results: { status: "admitted" }, clearance_issued: false, guarantees: [] },
+        bioethics_dual_use_review: { ok: true, subject: "capability", surfaces: [], assessor: "reviewer", sensitive_category: "biological_design", decision: { decision: "cleared" }, referral: {}, withholding: { status: "not_requested" }, guarantees: [] },
+        bioethics_validation_check: { ok: true, subject: "module", author: "author", maturity: "experimental", missing: [], missing_count: 0, verification: { status: "refused", fail_closed: true }, guarantees: [] },
+        bioethics_representation_audit: { ok: true, summary: { measured: [], unmeasured: [], suppressed: [] }, measured_count: 0, unmeasured_count: 0, suppressed_count: 0, complete: true, incomplete_axes: [], attribution: { status: "not_requested" }, guarantees: [] },
+      }[tool];
+      return jsonResponse({ ok: true, tool, request_id: "safety-1", mcp: { result: { structuredContent: projections } }, guarantee: "bounded" });
+    },
+  });
+  const options = { policy: {}, request: { kind: "clock_now" } };
+  const tape = await client.runtimeTapeVerify({ tape: {} });
+  const effect = await client.runtimeEffectCheck(options);
+  const simulation = await client.runtimeExecutionSimulate({ policy: {}, requests: [] });
+  const action = await client.bioethicsActionReview({ plan: {} });
+  const human = await client.humanSubjectScreen({ study: {} });
+  const dual = await client.bioethicsDualUseReview({ release: {}, risk: {} });
+  const validation = await client.bioethicsValidationCheck({ dossier: {} });
+  const representation = await client.bioethicsRepresentationAudit({ subject: "study", observations: [] });
+  assert.equal(effect.mcp.result.structuredContent.authorization, "perform");
+  assert.equal(tape.mcp.result.structuredContent.chain_verified, true);
+  assert.equal(simulation.mcp.result.structuredContent.replay.verified, true);
+  assert.equal(action.mcp.result.structuredContent.referral.executes_physical_action, false);
+  assert.equal(human.mcp.result.structuredContent.clearance_issued, false);
+  assert.equal(dual.mcp.result.structuredContent.decision.decision, "cleared");
+  assert.equal(validation.mcp.result.structuredContent.verification.fail_closed, true);
+  assert.equal(representation.mcp.result.structuredContent.summary.unmeasured.length, 0);
+  assert.deepEqual(calls.map((call) => call.tool), [
+    "runtime_tape_verify",
+    "runtime_effect_check",
+    "runtime_execution_simulate",
+    "bioethics_action_review",
+    "bioethics_human_subject_screen",
+    "bioethics_dual_use_review",
+    "bioethics_validation_check",
+    "bioethics_representation_audit",
+  ]);
+});

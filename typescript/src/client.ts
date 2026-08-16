@@ -116,6 +116,21 @@ import type {
   RestToolResponse,
   RouteReviewEvidenceResponse,
   RuntimeExecutionSimulateArgs,
+  RuntimeExecutionSimulateResult,
+  RuntimeEffectCheckArgs,
+  RuntimeEffectCheckResult,
+  RuntimeTapeVerifyArgs,
+  RuntimeTapeVerifyResult,
+  BioethicsActionReviewArgs,
+  BioethicsActionReviewResult,
+  HumanSubjectScreenArgs,
+  HumanSubjectScreenResult,
+  BioethicsDualUseReviewArgs,
+  BioethicsDualUseReviewResult,
+  BioethicsValidationCheckArgs,
+  BioethicsValidationCheckResult,
+  BioethicsRepresentationAuditArgs,
+  BioethicsRepresentationAuditResult,
   SseSnapshot,
   SubscribeOptions,
   SubscriptionListResponse,
@@ -575,8 +590,60 @@ export class ApiClient {
     return assembleMissionFromRoute(route, missionId, selections, policy);
   }
 
-  async runtimeExecutionSimulate(args: RuntimeExecutionSimulateArgs, options?: ClientRequestOptions) {
+  async runtimeEffectCheck(
+    args: RuntimeEffectCheckArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<RuntimeEffectCheckResult>> {
+    return this.callTool("runtime_effect_check", args, options);
+  }
+
+  async runtimeTapeVerify(
+    args: RuntimeTapeVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<RuntimeTapeVerifyResult>> {
+    return this.callTool("runtime_tape_verify", args, options);
+  }
+
+  async runtimeExecutionSimulate(
+    args: RuntimeExecutionSimulateArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<RuntimeExecutionSimulateResult>> {
     return this.callTool("runtime_execution_simulate", args, options);
+  }
+
+  async bioethicsActionReview(
+    args: BioethicsActionReviewArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BioethicsActionReviewResult>> {
+    return this.callTool("bioethics_action_review", args, options);
+  }
+
+  async humanSubjectScreen(
+    args: HumanSubjectScreenArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<HumanSubjectScreenResult>> {
+    return this.callTool("bioethics_human_subject_screen", args, options);
+  }
+
+  async bioethicsDualUseReview(
+    args: BioethicsDualUseReviewArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BioethicsDualUseReviewResult>> {
+    return this.callTool("bioethics_dual_use_review", args, options);
+  }
+
+  async bioethicsValidationCheck(
+    args: BioethicsValidationCheckArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BioethicsValidationCheckResult>> {
+    return this.callTool("bioethics_validation_check", args, options);
+  }
+
+  async bioethicsRepresentationAudit(
+    args: BioethicsRepresentationAuditArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BioethicsRepresentationAuditResult>> {
+    return this.callTool("bioethics_representation_audit", args, options);
   }
 
   async events(after = 0, limit = 100, options?: ClientRequestOptions): Promise<EventsResponse> {

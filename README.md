@@ -297,7 +297,7 @@ links, and step/refusal/byte summaries without returning unbounded terminal repo
 For browser and Node consumers, [`typescript/`](typescript/README.md) provides the corresponding
 dependency-free Fetch client. It enforces request/response bounds, timeout and abort semantics,
 typed API errors, SSE cursor parsing, webhook outbox lifecycle, and typed facades for the evidence,
-BioAtlas, OTLP, runtime, and developer-delivery workflows. See [`docs/TYPESCRIPT_SDK.md`](docs/TYPESCRIPT_SDK.md)
+BioAtlas, OTLP, runtime, bioethics, and developer-delivery workflows. See [`docs/TYPESCRIPT_SDK.md`](docs/TYPESCRIPT_SDK.md)
 for the compatibility, workbench, mission, secret-handling, and schema-aware full-catalogue
 invocation contract. `toolCatalogue()` and `planTool()` make arbitrary domain calls reviewable
 before `toolChecked()` executes them; `missionPreflight()` extends that review across dependency
@@ -453,7 +453,11 @@ surfaces remain bounded and local: they do not create durable queues, identity p
 public-key signing, CI execution, deployment, or network publication.
 `runtime_execution_simulate` runs bounded serialized effect programs against the deterministic
 in-process world, returns policy and budget evidence, proves complete replay, and can open a forked
-suffix with observable state and divergence comparison. `megafactory_twin_audit` qualifies
+suffix with observable state and divergence comparison. The Python and TypeScript SDKs expose typed
+runtime-effect, tape, and simulation projections plus the full bioethics review family, preserving
+authorization/refusal, simulated provenance, partial replay, physical referral, institutional
+review, dual-use assessment, validation maturity, and representation gaps across MCP and HTTP
+without claiming host execution or institutional clearance. `megafactory_twin_audit` qualifies
 mechanistic counterfactuals against alternative models while withholding oracle status on sign
 instability; `megafactory_placement_audit` checks worker capability, attestation, oracle
 independence, locality transfer, fencing, and duplicate-effect classes. These remain local

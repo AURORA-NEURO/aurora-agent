@@ -2354,13 +2354,194 @@ export interface MissionAssembly extends JsonObject {
   limitations: string[];
 }
 
+export type RuntimeEffectKind =
+  | "clock_now"
+  | "clock_sleep"
+  | "random_bytes"
+  | "network_fetch"
+  | "file_read"
+  | "file_write"
+  | "process_spawn"
+  | "service_call"
+  | "model_call"
+  | "outbound_message"
+  | "payment";
+export type RuntimeEffectClass = "pure" | "reversible_sandbox" | "compensable_external" | "irreversible";
+export type RuntimeAuthorization = "perform" | "simulate";
+
+export interface RuntimeEffectCheckArgs extends JsonObject {
+  policy: JsonObject;
+  request: JsonObject & { kind: RuntimeEffectKind };
+}
+
+export interface RuntimeEffectCheckResult extends JsonObject {
+  ok: boolean;
+  request?: JsonObject;
+  kind?: RuntimeEffectKind;
+  class?: RuntimeEffectClass;
+  class_label?: RuntimeEffectClass;
+  target_host?: string | null;
+  target_path?: string | null;
+  authorization?: RuntimeAuthorization;
+  simulated_outcome?: JsonValue;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
+export interface RuntimeTapeVerifyArgs extends JsonObject {
+  tape: JsonObject;
+  other_tape?: JsonObject;
+}
+
+export interface RuntimeTapeVerifyResult extends JsonObject {
+  ok: boolean;
+  run?: string;
+  lineage?: JsonObject | null;
+  entries?: number;
+  head?: string;
+  chain_verified?: boolean;
+  checkpoint_results?: JsonObject[];
+  artifacts?: JsonObject;
+  simulated_steps?: number[];
+  first_divergence?: number | null;
+  comparison_supplied?: boolean;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface RuntimeExecutionSimulateArgs extends JsonObject {
-  tape?: JsonObject;
-  actions?: JsonValue[];
+  run?: string;
+  policy: JsonObject;
+  requests: JsonObject[];
+  world?: JsonObject;
   budget?: JsonObject;
-  faults?: JsonValue[];
-  forks?: JsonValue[];
-  max_items?: number;
+  fork?: JsonObject;
+}
+
+export interface RuntimeExecutionSimulateResult extends JsonObject {
+  ok: boolean;
+  run: string;
+  request_count: number;
+  recorded_requests: number;
+  live_outcomes: JsonValue[];
+  execution_error: string | null;
+  tape: JsonObject;
+  world: JsonObject;
+  policy_journal: JsonValue[];
+  budget: JsonObject | null;
+  replay: JsonObject;
+  fork: JsonObject | null;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface BioethicsActionReviewArgs extends JsonObject {
+  plan: JsonObject;
+  boundary?: JsonObject;
+  authorisation?: JsonObject;
+}
+
+export interface BioethicsActionReviewResult extends JsonObject {
+  ok: boolean;
+  subject?: string;
+  declared_use?: string;
+  permitted_uses?: string[];
+  disposition?: JsonObject;
+  physical_step_count?: number;
+  in_silico_step_count?: number;
+  requires_external_authorisation?: boolean;
+  referral?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+}
+
+export interface HumanSubjectScreenArgs extends JsonObject {
+  study: JsonObject;
+  consent?: JsonObject;
+  at?: string;
+  boundary?: JsonObject;
+}
+
+export interface HumanSubjectScreenResult extends JsonObject {
+  ok: boolean;
+  subject: string;
+  determination: JsonObject;
+  requires_institutional_review: boolean;
+  triggers: JsonValue[];
+  consent: JsonObject;
+  return_of_results: JsonObject;
+  clearance_issued: boolean;
+  guarantees: string[];
+}
+
+export interface BioethicsDualUseReviewArgs extends JsonObject {
+  release: JsonObject;
+  risk: JsonObject;
+  withhold?: "exploit_detail" | "existence";
+  finding?: string;
+}
+
+export interface BioethicsDualUseReviewResult extends JsonObject {
+  ok: boolean;
+  subject?: string;
+  surfaces?: string[];
+  assessor?: string;
+  sensitive_category?: string;
+  decision?: JsonObject;
+  referral?: JsonObject;
+  withholding?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantee?: string;
+  guarantees?: string[];
+}
+
+export interface BioethicsValidationCheckArgs extends JsonObject {
+  dossier: JsonObject;
+}
+
+export interface BioethicsValidationCheckResult extends JsonObject {
+  ok: boolean;
+  subject: string;
+  author: string;
+  maturity: "experimental" | "verified";
+  missing: string[];
+  missing_count: number;
+  verification: JsonObject;
+  guarantees: string[];
+}
+
+export interface BioethicsRepresentationAuditArgs extends JsonObject {
+  subject: string;
+  observations: JsonObject[];
+  attribution?: JsonObject;
+}
+
+export interface BioethicsRepresentationAuditResult extends JsonObject {
+  ok: boolean;
+  summary?: JsonObject;
+  measured_count?: number;
+  unmeasured_count?: number;
+  suppressed_count?: number;
+  complete?: boolean;
+  incomplete_axes?: string[];
+  attribution?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
 }
 
 export type ToolArguments = JsonObject;

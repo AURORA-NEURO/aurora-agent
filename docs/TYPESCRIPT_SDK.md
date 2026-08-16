@@ -239,6 +239,19 @@ aggregate egress boundaries. `bioevalReferenceAudit` keeps distributed reference
 from modal summaries; `evaluationWorldlineAudit` reconciles leakage and dangling references;
 `evaluationReproductionCheck` keeps reproducibility separate from biological validity; and
 `evaluationTrajectoryCheck` exposes non-vacuous property outcomes and bounded suffix completeness.
+The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
+`runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
+reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,
+hash-chain and checkpoint verification, simulated provenance, budget exhaustion, partial recording,
+complete replay, and counterfactual fork evidence. The runtime inspection and simulation surfaces
+never reach a host filesystem, network, process, model, message, or payment endpoint.
+
+The bioethics facade adds `bioethicsActionReview`, `humanSubjectScreen`, `bioethicsDualUseReview`,
+`bioethicsValidationCheck`, and `bioethicsRepresentationAudit`. These retain physical versus
+in-silico action partitioning and referral-only semantics, institutional review versus consent versus
+return-of-results, misuse assessment before the section-13 risk gate, missing validation evidence,
+and measured versus unmeasured versus small-cell-suppressed strata. The result types intentionally
+do not mint physical execution, institutional clearance, clinical approval, or biological truth.
 `capabilityRouteReview` accepts the route plus caller-selected `MissionRouteSelection` values and
 returns typed `CapabilityRouteReviewResult` diagnostics. Ready results include deterministic
 dependency waves and a mission draft while retaining the `mission_preflight_required` boundary;

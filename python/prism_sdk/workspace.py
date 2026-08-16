@@ -129,6 +129,34 @@ from .evaluation import (
     oracle_missingness_report,
     oracle_reference_panel_report,
 )
+from .runtime import (
+    RuntimeEffectCheckArgs,
+    RuntimeEffectReport,
+    RuntimeExecutionSimulateArgs,
+    RuntimeExecutionSimulateReport,
+    RuntimeTapeVerifyArgs,
+    RuntimeTapeVerifyReport,
+    runtime_effect_check_report,
+    runtime_execution_simulate_report,
+    runtime_tape_verify_report,
+)
+from .bioethics import (
+    BioethicsActionReviewArgs,
+    BioethicsActionReviewReport,
+    BioethicsDualUseReviewArgs,
+    BioethicsDualUseReviewReport,
+    BioethicsRepresentationAuditArgs,
+    BioethicsRepresentationAuditReport,
+    BioethicsValidationCheckArgs,
+    BioethicsValidationCheckReport,
+    HumanSubjectScreenArgs,
+    HumanSubjectScreenReport,
+    bioethics_action_review_report,
+    bioethics_dual_use_review_report,
+    bioethics_representation_audit_report,
+    bioethics_validation_check_report,
+    human_subject_screen_report,
+)
 from .oncology import (
     OncoBoundaryArgs,
     OncoBoundaryReport,
@@ -1134,6 +1162,131 @@ class Workspace:
         horizon: int | None = None,
     ) -> EvaluationTrajectoryReport:
         return evaluation_trajectory_check_report(self.evaluation_trajectory_check(trajectory, step=step, horizon=horizon))
+
+    def runtime_effect_check(
+        self,
+        request: RuntimeEffectCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Inspect one runtime effect without touching a filesystem, network, or process."""
+
+        normalized = request if isinstance(request, RuntimeEffectCheckArgs) else RuntimeEffectCheckArgs.from_wire(request)
+        result = self.client.call_tool("runtime_effect_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def runtime_effect_check_report(
+        self,
+        request: RuntimeEffectCheckArgs | Mapping[str, Any],
+    ) -> RuntimeEffectReport:
+        return runtime_effect_check_report(self.runtime_effect_check(request))
+
+    def runtime_tape_verify(
+        self,
+        request: RuntimeTapeVerifyArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a hash-chained tape and retain checkpoint, artifact, and simulation evidence."""
+
+        normalized = request if isinstance(request, RuntimeTapeVerifyArgs) else RuntimeTapeVerifyArgs.from_wire(request)
+        result = self.client.call_tool("runtime_tape_verify", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def runtime_tape_verify_report(
+        self,
+        request: RuntimeTapeVerifyArgs | Mapping[str, Any],
+    ) -> RuntimeTapeVerifyReport:
+        return runtime_tape_verify_report(self.runtime_tape_verify(request))
+
+    def runtime_execution_simulate(
+        self,
+        request: RuntimeExecutionSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Record and replay a bounded deterministic effect program with optional counterfactual fork."""
+
+        normalized = request if isinstance(request, RuntimeExecutionSimulateArgs) else RuntimeExecutionSimulateArgs.from_wire(request)
+        return self.tool("runtime_execution_simulate", normalized.to_mcp_arguments())
+
+    def runtime_execution_simulate_report(
+        self,
+        request: RuntimeExecutionSimulateArgs | Mapping[str, Any],
+    ) -> RuntimeExecutionSimulateReport:
+        return runtime_execution_simulate_report(self.runtime_execution_simulate(request))
+
+    def bioethics_action_review(
+        self,
+        request: BioethicsActionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, BioethicsActionReviewArgs) else BioethicsActionReviewArgs.from_wire(request)
+        result = self.client.call_tool("bioethics_action_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioethics_action_review_report(
+        self,
+        request: BioethicsActionReviewArgs | Mapping[str, Any],
+    ) -> BioethicsActionReviewReport:
+        return bioethics_action_review_report(self.bioethics_action_review(request))
+
+    def human_subject_screen(
+        self,
+        request: HumanSubjectScreenArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, HumanSubjectScreenArgs) else HumanSubjectScreenArgs.from_wire(request)
+        return self.tool("bioethics_human_subject_screen", normalized.to_mcp_arguments())
+
+    def human_subject_screen_report(
+        self,
+        request: HumanSubjectScreenArgs | Mapping[str, Any],
+    ) -> HumanSubjectScreenReport:
+        return human_subject_screen_report(self.human_subject_screen(request))
+
+    def bioethics_dual_use_review(
+        self,
+        request: BioethicsDualUseReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, BioethicsDualUseReviewArgs) else BioethicsDualUseReviewArgs.from_wire(request)
+        result = self.client.call_tool("bioethics_dual_use_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioethics_dual_use_review_report(
+        self,
+        request: BioethicsDualUseReviewArgs | Mapping[str, Any],
+    ) -> BioethicsDualUseReviewReport:
+        return bioethics_dual_use_review_report(self.bioethics_dual_use_review(request))
+
+    def bioethics_validation_check(
+        self,
+        request: BioethicsValidationCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, BioethicsValidationCheckArgs) else BioethicsValidationCheckArgs.from_wire(request)
+        return self.tool("bioethics_validation_check", normalized.to_mcp_arguments())
+
+    def bioethics_validation_check_report(
+        self,
+        request: BioethicsValidationCheckArgs | Mapping[str, Any],
+    ) -> BioethicsValidationCheckReport:
+        return bioethics_validation_check_report(self.bioethics_validation_check(request))
+
+    def bioethics_representation_audit(
+        self,
+        request: BioethicsRepresentationAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, BioethicsRepresentationAuditArgs) else BioethicsRepresentationAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioethics_representation_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioethics_representation_audit_report(
+        self,
+        request: BioethicsRepresentationAuditArgs | Mapping[str, Any],
+    ) -> BioethicsRepresentationAuditReport:
+        return bioethics_representation_audit_report(self.bioethics_representation_audit(request))
 
     def developer_delivery_audit(
         self,
@@ -2404,6 +2557,125 @@ class AsyncWorkspace:
         horizon: int | None = None,
     ) -> EvaluationTrajectoryReport:
         return evaluation_trajectory_check_report(await self.evaluation_trajectory_check(trajectory, step=step, horizon=horizon))
+
+    async def runtime_effect_check(
+        self,
+        request: RuntimeEffectCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, RuntimeEffectCheckArgs) else RuntimeEffectCheckArgs.from_wire(request)
+        result = await self.client.call_tool("runtime_effect_check", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def runtime_effect_check_report(
+        self,
+        request: RuntimeEffectCheckArgs | Mapping[str, Any],
+    ) -> RuntimeEffectReport:
+        return runtime_effect_check_report(await self.runtime_effect_check(request))
+
+    async def runtime_tape_verify(
+        self,
+        request: RuntimeTapeVerifyArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, RuntimeTapeVerifyArgs) else RuntimeTapeVerifyArgs.from_wire(request)
+        result = await self.client.call_tool("runtime_tape_verify", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def runtime_tape_verify_report(
+        self,
+        request: RuntimeTapeVerifyArgs | Mapping[str, Any],
+    ) -> RuntimeTapeVerifyReport:
+        return runtime_tape_verify_report(await self.runtime_tape_verify(request))
+
+    async def runtime_execution_simulate(
+        self,
+        request: RuntimeExecutionSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, RuntimeExecutionSimulateArgs) else RuntimeExecutionSimulateArgs.from_wire(request)
+        return await self.tool("runtime_execution_simulate", normalized.to_mcp_arguments())
+
+    async def runtime_execution_simulate_report(
+        self,
+        request: RuntimeExecutionSimulateArgs | Mapping[str, Any],
+    ) -> RuntimeExecutionSimulateReport:
+        return runtime_execution_simulate_report(await self.runtime_execution_simulate(request))
+
+    async def bioethics_action_review(
+        self,
+        request: BioethicsActionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, BioethicsActionReviewArgs) else BioethicsActionReviewArgs.from_wire(request)
+        result = await self.client.call_tool("bioethics_action_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioethics_action_review_report(
+        self,
+        request: BioethicsActionReviewArgs | Mapping[str, Any],
+    ) -> BioethicsActionReviewReport:
+        return bioethics_action_review_report(await self.bioethics_action_review(request))
+
+    async def human_subject_screen(
+        self,
+        request: HumanSubjectScreenArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, HumanSubjectScreenArgs) else HumanSubjectScreenArgs.from_wire(request)
+        return await self.tool("bioethics_human_subject_screen", normalized.to_mcp_arguments())
+
+    async def human_subject_screen_report(
+        self,
+        request: HumanSubjectScreenArgs | Mapping[str, Any],
+    ) -> HumanSubjectScreenReport:
+        return human_subject_screen_report(await self.human_subject_screen(request))
+
+    async def bioethics_dual_use_review(
+        self,
+        request: BioethicsDualUseReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, BioethicsDualUseReviewArgs) else BioethicsDualUseReviewArgs.from_wire(request)
+        result = await self.client.call_tool("bioethics_dual_use_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioethics_dual_use_review_report(
+        self,
+        request: BioethicsDualUseReviewArgs | Mapping[str, Any],
+    ) -> BioethicsDualUseReviewReport:
+        return bioethics_dual_use_review_report(await self.bioethics_dual_use_review(request))
+
+    async def bioethics_validation_check(
+        self,
+        request: BioethicsValidationCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, BioethicsValidationCheckArgs) else BioethicsValidationCheckArgs.from_wire(request)
+        return await self.tool("bioethics_validation_check", normalized.to_mcp_arguments())
+
+    async def bioethics_validation_check_report(
+        self,
+        request: BioethicsValidationCheckArgs | Mapping[str, Any],
+    ) -> BioethicsValidationCheckReport:
+        return bioethics_validation_check_report(await self.bioethics_validation_check(request))
+
+    async def bioethics_representation_audit(
+        self,
+        request: BioethicsRepresentationAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, BioethicsRepresentationAuditArgs) else BioethicsRepresentationAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioethics_representation_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioethics_representation_audit_report(
+        self,
+        request: BioethicsRepresentationAuditArgs | Mapping[str, Any],
+    ) -> BioethicsRepresentationAuditReport:
+        return bioethics_representation_audit_report(await self.bioethics_representation_audit(request))
 
     async def developer_delivery_audit(
         self,

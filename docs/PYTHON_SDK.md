@@ -604,6 +604,46 @@ bounded trajectory properties. The same projections are available on `Workspace`
 `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`; nested oracle/evaluation records remain
 authoritative JSON objects rather than being flattened into lossy SDK guesses.
 
+## Runtime and bioethics safety workflows
+
+The runtime projection is split into request authoring and evidence parsing so callers can inspect
+the exact safety boundary without accidentally turning an inspection result into execution:
+
+- `RuntimeEffectCheckArgs` and `runtime_effect_check_report(...)` preserve the declared effect kind,
+  reversibility class, canonical path/network target, `perform` versus `simulate` authorization, and
+  structured fail-closed refusals. `RuntimeEffectReport.executed` is always `False`; a successful
+  authorization is not evidence that a provider exists or that any host effect occurred.
+- `RuntimeTapeVerifyArgs` and `runtime_tape_verify_report(...)` verify serialized world tapes before
+  trusting them, retain lineage, checkpoint results, artifact reads/writes, simulated steps, and
+  earliest digest divergence, and keep malformed-tape failures distinct from valid tape reports.
+- `RuntimeExecutionSimulateArgs` and `runtime_execution_simulate_report(...)` run bounded request
+  programs only through the deterministic in-process world. The report separates complete versus
+  partial recording, execution errors, budget exhaustion, replay verification/matching, and optional
+  fork evidence. `live_effects_reachable` is an explicit nonclaim, not an inferred green status.
+
+Bioethics projections mirror the crate-level asymmetries rather than reducing them to booleans:
+
+- `BioethicsActionReviewArgs` / `bioethics_action_review_report(...)` preserve in-silico versus
+  physical partitioning and the two-act authorization referral. `physical_execution_reachable` is
+  always false, including when a referral is successfully represented.
+- `HumanSubjectScreenArgs` / `human_subject_screen_report(...)` keep institutional review,
+  consent-at-time, and return-of-results statuses separate. An undetermined screen never becomes an
+  exemption, and `clearance_issued` is required to remain false.
+- `BioethicsDualUseReviewArgs` / `bioethics_dual_use_review_report(...)` require a misuse-surface
+  assessment before the section-13 risk gate and retain the distinction between exploit-detail
+  withholding and suppressing a finding's existence.
+- `BioethicsValidationCheckArgs` / `bioethics_validation_check_report(...)` reconcile all seven
+  evidence kinds and preserve experimental maturity or a fail-closed verification refusal.
+- `BioethicsRepresentationAuditArgs` / `bioethics_representation_audit_report(...)` count-reconcile
+  measured, unmeasured, and small-cell-suppressed strata, retaining incomplete coverage and refusing
+  duplicate partitions rather than overwriting them.
+
+All of these helpers are available on `Workspace`, `AsyncWorkspace`, `ApiClient`, and
+`AsyncApiClient`. They preserve structured domain refusals in raw mode where the server uses an MCP
+error envelope, so callers can choose whether to render a refusal, store it as evidence, or raise at
+their own boundary. None of them provides a host sandbox, physical laboratory control, institutional
+approval, clinical clearance, or biological truth.
+
 The package deliberately does not claim to implement DICOM/NIfTI/AnnData, indexed/compressed VCF,
 binary BIDS image parsing, inferential statistics, OTLP export, a notebook UI, or CI deployment. It
 now ships bounded text VCF, BIDS manifest, parsed DICOM metadata, parsed NIfTI header/affine, and
