@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 143);
+    assert_eq!(tools.len(), 144);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(143));
-    assert_eq!(result["advertised_tool_count"], json!(143));
+    assert_eq!(result["unique_catalog_tools"], json!(144));
+    assert_eq!(result["advertised_tool_count"], json!(144));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(143));
-    assert_eq!(result["schema_quality"]["valid"], json!(143));
+    assert_eq!(result["schema_quality"]["checked"], json!(144));
+    assert_eq!(result["schema_quality"]["valid"], json!(144));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5544,6 +5544,99 @@ fn lab_holdout_audit_never_mints_clean_scores_after_selection_and_rollback() {
     assert_eq!(result["operations"][5]["result"], json!("measurement_refused"));
     assert!(result["holdouts"][0]["exposure"].as_array().unwrap().len() >= 3);
     assert_eq!(result["holdouts"][0]["retired"], json!(false));
+}
+
+#[test]
+fn lab_evolution_audit_only_claims_clean_directional_improvement_and_retains_contamination() {
+    let v1 = CandidateArchitecture::new("v1")
+        .with_component(ComponentSpec::new("select", ComponentKind::ContextSelector))
+        .with_component(ComponentSpec::new("run", ComponentKind::Executor))
+        .with_component(ComponentSpec::new("stop", ComponentKind::Terminator));
+    let v2 = CandidateArchitecture::new("v2")
+        .derived_from("v1")
+        .with_component(ComponentSpec::new("select", ComponentKind::ContextSelector))
+        .with_component(ComponentSpec::new("run", ComponentKind::Executor))
+        .with_component(ComponentSpec::new("stop", ComponentKind::Terminator));
+    let base = json!({
+        "cost_ceiling": 100,
+        "candidates": [serde_json::to_value(&v1).unwrap(), serde_json::to_value(&v2).unwrap()],
+        "baseline": "v1",
+        "candidate": "v2",
+        "holdout": {
+            "id": "private-a",
+            "partition": "rotating_private_certification",
+            "query_budget": 4
+        },
+        "card_id": "card-v2",
+        "proposal": {
+            "id": "proposal-v2",
+            "rationale": "widen the protected closure",
+            "target_failure_clusters": ["cluster:missing-closure"],
+            "changed_artifacts": ["component select depth 3 -> 5"],
+            "regression_cells": ["cell:closure"],
+            "touches_protected": []
+        },
+        "rollback_handle": "v1",
+        "direction": "higher_is_better",
+        "would_have_to_be_true": ["the gain survives a second rotating private set"],
+        "max_rows": 10
+    });
+    let claimed = call(
+        &mut server(),
+        "lab_evolution_audit",
+        json!({
+            "cost_ceiling": base["cost_ceiling"],
+            "candidates": base["candidates"],
+            "baseline": base["baseline"],
+            "candidate": base["candidate"],
+            "holdout": base["holdout"],
+            "measurements": [
+                { "configuration": "v1", "metric": "admissible_rate", "value": 0.70 },
+                { "configuration": "v2", "metric": "admissible_rate", "value": 0.83 }
+            ],
+            "card_id": base["card_id"],
+            "proposal": base["proposal"],
+            "rollback_handle": base["rollback_handle"],
+            "direction": base["direction"],
+            "would_have_to_be_true": base["would_have_to_be_true"],
+            "max_rows": base["max_rows"]
+        }),
+    );
+    assert_eq!(claimed["__isError"], json!(false));
+    assert_eq!(claimed["ok"], json!(true));
+    assert_eq!(claimed["schema"], json!("bioprism-mcp/lab-evolution-audit/0.1"));
+    assert_eq!(claimed["status"], json!("improvement_claimed"));
+    assert_eq!(claimed["claimable"], json!(true));
+    assert!((claimed["claim"]["delta"].as_f64().unwrap() - 0.13).abs() < 1e-9);
+    assert!(claimed["sentence"].as_str().unwrap().contains("rotating_private_certification"));
+
+    let contaminated = call(
+        &mut server(),
+        "lab_evolution_audit",
+        json!({
+            "cost_ceiling": base["cost_ceiling"],
+            "candidates": base["candidates"],
+            "baseline": base["baseline"],
+            "candidate": base["candidate"],
+            "holdout": base["holdout"],
+            "measurements": [
+                { "configuration": "v1", "metric": "admissible_rate", "value": 0.70 },
+                { "configuration": "v1", "metric": "admissible_rate", "value": 0.71 },
+                { "configuration": "v2", "metric": "admissible_rate", "value": 0.83 }
+            ],
+            "card_id": base["card_id"],
+            "proposal": base["proposal"],
+            "rollback_handle": base["rollback_handle"],
+            "direction": base["direction"],
+            "would_have_to_be_true": base["would_have_to_be_true"]
+        }),
+    );
+    assert_eq!(contaminated["__isError"], json!(false));
+    assert_eq!(contaminated["ok"], json!(true));
+    assert_eq!(contaminated["status"], json!("contaminated"));
+    assert_eq!(contaminated["claimable"], json!(false));
+    assert_eq!(contaminated["card"]["surface"]["surface"], json!("contaminated"));
+    assert!(contaminated["claim_refusal"].as_str().unwrap().contains("contaminated"));
 }
 
 #[test]

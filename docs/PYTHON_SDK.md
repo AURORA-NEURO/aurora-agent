@@ -235,6 +235,12 @@ invent defaults:
   checkpoints, rollback receipts, retained exposure, and current certification budget. Measurement
   refusals remain successful audit evidence but never become clean scores; structural failures
   remain fail-closed. See [`docs/LAB_HOLDOUT_AUDIT.md`](LAB_HOLDOUT_AUDIT.md).
+- `LabEvolutionAuditArgs` / `lab_evolution_audit_report(...)` form the claim boundary over the
+  inference lab: only kernel-minted clean before/after measurements can produce an
+  `improvement_claimed` evolution card. Contaminated attempts remain serialized contaminated
+  cards, non-improvements remain `claim_refused`, and architecture/completeness/card failures
+  remain fail-closed with stages and omission-aware measurement rows. See
+  [`docs/LAB_EVOLUTION_AUDIT.md`](LAB_EVOLUTION_AUDIT.md).
 - `OncoBoundaryArgs` and `onco_boundary_report(...)` preserve oncology's partial-release contract:
   aggregate research uses can remain released while individual clinical uses are refused and
   escalated, and direct-identifier refusals remain fail-closed without echoing request data. The

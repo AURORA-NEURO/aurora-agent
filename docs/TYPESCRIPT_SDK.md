@@ -464,6 +464,11 @@ explicit row omissions. It is planning evidence, not verifier execution or safet
 contaminated measurements, checkpoint/rollback receipts, retained burn, and certification-budget
 state. It keeps measurement refusals as auditable rows rather than scores. See
 [`docs/LAB_HOLDOUT_AUDIT.md`](../docs/LAB_HOLDOUT_AUDIT.md).
+`labEvolutionAudit` exposes the final inference-lab claim boundary. Its result distinguishes
+kernel-minted clean before/after evidence, contaminated cards, clean non-improvements, and
+fail-closed architecture/completeness/card refusals while retaining bounded measurement rows,
+claim obligations, direction, rollback, and defeater context. See
+[`docs/LAB_EVOLUTION_AUDIT.md`](../docs/LAB_EVOLUTION_AUDIT.md).
 `providerCapabilityGate` preserves untested/failed/passed provider states, conjunctive gate
 outcomes, measurement counts, reproducible run evidence, and indeterminate cross-provider drift;
 performance observations remain measurements rather than invented pass/fail claims.

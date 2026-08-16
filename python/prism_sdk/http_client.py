@@ -197,6 +197,7 @@ from .routing_lab import RoutingLabRunArgs, RoutingLabRunReport, routing_lab_run
 from .lab_pareto import LabParetoAuditArgs, LabParetoAuditReport, lab_pareto_audit_report
 from .lab_branch import LabBranchAuditArgs, LabBranchAuditReport, lab_branch_audit_report
 from .lab_holdout import LabHoldoutAuditArgs, LabHoldoutAuditReport, lab_holdout_audit_report
+from .lab_evolution import LabEvolutionAuditArgs, LabEvolutionAuditReport, lab_evolution_audit_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
@@ -2319,6 +2320,23 @@ class ApiClient:
         """Return typed clean-measurement and contamination evidence."""
 
         return lab_holdout_audit_report(self.lab_holdout_audit(request))
+
+    def lab_evolution_audit(
+        self,
+        request: LabEvolutionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Assemble and grade a benchmark-gated evolution card through HTTP."""
+
+        normalized = request if isinstance(request, LabEvolutionAuditArgs) else LabEvolutionAuditArgs.from_wire(request)
+        return self.call_tool("lab_evolution_audit", normalized.to_mcp_arguments())
+
+    def lab_evolution_audit_report(
+        self,
+        request: LabEvolutionAuditArgs | Mapping[str, Any],
+    ) -> LabEvolutionAuditReport:
+        """Return typed clean-claim, contamination, and defeater evidence."""
+
+        return lab_evolution_audit_report(self.lab_evolution_audit(request))
 
     def provider_capability_gate(
         self,
@@ -4649,6 +4667,23 @@ class AsyncApiClient:
         """Return typed clean-measurement and contamination evidence."""
 
         return lab_holdout_audit_report(await self.lab_holdout_audit(request))
+
+    async def lab_evolution_audit(
+        self,
+        request: LabEvolutionAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Assemble and grade a benchmark-gated evolution card through async HTTP."""
+
+        normalized = request if isinstance(request, LabEvolutionAuditArgs) else LabEvolutionAuditArgs.from_wire(request)
+        return await self.call_tool("lab_evolution_audit", normalized.to_mcp_arguments())
+
+    async def lab_evolution_audit_report(
+        self,
+        request: LabEvolutionAuditArgs | Mapping[str, Any],
+    ) -> LabEvolutionAuditReport:
+        """Return typed clean-claim, contamination, and defeater evidence."""
+
+        return lab_evolution_audit_report(await self.lab_evolution_audit(request))
 
     async def provider_capability_gate(
         self,

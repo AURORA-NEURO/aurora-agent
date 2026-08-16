@@ -125,8 +125,9 @@ use bioprism_interweave::workflow::{catalogue as interweave_catalogue, outstandi
 use bioprism_lab::{
     expand as expand_acquisitions, separate as separate_hypotheses, AcquisitionAction,
     AcquisitionCost, HypothesisSet as LabHypothesisSet,
+    evolution::{ChangeProposal, ContaminationRecord, EvolutionCard},
     holdout::{Holdout, HoldoutId, HoldoutLedger, Partition},
-    pareto::{ParetoFront, Profile as LabParetoProfile},
+    pareto::{Direction as LabParetoDirection, ParetoFront, Profile as LabParetoProfile},
     risk::{BranchLedger, BranchOutcome, BranchPolicy, RiskFeatures},
     rollback::{Checkpoint, Deployment},
     space::{ArchitectureSpace, CandidateArchitecture, ConfigurationId},
@@ -1278,6 +1279,7 @@ impl Server {
             "lab_pareto_audit" => self.lab_pareto_audit(&arguments),
             "lab_branch_audit" => self.lab_branch_audit(&arguments),
             "lab_holdout_audit" => self.lab_holdout_audit(&arguments),
+            "lab_evolution_audit" => self.lab_evolution_audit(&arguments),
             "obligation_gate_check" => self.obligation_gate_check(&arguments),
             "lens_catalogue" => Ok(json!({
                 "ok": true,
@@ -7705,6 +7707,366 @@ impl Server {
                 "operations are an offline audit program and do not deploy traffic, trigger live rollback, or alter external state"
             ]
         }))
+    }
+
+    fn lab_evolution_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure evolution-audit input: {error}"))?;
+        if encoded.len() > 10_000_000 {
+            return Err("evolution-audit input exceeds the 10000000-byte safety bound".into());
+        }
+        let cost_ceiling = arguments
+            .get("cost_ceiling")
+            .and_then(Value::as_u64)
+            .ok_or("cost_ceiling is required and must be a non-negative integer")?;
+        if cost_ceiling > 1_000_000_000 {
+            return Err("cost_ceiling must be at most 1000000000".into());
+        }
+        let raw_candidates = arguments
+            .get("candidates")
+            .and_then(Value::as_array)
+            .ok_or("candidates is required and must be an array")?;
+        if raw_candidates.len() != 2 {
+            return Err("candidates must contain exactly baseline and candidate architecture bundles".into());
+        }
+        let mut space = ArchitectureSpace::new();
+        for (index, raw_candidate) in raw_candidates.iter().enumerate() {
+            let candidate: CandidateArchitecture = serde_json::from_value(raw_candidate.clone())
+                .map_err(|error| format!("invalid candidates[{index}]: {error}"))?;
+            if let Err(error) = candidate.validate(cost_ceiling) {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "space_error_serialization_failed"
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-evolution-audit/0.1",
+                    "stage": "architecture_validation",
+                    "candidate_index": index,
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "guarantees": [
+                        "an evolution card cannot be built from an invalid architecture bundle"
+                    ]
+                }));
+            }
+            if let Err(error) = space.register(candidate) {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "space_error_serialization_failed"
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-evolution-audit/0.1",
+                    "stage": "architecture_registration",
+                    "candidate_index": index,
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "guarantees": [
+                        "duplicate bundles and unregistered parents are refused before measurement"
+                    ]
+                }));
+            }
+        }
+
+        let baseline = arguments
+            .get("baseline")
+            .and_then(Value::as_str)
+            .ok_or("baseline is required and must name one candidate")?;
+        let candidate = arguments
+            .get("candidate")
+            .and_then(Value::as_str)
+            .ok_or("candidate is required and must name one candidate")?;
+        let baseline = ConfigurationId::new(baseline);
+        let candidate = ConfigurationId::new(candidate);
+        if !space.contains(&baseline) || !space.contains(&candidate) || baseline == candidate {
+            return Err("baseline and candidate must be distinct registered configurations".into());
+        }
+        let holdout_value = arguments
+            .get("holdout")
+            .cloned()
+            .ok_or("holdout is required and must contain id, partition, and query_budget")?;
+        let holdout_object = holdout_value
+            .as_object()
+            .ok_or("holdout must be an object")?;
+        let holdout_id = holdout_object
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("holdout.id must be a string")?;
+        let partition: Partition = serde_json::from_value(
+            holdout_object
+                .get("partition")
+                .cloned()
+                .ok_or("holdout.partition is required")?,
+        )
+        .map_err(|error| format!("invalid holdout.partition: {error}"))?;
+        let query_budget = holdout_object
+            .get("query_budget")
+            .and_then(Value::as_u64)
+            .ok_or("holdout.query_budget must be a non-negative integer")?;
+        if query_budget > u32::MAX as u64 {
+            return Err("holdout.query_budget exceeds u32".into());
+        }
+        let mut holdouts = HoldoutLedger::new();
+        holdouts
+            .register(Holdout::new(holdout_id, partition, query_budget as u32))
+            .map_err(|error| format!("holdout registration refused: {error}"))?;
+
+        let raw_proposal = arguments
+            .get("proposal")
+            .cloned()
+            .ok_or("proposal is required and must be a serialized ChangeProposal")?;
+        let proposal: ChangeProposal = serde_json::from_value(raw_proposal)
+            .map_err(|error| format!("invalid evolution proposal: {error}"))?;
+        let card_id = arguments
+            .get("card_id")
+            .and_then(Value::as_str)
+            .ok_or("card_id is required and must be a string")?;
+        let rollback_handle = ConfigurationId::new(
+            arguments
+                .get("rollback_handle")
+                .and_then(Value::as_str)
+                .ok_or("rollback_handle is required and must be a string")?,
+        );
+        let direction: LabParetoDirection = serde_json::from_value(
+            arguments
+                .get("direction")
+                .cloned()
+                .ok_or("direction is required and must be higher_is_better or lower_is_better")?,
+        )
+        .map_err(|error| format!("invalid improvement direction: {error}"))?;
+        let defeaters = arguments
+            .get("would_have_to_be_true")
+            .and_then(Value::as_array)
+            .ok_or("would_have_to_be_true is required and must be an array")?;
+        if defeaters.is_empty() || defeaters.len() > 128 {
+            return Err("would_have_to_be_true must contain between 1 and 128 statements".into());
+        }
+        let defeaters: Vec<String> = defeaters
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let statement = value
+                    .as_str()
+                    .ok_or_else(|| format!("would_have_to_be_true[{index}] must be a string"))?;
+                if statement.len() > 2_000 {
+                    return Err(format!("would_have_to_be_true[{index}] exceeds 2000 bytes"));
+                }
+                Ok(statement.to_string())
+            })
+            .collect::<Result<_, String>>()?;
+        let raw_measurements = arguments
+            .get("measurements")
+            .and_then(Value::as_array)
+            .ok_or("measurements is required and must be an array")?;
+        if raw_measurements.is_empty() || raw_measurements.len() > 256 {
+            return Err("measurements must contain between 1 and 256 values".into());
+        }
+        let max_rows = arguments
+            .get("max_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_rows == 0 || max_rows > 1_000 {
+            return Err("max_rows must be between 1 and 1000".into());
+        }
+        let max_rows = max_rows as usize;
+        let mut before_measurement = None;
+        let mut after_measurement = None;
+        let mut first_refusal: Option<(ConfigurationId, bioprism_lab::error::HoldoutError)> = None;
+        let mut measurement_rows = Vec::with_capacity(raw_measurements.len());
+        for (index, raw_measurement) in raw_measurements.iter().enumerate() {
+            let object = raw_measurement
+                .as_object()
+                .ok_or_else(|| format!("measurements[{index}] must be an object"))?;
+            let configuration = object
+                .get("configuration")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("measurements[{index}].configuration must be a string"))?;
+            let metric = object
+                .get("metric")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("measurements[{index}].metric must be a string"))?;
+            let value = object
+                .get("value")
+                .and_then(Value::as_f64)
+                .ok_or_else(|| format!("measurements[{index}].value must be a number"))?;
+            let configuration_id = ConfigurationId::new(configuration);
+            let result = holdouts.measure(
+                &HoldoutId::new(holdout_id),
+                &space,
+                &configuration_id,
+                metric,
+                value,
+            );
+            match result {
+                Ok(measurement) => {
+                    if configuration_id == baseline && before_measurement.is_none() {
+                        before_measurement = Some(measurement.clone());
+                    }
+                    if configuration_id == candidate && after_measurement.is_none() {
+                        after_measurement = Some(measurement.clone());
+                    }
+                    measurement_rows.push(json!({
+                        "index": index,
+                        "configuration": configuration_id,
+                        "result": "clean_measurement",
+                        "measurement": measurement,
+                    }));
+                }
+                Err(error) => {
+                    if first_refusal.is_none() {
+                        first_refusal = Some((configuration_id.clone(), error.clone()));
+                    }
+                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                        "error": "holdout_error_serialization_failed"
+                    }));
+                    measurement_rows.push(json!({
+                        "index": index,
+                        "configuration": configuration_id,
+                        "result": "measurement_refused",
+                        "refusal": error.to_string(),
+                        "error": detail,
+                        "fail_closed": true,
+                    }));
+                }
+            }
+        }
+
+        if let Some((refused_configuration, refusal)) = first_refusal {
+            let card = EvolutionCard::contaminated(
+                card_id,
+                proposal,
+                &baseline,
+                &candidate,
+                ContaminationRecord {
+                    holdout: HoldoutId::new(holdout_id),
+                    configuration: refused_configuration,
+                    refusal: refusal.clone(),
+                },
+                &rollback_handle,
+                defeaters,
+            );
+            let claim_refusal = card
+                .claim_improvement(direction)
+                .err()
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| "contaminated card unexpectedly yielded a claim".to_string());
+            return Ok(json!({
+                "ok": true,
+                "schema": "bioprism-mcp/lab-evolution-audit/0.1",
+                "status": "contaminated",
+                "claimable": false,
+                "card": card,
+                "claim_refusal": claim_refusal,
+                "measurement_count": measurement_rows.len(),
+                "max_rows": max_rows,
+                "measurement_rows": measurement_rows.iter().take(max_rows).collect::<Vec<_>>(),
+                "measurement_rows_omitted": measurement_rows.len().saturating_sub(max_rows),
+                "guarantees": [
+                    "a contaminated measurement is retained as a card but cannot become an improvement claim",
+                    "the clean-measurement type is minted only by the holdout ledger and is never deserialized"
+                ],
+                "limitations": [
+                    "the card records caller-supplied metric values and proposal declarations; no benchmark execution occurs",
+                    "a contaminated attempt is evidence of holdout use, not evidence of the candidate's quality"
+                ]
+            }));
+        }
+
+        let (Some(before), Some(after)) = (before_measurement, after_measurement) else {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/lab-evolution-audit/0.1",
+                "stage": "measurement_completeness",
+                "refusal": "both baseline and candidate require clean measurements before an evolution card can be assembled",
+                "fail_closed": true,
+                "measurement_count": measurement_rows.len(),
+                "max_rows": max_rows,
+                "measurement_rows": measurement_rows.iter().take(max_rows).collect::<Vec<_>>(),
+                "measurement_rows_omitted": measurement_rows.len().saturating_sub(max_rows),
+                "guarantees": [
+                    "missing before or after evidence is not converted into a zero delta or a partial improvement claim"
+                ]
+            }));
+        };
+        let card = match EvolutionCard::measured(
+            card_id,
+            proposal,
+            before,
+            after,
+            &rollback_handle,
+            defeaters,
+        ) {
+            Ok(card) => card,
+            Err(error) => {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "evolution_error_serialization_failed"
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-evolution-audit/0.1",
+                    "stage": "card_validation",
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "measurement_count": measurement_rows.len(),
+                    "max_rows": max_rows,
+                    "measurement_rows": measurement_rows.iter().take(max_rows).collect::<Vec<_>>(),
+                    "measurement_rows_omitted": measurement_rows.len().saturating_sub(max_rows),
+                    "guarantees": [
+                        "protected surfaces, changed-artifact declarations, defeaters, and metric/surface agreement gate card construction"
+                    ]
+                }));
+            }
+        };
+        match card.claim_improvement(direction) {
+            Ok(claim) => Ok(json!({
+                "ok": true,
+                "schema": "bioprism-mcp/lab-evolution-audit/0.1",
+                "status": "improvement_claimed",
+                "claimable": true,
+                "card": card,
+                "claim": claim,
+                "sentence": claim.to_sentence(),
+                "measurement_count": measurement_rows.len(),
+                "max_rows": max_rows,
+                "measurement_rows": measurement_rows.iter().take(max_rows).collect::<Vec<_>>(),
+                "measurement_rows_omitted": measurement_rows.len().saturating_sub(max_rows),
+                "guarantees": [
+                    "the claim is produced only from two clean measurements on one certifying surface",
+                    "direction, rollback handle, changed artifacts, and defeaters remain part of the claim"
+                ],
+                "limitations": [
+                    "a point delta is not a confidence interval, causal effect, biological validity result, or release approval",
+                    "the caller supplies the metric values and must independently support the stated defeaters"
+                ]
+            })),
+            Err(error) => {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "evolution_error_serialization_failed"
+                }));
+                Ok(json!({
+                    "ok": true,
+                    "schema": "bioprism-mcp/lab-evolution-audit/0.1",
+                    "status": "claim_refused",
+                    "claimable": false,
+                    "card": card,
+                    "claim_refusal": error.to_string(),
+                    "claim_error": detail,
+                    "measurement_count": measurement_rows.len(),
+                    "max_rows": max_rows,
+                    "measurement_rows": measurement_rows.iter().take(max_rows).collect::<Vec<_>>(),
+                    "measurement_rows_omitted": measurement_rows.len().saturating_sub(max_rows),
+                    "guarantees": [
+                        "a clean before/after card that is not an improvement remains a negative result",
+                        "the endpoint never upgrades a non-improvement or missing rollback handle into a claim"
+                    ],
+                    "limitations": [
+                        "the claim refusal is a kernel judgment over caller-supplied point measurements, not a statistical test"
+                    ]
+                }))
+            }
+        }
     }
 
     fn obligation_gate_check(&self, arguments: &Value) -> Result<Value, String> {
@@ -20620,7 +20982,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "inference_lab",
             "domains": ["hypothesis separation", "evidence acquisition", "holdout-aware improvement", "risk-triggered research"],
             "crates": ["bioprism-lab", "bioprism-obligation", "bioprism-routing", "bioprism-evalengine"],
-            "mcp_tools": ["lab_plan", "lab_pareto_audit", "lab_branch_audit", "lab_holdout_audit", "routing_decide", "routing_lab_run"],
+            "mcp_tools": ["lab_plan", "lab_pareto_audit", "lab_branch_audit", "lab_holdout_audit", "lab_evolution_audit", "routing_decide", "routing_lab_run"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -21483,6 +21845,28 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum operation rows returned; omission counts remain explicit. Defaults to 100." }
                 },
                 "required": ["cost_ceiling", "candidates", "holdouts", "current", "operations"]
+            }
+        }),
+        json!({
+            "name": "lab_evolution_audit",
+            "description": "Assemble and grade a benchmark-gated evolution card from real holdout-minted before/after measurements. Clean measurements can produce a claim only when the proposal, defeaters, rollback handle, metric direction, and protected-surface rules pass; contaminated attempts and non-improvements remain explicit negative evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cost_ceiling": { "type": "integer", "minimum": 0, "maximum": 1000000000, "description": "Maximum declared architecture cost accepted before measurement." },
+                    "candidates": { "type": "array", "minItems": 2, "maxItems": 2, "description": "Exactly two serialized CandidateArchitecture bundles; baseline and candidate names must resolve to these validated bundles." },
+                    "baseline": { "type": "string", "description": "Configuration id for the before measurement." },
+                    "candidate": { "type": "string", "description": "Configuration id for the after measurement." },
+                    "holdout": { "type": "object", "description": "Fresh holdout declaration: {id, partition, query_budget}. Clean measurements are minted only by this run's HoldoutLedger." },
+                    "measurements": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Ordered measurement attempts: {configuration, metric, value}. Refused attempts are retained and cannot become claims." },
+                    "card_id": { "type": "string", "description": "Evolution card identifier." },
+                    "proposal": { "type": "object", "description": "Serialized bioprism-lab ChangeProposal with changed_artifacts, optional target clusters/regression cells, and protected surfaces." },
+                    "rollback_handle": { "type": "string", "description": "Registered whole-bundle configuration restored if the change is withdrawn." },
+                    "direction": { "type": "string", "enum": ["higher_is_better", "lower_is_better"], "description": "Explicit metric direction; no default is inferred." },
+                    "would_have_to_be_true": { "type": "array", "minItems": 1, "maxItems": 128, "description": "Non-empty defeaters that state what would make the improvement unreal." },
+                    "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum measurement rows returned; omission counts remain explicit. Defaults to 100." }
+                },
+                "required": ["cost_ceiling", "candidates", "baseline", "candidate", "holdout", "measurements", "card_id", "proposal", "rollback_handle", "direction", "would_have_to_be_true"]
             }
         }),
         json!({

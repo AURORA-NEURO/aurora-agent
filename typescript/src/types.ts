@@ -6331,6 +6331,44 @@ export interface LabHoldoutAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface LabEvolutionAuditArgs extends JsonObject {
+  cost_ceiling: number;
+  candidates: JsonObject[];
+  baseline: string;
+  candidate: string;
+  holdout: JsonObject;
+  measurements: JsonObject[];
+  card_id: string;
+  proposal: JsonObject;
+  rollback_handle: string;
+  direction: "higher_is_better" | "lower_is_better";
+  would_have_to_be_true: string[];
+  max_rows?: number;
+}
+
+export interface LabEvolutionAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/lab-evolution-audit/0.1";
+  status?: "improvement_claimed" | "contaminated" | "claim_refused";
+  claimable?: boolean;
+  card?: JsonObject;
+  claim?: JsonObject;
+  sentence?: string;
+  claim_refusal?: string;
+  claim_error?: JsonObject;
+  measurement_count?: number;
+  measurement_rows?: JsonObject[];
+  measurement_rows_omitted?: number;
+  max_rows?: number;
+  stage?: string;
+  candidate_index?: number;
+  refusal?: string;
+  error?: JsonObject;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface ProviderCapabilityGateArgs extends JsonObject {
   card: JsonObject;
   required: string[];

@@ -2411,6 +2411,51 @@ test("client exposes holdout contamination and rollback retention", async () => 
   assert.equal(result.mcp.result.structuredContent.permanently_burned[0].configuration, "v2");
 });
 
+test("client exposes evolution claim gating and retained measurement rows", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/lab_evolution_audit");
+      return jsonResponse({ ok: true, tool: "lab_evolution_audit", request_id: "evolution-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/lab-evolution-audit/0.1",
+        status: "improvement_claimed",
+        claimable: true,
+        card: { id: "card-v2", surface: { surface: "rotating_private_certification" } },
+        claim: { card_id: "card-v2", delta: 0.13 },
+        sentence: "v2 improves admissible_rate over v1",
+        measurement_count: 2,
+        measurement_rows: [{ index: 0, result: "clean_measurement" }],
+        measurement_rows_omitted: 1,
+        max_rows: 1,
+        guarantees: ["clean measurements only"],
+        limitations: ["point delta"],
+      } } } });
+    },
+  });
+  const result = await client.labEvolutionAudit({
+    cost_ceiling: 100,
+    candidates: [{ id: "v1" }, { id: "v2", derived_from: "v1" }],
+    baseline: "v1",
+    candidate: "v2",
+    holdout: { id: "private-a", partition: "rotating_private_certification", query_budget: 4 },
+    measurements: [
+      { configuration: "v1", metric: "admissible_rate", value: 0.7 },
+      { configuration: "v2", metric: "admissible_rate", value: 0.83 },
+    ],
+    card_id: "card-v2",
+    proposal: { id: "proposal-v2" },
+    rollback_handle: "v1",
+    direction: "higher_is_better",
+    would_have_to_be_true: ["the gain survives another private set"],
+    max_rows: 1,
+  });
+  assert.equal(result.mcp.result.structuredContent.status, "improvement_claimed");
+  assert.equal(result.mcp.result.structuredContent.claimable, true);
+  assert.equal(result.mcp.result.structuredContent.claim.delta, 0.13);
+  assert.equal(result.mcp.result.structuredContent.measurement_rows_omitted, 1);
+});
+
 test("client exposes provider gate states and differential indeterminacy", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",
