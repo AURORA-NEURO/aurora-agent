@@ -393,6 +393,9 @@ adds an explicit misuse-surface assessment in front of the section-13 release ga
 refusing attribution across unmatched resource context.
 `influence_analyze` computes caller-scoped numeric influence bounds over declared factor regions,
 defaults to structural-only analysis, and keeps unknown preconditions distinct from vacuous bounds.
+The Python and TypeScript SDKs expose the same factor-region request and report boundary, including
+hard budgets, attempted-method provenance, exact versus conservative validity, and typed unknown
+reasons; they never turn an uncomputable influence into infinity or a fabricated numeric bound.
 `routing_decide` selects only among an explicitly approved architecture panel, abstains on weak
 coverage or margins, and refuses held-out evidence leakage when a task identity is supplied;
 `token_context_plan` checks mandatory token closure, dry-run restricted-data privacy, and policy-only

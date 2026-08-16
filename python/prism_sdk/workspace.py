@@ -202,6 +202,7 @@ from .stress import (
     stress_profile_report,
     stress_report_projection,
 )
+from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_analysis_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -673,6 +674,22 @@ class Workspace:
         request: StressReportArgs | Mapping[str, Any],
     ) -> StressReportProjection:
         return stress_report_projection(self.stress_report(request))
+
+    def influence_analyze(
+        self,
+        request: InfluenceAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, InfluenceAnalyzeArgs) else InfluenceAnalyzeArgs.from_wire(request)
+        result = self.client.call_tool("influence_analyze", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def influence_analysis_report(
+        self,
+        request: InfluenceAnalyzeArgs | Mapping[str, Any],
+    ) -> InfluenceAnalysisReport:
+        return influence_analysis_report(self.influence_analyze(request))
 
     def lab_plan(
         self,
@@ -2172,6 +2189,22 @@ class AsyncWorkspace:
         request: StressReportArgs | Mapping[str, Any],
     ) -> StressReportProjection:
         return stress_report_projection(await self.stress_report(request))
+
+    async def influence_analyze(
+        self,
+        request: InfluenceAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, InfluenceAnalyzeArgs) else InfluenceAnalyzeArgs.from_wire(request)
+        result = await self.client.call_tool("influence_analyze", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def influence_analysis_report(
+        self,
+        request: InfluenceAnalyzeArgs | Mapping[str, Any],
+    ) -> InfluenceAnalysisReport:
+        return influence_analysis_report(await self.influence_analyze(request))
 
     async def lab_plan(
         self,

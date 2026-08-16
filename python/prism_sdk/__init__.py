@@ -292,6 +292,15 @@ from .stress import (
     stress_profile_report,
     stress_report_projection,
 )
+from .influence import (
+    INFLUENCE_APPROXIMATIONS,
+    INFLUENCE_METHODS,
+    INFLUENCE_METRICS,
+    INFLUENCE_PERTURBATIONS,
+    InfluenceAnalysisReport,
+    InfluenceAnalyzeArgs,
+    influence_analysis_report,
+)
 from .bioethics import (
     ENGAGEMENT_KINDS,
     MISUSE_SURFACES,

@@ -878,3 +878,46 @@ test("client exposes typed biological stress profile and report workflows", asyn
   const report = await client.stressReport({ cohort: {}, stresses: [] });
   assert.equal(report.mcp.result.structuredContent.report.cohort_id, "cohort-1");
 });
+
+test("client exposes typed influence bounds and explicit unknown estimates", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      const path = new URL(String(input)).pathname;
+      assert.equal(path, "/v1/tools/influence_analyze");
+      return jsonResponse({ ok: true, tool: "influence_analyze", request_id: "influence-1", mcp: { result: { structuredContent: {
+        ok: true,
+        region: {
+          label: "small-region",
+          variables: { a: 2 },
+          free: ["a"],
+          bound: [],
+          factors: [{ id: "f.a", scope: ["a"], arity: 1, has_table: false }],
+          has_tables: false,
+          joint_entries: 2,
+          free_entries: 2,
+          assumed_cardinality_fraction: 0,
+        },
+        execute: false,
+        analysis: {
+          subject: ["f.a"],
+          perturbation: { class: "removal" },
+          estimate: { kind: "unknown", reason: { reason: "no_factor_table", factor: "f.a" } },
+          attempted: [{ method: "dynamic_range", declined: { reason: "no_factor_table", factor: "f.a" } }],
+        },
+        looseness: null,
+        guarantees: ["unknown remains unknown"],
+      } } } });
+    },
+  });
+  const result = await client.influenceAnalyze({
+    label: "small-region",
+    variables: { a: 2 },
+    factors: [{ id: "f.a", scope: ["a"] }],
+    free: ["a"],
+    factor: "f.a",
+    perturbation: { class: "removal" },
+  });
+  assert.equal(result.mcp.result.structuredContent.analysis.estimate.kind, "unknown");
+  assert.equal(result.mcp.result.structuredContent.execute, false);
+});

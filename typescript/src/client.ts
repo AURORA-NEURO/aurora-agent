@@ -78,6 +78,8 @@ import type {
   StressProfileToolResult,
   StressReportArgs,
   StressReportToolResult,
+  InfluenceAnalyzeArgs,
+  InfluenceAnalyzeResult,
   OracleCombineArgs,
   OracleCombineResult,
   OracleReferencePanelArgs,
@@ -490,6 +492,10 @@ export class ApiClient {
 
   async stressReport(args: StressReportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<StressReportToolResult>> {
     return this.callTool<StressReportToolResult>("stress_report", args, options);
+  }
+
+  async influenceAnalyze(args: InfluenceAnalyzeArgs, options?: ClientRequestOptions): Promise<RestToolResponse<InfluenceAnalyzeResult>> {
+    return this.callTool<InfluenceAnalyzeResult>("influence_analyze", args, options);
   }
 
   async oracleCombine(args: OracleCombineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OracleCombineResult>> {

@@ -246,6 +246,10 @@ identifiability, intensity-ladder sweep points, effective sample size, unresolve
 required-versus-probed findings, generator defects, and a nullable guarded worst-family projection.
 They preserve the kernel’s breaking-point semantics instead of collapsing distribution-shift and
 assay-degradation evidence into a scalar robustness score.
+`influenceAnalyze` carries the factor-region boundary with explicit exact versus conservative
+total-variation estimates, method/validity provenance, attempted-method refusals, budget posture,
+and structural-only execution. `unknown` estimates retain their reason object and never become a
+numeric infinity or an implicit robustness claim.
 `oracleCombine` retains tiered decisions, underdetermination, suppressed overrides, inadmissible
 and withheld ledgers, and nullable deciding/confidence evidence. `oracleReferencePanel` and
 `oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and

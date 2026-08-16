@@ -2727,4 +2727,69 @@ export interface StressReportToolResult extends JsonObject {
   guarantee?: string;
 }
 
+export interface InfluenceAnalyzeArgs extends JsonObject {
+  label: string;
+  variables: { [name: string]: number };
+  assumed_variables?: string[];
+  factors: JsonObject[];
+  free: string[];
+  factor?: string;
+  factor_group?: string[];
+  perturbation: JsonObject;
+  budget?: JsonObject;
+  execute?: boolean;
+}
+
+export interface InfluenceBoundResult extends JsonObject {
+  kind: "bounded";
+  value: number;
+  metric: "total_variation_on_normalised_answer";
+  method: string;
+  approximation: "exact" | "conservative_upper_bound";
+  validity: string;
+}
+
+export interface InfluenceUnknownResult extends JsonObject {
+  kind: "unknown";
+  reason: JsonObject;
+}
+
+export type InfluenceEstimateResult = InfluenceBoundResult | InfluenceUnknownResult;
+
+export interface InfluenceMethodOutcomeResult extends JsonObject {
+  method: string;
+  value?: number;
+  declined?: JsonObject;
+}
+
+export interface InfluenceAnalysisBodyResult extends JsonObject {
+  subject: string[];
+  perturbation: JsonObject;
+  estimate: InfluenceEstimateResult;
+  attempted: InfluenceMethodOutcomeResult[];
+}
+
+export interface InfluenceRegionResult extends JsonObject {
+  label: string;
+  variables: { [name: string]: number };
+  free: string[];
+  bound: string[];
+  factors: JsonObject[];
+  has_tables: boolean;
+  joint_entries: number;
+  free_entries: number;
+  assumed_cardinality_fraction: number;
+}
+
+export interface InfluenceAnalyzeResult extends JsonObject {
+  ok: boolean;
+  region: InfluenceRegionResult;
+  subjects: string[];
+  perturbation: JsonObject;
+  execute: boolean;
+  analysis: InfluenceAnalysisBodyResult;
+  looseness: number | null;
+  guarantees: string[];
+}
+
 export type ToolArguments = JsonObject;

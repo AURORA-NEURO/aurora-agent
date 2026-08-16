@@ -631,6 +631,17 @@ not silently ranked. Inputs keep serialized Cohort, Stress, and Procedure values
 while the SDK bounds custom panels and programs to the server’s 100-entry limits. The facades are
 available synchronously and asynchronously over MCP and HTTP.
 
+`InfluenceAnalyzeArgs` / `influence_analysis_report(...)` expose caller-scoped factor-region
+influence without reconstructing the graph in Python. Request validation keeps positive variable
+cardinalities, assumed versus observed variables, factor scopes/tables, free variables, mutually
+exclusive factor selection, perturbation class, hard budgets, and explicit execution permission
+visible. `InfluenceAnalysisReport` preserves the normalized region, exact or conservative
+total-variation estimate, method provenance, approximation direction, validity scope, every
+attempted method, looseness, and the structural-only flag. An `unknown` estimate retains its
+typed reason (for example an untabled factor) and has no numeric fallback; the SDK never promotes
+unknown influence to infinity or a vacuous bound. The same projection is available on all four
+sync/async MCP and HTTP facades.
+
 ## Runtime and bioethics safety workflows
 
 The runtime projection is split into request authoring and evidence parsing so callers can inspect

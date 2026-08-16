@@ -169,6 +169,7 @@ from .stress import (
     stress_profile_report,
     stress_report_projection,
 )
+from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_analysis_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -1573,6 +1574,19 @@ class ApiClient:
         request: StressReportArgs | Mapping[str, Any],
     ) -> StressReportProjection:
         return stress_report_projection(self.stress_report(request))
+
+    def influence_analyze(
+        self,
+        request: InfluenceAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, InfluenceAnalyzeArgs) else InfluenceAnalyzeArgs.from_wire(request)
+        return self.call_tool("influence_analyze", normalized.to_mcp_arguments())
+
+    def influence_analysis_report(
+        self,
+        request: InfluenceAnalyzeArgs | Mapping[str, Any],
+    ) -> InfluenceAnalysisReport:
+        return influence_analysis_report(self.influence_analyze(request))
 
     def lab_plan(
         self,
@@ -3103,6 +3117,19 @@ class AsyncApiClient:
         request: StressReportArgs | Mapping[str, Any],
     ) -> StressReportProjection:
         return stress_report_projection(await self.stress_report(request))
+
+    async def influence_analyze(
+        self,
+        request: InfluenceAnalyzeArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, InfluenceAnalyzeArgs) else InfluenceAnalyzeArgs.from_wire(request)
+        return await self.call_tool("influence_analyze", normalized.to_mcp_arguments())
+
+    async def influence_analysis_report(
+        self,
+        request: InfluenceAnalyzeArgs | Mapping[str, Any],
+    ) -> InfluenceAnalysisReport:
+        return influence_analysis_report(await self.influence_analyze(request))
 
     async def lab_plan(
         self,
