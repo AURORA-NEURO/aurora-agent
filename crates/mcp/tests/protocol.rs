@@ -68,6 +68,10 @@ use bioprism_onco::{
     Population, ProgressionEvidence, RequestContext, ResponseCriterion, SubjectRef, TargetLesion,
     TerminalFact, Timepoint, TreatmentContext, TreatmentModality, TumourWorldline,
 };
+use bioprism_obligation::{
+    Action as ObligationAction, Obligation, ObligationGraph, ObligationPredicate,
+    ObligationState, RegretClass, StateRecord,
+};
 use bioprism_oncoworlds::{
     Artifact as OncoArtifact, ArtifactLevel, Calibration, CellularFraction, ClaimTarget,
     ClassifierVersion, ClonalHistory, CohortSelection, DeclaredTransport, DetectionSensitivity,
@@ -307,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 130);
+    assert_eq!(tools.len(), 131);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4138,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(130));
-    assert_eq!(result["advertised_tool_count"], json!(130));
+    assert_eq!(result["unique_catalog_tools"], json!(131));
+    assert_eq!(result["advertised_tool_count"], json!(131));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(130));
-    assert_eq!(result["schema_quality"]["valid"], json!(130));
+    assert_eq!(result["schema_quality"]["checked"], json!(131));
+    assert_eq!(result["schema_quality"]["valid"], json!(131));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5291,6 +5295,105 @@ fn lab_plan_orders_reachable_evidence_and_refuses_privacy_crossings() {
         json!("crosses_boundary")
     );
     assert_eq!(result["should_escalate"], json!(true));
+}
+
+#[test]
+fn obligation_gate_check_keeps_effective_states_and_mandatory_closure_visible() {
+    let at = Timestamp::parse("2026-08-14T00:00:00Z").unwrap();
+    let mut graph = ObligationGraph::new("publish a validation report");
+    graph
+        .insert(
+            Obligation::new("identity", "the specimen identity is established")
+                .mandatory()
+                .with_value(3.0),
+        )
+        .unwrap();
+    graph
+        .insert(
+            Obligation::new("validation", "the assay validation is complete")
+                .depending_on(["identity"])
+                .mandatory()
+                .with_value(5.0),
+        )
+        .unwrap();
+    graph
+        .insert(
+            Obligation::new("consent", "the release consent is recorded")
+                .mandatory()
+                .with_value(4.0),
+        )
+        .unwrap();
+    graph
+        .record(
+            "identity",
+            StateRecord::new(ObligationState::Satisfied, "reviewer", at, 0.95)
+                .with_evidence(["evidence://identity"]),
+        )
+        .unwrap();
+    let action = ObligationAction::new("publish", RegretClass::Irreversible)
+        .described("publish the validation result")
+        .requiring(ObligationPredicate::satisfied("validation"));
+
+    let blocked = call(
+        &mut server(),
+        "obligation_gate_check",
+        json!({
+            "graph": serde_json::to_value(&graph).unwrap(),
+            "action": serde_json::to_value(&action).unwrap(),
+            "max_items": 1
+        }),
+    );
+    assert_eq!(blocked["ok"], json!(true));
+    assert_eq!(blocked["schema"], json!("bioprism-mcp/obligation-gate-check/0.1"));
+    assert_eq!(blocked["outcome_kind"], json!("blocked"));
+    assert_eq!(blocked["gate"]["reason"]["reason"], json!("prerequisites_unmet"));
+    assert_eq!(blocked["graph"]["valid"], json!(true));
+    assert_eq!(blocked["graph"]["omitted_effective_states"], json!(2));
+    assert_eq!(blocked["graph"]["frontier"][0]["obligation"], json!("validation"));
+
+    graph
+        .record(
+            "validation",
+            StateRecord::new(ObligationState::Satisfied, "reviewer", at, 0.9)
+                .with_evidence(["evidence://validation"]),
+        )
+        .unwrap();
+    let blocked_closure = call(
+        &mut server(),
+        "obligation_gate_check",
+        json!({
+            "graph": serde_json::to_value(&graph).unwrap(),
+            "action": serde_json::to_value(&action).unwrap()
+        }),
+    );
+    assert_eq!(blocked_closure["outcome_kind"], json!("blocked"));
+    assert_eq!(
+        blocked_closure["gate"]["reason"]["reason"],
+        json!("mandatory_obligation_outstanding")
+    );
+    assert_eq!(blocked_closure["gate"]["reason"]["obligation"], json!("consent"));
+
+    graph
+        .record(
+            "consent",
+            StateRecord::new(ObligationState::Satisfied, "reviewer", at, 0.9)
+                .with_evidence(["evidence://consent"]),
+        )
+        .unwrap();
+    let allowed = call(
+        &mut server(),
+        "obligation_gate_check",
+        json!({
+            "graph": serde_json::to_value(&graph).unwrap(),
+            "action": serde_json::to_value(&action).unwrap()
+        }),
+    );
+    assert_eq!(allowed["outcome_kind"], json!("allowed"));
+    assert_eq!(allowed["allowed"], json!(true));
+    assert_eq!(allowed["refusal"], Value::Null);
+    assert_eq!(allowed["gate"]["checked"], json!(["validation"]));
+    assert_eq!(allowed["graph"]["undischarged"], json!([]));
+    assert_eq!(allowed["graph"]["sha256"].as_str().unwrap().len(), 64);
 }
 
 #[test]

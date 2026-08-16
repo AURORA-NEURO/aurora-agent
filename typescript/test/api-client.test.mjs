@@ -1528,6 +1528,36 @@ test("client exposes modality-aware comparability refusals and report digests", 
   assert.equal(result.mcp.result.structuredContent.report_sha256.length, 64);
 });
 
+test("client exposes fail-closed obligation gate decisions and graph projections", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async () => jsonResponse({
+      ok: true,
+      tool: "obligation_gate_check",
+      request_id: "gate-1",
+      mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/obligation-gate-check/0.1",
+        outcome_kind: "blocked",
+        allowed: false,
+        goal: "publish a validation report",
+        action: { id: "publish", regret: "irreversible" },
+        gate: { gate: "blocked", reason: { reason: "mandatory_obligation_outstanding", obligation: "consent" } },
+        refusal: { reason: "mandatory_obligation_outstanding", obligation: "consent" },
+        graph: { valid: true, sha256: "a".repeat(64), obligation_count: 3, frontier: [{ obligation: "consent" }] },
+      } } },
+    }),
+  });
+  const result = await client.obligationGateCheck({
+    graph: { goal: "publish a validation report", obligations: {} },
+    action: { id: "publish", regret: "irreversible", prerequisites: [] },
+    max_items: 10,
+  });
+  assert.equal(result.mcp.result.structuredContent.outcome_kind, "blocked");
+  assert.equal(result.mcp.result.structuredContent.refusal.obligation, "consent");
+  assert.equal(result.mcp.result.structuredContent.graph.valid, true);
+});
+
 test("client parses cursor SSE and validates webhook mutations", async () => {
   const client = new ApiClient({
     baseUrl: "https://example.test",

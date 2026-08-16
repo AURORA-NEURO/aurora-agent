@@ -128,6 +128,7 @@ use bioprism_modalities::{
     ClaimKind, EvaluationHorizon, EvidenceTier, LiteratureClaim, Modality, ModalityDescriptor,
     ModalMeasurement, ModalityTransport, Resolution, TransportKind,
 };
+use bioprism_obligation::{may_perform, Action as ObligationAction, ObligationGraph};
 use bioprism_mutation::{
     generate as generate_mutations, measure as measure_diversity, standard_suite,
 };
@@ -1246,6 +1247,7 @@ impl Server {
             "preanalytic_apply" => self.preanalytic_apply(&arguments),
             "contradiction_review" => self.contradiction_review(&arguments),
             "lab_plan" => self.lab_plan(&arguments),
+            "obligation_gate_check" => self.obligation_gate_check(&arguments),
             "lens_catalogue" => Ok(json!({
                 "ok": true,
                 "schema": bioprism_lens::LENS_REPORT_SCHEMA_VERSION,
@@ -6872,6 +6874,139 @@ impl Server {
                 "values, costs, privacy declarations, and observations are caller-supplied",
                 "hypothesis generation, posterior probabilities, confidence intervals, and execution scheduling are outside the crate",
             ]
+        }))
+    }
+
+    fn obligation_gate_check(&self, arguments: &Value) -> Result<Value, String> {
+        let graph_value = arguments
+            .get("graph")
+            .cloned()
+            .ok_or("graph is required and must be a serialized ObligationGraph")?;
+        let graph_bytes = serde_json::to_vec(&graph_value)
+            .map_err(|error| format!("cannot measure obligation graph envelope: {error}"))?;
+        if graph_bytes.len() > 10_000_000 {
+            return Err("obligation graph exceeds the 10000000-byte safety bound".into());
+        }
+        let graph: ObligationGraph = serde_json::from_value(graph_value)
+            .map_err(|error| format!("invalid obligation graph: {error}"))?;
+        if graph.len() > 10_000 {
+            return Err("graph exceeds the 10000-obligation safety bound".into());
+        }
+
+        let action_value = arguments
+            .get("action")
+            .cloned()
+            .ok_or("action is required and must be a serialized obligation Action")?;
+        let action_bytes = serde_json::to_vec(&action_value)
+            .map_err(|error| format!("cannot measure obligation action envelope: {error}"))?;
+        if action_bytes.len() > 1_000_000 {
+            return Err("obligation action exceeds the 1000000-byte safety bound".into());
+        }
+        let action: ObligationAction = serde_json::from_value(action_value)
+            .map_err(|error| format!("invalid obligation action: {error}"))?;
+        if action.prerequisites.len() > 1_000 {
+            return Err("action exceeds the 1000-prerequisite safety bound".into());
+        }
+
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let gate = may_perform(&action, &graph);
+        let validation = graph.validate().err().map(|error| error.to_string());
+        let graph_hash = graph.content_hash().ok().map(|hash| hash.to_string());
+        let topological = graph.topological_order().ok();
+        let effective = graph.effective_states().ok();
+        let frontier = graph.frontier().ok();
+        let undischarged = graph.undischarged().ok();
+        let topological_count = topological.as_ref().map_or(0, Vec::len);
+        let effective_count = effective.as_ref().map_or(0, std::collections::BTreeMap::len);
+        let frontier_count = frontier.as_ref().map_or(0, Vec::len);
+        let undischarged_count = undischarged.as_ref().map_or(0, Vec::len);
+        let topological = topological
+            .map(|ids| ids.into_iter().take(max_items).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let effective = effective
+            .map(|states| {
+                states
+                    .into_iter()
+                    .take(max_items)
+                    .map(|(obligation, state)| json!({
+                        "obligation": obligation,
+                        "effective": state,
+                    }))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let frontier = frontier
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .take(max_items)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let undischarged = undischarged
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .take(max_items)
+                    .map(|(obligation, state)| json!({
+                        "obligation": obligation,
+                        "effective": state,
+                    }))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let gate_value = serde_json::to_value(&gate)
+            .map_err(|error| format!("cannot serialize obligation gate: {error}"))?;
+        let refusal = if gate.is_allowed() {
+            Value::Null
+        } else {
+            serde_json::to_value(gate.block_reason())
+                .map_err(|error| format!("cannot serialize obligation refusal: {error}"))?
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/obligation-gate-check/0.1",
+            "outcome_kind": if gate.is_allowed() { "allowed" } else { "blocked" },
+            "allowed": gate.is_allowed(),
+            "goal": graph.goal.clone(),
+            "action": action,
+            "gate": gate_value,
+            "refusal": refusal,
+            "graph": {
+                "valid": validation.is_none(),
+                "validation_error": validation,
+                "sha256": graph_hash,
+                "obligation_count": graph.len(),
+                "mandatory": graph.mandatory_ids(),
+                "topological_order": topological,
+                "omitted_topological": topological_count.saturating_sub(max_items),
+                "effective_states": effective,
+                "omitted_effective_states": effective_count.saturating_sub(max_items),
+                "frontier": frontier,
+                "omitted_frontier": frontier_count.saturating_sub(max_items),
+                "undischarged": undischarged,
+                "omitted_undischarged": undischarged_count.saturating_sub(max_items),
+            },
+            "guarantees": [
+                "high-regret actions with undeclared prerequisites are blocked",
+                "unknown obligations, dangling dependencies, and cycles cannot open a gate",
+                "effective dependency states are computed by bioprism-obligation rather than by a boolean checklist",
+                "irreversible actions answer to the full mandatory closure, including obligations they did not name",
+                "frontier, effective states, and the gate decision remain separately inspectable",
+            ],
+            "limitations": [
+                "the graph, state evidence, actor confidence, and action declarations are caller-supplied",
+                "this tool does not authenticate authority, execute the action, or acquire missing evidence",
+                "confidence is an actor assertion and is not calibrated into a probability",
+                "truncated projection rows are bounded views, not complete graph claims",
+            ],
         }))
     }
 
@@ -17840,7 +17975,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "decision_context",
             "domains": ["typed queries", "evidence selection", "omission accounting"],
             "crates": ["bioprism-fiber", "bioprism-section", "bioprism-obligation", "bioprism-scope", "bioprism-graph"],
-            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle"],
+            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle", "obligation_gate_check"],
             "cli_entrypoints": ["context explain", "context compile", "context verify", "context compare"],
             "status": "available"
         },
@@ -18844,6 +18979,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum frontier, ordered, and excluded rows returned; defaults to 100." }
                 },
                 "required": ["graph", "actions", "budget"]
+            }
+        }),
+        json!({
+            "name": "obligation_gate_check",
+            "description": "Evaluate a serialized high-regret action against a dependency-aware ObligationGraph. The in-tree obligation kernel computes effective states, validates cycles and dangling dependencies, enforces undeclared-prerequisite and full-mandatory-closure rules, returns a typed allowed-or-blocked Gate, and exposes a bounded frontier and graph digest without executing the action or acquiring evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "graph": { "type": "object", "description": "Serialized bioprism-obligation ObligationGraph with append-only state history and dependency edges." },
+                    "action": { "type": "object", "description": "Serialized bioprism-obligation Action with regret class and prerequisite predicates." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum graph projection rows returned; defaults to 100. Omission counts remain explicit." }
+                },
+                "required": ["graph", "action"]
             }
         }),
         json!({

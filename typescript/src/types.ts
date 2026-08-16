@@ -4020,6 +4020,28 @@ export interface LabPlanResult extends JsonObject {
   limitations?: string[];
 }
 
+export type ObligationGateOutcomeKind = "allowed" | "blocked";
+
+export interface ObligationGateCheckArgs extends JsonObject {
+  graph: JsonObject;
+  action: JsonObject;
+  max_items?: number;
+}
+
+export interface ObligationGateCheckResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/obligation-gate-check/0.1";
+  outcome_kind: ObligationGateOutcomeKind;
+  allowed: boolean;
+  goal: string;
+  action: JsonObject;
+  gate: JsonObject;
+  refusal: JsonObject | null;
+  graph: JsonObject;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface OncoBoundaryArgs extends JsonObject {
   request: JsonObject;
   boundary?: JsonObject;

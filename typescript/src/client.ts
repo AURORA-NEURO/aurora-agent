@@ -60,6 +60,8 @@ import type {
   ContradictionReviewResult,
   LabPlanArgs,
   LabPlanResult,
+  ObligationGateCheckArgs,
+  ObligationGateCheckResult,
   OncoBoundaryArgs,
   OncoBoundaryResult,
   OncoClassificationArgs,
@@ -622,6 +624,10 @@ export class ApiClient {
 
   async labPlan(args: LabPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LabPlanResult>> {
     return this.callTool<LabPlanResult>("lab_plan", args, options);
+  }
+
+  async obligationGateCheck(args: ObligationGateCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ObligationGateCheckResult>> {
+    return this.callTool<ObligationGateCheckResult>("obligation_gate_check", args, options);
   }
 
   async oncoBoundaryCheck(args: OncoBoundaryArgs, options?: ClientRequestOptions): Promise<RestToolResponse<OncoBoundaryResult>> {

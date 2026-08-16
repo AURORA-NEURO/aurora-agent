@@ -1045,6 +1045,13 @@ from .lab import (
     LabStopReport,
     lab_plan_report,
 )
+from .obligation import (
+    OBLIGATION_GATE_OUTCOME_KINDS,
+    OBLIGATION_GATE_SCHEMA,
+    ObligationGateCheckArgs,
+    ObligationGateCheckReport,
+    obligation_gate_check_report,
+)
 from .oncology import (
     ONCO_ANALYSIS_UNITS,
     ONCO_BIAS_FLAGS,
@@ -2117,6 +2124,11 @@ __all__ = [
     "LabPlannedAcquisitionReport",
     "LabStopReport",
     "lab_plan_report",
+    "OBLIGATION_GATE_SCHEMA",
+    "OBLIGATION_GATE_OUTCOME_KINDS",
+    "ObligationGateCheckArgs",
+    "ObligationGateCheckReport",
+    "obligation_gate_check_report",
     "ONCO_ANALYSIS_UNITS",
     "ONCO_BIAS_FLAGS",
     "ONCO_BOUNDARY_OUTCOME_KINDS",

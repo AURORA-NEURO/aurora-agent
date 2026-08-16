@@ -560,6 +560,12 @@ invent defaults:
   caveats, and the canonical report digest visible; a comparable verdict means category
   compatibility, not equality or biological agreement. See
   [`docs/MODALITY_COMPARABILITY_CHECK.md`](MODALITY_COMPARABILITY_CHECK.md).
+- `ObligationGateCheckArgs` and `obligation_gate_check(...)` expose the fail-closed action gate
+  over a serialized dependency-aware obligation graph. `ObligationGateCheckReport` preserves the
+  typed allowed/blocked decision, effective dependency states, mandatory-closure refusal,
+  prerequisite evidence, frontier rows, graph digest, and bounded omission counts. Permission is
+  not execution, authority authentication, evidence acquisition, or calibrated probability. See
+  [`docs/OBLIGATION_GATE_CHECK.md`](OBLIGATION_GATE_CHECK.md).
 - `HubSearchArgs` and `hub_search(...)` preserve caller-supplied federation, catalog, and exact
   facet query declarations under the server's catalog/release/result bounds. `HubSearchReport`
   types every match, non-empty facet explanation, near miss, trust tier, namespace authority,

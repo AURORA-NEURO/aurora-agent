@@ -329,6 +329,10 @@ without implying moved values, validated references, or recovery of discarded in
 measurand and resolution checks, optional delegated standards evidence, typed blocked reasons, and
 a canonical report digest. The client keeps standards comparability separate from biological
 equality, calibration, or agreement. See [`docs/MODALITY_COMPARABILITY_CHECK.md`](MODALITY_COMPARABILITY_CHECK.md).
+`obligationGateCheck` returns `ObligationGateCheckResult` with the Rust obligation kernel's typed
+allowed/blocked gate, effective state and mandatory-closure evidence, bounded frontier projection,
+and graph digest. It does not execute an action or authenticate authority. See
+[`docs/OBLIGATION_GATE_CHECK.md`](OBLIGATION_GATE_CHECK.md).
 `hubSearch` returns `HubSearchResult` with typed exact-facet matches, required `why` evidence,
 near-miss exclusions, trust tier, authority provenance, freshness variants, and explicit bounded
 truncation. Federation and catalog values remain JSON inputs because the Rust hubapi owns their

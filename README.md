@@ -537,8 +537,8 @@ response availability, and optional caller-threshold detectability.
 `contradiction_review` poses multimodal readings, filters admissible explanations, detects answer
 cues, ranks discriminating evidence, and keeps resolved, not-yet-examined, and unresolvable states
 distinct without choosing a correct modality.
-`lab_plan` orders caller-declared evidence acquisitions against dependency-aware obligations,
-privacy boundaries, and budget stop rules, while `atlas_report` preserves capability coverage debt,
+`lab_plan` orders declared evidence; `obligation_gate_check` enforces high-regret gates, while
+`atlas_report` preserves capability coverage debt,
 failure inconsistencies, measured-versus-unmeasured holes, and optional gated composites; the
 Python and TypeScript SDKs keep hole omission, evidence depth, family darkness, and composite
 refusals visible without rendering unmeasured capabilities as zero.

@@ -125,6 +125,7 @@ from .lineage import LineageAuditArgs, LineageAuditReport, lineage_audit_report
 from .preanalytic import PreanalyticApplyArgs, PreanalyticApplyReport, preanalytic_apply_report
 from .contradiction import ContradictionReviewArgs, ContradictionReviewReport, contradiction_review_report
 from .lab import LabPlanReport, lab_plan_report
+from .obligation import ObligationGateCheckArgs, ObligationGateCheckReport, obligation_gate_check_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -1124,6 +1125,19 @@ class Workspace:
                 max_items=max_items,
             )
         )
+
+    def obligation_gate_check(
+        self,
+        request: ObligationGateCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ObligationGateCheckArgs) else ObligationGateCheckArgs.from_wire(request)
+        return self.tool("obligation_gate_check", normalized.to_mcp_arguments())
+
+    def obligation_gate_check_report(
+        self,
+        request: ObligationGateCheckArgs | Mapping[str, Any],
+    ) -> ObligationGateCheckReport:
+        return obligation_gate_check_report(self.obligation_gate_check(request))
 
     def routing_decide(
         self,
@@ -3242,6 +3256,19 @@ class AsyncWorkspace:
                 max_items=max_items,
             )
         )
+
+    async def obligation_gate_check(
+        self,
+        request: ObligationGateCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ObligationGateCheckArgs) else ObligationGateCheckArgs.from_wire(request)
+        return await self.tool("obligation_gate_check", normalized.to_mcp_arguments())
+
+    async def obligation_gate_check_report(
+        self,
+        request: ObligationGateCheckArgs | Mapping[str, Any],
+    ) -> ObligationGateCheckReport:
+        return obligation_gate_check_report(await self.obligation_gate_check(request))
 
     async def routing_decide(
         self,
