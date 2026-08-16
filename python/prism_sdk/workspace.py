@@ -222,6 +222,7 @@ from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisRe
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
+from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -320,6 +321,25 @@ class Workspace:
         if max_items is not None:
             arguments["max_items"] = max_items
         return self.tool("pack_catalogue", arguments)
+
+    def security_redteam_simulate(
+        self,
+        request: SecurityRedteamSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Replay the bounded section-13 safety workflow with explicit evidence planes."""
+
+        normalized = SecurityRedteamSimulateArgs() if request is None else request if isinstance(request, SecurityRedteamSimulateArgs) else SecurityRedteamSimulateArgs.from_wire(request)
+        return self.tool("security_redteam_simulate", normalized.to_mcp_arguments())
+
+    def security_redteam_simulate_report(
+        self,
+        request: SecurityRedteamSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> SecurityRedteamReport:
+        """Return typed regression, disclosure, boundary, incident, audit, and attestation evidence."""
+
+        normalized = SecurityRedteamSimulateArgs() if request is None else request if isinstance(request, SecurityRedteamSimulateArgs) else SecurityRedteamSimulateArgs.from_wire(request)
+        result = self.client.call_tool("security_redteam_simulate", normalized.to_mcp_arguments())
+        return security_redteam_simulate_report(result.require_object())
 
     def pack_catalogue_report(
         self,
@@ -2049,6 +2069,25 @@ class AsyncWorkspace:
         if max_items is not None:
             arguments["max_items"] = max_items
         return await self.tool("pack_catalogue", arguments)
+
+    async def security_redteam_simulate(
+        self,
+        request: SecurityRedteamSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.security_redteam_simulate`."""
+
+        normalized = SecurityRedteamSimulateArgs() if request is None else request if isinstance(request, SecurityRedteamSimulateArgs) else SecurityRedteamSimulateArgs.from_wire(request)
+        return await self.tool("security_redteam_simulate", normalized.to_mcp_arguments())
+
+    async def security_redteam_simulate_report(
+        self,
+        request: SecurityRedteamSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> SecurityRedteamReport:
+        """Async typed section-13 safety evidence."""
+
+        normalized = SecurityRedteamSimulateArgs() if request is None else request if isinstance(request, SecurityRedteamSimulateArgs) else SecurityRedteamSimulateArgs.from_wire(request)
+        result = await self.client.call_tool("security_redteam_simulate", normalized.to_mcp_arguments())
+        return security_redteam_simulate_report(result.require_object())
 
     async def pack_catalogue_report(
         self,

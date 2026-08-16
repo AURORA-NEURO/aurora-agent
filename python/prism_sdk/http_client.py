@@ -185,6 +185,7 @@ from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisRe
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
+from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -812,6 +813,23 @@ class ApiClient:
         """Return typed health findings and a score only when the server reportability gate clears."""
 
         return pack_health_assessment_report(self.pack_health_assess(request))
+
+    def security_redteam_simulate(
+        self,
+        request: SecurityRedteamSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run the bounded section-13 safety workflow through the HTTP gateway."""
+
+        normalized = SecurityRedteamSimulateArgs() if request is None else request if isinstance(request, SecurityRedteamSimulateArgs) else SecurityRedteamSimulateArgs.from_wire(request)
+        return self.call_tool("security_redteam_simulate", normalized.to_mcp_arguments())
+
+    def security_redteam_simulate_report(
+        self,
+        request: SecurityRedteamSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> SecurityRedteamReport:
+        """Return typed section-13 safety evidence without collapsing partial refusals."""
+
+        return security_redteam_simulate_report(self.security_redteam_simulate(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2553,6 +2571,23 @@ class AsyncApiClient:
         """Return async typed pack-health evidence."""
 
         return pack_health_assessment_report(await self.pack_health_assess(request))
+
+    async def security_redteam_simulate(
+        self,
+        request: SecurityRedteamSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async section-13 safety workflow through the HTTP gateway."""
+
+        normalized = SecurityRedteamSimulateArgs() if request is None else request if isinstance(request, SecurityRedteamSimulateArgs) else SecurityRedteamSimulateArgs.from_wire(request)
+        return await self.call_tool("security_redteam_simulate", normalized.to_mcp_arguments())
+
+    async def security_redteam_simulate_report(
+        self,
+        request: SecurityRedteamSimulateArgs | Mapping[str, Any] | None = None,
+    ) -> SecurityRedteamReport:
+        """Return async typed section-13 safety evidence."""
+
+        return security_redteam_simulate_report(await self.security_redteam_simulate(request))
 
     async def developer_delivery_audit_report(
         self,

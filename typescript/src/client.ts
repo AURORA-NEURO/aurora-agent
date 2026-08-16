@@ -124,6 +124,8 @@ import type {
   PackCatalogueResult,
   PackHealthAssessArgs,
   PackHealthAssessmentResult,
+  SecurityRedteamSimulateArgs,
+  SecurityRedteamResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -402,6 +404,10 @@ export class ApiClient {
 
   async packHealthAssess(args: PackHealthAssessArgs, options?: ClientRequestOptions): Promise<RestToolResponse<PackHealthAssessmentResult>> {
     return this.callTool<PackHealthAssessmentResult>("pack_health_assess", args, options);
+  }
+
+  async securityRedteamSimulate(args: SecurityRedteamSimulateArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<SecurityRedteamResult>> {
+    return this.callTool<SecurityRedteamResult>("security_redteam_simulate", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

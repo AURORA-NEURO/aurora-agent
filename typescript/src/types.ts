@@ -1191,6 +1191,191 @@ export interface PackHealthAssessmentResult extends JsonObject {
   guarantees: string[];
 }
 
+export type RedteamVulnerabilityClass = "code_vulnerability" | "sandbox_bypass" | "evaluator_bypass" | "privacy_leakage" | "benchmark_exploit" | "hidden_test_exposure" | "provenance_flaw" | "malicious_artifact" | "dependency_compromise" | "misleading_security_claim";
+export type RedteamFindingStatus = "reported" | "reproduced" | "confirmed" | "not_reproduced" | "duplicate";
+export type RedteamSeverity = "low" | "medium" | "high" | "critical";
+export type RedteamDisclosureStage = "reported" | "triaged" | "fixed" | "disclosed" | "withdrawn" | "duplicate";
+export type RedteamTrustZone = "user_client" | "public_api" | "control_plane" | "catalog" | "artifact_service" | "build_service" | "agent_sandbox" | "evaluator_sandbox" | "trusted_review" | "private_worker" | "model_provider" | "public_registry_mirror";
+export type RedteamChannel = "sealed_output_bundle" | "typed_claim" | "read_only_input" | "hidden_oracle_mount" | "artifact_fetch" | "control_plane_api" | "provider_api" | "human_review" | "publication";
+export type RedteamArtifactKind = "agent_output" | "hidden_oracle_asset" | "grader_claim" | "pack_manifest" | "credential" | "trace" | "published_result";
+export type RedteamIncidentClass = "confidentiality_leak" | "unauthorized_effect" | "sandbox_escape" | "cross_tenant_exposure" | "malicious_pack" | "compromised_key" | "result_integrity_failure" | "benchmark_exploit" | "hidden_holdout_leak" | "evaluator_tampering" | "artifact_substitution" | "dependency_vulnerability" | "privacy_breach" | "service_compromise" | "widespread_result_invalidity";
+export type RedteamContainmentAction = "stop_execution_pool" | "revoke_leases" | "revoke_credentials" | "quarantine_artifacts" | "freeze_publication" | "preserve_logs" | "rotate_keys" | "notify_federation_peers";
+export type RedteamAuditEvent = "authentication" | "privilege_change" | "policy_change" | "hidden_oracle_access" | "sensitive_artifact_access" | "publication" | "result_acceptance" | "reviewer_decision" | "key_lifecycle" | "security_quarantine" | "deletion" | "federation_import";
+
+export interface SecurityRedteamSimulateArgs extends JsonObject {
+  findings?: JsonObject[];
+  vulnerabilities?: JsonObject[];
+  deliveries?: JsonObject[];
+  incidents?: JsonObject[];
+  audit_records?: JsonObject[];
+  attestations?: JsonObject[];
+  boundary_universe?: string[];
+  include_details?: boolean;
+  max_items?: number;
+}
+
+export interface RegressionGateResult extends JsonObject {
+  eligible: boolean;
+  cell?: JsonObject;
+  public_summary?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RedteamFindingResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  finding?: JsonObject & { id: string; campaign: string; boundary: string; class: RedteamVulnerabilityClass; status: RedteamFindingStatus; reproduction?: string };
+  regression_gate?: RegressionGateResult;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RegressionCorpusResult extends JsonObject {
+  sentinel_count: number;
+  covered_boundaries: string[];
+  unminimised_count: number;
+  uncovered_boundaries: string[];
+  cells: JsonObject[];
+  omitted_cells: number;
+}
+
+export interface VulnerabilityTransitionResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  to?: RedteamDisclosureStage;
+  epoch?: number;
+  stage_after?: RedteamDisclosureStage;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface VulnerabilityResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  vulnerability?: JsonObject & { id: string; class: RedteamVulnerabilityClass; severity: RedteamSeverity; stage: RedteamDisclosureStage; entered_at: number; embargoed: boolean; history: JsonObject[] };
+  transitions?: VulnerabilityTransitionResult[];
+  transition_count?: number;
+  stopped_after_refusal?: boolean;
+  advisory_present?: boolean;
+  advisory_missing_fields?: string[];
+  independent_verification_required?: boolean;
+  disclosed?: boolean;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RedteamDeliveryResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  crossing?: JsonObject;
+  honest_label?: string;
+  scope?: "within_trial" | "across_trials" | null;
+  requested?: JsonObject;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RedteamBoundaryResult extends JsonObject {
+  model: string;
+  within_trial_agent_to_evaluator: JsonValue[];
+  within_trial_evaluator_to_agent: JsonValue[];
+  all_scope_agent_to_evaluator: JsonValue[];
+  feedback_loops: JsonValue[];
+  delivery_rows: RedteamDeliveryResult[];
+  delivery_rows_omitted: number;
+  allowed_delivery_count: number;
+  refused_delivery_count: number;
+}
+
+export interface ContainmentRequestResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  request?: JsonObject & { action: RedteamContainmentAction; requested_at: number; requested_by: string };
+  honest_label?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RedteamTimelineResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  epoch?: number;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface ContainmentClaimResult extends JsonObject {
+  allowed: boolean;
+  report?: JsonObject;
+  caveat?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RedteamIncidentResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  incident?: JsonObject & { id: string; class: RedteamIncidentClass; opened_at: number };
+  requests?: ContainmentRequestResult[];
+  timeline?: RedteamTimelineResult[];
+  containment_claim?: ContainmentClaimResult;
+  unrequested_actions?: RedteamContainmentAction[];
+  result_tainting_class?: boolean;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RedteamAuditRowResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  linked?: JsonObject;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RedteamAuditResult extends JsonObject {
+  rows: RedteamAuditRowResult[];
+  rows_omitted: number;
+  chain_length: number;
+  head?: string | null;
+  verified: boolean;
+  verification_refusal?: string | null;
+  assertion_count: number;
+  public_view_count: number;
+  records: JsonObject[];
+}
+
+export interface RedteamAttestationResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  observed?: boolean;
+  attestation?: JsonObject;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface SecurityRedteamResult extends JsonObject {
+  ok: boolean;
+  workflow?: "section_13_redteam_incident_evidence";
+  input_counts?: Record<string, number>;
+  findings?: RedteamFindingResult[];
+  findings_omitted?: number;
+  regression_corpus?: RegressionCorpusResult;
+  vulnerabilities?: VulnerabilityResult[];
+  vulnerabilities_omitted?: number;
+  boundary?: RedteamBoundaryResult;
+  incidents?: RedteamIncidentResult[];
+  incidents_omitted?: number;
+  audit?: RedteamAuditResult;
+  attestations?: RedteamAttestationResult[];
+  attestations_omitted?: number;
+  guarantees: string[];
+  limitations?: string[];
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

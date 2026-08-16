@@ -204,6 +204,24 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         score_gate: { reportable: false, refusal: "pack is saturated", fail_closed: true, score: null },
         guarantees: ["declarations, observed outcomes, oracle posture, and reportability remain separate"],
       } } } });
+      if (path === "/v1/tools/security_redteam_simulate") return jsonResponse({ ok: true, tool: "security_redteam_simulate", request_id: "r24", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "section_13_redteam_incident_evidence",
+        input_counts: { findings: 1, vulnerabilities: 0, deliveries: 0, incidents: 0, audit_records: 0, attestations: 0 },
+        findings: [{ index: 0, ok: true, finding: { id: "F-confirmed", campaign: "sandbox", boundary: "agent_sandbox", class: "sandbox_bypass", status: "confirmed" }, regression_gate: { eligible: true, cell: { finding: "F-confirmed" }, public_summary: "F-confirmed against agent_sandbox" } }],
+        findings_omitted: 0,
+        regression_corpus: { sentinel_count: 1, covered_boundaries: ["agent_sandbox"], unminimised_count: 0, uncovered_boundaries: [], cells: [], omitted_cells: 0 },
+        vulnerabilities: [],
+        vulnerabilities_omitted: 0,
+        boundary: { model: "evaluation_model", within_trial_agent_to_evaluator: [], within_trial_evaluator_to_agent: [], all_scope_agent_to_evaluator: [], feedback_loops: [], delivery_rows: [], delivery_rows_omitted: 0, allowed_delivery_count: 0, refused_delivery_count: 0 },
+        incidents: [],
+        incidents_omitted: 0,
+        audit: { rows: [], rows_omitted: 0, chain_length: 0, head: null, verified: true, verification_refusal: null, assertion_count: 0, public_view_count: 0, records: [] },
+        attestations: [],
+        attestations_omitted: 0,
+        guarantees: ["only confirmed findings can become regression cells"],
+        limitations: ["this endpoint replays typed contracts; it does not run fuzzers"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -676,6 +694,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(packHealth.mcp.result.structuredContent.verdict, "unreportable");
   assert.equal(packHealth.mcp.result.structuredContent.score_gate.reportable, false);
   assert.equal(packHealth.mcp.result.structuredContent.health.pack_digest.length, 64);
+  const redteam = await client.securityRedteamSimulate({ findings: [{ id: "F-confirmed" }], include_details: true, max_items: 10 });
+  assert.equal(redteam.mcp.result.structuredContent.workflow, "section_13_redteam_incident_evidence");
+  assert.equal(redteam.mcp.result.structuredContent.regression_corpus.sentinel_count, 1);
+  assert.equal(redteam.mcp.result.structuredContent.findings[0].regression_gate.eligible, true);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

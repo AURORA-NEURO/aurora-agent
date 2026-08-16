@@ -37,7 +37,8 @@ if (result.mcp.result?.isError) {
   `bioAtlasPublicationAudit`, `repositoryCatalog`, `repositoryBundle`, `repositoryImpact`,
   `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`,
   `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
-  `runtimeExecutionSimulate`, `packCatalogue`, and `packHealthAssess` cover the highest-value
+  `runtimeExecutionSimulate`, `packCatalogue`, `packHealthAssess`, and `securityRedteamSimulate`
+  cover the highest-value
   cross-domain workflows without pretending
   to type every domain payload twice. Repository helpers keep catalog, route traversal, and
   changed-module impact requests explicit; `telemetryProject` preserves the event, treatment
@@ -47,6 +48,9 @@ if (result.mcp.result?.isError) {
   binding, and score withholding in one raw REST/MCP envelope. A saturated, contaminated, or
   otherwise unreportable pack remains inspectable, but its numeric score is explicitly absent;
   `reportable: false` is not a zero.
+- `securityRedteamSimulate` returns separately typed regression, disclosure, trust-boundary,
+  incident-containment, audit-chain, and attestation evidence. It models safety contracts only:
+  permitted crossings are not observed transfers and requested containment is not execution.
 - `toolCatalogue()` snapshots the live `/v1/tools` definitions into a bounded SHA-256 catalogue;
   `planTool()` performs conservative JSON-shape preflight without a POST; and `toolChecked()`
   executes the reviewed call while preserving the raw refusal envelope. This covers every current

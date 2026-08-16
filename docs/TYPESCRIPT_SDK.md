@@ -192,6 +192,12 @@ gate. A `reportable: false` gate carries a refusal and `fail_closed: true` with 
 not a zero and it must not be ranked. The TypeScript interfaces keep saturation, floors,
 underdetermination, degeneracy, contamination, grounded-oracle tiers, and materialization
 findings visible while leaving Rust as the authority for validation and threshold semantics.
+`securityRedteamSimulate` accepts bounded finding, vulnerability, delivery, incident, audit, and
+attestation rows and returns `SecurityRedteamResult`. Its nested result types keep regression-cell
+eligibility, sequential disclosure, within-trial versus across-trial influence, honest containment
+claims, audit-chain verification, and observation/assertion status independent. A permitted model
+crossing is not an observed transfer, a containment request is not a performed action, and the
+client preserves these nonclaims beside the typed evidence.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

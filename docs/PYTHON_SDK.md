@@ -385,6 +385,14 @@ invent defaults:
   full threat details; each mitigation keeps its state-specific declaration, absence reason, or
   enforcement basis. The report explicitly retains that this is a model projection, not runtime
   sandboxing or perimeter enforcement.
+- `SecurityRedteamSimulateArgs` and `security_redteam_simulate_report(...)` type the complete
+  section-13 contract replay across sync MCP, async MCP, and HTTP. Separate reports retain
+  confirmed-finding regression eligibility, disclosure transitions and missing advisory fields,
+  permitted versus refused trust-boundary deliveries, across-trial feedback, incident requests
+  and containment claims, hash-linked audit verification, and observed-versus-asserted
+  attestations. Per-row refusals remain fail-closed; the report explicitly preserves the endpoint's
+  nonclaims about fuzzers, sandboxes, notification, credential revocation, and durable security
+  infrastructure.
 - `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
   across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit
