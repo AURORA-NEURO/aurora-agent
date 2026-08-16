@@ -472,11 +472,12 @@ export interface PublicationCrossLayerResult extends JsonObject {
 
 export interface BioAtlasPublicationAuditResult extends JsonObject {
   ok: boolean;
+  schema: "bioprism-mcp/bioatlas-publication-audit/0.1";
   workflow: "bioatlas_publication_audit";
   atlas: JsonObject;
   evidence_audit: JsonObject | null;
-  card: JsonObject | null;
-  leaderboard: JsonObject | null;
+  card: HubCardRenderResult | null;
+  leaderboard: HubLeaderboardRenderResult | null;
   release_request: PublicationReleaseRequestResult;
   cross_layer: PublicationCrossLayerResult;
   guarantees: string[];
@@ -1889,6 +1890,56 @@ export interface HubCardRenderResult extends JsonObject {
   stage?: "card_disclosure_gate" | "card_publication_gate";
   refusal?: string;
   fail_closed?: boolean;
+  guarantees: string[];
+}
+
+export type HubUnrankableReasonKind = "not_comparable" | "not_published" | "below_verification_floor" | "ineligible";
+
+export interface HubLeaderboardRenderArgs extends JsonObject {
+  board: JsonObject;
+  entries: JsonValue[];
+  moderation: JsonObject;
+  disclosure: JsonObject;
+  include_details?: boolean;
+}
+
+export interface HubUnrankableReasonResult extends JsonObject {
+  reason: HubUnrankableReasonKind;
+  differences?: JsonObject[];
+  state?: string | null;
+  has?: string;
+  floor?: string;
+  detail?: string;
+}
+
+export interface HubRankedEntryResult extends JsonObject {
+  rank: number;
+  entry: JsonObject;
+  verification: string;
+  label: HubCardLabelResult;
+}
+
+export interface HubUnrankedEntryResult extends JsonObject {
+  entry: JsonObject;
+  reason: HubUnrankableReasonResult;
+}
+
+export interface HubRankedBoardResult extends JsonObject {
+  board: string;
+  conditions: JsonObject;
+  ranked: HubRankedEntryResult[];
+  unranked: HubUnrankedEntryResult[];
+}
+
+export interface HubLeaderboardRenderResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/hub-leaderboard/0.1";
+  board: string;
+  ranked_count: number;
+  unranked_count: number;
+  leader_count: number;
+  headline: string;
+  rendered: HubRankedBoardResult | null;
   guarantees: string[];
 }
 

@@ -193,6 +193,7 @@ from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimula
 from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimulateArgs, cache_invalidation_report
 from .hub_disclosure import HubDisclosureReviewArgs, HubDisclosureReviewReport, hub_disclosure_review
 from .hub_card import HubCardRenderArgs, HubCardRenderReport, hub_card_render
+from .hub_publication import BioAtlasPublicationAuditArgs, BioAtlasPublicationAuditReport, HubLeaderboardRenderArgs, HubLeaderboardRenderReport, bioatlas_publication_audit, hub_leaderboard_render
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -957,6 +958,40 @@ class ApiClient:
 
         return hub_card_render(self.hub_card_render(request))
 
+    def hub_leaderboard_render(
+        self,
+        request: HubLeaderboardRenderArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Render the public-hub leaderboard through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubLeaderboardRenderArgs) else HubLeaderboardRenderArgs.from_wire(request)
+        return self.call_tool("hub_leaderboard_render", normalized.to_mcp_arguments())
+
+    def hub_leaderboard_render_report(
+        self,
+        request: HubLeaderboardRenderArgs | Mapping[str, Any],
+    ) -> HubLeaderboardRenderReport:
+        """Return typed leaderboard evidence through the HTTP gateway."""
+
+        return hub_leaderboard_render(self.hub_leaderboard_render(request))
+
+    def bioatlas_publication_audit(
+        self,
+        request: BioAtlasPublicationAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compose the BioAtlas publication audit through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BioAtlasPublicationAuditArgs) else BioAtlasPublicationAuditArgs.from_wire(request)
+        return self.call_tool("bioatlas_publication_audit", normalized.to_mcp_arguments())
+
+    def bioatlas_publication_audit_report(
+        self,
+        request: BioAtlasPublicationAuditArgs | Mapping[str, Any],
+    ) -> BioAtlasPublicationAuditReport:
+        """Return typed composed publication evidence through the HTTP gateway."""
+
+        return bioatlas_publication_audit(self.bioatlas_publication_audit(request))
+
     def developer_delivery_audit_report(
         self,
         *,
@@ -1587,8 +1622,12 @@ class ApiClient:
         return biocapability_evidence_audit_report(self.biocapability_evidence_audit(request))
 
     def bioatlas_publication_audit(
-        self, atlas: Mapping[str, Any], **kwargs: Any
+        self, atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs, **kwargs: Any
     ) -> dict[str, Any]:
+        if isinstance(atlas, BioAtlasPublicationAuditArgs):
+            if kwargs:
+                raise ArgumentError("typed BioAtlasPublicationAuditArgs cannot be combined with keyword options")
+            return self.call_tool("bioatlas_publication_audit", atlas.to_mcp_arguments())
         arguments: dict[str, Any] = {"atlas": dict(atlas)}
         for key in ("weighting", "evidence_audit", "card", "leaderboard"):
             if kwargs.get(key) is not None:
@@ -1600,10 +1639,14 @@ class ApiClient:
         return self.call_tool("bioatlas_publication_audit", arguments)
 
     def bioatlas_publication_audit_report(
-        self, atlas: Mapping[str, Any], **kwargs: Any
+        self, atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs, **kwargs: Any
     ) -> BioAtlasPublicationAuditReport:
         """Return typed publication-readiness evidence from the HTTP gateway."""
 
+        if isinstance(atlas, BioAtlasPublicationAuditArgs):
+            if kwargs:
+                raise ArgumentError("typed BioAtlasPublicationAuditArgs cannot be combined with keyword options")
+            return bioatlas_publication_audit(self.bioatlas_publication_audit(atlas))
         return bioatlas_publication_audit_report(self.bioatlas_publication_audit(atlas, **kwargs))
 
     def bioql_compile(
@@ -2834,6 +2877,40 @@ class AsyncApiClient:
 
         return hub_card_render(await self.hub_card_render(request))
 
+    async def hub_leaderboard_render(
+        self,
+        request: HubLeaderboardRenderArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async public-hub leaderboard rendering through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubLeaderboardRenderArgs) else HubLeaderboardRenderArgs.from_wire(request)
+        return await self.call_tool("hub_leaderboard_render", normalized.to_mcp_arguments())
+
+    async def hub_leaderboard_render_report(
+        self,
+        request: HubLeaderboardRenderArgs | Mapping[str, Any],
+    ) -> HubLeaderboardRenderReport:
+        """Return async typed leaderboard evidence through the HTTP gateway."""
+
+        return hub_leaderboard_render(await self.hub_leaderboard_render(request))
+
+    async def bioatlas_publication_audit(
+        self,
+        request: BioAtlasPublicationAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async composed BioAtlas publication audit through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BioAtlasPublicationAuditArgs) else BioAtlasPublicationAuditArgs.from_wire(request)
+        return await self.call_tool("bioatlas_publication_audit", normalized.to_mcp_arguments())
+
+    async def bioatlas_publication_audit_report(
+        self,
+        request: BioAtlasPublicationAuditArgs | Mapping[str, Any],
+    ) -> BioAtlasPublicationAuditReport:
+        """Return async typed composed publication evidence through the HTTP gateway."""
+
+        return bioatlas_publication_audit(await self.bioatlas_publication_audit(request))
+
     async def developer_delivery_audit_report(
         self,
         *,
@@ -3466,18 +3543,24 @@ class AsyncApiClient:
         )
 
     async def bioatlas_publication_audit(
-        self, atlas: Mapping[str, Any], **kwargs: Any
+        self, atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs, **kwargs: Any
     ) -> dict[str, Any]:
+        if isinstance(atlas, BioAtlasPublicationAuditArgs):
+            if kwargs:
+                raise ArgumentError("typed BioAtlasPublicationArgs cannot be combined with keyword options")
+            return await asyncio.to_thread(self.client.bioatlas_publication_audit, atlas)
         return await asyncio.to_thread(self.client.bioatlas_publication_audit, atlas, **kwargs)
 
     async def bioatlas_publication_audit_report(
-        self, atlas: Mapping[str, Any], **kwargs: Any
+        self, atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs, **kwargs: Any
     ) -> BioAtlasPublicationAuditReport:
         """Async typed publication-readiness evidence from the HTTP gateway."""
 
-        return bioatlas_publication_audit_report(
-            await self.bioatlas_publication_audit(atlas, **kwargs)
-        )
+        if isinstance(atlas, BioAtlasPublicationAuditArgs):
+            if kwargs:
+                raise ArgumentError("typed BioAtlasPublicationAuditArgs cannot be combined with keyword options")
+            return bioatlas_publication_audit(await self.bioatlas_publication_audit(atlas))
+        return bioatlas_publication_audit_report(await self.bioatlas_publication_audit(atlas, **kwargs))
 
     async def bioql_compile(
         self,

@@ -7920,6 +7920,7 @@ impl Server {
         };
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/hub-leaderboard/0.1",
             "board": ranked.board,
             "ranked_count": ranked.ranked.len(),
             "unranked_count": ranked.unranked.len(),
@@ -8172,6 +8173,7 @@ impl Server {
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/bioatlas-publication-audit/0.1",
             "workflow": "bioatlas_publication_audit",
             "atlas": atlas,
             "evidence_audit": evidence_audit,

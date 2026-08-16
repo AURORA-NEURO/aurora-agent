@@ -238,6 +238,13 @@ non-claims, limitations, and score display typed. Published scores retain their 
 withheld scores retain the state and reason, while disclosure/publication-gate refusals remain
 fail-closed with a null attachment. The Fetch client renders a contract object only; it does not
 generate HTML or publish a page.
+`hubLeaderboardRender` accepts a serialized board, entries, moderation ledger, and disclosure
+ledger and returns `HubLeaderboardRenderResult`. Optional details retain ranked entries and typed
+unranked reasons; summary mode still preserves rank counts, leader counts, scoped caveat text, and
+the non-clinical/non-universal headline. `bioatlasPublicationAudit` returns
+`BioAtlasPublicationAuditResult`, keeping atlas/evidence/card/leaderboard gates separate from an
+explicit target-by-target release request. A ready target is contract eligibility, not web
+publication or scientific authority.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

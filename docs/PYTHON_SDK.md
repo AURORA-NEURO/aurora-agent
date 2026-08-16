@@ -62,6 +62,17 @@ invent defaults:
   score gates, card/leaderboard availability, ranked/unranked counts, and explicit publication-target
   blockers. A ready target is contract eligibility, not publication, clinical authority, or network
   deployment.
+- `HubLeaderboardRenderArgs` and `hub_leaderboard_render(...)` type rankable and unranked public
+  entries across sync MCP, async MCP, and HTTP. Detailed projections preserve competition ranks,
+  verification and disclosure labels, comparability differences, publication states, verification
+  floors, evidence-scale refusals, and typed ineligible reasons; summary mode keeps detail omission
+  explicit while retaining counts and the scoped non-clinical headline.
+- `BioAtlasPublicationAuditArgs` and `bioatlas_publication_audit(...)` add a schema-bound composed
+  projection for atlas coverage, evidence readiness, card attachment, leaderboard counts, and
+  explicit release targets. `BioAtlasReleaseRequestReport` reconciles target blockers and
+  fail-closed readiness; `BioAtlasCrossLayerReport` keeps numeric-score evidence requirements and
+  withheld-score semantics visible. The audit is not a publisher, identity service, assay runner,
+  leakage detector, or scientific/clinical approval.
 - `BioCapabilityEvidenceAuditRequest`, `EvidenceItem`, and `ClaimRequest` provide a bounded typed
   input for `Workspace.biocapability_evidence_audit(...)` and its async/HTTP counterparts. They
   enumerate the nine evidence dimensions, keep observed/reproduced support distinct from declared

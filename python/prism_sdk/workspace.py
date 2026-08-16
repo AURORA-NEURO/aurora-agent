@@ -230,6 +230,7 @@ from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimula
 from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimulateArgs, cache_invalidation_report
 from .hub_disclosure import HubDisclosureReviewArgs, HubDisclosureReviewReport, hub_disclosure_review
 from .hub_card import HubCardRenderArgs, HubCardRenderReport, hub_card_render
+from .hub_publication import BioAtlasPublicationAuditArgs, BioAtlasPublicationAuditReport, HubLeaderboardRenderArgs, HubLeaderboardRenderReport, bioatlas_publication_audit, hub_leaderboard_render
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -480,6 +481,44 @@ class Workspace:
         normalized = request if isinstance(request, HubCardRenderArgs) else HubCardRenderArgs.from_wire(request)
         result = self.client.call_tool("hub_card_render", normalized.to_mcp_arguments())
         return hub_card_render(result.require_object())
+
+    def hub_leaderboard_render(
+        self,
+        request: HubLeaderboardRenderArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Render rankable and explicitly unranked public-hub entries."""
+
+        normalized = request if isinstance(request, HubLeaderboardRenderArgs) else HubLeaderboardRenderArgs.from_wire(request)
+        return self.tool("hub_leaderboard_render", normalized.to_mcp_arguments())
+
+    def hub_leaderboard_render_report(
+        self,
+        request: HubLeaderboardRenderArgs | Mapping[str, Any],
+    ) -> HubLeaderboardRenderReport:
+        """Return typed rankability, reasons, labels, counts, and headline nonclaims."""
+
+        normalized = request if isinstance(request, HubLeaderboardRenderArgs) else HubLeaderboardRenderArgs.from_wire(request)
+        result = self.client.call_tool("hub_leaderboard_render", normalized.to_mcp_arguments())
+        return hub_leaderboard_render(result.require_object())
+
+    def bioatlas_publication_audit(
+        self,
+        request: BioAtlasPublicationAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compose atlas, evidence, card, leaderboard, and explicit release gates."""
+
+        normalized = request if isinstance(request, BioAtlasPublicationAuditArgs) else BioAtlasPublicationAuditArgs.from_wire(request)
+        return self.tool("bioatlas_publication_audit", normalized.to_mcp_arguments())
+
+    def bioatlas_publication_audit_report(
+        self,
+        request: BioAtlasPublicationAuditArgs | Mapping[str, Any],
+    ) -> BioAtlasPublicationAuditReport:
+        """Return typed cross-layer publication readiness without implying network release."""
+
+        normalized = request if isinstance(request, BioAtlasPublicationAuditArgs) else BioAtlasPublicationAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioatlas_publication_audit", normalized.to_mcp_arguments())
+        return bioatlas_publication_audit(result.require_object())
 
     def pack_catalogue_report(
         self,
@@ -1888,7 +1927,7 @@ class Workspace:
 
     def bioatlas_publication_audit(
         self,
-        atlas: Mapping[str, Any],
+        atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs,
         *,
         weighting: Mapping[str, Any] | None = None,
         evidence_audit: Mapping[str, Any] | None = None,
@@ -1898,6 +1937,10 @@ class Workspace:
         targets: Sequence[str] | None = None,
         max_items: int | None = None,
     ) -> dict[str, Any]:
+        if isinstance(atlas, BioAtlasPublicationAuditArgs):
+            if any(value is not None for value in (weighting, evidence_audit, card, leaderboard, request_id, targets, max_items)):
+                raise ArgumentError("typed BioAtlasPublicationAuditArgs cannot be combined with keyword options")
+            return self.tool("bioatlas_publication_audit", atlas.to_mcp_arguments())
         arguments: dict[str, Any] = {"atlas": dict(atlas)}
         for key, value in (
             ("weighting", weighting),
@@ -1916,14 +1959,16 @@ class Workspace:
 
     def bioatlas_publication_audit_report(
         self,
-        atlas: Mapping[str, Any],
+        atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs,
         **kwargs: Any,
     ) -> BioAtlasPublicationAuditReport:
         """Return typed atlas, evidence, card, leaderboard, and publication gates."""
 
-        return bioatlas_publication_audit_report(
-            self.bioatlas_publication_audit(atlas, **kwargs)
-        )
+        if isinstance(atlas, BioAtlasPublicationAuditArgs):
+            if kwargs:
+                raise ArgumentError("typed BioAtlasPublicationAuditArgs cannot be combined with keyword options")
+            return bioatlas_publication_audit(self.bioatlas_publication_audit(atlas))
+        return bioatlas_publication_audit_report(self.bioatlas_publication_audit(atlas, **kwargs))
 
     def repository_catalog(
         self,
@@ -2361,6 +2406,44 @@ class AsyncWorkspace:
         normalized = request if isinstance(request, HubCardRenderArgs) else HubCardRenderArgs.from_wire(request)
         result = await self.client.call_tool("hub_card_render", normalized.to_mcp_arguments())
         return hub_card_render(result.require_object())
+
+    async def hub_leaderboard_render(
+        self,
+        request: HubLeaderboardRenderArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async public-hub leaderboard rendering."""
+
+        normalized = request if isinstance(request, HubLeaderboardRenderArgs) else HubLeaderboardRenderArgs.from_wire(request)
+        return await self.tool("hub_leaderboard_render", normalized.to_mcp_arguments())
+
+    async def hub_leaderboard_render_report(
+        self,
+        request: HubLeaderboardRenderArgs | Mapping[str, Any],
+    ) -> HubLeaderboardRenderReport:
+        """Return async typed leaderboard evidence."""
+
+        normalized = request if isinstance(request, HubLeaderboardRenderArgs) else HubLeaderboardRenderArgs.from_wire(request)
+        result = await self.client.call_tool("hub_leaderboard_render", normalized.to_mcp_arguments())
+        return hub_leaderboard_render(result.require_object())
+
+    async def bioatlas_publication_audit(
+        self,
+        request: BioAtlasPublicationAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async composed BioAtlas publication audit."""
+
+        normalized = request if isinstance(request, BioAtlasPublicationAuditArgs) else BioAtlasPublicationAuditArgs.from_wire(request)
+        return await self.tool("bioatlas_publication_audit", normalized.to_mcp_arguments())
+
+    async def bioatlas_publication_audit_report(
+        self,
+        request: BioAtlasPublicationAuditArgs | Mapping[str, Any],
+    ) -> BioAtlasPublicationAuditReport:
+        """Return async typed publication-audit evidence."""
+
+        normalized = request if isinstance(request, BioAtlasPublicationAuditArgs) else BioAtlasPublicationAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioatlas_publication_audit", normalized.to_mcp_arguments())
+        return bioatlas_publication_audit(result.require_object())
 
     async def pack_catalogue_report(
         self,
@@ -3751,7 +3834,11 @@ class AsyncWorkspace:
             )
         )
 
-    async def bioatlas_publication_audit(self, atlas: Mapping[str, Any], **kwargs: Any) -> dict[str, Any]:
+    async def bioatlas_publication_audit(self, atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs, **kwargs: Any) -> dict[str, Any]:
+        if isinstance(atlas, BioAtlasPublicationAuditArgs):
+            if kwargs:
+                raise ArgumentError("typed BioAtlasPublicationAuditArgs cannot be combined with keyword options")
+            return (await self.client.call_tool("bioatlas_publication_audit", atlas.to_mcp_arguments())).require_ok()
         arguments: dict[str, Any] = {"atlas": dict(atlas)}
         for key in ("weighting", "evidence_audit", "card", "leaderboard"):
             if kwargs.get(key) is not None:
@@ -3765,14 +3852,16 @@ class AsyncWorkspace:
 
     async def bioatlas_publication_audit_report(
         self,
-        atlas: Mapping[str, Any],
+        atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs,
         **kwargs: Any,
     ) -> BioAtlasPublicationAuditReport:
         """Async typed atlas, evidence, card, leaderboard, and publication gates."""
 
-        return bioatlas_publication_audit_report(
-            await self.bioatlas_publication_audit(atlas, **kwargs)
-        )
+        if isinstance(atlas, BioAtlasPublicationAuditArgs):
+            if kwargs:
+                raise ArgumentError("typed BioAtlasPublicationAuditArgs cannot be combined with keyword options")
+            return bioatlas_publication_audit(await self.bioatlas_publication_audit(atlas))
+        return bioatlas_publication_audit_report(await self.bioatlas_publication_audit(atlas, **kwargs))
 
     async def repository_catalog(
         self,

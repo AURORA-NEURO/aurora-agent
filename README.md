@@ -492,6 +492,10 @@ and a visible benchmark cannot become a bare headline number without explicit ac
 `hub_card_render` adds the renderer boundary: cards carry moderation-derived publication state,
 access, verification, provenance, limitations, non-claims, and a tagged published/withheld score;
 failed disclosure or publication gates preserve the card while keeping its numeric score null.
+`hub_leaderboard_render` and `bioatlas_publication_audit` complete the composed public surface:
+ranked and unranked entries retain typed reasons and scoped nonclaims, while atlas coverage,
+evidence-conditioned claims, card score attachment, and explicit release targets remain separate
+gates with fail-closed blockers.
 `runtime_execution_simulate` runs bounded serialized effect programs against the deterministic
 in-process world, returns policy and budget evidence, proves complete replay, and can open a forked
 suffix with observable state and divergence comparison. The Python and TypeScript SDKs expose typed

@@ -59,6 +59,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       } } } });
       if (path === "/v1/tools/bioatlas_publication_audit") return jsonResponse({ ok: true, tool: "bioatlas_publication_audit", request_id: "r17", mcp: { result: { structuredContent: {
         ok: true,
+        schema: "bioprism-mcp/bioatlas-publication-audit/0.1",
         workflow: "bioatlas_publication_audit",
         atlas: { ok: true, summary: { coverage_supports_aggregation: true } },
         evidence_audit: null,
@@ -336,6 +337,11 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         score: { attached: true, pack: "pack-1", computed_at: 4 },
         moderation_state: "accepted", verification: "self-reported",
         guarantees: ["a card starts with a withheld score and never uses zero or blank as a failure state", "scores require disclosure eligibility and an available publication state", "the result is a renderer-facing object; it does not render HTML, resolve links, or publish a page"],
+      } } } });
+      if (path === "/v1/tools/hub_leaderboard_render") return jsonResponse({ ok: true, tool: "hub_leaderboard_render", request_id: "r31", mcp: { result: { structuredContent: {
+        ok: true, schema: "bioprism-mcp/hub-leaderboard/0.1", board: "board-1", ranked_count: 1, unranked_count: 1, leader_count: 1,
+        headline: "Rank 1 under conditions; no clinical validity.", rendered: null,
+        guarantees: ["evidence scale and disclosure eligibility are checked before an entry is rankable"],
       } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
@@ -872,6 +878,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(card.mcp.result.structuredContent.schema, "bioprism-mcp/hub-card/0.1");
   assert.equal(card.mcp.result.structuredContent.card.score.display, "published");
   assert.equal(card.mcp.result.structuredContent.score.attached, true);
+  const leaderboard = await client.hubLeaderboardRender({ board: {}, entries: [], moderation: {}, disclosure: {}, include_details: false });
+  assert.equal(leaderboard.mcp.result.structuredContent.schema, "bioprism-mcp/hub-leaderboard/0.1");
+  assert.equal(leaderboard.mcp.result.structuredContent.unranked_count, 1);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

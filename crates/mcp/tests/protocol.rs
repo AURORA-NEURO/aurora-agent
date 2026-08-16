@@ -775,6 +775,7 @@ fn hub_cards_and_leaderboards_compose_moderation_disclosure_and_comparability_ga
         }),
     );
     assert_eq!(leaderboard["ok"], json!(true));
+    assert_eq!(leaderboard["schema"], json!("bioprism-mcp/hub-leaderboard/0.1"));
     assert_eq!(leaderboard["ranked_count"], json!(1));
     assert_eq!(leaderboard["unranked_count"], json!(1));
     assert_eq!(leaderboard["leader_count"], json!(1));
@@ -944,6 +945,7 @@ fn bioatlas_publication_audit_binds_atlas_evidence_card_and_leaderboard_targets(
         }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioatlas-publication-audit/0.1"));
     assert_eq!(result["workflow"], json!("bioatlas_publication_audit"));
     assert_eq!(result["release_request"]["ready"], json!(true));
     assert_eq!(
