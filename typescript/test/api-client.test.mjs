@@ -2702,3 +2702,47 @@ test("client exposes bioeval grounding state, locator, and staleness evidence", 
   assert.equal(result.mcp.result.structuredContent.census.contested, 1);
   assert.equal(result.mcp.result.structuredContent.staleness.requested, true);
 });
+
+test("client exposes bioeval estimand identification and transport evidence", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_estimand_audit");
+      return jsonResponse({ ok: true, tool: "bioeval_estimand_audit", request_id: "estimand-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-estimand-audit/0.1",
+        workflow: "bioeval_estimand_audit",
+        estimand: { five_elements_complete: true, scope: "pdac-twin" },
+        claim: { kind: "intervention", still_model_conditional: false, identification_summary: { status: "probed" } },
+        policies: { require_identification: true },
+        transport: { status: "partially_declared", accepted: 1, refused: 1 },
+        guarantees: ["qualifier retained"],
+        limitations: ["no causal engine"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalEstimandAudit({
+    estimand: {
+      intervention: "knockdown",
+      comparator: "control",
+      unit: "cell line",
+      outcome: "viability",
+      horizon: "72h",
+      scope: "pdac-twin",
+    },
+    kind: "intervention",
+    basis: { evidentiary: "model_conditional", model: "pdac-twin-v2" },
+    identification: {
+      identification: "probed",
+      strategy: "backdoor",
+      assumptions: ["no unmeasured confounding"],
+      checks: [{ name: "negative-control", passed: false, detail: "signal remained" }],
+    },
+    corroborations: [{ source: "GSE-14520", kind: "intervention", detail: "external replication" }],
+    transport_requests: [{ target: "pdac-twin", declared_scopes: ["pdac-twin"] }],
+    require_identification: true,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-estimand-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.claim.identification_summary.status, "probed");
+  assert.equal(result.mcp.result.structuredContent.transport.status, "partially_declared");
+});

@@ -517,6 +517,10 @@ boundary and does not turn an admissible trace into biological validity. See
 adjacent edges, the five-way grounding census, freeze-relative staleness, lineage gaps, orphan
 evidence, and bounded omission metadata without dereferencing external artifacts. See
 [`docs/BIOEVAL_GROUNDING_AUDIT.md`](../docs/BIOEVAL_GROUNDING_AUDIT.md).
+`bioevalEstimandAudit` types the five estimand elements, evidentiary basis, claim kind,
+identification posture, external corroboration, and declared scope transport. It retains the
+kernel-rendered claim language and fail-closed policy options. See
+[`docs/BIOEVAL_ESTIMAND_AUDIT.md`](../docs/BIOEVAL_ESTIMAND_AUDIT.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

@@ -252,6 +252,7 @@ from .epistemic_context import EpistemicContextAuditArgs, EpistemicContextAuditR
 from .epistemic_selection import EpistemicSelectionAuditArgs, EpistemicSelectionAuditReport, epistemic_selection_audit_report
 from .bioeval_acquisition import BioevalAcquisitionAuditArgs, BioevalAcquisitionAuditReport, bioeval_acquisition_audit_report
 from .bioeval_grounding import BioevalGroundingAuditArgs, BioevalGroundingAuditReport, bioeval_grounding_audit_report
+from .bioeval_estimand import BioevalEstimandAuditArgs, BioevalEstimandAuditReport, bioeval_estimand_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1909,6 +1910,26 @@ class Workspace:
         """Return typed claim-state, locator, staleness, and lineage evidence."""
 
         return bioeval_grounding_audit_report(self.bioeval_grounding_audit(request))
+
+    def bioeval_estimand_audit(
+        self,
+        request: BioevalEstimandAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit an estimand, claim language, identification posture, and transport scope."""
+
+        normalized = request if isinstance(request, BioevalEstimandAuditArgs) else BioevalEstimandAuditArgs.from_wire(request)
+        result = self.client.call_tool("bioeval_estimand_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def bioeval_estimand_audit_report(
+        self,
+        request: BioevalEstimandAuditArgs | Mapping[str, Any],
+    ) -> BioevalEstimandAuditReport:
+        """Return typed estimand and identification evidence."""
+
+        return bioeval_estimand_audit_report(self.bioeval_estimand_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4378,6 +4399,26 @@ class AsyncWorkspace:
         """Return async typed claim-evidence grounding evidence."""
 
         return bioeval_grounding_audit_report(await self.bioeval_grounding_audit(request))
+
+    async def bioeval_estimand_audit(
+        self,
+        request: BioevalEstimandAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async estimand and identification audit with structured refusals."""
+
+        normalized = request if isinstance(request, BioevalEstimandAuditArgs) else BioevalEstimandAuditArgs.from_wire(request)
+        result = await self.client.call_tool("bioeval_estimand_audit", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def bioeval_estimand_audit_report(
+        self,
+        request: BioevalEstimandAuditArgs | Mapping[str, Any],
+    ) -> BioevalEstimandAuditReport:
+        """Return async typed estimand and identification evidence."""
+
+        return bioeval_estimand_audit_report(await self.bioeval_estimand_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

@@ -959,6 +959,10 @@ with five-way claim states, typed support/contradiction/adjacent edges, locator 
 against an explicit freeze, lineage gaps, orphan evidence, duplicate-edge findings, and bounded
 omission counts. The report does not dereference artifacts or convert citations into a score. See
 [`docs/BIOEVAL_GROUNDING_AUDIT.md`](BIOEVAL_GROUNDING_AUDIT.md).
+`BioevalEstimandAuditArgs` / `bioeval_estimand_audit_report(...)` preserve the five-element
+estimand, association-versus-intervention claim language, evidentiary basis, not-assessed/
+declared/probed identification, external-corroboration promotion, and scope transport refusals. See
+[`docs/BIOEVAL_ESTIMAND_AUDIT.md`](BIOEVAL_ESTIMAND_AUDIT.md).
 
 ## Biological stress profiling
 

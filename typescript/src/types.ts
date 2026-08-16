@@ -5002,6 +5002,78 @@ export interface BioevalGroundingAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface BioevalEstimandArgs extends JsonObject {
+  intervention: string;
+  comparator: string;
+  unit: string;
+  outcome: string;
+  horizon: string;
+  scope: string;
+}
+
+export type BioevalClaimKind = "association" | "intervention";
+export type BioevalEvidentiaryKind = "model_conditional" | "observational" | "experimental";
+
+export interface BioevalBasisArgs extends JsonObject {
+  evidentiary: BioevalEvidentiaryKind;
+  model?: string;
+  dataset?: string;
+  study?: string;
+}
+
+export type BioevalIdentificationState = "not_assessed" | "declared" | "probed";
+
+export interface BioevalIdentificationCheckArgs extends JsonObject {
+  name: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface BioevalIdentificationArgs extends JsonObject {
+  identification: BioevalIdentificationState;
+  strategy?: string;
+  assumptions?: string[];
+  checks?: BioevalIdentificationCheckArgs[];
+}
+
+export interface BioevalCorroborationArgs extends JsonObject {
+  source: string;
+  kind: BioevalClaimKind;
+  detail: string;
+}
+
+export interface BioevalTransportRequestArgs extends JsonObject {
+  target: string;
+  declared_scopes: string[];
+}
+
+export interface BioevalEstimandAuditArgs extends JsonObject {
+  estimand: BioevalEstimandArgs;
+  kind: BioevalClaimKind;
+  basis: BioevalBasisArgs;
+  identification?: BioevalIdentificationArgs | null;
+  corroborations?: BioevalCorroborationArgs[];
+  transport_requests?: BioevalTransportRequestArgs[];
+  require_identification?: boolean;
+  require_corroboration?: boolean;
+  strict_transport?: boolean;
+}
+
+export interface BioevalEstimandAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-estimand-audit/0.1";
+  workflow?: "bioeval_estimand_audit";
+  estimand?: JsonObject;
+  claim?: JsonObject;
+  policies?: JsonObject;
+  transport?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;

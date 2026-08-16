@@ -65,6 +65,11 @@ use bioprism_bioevalx::grounding::{
     Evidence as GroundingEvidence, Grounding,
     LocatorStatus as GroundingLocatorStatus, SupportEdge as GroundingSupportEdge,
 };
+use bioprism_bioevalx::estimand::{
+    ClaimKind as BioevalClaimKind, Corroboration as BioevalCorroboration,
+    Estimand as BioevalEstimand, Evidentiary as BioevalEvidentiary,
+    Finding as BioevalFinding, Identification as BioevalIdentification,
+};
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
@@ -1351,6 +1356,7 @@ impl Server {
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
+            "bioeval_estimand_audit" => self.bioeval_estimand_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -14045,6 +14051,381 @@ impl Server {
         }))
     }
 
+    fn bioeval_estimand_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-estimand-audit/0.1";
+        const MAX_CORROBORATIONS: usize = 256;
+        const MAX_TRANSPORT_REQUESTS: usize = 256;
+        const MAX_TEXT_BYTES: usize = 4_096;
+
+        let raw_estimand = arguments
+            .get("estimand")
+            .and_then(Value::as_object)
+            .ok_or("estimand is required and must be an object")?;
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure estimand audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("estimand audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_estimand_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "an incomplete five-element estimand never becomes a successful finding projection",
+                    "model-conditional findings cannot be promoted by the same model or by an implicit boolean",
+                    "identification declaration, identification probing, and identification validity remain separate",
+                ],
+                "limitations": [
+                    "the route records identification assumptions and checks but does not run a causal graph or d-separation engine",
+                    "corroboration is caller-declared external evidence and is not independently authenticated",
+                    "transport checks only declared scope membership; scope mapping and loss accounting belong to bioprism-scope",
+                ],
+            })
+        };
+        let text_field = |name: &str| -> Result<String, String> {
+            let value = raw_estimand
+                .get(name)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("estimand.{name} requires a string"))?;
+            if value.trim().is_empty() || value.len() > MAX_TEXT_BYTES {
+                return Err(format!(
+                    "estimand.{name} must contain 1 to {MAX_TEXT_BYTES} bytes"
+                ));
+            }
+            Ok(value.to_string())
+        };
+        let intervention = text_field("intervention")?;
+        let comparator = text_field("comparator")?;
+        let unit = text_field("unit")?;
+        let outcome = text_field("outcome")?;
+        let horizon = text_field("horizon")?;
+        let scope = text_field("scope")?;
+        let estimand = match BioevalEstimand::declare(
+            intervention,
+            comparator,
+            unit,
+            outcome,
+            horizon,
+            scope,
+        ) {
+            Ok(estimand) => estimand,
+            Err(error) => return Ok(refusal("estimand_validation", error.to_string())),
+        };
+
+        let kind = match arguments.get("kind") {
+            Some(value) => match serde_json::from_value::<BioevalClaimKind>(value.clone()) {
+                Ok(kind) => kind,
+                Err(error) => {
+                    return Ok(refusal(
+                        "kind_validation",
+                        format!("kind is invalid: {error}"),
+                    ));
+                }
+            },
+            None => return Err("kind is required: association or intervention".into()),
+        };
+        let basis = match arguments.get("basis") {
+            Some(value) => match serde_json::from_value::<BioevalEvidentiary>(value.clone()) {
+                Ok(basis) => basis,
+                Err(error) => {
+                    return Ok(refusal(
+                        "basis_validation",
+                        format!("basis is invalid: {error}"),
+                    ));
+                }
+            },
+            None => return Err("basis is required and must carry an evidentiary tag".into()),
+        };
+        let basis_source = match &basis {
+            BioevalEvidentiary::ModelConditional { model } => ("model_conditional", model.clone()),
+            BioevalEvidentiary::Observational { dataset } => ("observational", dataset.clone()),
+            BioevalEvidentiary::Experimental { study } => ("experimental", study.clone()),
+        };
+        if basis_source.1.trim().is_empty() || basis_source.1.len() > MAX_TEXT_BYTES {
+            return Ok(refusal(
+                "basis_validation",
+                format!("basis source must contain 1 to {MAX_TEXT_BYTES} bytes"),
+            ));
+        }
+
+        let identification = match arguments.get("identification") {
+            None | Some(Value::Null) => BioevalIdentification::NotAssessed,
+            Some(value) => match serde_json::from_value::<BioevalIdentification>(value.clone()) {
+                Ok(identification) => identification,
+                Err(error) => {
+                    return Ok(refusal(
+                        "identification_validation",
+                        format!("identification is invalid: {error}"),
+                    ));
+                }
+            },
+        };
+        let identification_summary = match &identification {
+            BioevalIdentification::NotAssessed => json!({
+                "status": "not_assessed",
+                "strategy": Value::Null,
+                "assumption_count": 0,
+                "check_count": 0,
+                "failed_check_count": 0,
+                "probed": false,
+            }),
+            BioevalIdentification::Declared {
+                strategy,
+                assumptions,
+            } => json!({
+                "status": "declared",
+                "strategy": strategy,
+                "assumption_count": assumptions.len(),
+                "check_count": 0,
+                "failed_check_count": 0,
+                "probed": false,
+            }),
+            BioevalIdentification::Probed {
+                strategy,
+                assumptions,
+                checks,
+            } => json!({
+                "status": "probed",
+                "strategy": strategy,
+                "assumption_count": assumptions.len(),
+                "check_count": checks.len(),
+                "failed_check_count": checks.iter().filter(|check| !check.passed).count(),
+                "failed_check_names": checks.iter().filter(|check| !check.passed).map(|check| check.name.clone()).collect::<Vec<_>>(),
+                "probed": true,
+            }),
+        };
+        if arguments
+            .get("require_identification")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && matches!(identification, BioevalIdentification::NotAssessed)
+        {
+            return Ok(refusal(
+                "identification_policy",
+                "require_identification was true but identification is not assessed".into(),
+            ));
+        }
+
+        let raw_corroborations = match arguments.get("corroborations") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(value) => value
+                .as_array()
+                .ok_or("corroborations must be an array")?
+                .clone(),
+        };
+        if raw_corroborations.len() > MAX_CORROBORATIONS {
+            return Err(format!(
+                "corroborations are bounded at {MAX_CORROBORATIONS} rows"
+            ));
+        }
+        let mut corroborations = Vec::with_capacity(raw_corroborations.len());
+        for (index, raw) in raw_corroborations.iter().enumerate() {
+            let corroboration: BioevalCorroboration = match serde_json::from_value(raw.clone()) {
+                Ok(corroboration) => corroboration,
+                Err(error) => {
+                    return Ok(refusal(
+                        "corroboration_validation",
+                        format!("corroborations[{index}] is invalid: {error}"),
+                    ));
+                }
+            };
+            if corroboration.source.trim().is_empty()
+                || corroboration.source.len() > MAX_TEXT_BYTES
+                || corroboration.detail.trim().is_empty()
+                || corroboration.detail.len() > MAX_TEXT_BYTES
+            {
+                return Ok(refusal(
+                    "corroboration_validation",
+                    format!("corroborations[{index}] source and detail must contain 1 to {MAX_TEXT_BYTES} bytes"),
+                ));
+            }
+            corroborations.push(corroboration);
+        }
+        if arguments
+            .get("require_corroboration")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && matches!(&basis, BioevalEvidentiary::ModelConditional { .. })
+            && corroborations.is_empty()
+        {
+            return Ok(refusal(
+                "corroboration_policy",
+                "require_corroboration was true but no external corroboration was supplied".into(),
+            ));
+        }
+
+        let mut finding = BioevalFinding::new(estimand, kind, basis);
+        finding = finding.identified_by(identification);
+        for (index, corroboration) in corroborations.iter().cloned().enumerate() {
+            if let Err(error) = finding.promote(corroboration) {
+                return Ok(refusal(
+                    "corroboration_validation",
+                    format!("corroborations[{index}] was refused: {error}"),
+                ));
+            }
+        }
+
+        let raw_transport = match arguments.get("transport_requests") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(value) => value
+                .as_array()
+                .ok_or("transport_requests must be an array")?
+                .clone(),
+        };
+        if raw_transport.len() > MAX_TRANSPORT_REQUESTS {
+            return Err(format!(
+                "transport_requests are bounded at {MAX_TRANSPORT_REQUESTS} rows"
+            ));
+        }
+        let mut transport_requests = Vec::with_capacity(raw_transport.len());
+        let mut transport_targets = BTreeSet::new();
+        for (index, raw) in raw_transport.iter().enumerate() {
+            let target = raw
+                .get("target")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("transport_requests[{index}] requires target"))?;
+            if target.trim().is_empty() || target.len() > MAX_TEXT_BYTES {
+                return Ok(refusal(
+                    "transport_validation",
+                    format!("transport_requests[{index}].target must contain 1 to {MAX_TEXT_BYTES} bytes"),
+                ));
+            }
+            if !transport_targets.insert(target.to_string()) {
+                return Ok(refusal(
+                    "transport_validation",
+                    format!("transport_requests[{index}] duplicates target {target:?}"),
+                ));
+            }
+            let declared = raw
+                .get("declared_scopes")
+                .ok_or_else(|| format!("transport_requests[{index}] requires declared_scopes"))?
+                .as_array()
+                .ok_or_else(|| format!("transport_requests[{index}].declared_scopes must be an array"))?;
+            let mut declared_scopes = BTreeSet::new();
+            for (scope_index, scope) in declared.iter().enumerate() {
+                let scope = scope.as_str().ok_or_else(|| {
+                    format!("transport_requests[{index}].declared_scopes[{scope_index}] must be a string")
+                })?;
+                if scope.trim().is_empty() || scope.len() > MAX_TEXT_BYTES {
+                    return Ok(refusal(
+                        "transport_validation",
+                        format!("transport_requests[{index}].declared_scopes[{scope_index}] is invalid"),
+                    ));
+                }
+                declared_scopes.insert(scope.to_string());
+            }
+            transport_requests.push((target.to_string(), declared_scopes));
+        }
+        let mut transport_rows = Vec::with_capacity(transport_requests.len());
+        let mut transport_refusals = 0usize;
+        for (target, declared_scopes) in &transport_requests {
+            match finding.estimand.transport_to(target, declared_scopes) {
+                Ok(()) => transport_rows.push(json!({
+                    "target": target,
+                    "declared_scopes": declared_scopes,
+                    "ok": true,
+                    "refusal": Value::Null,
+                })),
+                Err(error) => {
+                    transport_refusals += 1;
+                    transport_rows.push(json!({
+                        "target": target,
+                        "declared_scopes": declared_scopes,
+                        "ok": false,
+                        "refusal": error.to_string(),
+                    }));
+                }
+            }
+        }
+        if arguments
+            .get("strict_transport")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && transport_refusals > 0
+        {
+            return Ok(refusal(
+                "transport_policy",
+                format!("strict_transport refused {transport_refusals} out-of-scope request(s)"),
+            ));
+        }
+
+        let claim_kind_name = match finding.kind {
+            BioevalClaimKind::Association => "association",
+            BioevalClaimKind::Intervention => "intervention",
+        };
+        let transport_status = if transport_requests.is_empty() {
+            "not_requested"
+        } else if transport_refusals == 0 {
+            "all_declared"
+        } else if transport_refusals == transport_requests.len() {
+            "all_refused"
+        } else {
+            "partially_declared"
+        };
+        let identification_value = serde_json::to_value(&finding.identification)
+            .map_err(|error| format!("cannot serialize identification: {error}"))?;
+        let basis_value = serde_json::to_value(&finding.basis)
+            .map_err(|error| format!("cannot serialize evidentiary basis: {error}"))?;
+        let corroborations_value = serde_json::to_value(finding.corroborations())
+            .map_err(|error| format!("cannot serialize corroborations: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_estimand_audit",
+            "estimand": {
+                "intervention": finding.estimand.intervention(),
+                "comparator": finding.estimand.comparator(),
+                "unit": finding.estimand.unit(),
+                "outcome": finding.estimand.outcome(),
+                "horizon": finding.estimand.horizon(),
+                "scope": finding.estimand.scope(),
+                "five_elements_complete": true,
+            },
+            "claim": {
+                "kind": claim_kind_name,
+                "basis": basis_value,
+                "basis_kind": basis_source.0,
+                "basis_source": basis_source.1,
+                "identification": identification_value,
+                "identification_summary": identification_summary,
+                "corroborations": corroborations_value,
+                "corroboration_count": finding.corroborations().len(),
+                "still_model_conditional": finding.still_model_conditional(),
+                "claim_language": finding.claim_language(),
+            },
+            "policies": {
+                "require_identification": arguments.get("require_identification").and_then(Value::as_bool).unwrap_or(false),
+                "require_corroboration": arguments.get("require_corroboration").and_then(Value::as_bool).unwrap_or(false),
+                "strict_transport": arguments.get("strict_transport").and_then(Value::as_bool).unwrap_or(false),
+            },
+            "transport": {
+                "status": transport_status,
+                "requested": transport_requests.len(),
+                "accepted": transport_requests.len().saturating_sub(transport_refusals),
+                "refused": transport_refusals,
+                "rows": transport_rows,
+            },
+            "guarantees": [
+                "intervention, comparator, unit, outcome, horizon, and scope are declared through the real estimand constructor",
+                "association findings render association language and cannot be rendered as intervention claims",
+                "model-conditional findings retain their qualifier until a named external corroboration is accepted",
+                "a same-model corroboration is refused rather than counted as independent promotion",
+                "identification is reported as not_assessed, declared, or probed without claiming that assumptions hold",
+                "out-of-scope transport remains a row-level refusal unless strict_transport explicitly requests a fail-closed gate",
+            ],
+            "limitations": [
+                "the route does not construct a causal graph, run d-separation, estimate effects, simulate bias, or measure decision regret",
+                "named assumptions and negative-control outcomes are caller-supplied records, not executed checks",
+                "external corroboration is recorded provenance and does not establish biological or clinical truth",
+                "scope membership is not a transport map; loss, comparability, and target-population evidence remain outside this kernel",
+            ],
+        }))
+    }
+
     fn bioeval_acquisition_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-acquisition-audit/0.1";
         let raw_obligations = arguments
@@ -22632,7 +23013,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -22662,9 +23043,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -23975,6 +24356,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum rows and finding identifiers returned in each bounded projection; total and omitted counts remain explicit." }
                 },
                 "required": ["claims", "evidence", "edges"]
+            }
+        }),
+        json!({
+            "name": "bioeval_estimand_audit",
+            "description": "Audit a serialized bioevalx estimand and finding. It validates the five required estimand elements, preserves association versus intervention language, records not-assessed/declared/probed identification, requires explicit external corroboration before model-conditional promotion, and reports declared scope transport refusals without running a causal engine or estimator.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "estimand": { "type": "object", "description": "Five-element estimand plus scope: {intervention, comparator, unit, outcome, horizon, scope}. All fields are required and non-empty." },
+                    "kind": { "type": "string", "enum": ["association", "intervention"], "description": "Whether the finding licenses association or intervention language." },
+                    "basis": { "type": "object", "description": "Serialized Evidentiary union: {evidentiary: model_conditional, model} | {evidentiary: observational, dataset} | {evidentiary: experimental, study}." },
+                    "identification": { "type": "object", "description": "Optional serialized Identification union: not_assessed, declared {strategy, assumptions}, or probed {strategy, assumptions, checks}." },
+                    "corroborations": { "type": "array", "maxItems": 256, "description": "Named external Corroboration rows {source, kind, detail}. A same-model source is refused for a model-conditional finding." },
+                    "transport_requests": { "type": "array", "maxItems": 256, "description": "Optional scope checks [{target, declared_scopes}]. Out-of-scope rows remain visible unless strict_transport is true." },
+                    "require_identification": { "type": "boolean", "description": "Fail closed when identification is not assessed." },
+                    "require_corroboration": { "type": "boolean", "description": "Fail closed when a model-conditional finding has no named external corroboration." },
+                    "strict_transport": { "type": "boolean", "description": "Fail closed when any requested transport target is not declared; defaults false." }
+                },
+                "required": ["estimand", "kind", "basis"]
             }
         }),
         json!({

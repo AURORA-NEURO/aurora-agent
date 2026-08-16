@@ -403,6 +403,7 @@ values. Binary BAM/CRAM remains an explicit dependency-gated route.
 
 - `26.19` Biocapability Atlas
 
-The transport now exposes the implemented 26.03 claim-grounding and 26.05 acquisition kernels
-through `bioeval_grounding_audit` and `bioeval_acquisition_audit`; the remaining item is the atlas
-module itself, not a missing grounding or acquisition wrapper.
+The transport now exposes the implemented 26.03 claim-grounding, 26.05 acquisition, and 26.09
+estimand/identification kernels through `bioeval_grounding_audit`, `bioeval_acquisition_audit`, and
+`bioeval_estimand_audit`; the remaining item is the atlas module itself, not a missing grounding,
+acquisition, or estimand wrapper.

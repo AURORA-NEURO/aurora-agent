@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 149);
+    assert_eq!(tools.len(), 150);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(149));
-    assert_eq!(result["advertised_tool_count"], json!(149));
+    assert_eq!(result["unique_catalog_tools"], json!(150));
+    assert_eq!(result["advertised_tool_count"], json!(150));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(149));
-    assert_eq!(result["schema_quality"]["valid"], json!(149));
+    assert_eq!(result["schema_quality"]["checked"], json!(150));
+    assert_eq!(result["schema_quality"]["valid"], json!(150));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6024,6 +6024,82 @@ fn bioeval_grounding_audit_preserves_states_locators_staleness_and_lineage() {
     assert_eq!(invalid["ok"], json!(false));
     assert_eq!(invalid["stage"], json!("edge_validation"));
     assert_eq!(invalid["fail_closed"], json!(true));
+}
+
+#[test]
+fn bioeval_estimand_audit_preserves_claim_language_identification_and_transport() {
+    let result = call(
+        &mut server(),
+        "bioeval_estimand_audit",
+        json!({
+            "estimand": {
+                "intervention": "knockdown",
+                "comparator": "control",
+                "unit": "cell line",
+                "outcome": "viability",
+                "horizon": "72h",
+                "scope": "pdac-twin"
+            },
+            "kind": "intervention",
+            "basis": { "evidentiary": "model_conditional", "model": "pdac-twin-v2" },
+            "identification": {
+                "identification": "probed",
+                "strategy": "backdoor",
+                "assumptions": ["no unmeasured confounding"],
+                "checks": [
+                    { "name": "negative-control", "passed": false, "detail": "signal remained" },
+                    { "name": "sensitivity", "passed": true, "detail": "stable" }
+                ]
+            },
+            "corroborations": [
+                { "source": "GSE-14520", "kind": "intervention", "detail": "external replication" }
+            ],
+            "transport_requests": [
+                { "target": "pdac-twin", "declared_scopes": ["pdac-twin"] },
+                { "target": "patients", "declared_scopes": ["pdac-twin"] }
+            ],
+            "require_identification": true
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-estimand-audit/0.1"));
+    assert_eq!(result["estimand"]["five_elements_complete"], json!(true));
+    assert_eq!(result["claim"]["kind"], json!("intervention"));
+    assert_eq!(result["claim"]["still_model_conditional"], json!(false));
+    assert!(result["claim"]["claim_language"]
+        .as_str()
+        .unwrap()
+        .contains("changes"));
+    assert_eq!(result["claim"]["identification_summary"]["status"], json!("probed"));
+    assert_eq!(result["claim"]["identification_summary"]["failed_check_count"], json!(1));
+    assert_eq!(result["transport"]["status"], json!("partially_declared"));
+    assert_eq!(result["transport"]["accepted"], json!(1));
+    assert_eq!(result["transport"]["refused"], json!(1));
+
+    let same_model = call(
+        &mut server(),
+        "bioeval_estimand_audit",
+        json!({
+            "estimand": {
+                "intervention": "knockdown",
+                "comparator": "control",
+                "unit": "cell line",
+                "outcome": "viability",
+                "horizon": "72h",
+                "scope": "pdac-twin"
+            },
+            "kind": "association",
+            "basis": { "evidentiary": "model_conditional", "model": "pdac-twin-v2" },
+            "corroborations": [
+                { "source": "pdac-twin-v2", "kind": "association", "detail": "ran again" }
+            ]
+        }),
+    );
+    assert_eq!(same_model["__isError"], json!(false));
+    assert_eq!(same_model["ok"], json!(false));
+    assert_eq!(same_model["stage"], json!("corroboration_validation"));
+    assert_eq!(same_model["fail_closed"], json!(true));
 }
 
 #[test]
