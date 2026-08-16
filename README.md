@@ -594,7 +594,9 @@ participant-safe splits, training-only feature fitting, specimen-versus-tumour t
 mechanism strata, and declared transport assumptions before admitting a cross-modal claim.
 `onco_outcome_analyze` requires an explicit estimand before interpreting one subject’s follow-up,
 keeps loss to follow-up and competing death as censoring distinctions, and reports delayed-entry
-bias. `oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and
+bias. Its versioned typed projection binds endpoint strategy, event/censoring tags, delayed-entry
+exposure, and complete versus informative bias flags; see [`docs/ONCO_OUTCOME_ANALYZE.md`](docs/ONCO_OUTCOME_ANALYZE.md).
+`oncoworlds_clonal_history_check` audits candidate histories against cellular fractions and
 keeps multiple compatible histories as ambiguity rather than selecting one.
 The Python and TypeScript SDKs expose all five OncoWorlds workflows as typed MCP and HTTP
 projections, retaining domain refusals, QC abstention, version-conditioned disagreement, transport

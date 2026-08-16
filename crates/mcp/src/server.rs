@@ -10183,13 +10183,25 @@ impl Server {
                 )
             })
             .collect::<Vec<_>>();
+        let all_bias_flags = analysis.bias_flags.clone();
+        let bias_count = all_bias_flags.len();
+        let informative_bias_count = informative_bias_flags.len();
+        let outcome = analysis.outcome;
+        let censoring_informative = censoring_reason.map(|reason| reason.is_potentially_informative());
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/onco-outcome-analyze/0.1",
             "analysis": analysis,
+            "outcome": outcome,
+            "bias_flags": all_bias_flags,
+            "bias_count": bias_count,
+            "informative_bias_count": informative_bias_count,
             "at_risk_days": at_risk_days,
             "immortal_time_days": immortal_time_days,
+            "left_truncated": immortal_time_days > 0,
             "event": event,
             "censoring_reason": censoring_reason,
+            "censoring_informative": censoring_informative,
             "informative_bias_flags": informative_bias_flags,
             "guarantees": [
                 "the caller must state the estimand before the per-subject outcome is interpreted",

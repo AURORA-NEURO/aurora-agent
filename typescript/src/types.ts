@@ -4075,14 +4075,62 @@ export interface OncoOutcomeAnalyzeArgs extends JsonObject {
   estimand: JsonObject;
 }
 
+export type OncoOutcomeEndpoint = "overall_survival" | "progression_free_survival" | "time_to_progression" | "time_to_treatment_failure";
+
+export type OncoOutcomePopulation = "intention_to_treat" | "per_protocol" | "evaluable_for_response";
+
+export type OncoOutcomeEventKind = "death" | "confirmed_progression" | "progression_or_death" | "treatment_failure";
+
+export type OncoOutcomeCensoringReason = "administrative_cutoff" | "lost_to_follow_up" | "withdrew_consent" | "event_free_at_last_contact" | "competing_death" | "subsequent_therapy";
+
+export type OncoOutcomeBias = "left_truncation" | "informative_loss_to_follow_up" | "competing_death" | "treatment_switching";
+
+export interface OncoOutcomeEstimandResult extends JsonObject {
+  endpoint: OncoOutcomeEndpoint;
+  population: OncoOutcomePopulation;
+  variable: string;
+  summary_measure: JsonValue;
+  intercurrent_event_strategies: [string, string][];
+  censoring_assumption: JsonValue;
+}
+
+export type OncoOutcomeCensoredResult =
+  | ({ outcome: "censored"; administrative_cutoff: null } & JsonObject)
+  | ({ outcome: "censored"; lost_to_follow_up: null } & JsonObject)
+  | ({ outcome: "censored"; withdrew_consent: null } & JsonObject)
+  | ({ outcome: "censored"; event_free_at_last_contact: null } & JsonObject)
+  | ({ outcome: "censored"; competing_death: null } & JsonObject)
+  | ({ outcome: "censored"; subsequent_therapy: null } & JsonObject)
+  | ({ outcome: "censored"; reason: OncoOutcomeCensoringReason } & JsonObject);
+
+export type OncoOutcomeOutcomeResult =
+  | ({ outcome: "event"; kind: OncoOutcomeEventKind } & JsonObject)
+  | OncoOutcomeCensoredResult;
+
+export interface OncoOutcomeAnalysisResult extends JsonObject {
+  subject: string;
+  estimand: OncoOutcomeEstimandResult;
+  at_risk_days: number;
+  immortal_time_days: number;
+  outcome: OncoOutcomeOutcomeResult;
+  bias_flags: OncoOutcomeBias[];
+}
+
 export interface OncoOutcomeResult extends JsonObject {
   ok: boolean;
-  analysis?: JsonObject;
+  schema?: "bioprism-mcp/onco-outcome-analyze/0.1";
+  analysis?: OncoOutcomeAnalysisResult;
+  outcome?: OncoOutcomeOutcomeResult;
+  bias_flags?: OncoOutcomeBias[];
+  bias_count?: number;
+  informative_bias_count?: number;
   at_risk_days?: number;
   immortal_time_days?: number;
+  left_truncated?: boolean;
   event?: boolean;
   censoring_reason?: string | null;
-  informative_bias_flags?: string[];
+  censoring_informative?: boolean | null;
+  informative_bias_flags?: OncoOutcomeBias[];
   guarantees?: string[];
   limitations?: string[];
 }

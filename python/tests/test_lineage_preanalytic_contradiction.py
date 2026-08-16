@@ -432,17 +432,74 @@ class LabAndOncoReportTests(unittest.TestCase):
         self.assertTrue(identity.declined)
         outcome = onco_outcome_report({
             "ok": True,
-            "analysis": {"outcome": {"censored": "lost_to_follow_up"}},
+            "schema": "bioprism-mcp/onco-outcome-analyze/0.1",
+            "analysis": {
+                "subject": "P-1",
+                "estimand": {
+                    "endpoint": "time_to_progression",
+                    "population": "intention_to_treat",
+                    "variable": "time from entry to progression",
+                    "summary_measure": "median_time_to_event",
+                    "intercurrent_event_strategies": [["death", "hypothetical"], ["loss_to_follow_up", "hypothetical"]],
+                    "censoring_assumption": {"censoring": "potentially_informative", "concern": "loss is prognosis-dependent"},
+                },
+                "at_risk_days": 10,
+                "immortal_time_days": 10,
+                "outcome": {"outcome": "censored", "lost_to_follow_up": None},
+                "bias_flags": ["left_truncation", "informative_loss_to_follow_up"],
+            },
+            "outcome": {"outcome": "censored", "lost_to_follow_up": None},
+            "bias_flags": ["left_truncation", "informative_loss_to_follow_up"],
+            "bias_count": 2,
+            "informative_bias_count": 1,
             "at_risk_days": 10,
             "immortal_time_days": 10,
+            "left_truncated": True,
             "event": False,
             "censoring_reason": "lost_to_follow_up",
+            "censoring_informative": True,
             "informative_bias_flags": ["informative_loss_to_follow_up"],
             "guarantees": ["censoring"],
             "limitations": ["one subject"],
         })
         self.assertTrue(outcome.left_truncated)
         self.assertEqual(outcome.censoring_reason, "lost_to_follow_up")
+        self.assertEqual(outcome.analysis_record.estimand.endpoint, "time_to_progression")
+        self.assertEqual(outcome.outcome_record.censoring_reason, "lost_to_follow_up")
+        self.assertEqual(outcome.bias_count, 2)
+
+        with self.assertRaises(ArgumentError):
+            onco_outcome_report({
+                "ok": True,
+                "analysis": {
+                    "subject": "P-1",
+                    "estimand": {
+                        "endpoint": "time_to_progression",
+                        "population": "intention_to_treat",
+                        "variable": "time from entry to progression",
+                        "summary_measure": "median_time_to_event",
+                        "intercurrent_event_strategies": [],
+                        "censoring_assumption": "noninformative_assumed",
+                    },
+                    "at_risk_days": 10,
+                    "immortal_time_days": 0,
+                    "outcome": {"outcome": "censored", "lost_to_follow_up": None},
+                    "bias_flags": [],
+                },
+                "outcome": {"outcome": "censored", "lost_to_follow_up": None},
+                "bias_flags": [],
+                "bias_count": 0,
+                "informative_bias_count": 0,
+                "at_risk_days": 10,
+                "immortal_time_days": 0,
+                "left_truncated": False,
+                "event": False,
+                "censoring_reason": "lost_to_follow_up",
+                "censoring_informative": False,
+                "informative_bias_flags": [],
+                "guarantees": [],
+                "limitations": [],
+            })
 
     def test_new_onco_args_preserve_optional_warrants_and_bound_numbers(self) -> None:
         response = OncoResponseAssessArgs(

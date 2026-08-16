@@ -6073,10 +6073,31 @@ fn onco_outcome_analyze_keeps_censoring_and_delayed_entry_explicit() {
         }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/onco-outcome-analyze/0.1")
+    );
     assert_eq!(result["event"], json!(false));
     assert_eq!(result["censoring_reason"], json!("lost_to_follow_up"));
+    assert_eq!(result["censoring_informative"], json!(true));
+    assert_eq!(result["left_truncated"], json!(true));
     assert_eq!(result["at_risk_days"], json!(10));
     assert_eq!(result["immortal_time_days"], json!(10));
+    assert_eq!(result["bias_count"], json!(2));
+    assert_eq!(result["informative_bias_count"], json!(1));
+    assert_eq!(
+        result["outcome"],
+        json!({"outcome": "censored", "lost_to_follow_up": null})
+    );
+    assert_eq!(result["analysis"]["subject"], json!("P-1"));
+    assert_eq!(
+        result["analysis"]["estimand"]["endpoint"],
+        json!("time_to_progression")
+    );
+    assert_eq!(
+        result["analysis"]["bias_flags"],
+        json!(["left_truncation", "informative_loss_to_follow_up"])
+    );
     assert_eq!(
         result["informative_bias_flags"][0],
         json!("informative_loss_to_follow_up")

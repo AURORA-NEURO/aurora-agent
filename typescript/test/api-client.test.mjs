@@ -746,7 +746,31 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       } } } });
       if (path === "/v1/tools/onco_classification_check") return jsonResponse({ ok: true, tool: "onco_classification_check", request_id: "r34", mcp: { result: { structuredContent: { ok: true, is_integrated: false, obligations: [{ marker: "idh_mutation" }] } } } });
       if (path === "/v1/tools/oncoworlds_identity_join") return jsonResponse({ ok: true, tool: "oncoworlds_identity_join", request_id: "r35", mcp: { result: { structuredContent: { ok: true, joinable: false, bridge_declared: false } } } });
-      if (path === "/v1/tools/onco_outcome_analyze") return jsonResponse({ ok: true, tool: "onco_outcome_analyze", request_id: "r36", mcp: { result: { structuredContent: { ok: true, event: false, censoring_reason: "lost_to_follow_up", immortal_time_days: 4 } } } });
+      if (path === "/v1/tools/onco_outcome_analyze") return jsonResponse({ ok: true, tool: "onco_outcome_analyze", request_id: "r36", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/onco-outcome-analyze/0.1",
+        analysis: {
+          subject: "P-1",
+          estimand: { endpoint: "time_to_progression", population: "intention_to_treat", variable: "time from entry to progression", summary_measure: "median_time_to_event", intercurrent_event_strategies: [["death", "hypothetical"]], censoring_assumption: "noninformative_assumed" },
+          at_risk_days: 10,
+          immortal_time_days: 4,
+          outcome: { outcome: "censored", lost_to_follow_up: null },
+          bias_flags: ["left_truncation", "informative_loss_to_follow_up"],
+        },
+        outcome: { outcome: "censored", lost_to_follow_up: null },
+        bias_flags: ["left_truncation", "informative_loss_to_follow_up"],
+        bias_count: 2,
+        informative_bias_count: 1,
+        at_risk_days: 10,
+        immortal_time_days: 4,
+        left_truncated: true,
+        event: false,
+        censoring_reason: "lost_to_follow_up",
+        censoring_informative: true,
+        informative_bias_flags: ["informative_loss_to_follow_up"],
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/oracle_combine") return jsonResponse({ ok: true, tool: "oracle_combine", request_id: "r37", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/oracle-combine/0.1",
@@ -1242,6 +1266,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(classification.mcp.result.structuredContent.is_integrated, false);
   assert.equal(identity.mcp.result.structuredContent.joinable, false);
   assert.equal(outcome.mcp.result.structuredContent.censoring_reason, "lost_to_follow_up");
+  assert.equal(outcome.mcp.result.structuredContent.schema, "bioprism-mcp/onco-outcome-analyze/0.1");
+  assert.equal(outcome.mcp.result.structuredContent.analysis.estimand.endpoint, "time_to_progression");
+  assert.equal(outcome.mcp.result.structuredContent.bias_count, 2);
   assert.equal(oracleCombine.mcp.result.structuredContent.status, "underdetermined");
   assert.equal(oracleCombine.mcp.result.structuredContent.schema, "bioprism-mcp/oracle-combine/0.1");
   assert.equal(oracleCombine.mcp.result.structuredContent.contributing[0].oracle.version.major, 1);

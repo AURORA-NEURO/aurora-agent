@@ -601,6 +601,11 @@ class OncoClassificationReport:
 
 ONCO_ANALYSIS_UNITS = frozenset({"participant", "lesion", "specimen", "imaging_series"})
 ONCO_BIAS_FLAGS = frozenset({"left_truncation", "informative_loss_to_follow_up", "competing_death", "treatment_switching"})
+ONCO_OUTCOME_SCHEMA = "bioprism-mcp/onco-outcome-analyze/0.1"
+ONCO_OUTCOME_ENDPOINTS = frozenset({"overall_survival", "progression_free_survival", "time_to_progression", "time_to_treatment_failure"})
+ONCO_OUTCOME_POPULATIONS = frozenset({"intention_to_treat", "per_protocol", "evaluable_for_response"})
+ONCO_OUTCOME_EVENT_KINDS = frozenset({"death", "confirmed_progression", "progression_or_death", "treatment_failure"})
+ONCO_OUTCOME_CENSORING_REASONS = frozenset({"administrative_cutoff", "lost_to_follow_up", "withdrew_consent", "event_free_at_last_contact", "competing_death", "subsequent_therapy"})
 
 
 @dataclass(frozen=True)
@@ -684,6 +689,127 @@ class OncoOutcomeAnalyzeArgs:
 
 
 @dataclass(frozen=True)
+class OncoEstimandProjection:
+    """The estimand carried into a one-subject outcome record."""
+
+    raw: dict[str, Any]
+    endpoint: str
+    population: str
+    variable: str
+    summary_measure: str | dict[str, Any]
+    intercurrent_event_strategies: tuple[tuple[str, str], ...]
+    censoring_assumption: str | dict[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoEstimandProjection":
+        raw = _route_mapping("oncology outcome estimand", value)
+        endpoint = _route_text("oncology estimand endpoint", raw.get("endpoint"))
+        population = _route_text("oncology estimand population", raw.get("population"))
+        if endpoint not in ONCO_OUTCOME_ENDPOINTS:
+            raise ArgumentError(f"unknown oncology estimand endpoint: {endpoint!r}")
+        if population not in ONCO_OUTCOME_POPULATIONS:
+            raise ArgumentError(f"unknown oncology estimand population: {population!r}")
+        summary_value = raw.get("summary_measure")
+        if isinstance(summary_value, str):
+            summary_measure: str | dict[str, Any] = _route_text("oncology summary measure", summary_value)
+        else:
+            summary_measure = _route_mapping("oncology summary measure", summary_value)
+        strategies: list[tuple[str, str]] = []
+        seen_events: set[str] = set()
+        for index, pair in enumerate(_array("oncology intercurrent event strategies", raw.get("intercurrent_event_strategies"))):
+            values = _array(f"oncology intercurrent event strategy[{index}]", pair)
+            if len(values) != 2:
+                raise ArgumentError("oncology intercurrent event strategies must be event/strategy pairs")
+            event = _route_text(f"oncology intercurrent event[{index}]", values[0])
+            strategy = _route_text(f"oncology intercurrent strategy[{index}]", values[1])
+            if event in seen_events:
+                raise ArgumentError("oncology estimand cannot declare duplicate intercurrent events")
+            seen_events.add(event)
+            strategies.append((event, strategy))
+        censoring_value = raw.get("censoring_assumption")
+        if isinstance(censoring_value, str):
+            censoring_assumption: str | dict[str, Any] = _route_text("oncology censoring assumption", censoring_value)
+        else:
+            censoring_assumption = _route_mapping("oncology censoring assumption", censoring_value)
+        return cls(
+            raw,
+            endpoint,
+            population,
+            _route_text("oncology estimand variable", raw.get("variable")),
+            summary_measure,
+            tuple(strategies),
+            censoring_assumption,
+        )
+
+
+@dataclass(frozen=True)
+class OncoAnalysisOutcomeProjection:
+    """Endpoint-specific event/censoring outcome, retaining the tagged wire form."""
+
+    raw: dict[str, Any]
+    outcome: str
+    event_kind: str | None
+    censoring_reason: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoAnalysisOutcomeProjection":
+        raw = _route_mapping("oncology analysis outcome", value)
+        outcome = _route_text("oncology analysis outcome tag", raw.get("outcome"))
+        event_kind = censoring_reason = None
+        if outcome == "event":
+            event_kind = _route_text("oncology event kind", raw.get("kind"))
+            if event_kind not in ONCO_OUTCOME_EVENT_KINDS:
+                raise ArgumentError(f"unknown oncology event kind: {event_kind!r}")
+        elif outcome == "censored":
+            reason_value = raw.get("reason")
+            tagged_reasons = [reason for reason in ONCO_OUTCOME_CENSORING_REASONS if reason in raw]
+            if reason_value is not None:
+                censoring_reason = _route_text("oncology analysis censoring reason", reason_value)
+            elif len(tagged_reasons) == 1 and raw[tagged_reasons[0]] is None:
+                censoring_reason = tagged_reasons[0]
+            else:
+                raise ArgumentError("censored oncology outcomes must carry exactly one tagged censoring reason")
+            if censoring_reason not in ONCO_OUTCOME_CENSORING_REASONS:
+                raise ArgumentError(f"unknown oncology analysis censoring reason: {censoring_reason!r}")
+        else:
+            raise ArgumentError(f"unknown oncology analysis outcome: {outcome!r}")
+        return cls(raw, outcome, event_kind, censoring_reason)
+
+    @property
+    def is_event(self) -> bool:
+        return self.outcome == "event"
+
+
+@dataclass(frozen=True)
+class OncoAnalysisRecordProjection:
+    """The nested `AnalysedFollowUp` record that binds outcome numbers to an estimand."""
+
+    raw: dict[str, Any]
+    subject: str
+    estimand: OncoEstimandProjection
+    at_risk_days: int
+    immortal_time_days: int
+    outcome: OncoAnalysisOutcomeProjection
+    bias_flags: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoAnalysisRecordProjection":
+        raw = _route_mapping("oncology outcome analysis", value)
+        flags = _route_strings("oncology analysis bias_flags", raw.get("bias_flags"))
+        if any(flag not in ONCO_BIAS_FLAGS for flag in flags):
+            raise ArgumentError("oncology analysis bias_flags contains an unknown bias")
+        return cls(
+            raw,
+            _route_text("oncology analysis subject", raw.get("subject")),
+            OncoEstimandProjection.from_wire(raw.get("estimand")),
+            _route_count("oncology analysis at_risk_days", raw.get("at_risk_days")),
+            _route_count("oncology analysis immortal_time_days", raw.get("immortal_time_days")),
+            OncoAnalysisOutcomeProjection.from_wire(raw.get("outcome")),
+            flags,
+        )
+
+
+@dataclass(frozen=True)
 class OncoOutcomeReport:
     raw: dict[str, Any]
     ok: bool
@@ -695,14 +821,27 @@ class OncoOutcomeReport:
     informative_bias_flags: tuple[str, ...]
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_record: OncoAnalysisOutcomeProjection | None = None
+    analysis_record: OncoAnalysisRecordProjection | None = None
+    bias_flags: tuple[str, ...] = ()
+    bias_count: int | None = None
+    informative_bias_count: int | None = None
+    censoring_informative: bool | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoOutcomeReport":
         raw = _projection_payload(value, description="oncology outcome", direct_keys=("analysis", "censoring_reason"))
         if not _bool("oncology outcome ok", raw.get("ok")):
             raise ArgumentError("oncology outcome analysis is not successful")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("oncology outcome schema", schema_value)
+        if schema is not None and schema != ONCO_OUTCOME_SCHEMA:
+            raise ArgumentError(f"unknown oncology outcome schema: {schema!r}")
         event = _bool("oncology outcome event", raw.get("event"))
         reason = None if raw.get("censoring_reason") is None else _route_text("oncology censoring_reason", raw.get("censoring_reason"))
+        if reason is not None and reason not in ONCO_OUTCOME_CENSORING_REASONS:
+            raise ArgumentError(f"unknown oncology censoring_reason: {reason!r}")
         if event and reason is not None:
             raise ArgumentError("an oncology event cannot carry a censoring reason")
         if not event and reason is None:
@@ -710,17 +849,51 @@ class OncoOutcomeReport:
         flags = _route_strings("oncology informative_bias_flags", raw.get("informative_bias_flags"))
         if any(flag not in ONCO_BIAS_FLAGS for flag in flags):
             raise ArgumentError("oncology informative_bias_flags contains an unknown bias")
+        analysis_record = OncoAnalysisRecordProjection.from_wire(raw.get("analysis"))
+        outcome_value = OncoAnalysisOutcomeProjection.from_wire(raw.get("outcome"))
+        if outcome_value.raw != analysis_record.outcome.raw:
+            raise ArgumentError("top-level oncology outcome does not reconcile with the analysis record")
+        if outcome_value.is_event != event or outcome_value.censoring_reason != reason:
+            raise ArgumentError("oncology event/censoring fields do not reconcile with the tagged outcome")
+        at_risk_days = _route_count("oncology at_risk_days", raw.get("at_risk_days"))
+        immortal_time_days = _route_count("oncology immortal_time_days", raw.get("immortal_time_days"))
+        if (analysis_record.at_risk_days, analysis_record.immortal_time_days) != (at_risk_days, immortal_time_days):
+            raise ArgumentError("oncology time-at-risk fields do not reconcile with the analysis record")
+        all_flags = _route_strings("oncology bias_flags", raw.get("bias_flags"))
+        if all_flags != analysis_record.bias_flags:
+            raise ArgumentError("oncology bias_flags do not reconcile with the analysis record")
+        informative_expected = tuple(flag for flag in all_flags if flag != "left_truncation")
+        if flags != informative_expected:
+            raise ArgumentError("oncology informative_bias_flags do not reconcile with all bias flags")
+        bias_count = _route_count("oncology bias_count", raw.get("bias_count"))
+        informative_bias_count = _route_count("oncology informative_bias_count", raw.get("informative_bias_count"))
+        if bias_count != len(all_flags) or informative_bias_count != len(flags):
+            raise ArgumentError("oncology bias counts do not reconcile")
+        left_truncated = _bool("oncology left_truncated", raw.get("left_truncated"))
+        if left_truncated != (immortal_time_days > 0):
+            raise ArgumentError("oncology left_truncated does not reconcile with immortal time")
+        censoring_informative_value = raw.get("censoring_informative")
+        censoring_informative = None if censoring_informative_value is None else _bool("oncology censoring_informative", censoring_informative_value)
+        if censoring_informative != (None if reason is None else reason in {"lost_to_follow_up", "withdrew_consent", "competing_death", "subsequent_therapy"}):
+            raise ArgumentError("oncology censoring informativeness does not reconcile with the reason")
         return cls(
             raw,
             True,
-            _route_mapping("oncology outcome analysis", raw.get("analysis")),
-            _route_count("oncology at_risk_days", raw.get("at_risk_days")),
-            _route_count("oncology immortal_time_days", raw.get("immortal_time_days")),
+            analysis_record.raw,
+            at_risk_days,
+            immortal_time_days,
             event,
             reason,
             flags,
             _route_strings("oncology outcome guarantees", raw.get("guarantees")),
             _route_strings("oncology outcome limitations", raw.get("limitations")),
+            schema=schema,
+            outcome_record=outcome_value,
+            analysis_record=analysis_record,
+            bias_flags=all_flags,
+            bias_count=bias_count,
+            informative_bias_count=informative_bias_count,
+            censoring_informative=censoring_informative,
         )
 
     @property

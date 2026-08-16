@@ -194,8 +194,10 @@ invent defaults:
   imaging-series joins with optional identity evidence and epoch bridges. `joinable=False` is a
   successful, auditable domain verdict—not a transport exception—and `bridge_declared` remains
   explicit. `OncoOutcomeAnalyzeArgs`/`onco_outcome_report(...)` carry the predeclared estimand,
-  at-risk days, immortal-time exposure, event/censoring split, and informative-bias flags; the
-  parser rejects event/censoring contradictions.
+  typed endpoint strategy, at-risk days, immortal-time exposure, event/censoring split, and
+  informative-bias flags; `analysis_record` retains the estimand-bound nested outcome and the
+  parser rejects event/censoring, bias-count, and informative-censoring contradictions. See
+  `docs/ONCO_OUTCOME_ANALYZE.md`.
 - `OncoWorldsModelTransportArgs`/`oncoworlds_model_transport_report(...)` preserve model-system
   fidelity, establishment, declared sample size, transport assumptions, and the distinction
   between a supported patient-relevant research claim and a typed fail-closed transport refusal.
