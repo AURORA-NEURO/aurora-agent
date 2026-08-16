@@ -261,4 +261,3 @@ class ProviderCapabilityGateReport:
 
 def provider_capability_gate_report(value: Mapping[str, Any]) -> ProviderCapabilityGateReport:
     return ProviderCapabilityGateReport.from_wire(value)
-
