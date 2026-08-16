@@ -772,7 +772,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         admissible_at: ["early"],
         guarantees: ["accessibility clock"], limitations: ["no denominator"],
       } } } });
-      if (path === "/v1/tools/evaluation_reproduction_check") return jsonResponse({ ok: true, tool: "evaluation_reproduction_check", request_id: "r42", mcp: { result: { structuredContent: { ok: true, reproduced: false, portability_demonstrated: false } } } });
+      if (path === "/v1/tools/evaluation_reproduction_check") return jsonResponse({ ok: true, tool: "evaluation_reproduction_check", request_id: "r42", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/evaluation-reproduction-check/0.1",
+        certificate: { workflow: "w1", environment_pinned: true, verdicts: [["score", { verdict: "diverged", detail: "delta exceeds tolerance" }]] },
+        verdicts: [{ output: "score", verdict: "diverged", detail: "delta exceeds tolerance" }],
+        verdict_count: 1, matched_count: 0, diverged_count: 1, missing_count: 0,
+        reproduced: false,
+        first_divergence: { output: "score", verdict: { verdict: "diverged", detail: "delta exceeds tolerance" } },
+        missing_outputs: [], portability_demonstrated: false,
+        validity_claim: { ok: false, refusal: "not biological validity", fail_closed: true },
+        guarantees: ["first divergence"], limitations: ["no execution"],
+      } } } });
       if (path === "/v1/tools/evaluation_trajectory_check") return jsonResponse({ ok: true, tool: "evaluation_trajectory_check", request_id: "r43", mcp: { result: { structuredContent: { ok: true, steps: 1 } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
@@ -1177,6 +1188,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(lockedHub.mcp.result.structuredContent.entries[0].locked.required_by[0].source.source, "root");
   assert.equal(worldClaim.mcp.result.structuredContent.fail_closed, true);
   assert.equal(observedWorld.mcp.result.structuredContent.provenance.top, "observed");
+  assert.equal(reproduction.mcp.result.structuredContent.schema, "bioprism-mcp/evaluation-reproduction-check/0.1");
+  assert.equal(reproduction.mcp.result.structuredContent.diverged_count, 1);
+  assert.equal(reproduction.mcp.result.structuredContent.first_divergence.output, "score");
   assert.equal(lineage.mcp.result.structuredContent.identity_complete, true);
   assert.equal(preanalytic.mcp.result.structuredContent.fail_closed, true);
   assert.equal(contradiction.mcp.result.structuredContent.stage, "pose");

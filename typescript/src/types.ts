@@ -4265,14 +4265,48 @@ export interface EvaluationReproductionArgs extends JsonObject {
   biological_claim?: string;
 }
 
+export type EvaluationReproductionVerdict = "matched" | "diverged" | "missing";
+
+export interface EvaluationReproductionVerdictResult extends JsonObject {
+  output: string;
+  verdict: EvaluationReproductionVerdict;
+  detail?: string;
+}
+
+export interface EvaluationReproductionCertificateVerdictResult extends JsonObject {
+  verdict: EvaluationReproductionVerdict;
+  detail?: string;
+}
+
+export interface EvaluationReproductionCertificateResult extends JsonObject {
+  workflow: string;
+  environment_pinned: boolean;
+  verdicts: [string, EvaluationReproductionCertificateVerdictResult][];
+}
+
+export interface EvaluationValidityClaimResult extends JsonObject {
+  ok: boolean;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
 export interface EvaluationReproductionResult extends JsonObject {
   ok: boolean;
-  certificate?: JsonObject;
+  schema?: "bioprism-mcp/evaluation-reproduction-check/0.1";
+  certificate?: EvaluationReproductionCertificateResult;
+  verdicts?: EvaluationReproductionVerdictResult[];
+  verdict_count?: number;
+  matched_count?: number;
+  diverged_count?: number;
+  missing_count?: number;
   reproduced?: boolean;
-  first_divergence?: JsonObject | null;
-  missing_outputs?: JsonValue[];
+  first_divergence?: {
+    output: string;
+    verdict: EvaluationReproductionVerdictResult;
+  } | null;
+  missing_outputs?: string[];
   portability_demonstrated?: boolean;
-  validity_claim?: JsonObject | null;
+  validity_claim?: EvaluationValidityClaimResult | null;
   stage?: string;
   refusal?: string;
   fail_closed?: boolean;

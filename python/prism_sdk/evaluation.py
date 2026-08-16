@@ -20,6 +20,8 @@ from .errors import ArgumentError
 ORACLE_STATUSES = frozenset({"valid", "invalid", "underdetermined"})
 ORACLE_EVIDENCE_TIERS = frozenset({"deterministic", "execution", "property", "statistical", "judge"})
 ORACLE_COMBINE_SCHEMA = "bioprism-mcp/oracle-combine/0.1"
+EVALUATION_REPRODUCTION_SCHEMA = "bioprism-mcp/evaluation-reproduction-check/0.1"
+EVALUATION_REPRODUCTION_VERDICTS = frozenset({"matched", "diverged", "missing"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -719,6 +721,97 @@ class EvaluationWorldlineReport:
 
 
 @dataclass(frozen=True)
+class EvaluationReproductionVerdictProjection:
+    raw: dict[str, Any]
+    output: str
+    verdict: str
+    detail: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationReproductionVerdictProjection":
+        raw = _route_mapping("evaluation reproduction verdict", value)
+        verdict = _route_text("evaluation reproduction verdict kind", raw.get("verdict"))
+        if verdict not in EVALUATION_REPRODUCTION_VERDICTS:
+            raise ArgumentError(f"unknown evaluation reproduction verdict: {verdict!r}")
+        detail = None if raw.get("detail") is None else _route_text("evaluation reproduction verdict detail", raw.get("detail"))
+        if verdict == "diverged" and detail is None:
+            raise ArgumentError("diverged evaluation reproduction verdicts require detail")
+        return cls(raw, _route_text("evaluation reproduction output", raw.get("output")), verdict, detail)
+
+
+@dataclass(frozen=True)
+class EvaluationReproductionCertificateProjection:
+    raw: dict[str, Any]
+    workflow: str
+    environment_pinned: bool
+    verdicts: tuple[EvaluationReproductionVerdictProjection, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationReproductionCertificateProjection":
+        raw = _route_mapping("evaluation reproduction certificate", value)
+        pairs = _array("evaluation certificate verdicts", raw.get("verdicts"))
+        rows: list[dict[str, Any]] = []
+        for pair in pairs:
+            values = _array("evaluation certificate verdict pair", pair)
+            if len(values) != 2:
+                raise ArgumentError("evaluation certificate verdicts must be output/verdict pairs")
+            output = _route_text("evaluation certificate output", values[0])
+            verdict = _route_mapping("evaluation certificate verdict", values[1])
+            row = dict(verdict)
+            row["output"] = output
+            rows.append(row)
+        return cls(
+            raw,
+            _route_text("evaluation certificate workflow", raw.get("workflow")),
+            _bool("evaluation certificate environment_pinned", raw.get("environment_pinned")),
+            tuple(EvaluationReproductionVerdictProjection.from_wire(row) for row in rows),
+        )
+
+
+@dataclass(frozen=True)
+class EvaluationReproductionFirstDivergenceProjection:
+    raw: dict[str, Any]
+    output: str
+    verdict: EvaluationReproductionVerdictProjection
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationReproductionFirstDivergenceProjection":
+        raw = _route_mapping("evaluation first divergence", value)
+        output = _route_text("evaluation first divergence output", raw.get("output"))
+        verdict = EvaluationReproductionVerdictProjection.from_wire({
+            "output": output,
+            **_route_mapping("evaluation first divergence verdict", raw.get("verdict")),
+        })
+        if verdict.verdict == "matched":
+            raise ArgumentError("first evaluation divergence cannot be a matched verdict")
+        return cls(raw, output, verdict)
+
+
+@dataclass(frozen=True)
+class EvaluationValidityClaimProjection:
+    raw: dict[str, Any]
+    ok: bool
+    refusal: str | None
+    fail_closed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationValidityClaimProjection":
+        raw = _route_mapping("evaluation validity claim", value)
+        ok = _bool("evaluation validity claim ok", raw.get("ok"))
+        refusal = None if raw.get("refusal") is None else _route_text("evaluation validity claim refusal", raw.get("refusal"))
+        fail_closed_value = raw.get("fail_closed", False)
+        if not isinstance(fail_closed_value, bool):
+            raise ArgumentError("evaluation validity claim fail_closed must be a boolean")
+        fail_closed = fail_closed_value
+        if not ok:
+            if refusal is None or not _bool("evaluation validity claim fail_closed", raw.get("fail_closed")):
+                raise ArgumentError("refused evaluation validity claims must be fail-closed and explain the refusal")
+        elif refusal is not None or fail_closed:
+            raise ArgumentError("successful evaluation validity claims cannot carry refusal evidence")
+        return cls(raw, ok, refusal, fail_closed)
+
+
+@dataclass(frozen=True)
 class EvaluationReproductionReport:
     raw: dict[str, Any]
     ok: bool
@@ -734,36 +827,117 @@ class EvaluationReproductionReport:
     guarantee: str | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    certificate_record: EvaluationReproductionCertificateProjection | None = None
+    verdict_records: tuple[EvaluationReproductionVerdictProjection, ...] = field(default_factory=tuple)
+    first_divergence_record: EvaluationReproductionFirstDivergenceProjection | None = None
+    validity_record: EvaluationValidityClaimProjection | None = None
+    verdict_count: int = 0
+    matched_count: int = 0
+    diverged_count: int = 0
+    missing_count: int = 0
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationReproductionReport":
         raw = _projection_payload(value, description="evaluation reproduction", direct_keys=("certificate", "stage"))
+        schema = None if raw.get("schema") is None else _route_text("evaluation reproduction schema", raw.get("schema"))
+        if schema is not None and schema != EVALUATION_REPRODUCTION_SCHEMA:
+            raise ArgumentError(f"unknown evaluation reproduction schema: {schema!r}")
         ok = _bool("evaluation reproduction ok", raw.get("ok"))
         if not ok:
             stage, refusal, guarantee = _refusal(raw, "evaluation reproduction")
-            return cls(raw, False, None, None, None, (), None, None, stage, refusal, True, guarantee, (), ())
+            return cls(raw, False, None, None, None, (), None, None, stage, refusal, True, guarantee, (), (), schema=schema)
         if raw.get("stage") is not None or raw.get("refusal") is not None or raw.get("fail_closed", False):
             raise ArgumentError("successful evaluation reproduction cannot carry refusal evidence")
+        certificate = _route_mapping("evaluation certificate", raw.get("certificate"))
+        certificate_record = EvaluationReproductionCertificateProjection.from_wire(certificate)
+        verdict_records = tuple(
+            EvaluationReproductionVerdictProjection.from_wire(item)
+            for item in _array("evaluation reproduction verdicts", raw.get("verdicts"))
+        )
+        if len(verdict_records) != len(certificate_record.verdicts):
+            raise ArgumentError("evaluation reproduction verdicts do not reconcile with the certificate")
+        if tuple((row.output, row.verdict, row.detail) for row in verdict_records) != tuple(
+            (row.output, row.verdict, row.detail) for row in certificate_record.verdicts
+        ):
+            raise ArgumentError("evaluation reproduction top-level verdicts do not reconcile with the certificate")
+        verdict_count = _route_count("evaluation verdict_count", raw.get("verdict_count"))
+        matched_count = _route_count("evaluation matched_count", raw.get("matched_count"))
+        diverged_count = _route_count("evaluation diverged_count", raw.get("diverged_count"))
+        missing_count = _route_count("evaluation missing_count", raw.get("missing_count"))
+        if verdict_count != len(verdict_records) or matched_count + diverged_count + missing_count != verdict_count:
+            raise ArgumentError("evaluation reproduction verdict counts do not reconcile")
+        expected_counts = {
+            "matched": sum(row.verdict == "matched" for row in verdict_records),
+            "diverged": sum(row.verdict == "diverged" for row in verdict_records),
+            "missing": sum(row.verdict == "missing" for row in verdict_records),
+        }
+        if (matched_count, diverged_count, missing_count) != (expected_counts["matched"], expected_counts["diverged"], expected_counts["missing"]):
+            raise ArgumentError("evaluation reproduction verdict counts do not match verdict rows")
+        reproduced = _bool("evaluation reproduced", raw.get("reproduced"))
+        if reproduced != (matched_count == verdict_count):
+            raise ArgumentError("evaluation reproduced does not reconcile with verdict rows")
+        missing_outputs = tuple(_route_text("evaluation missing output", item) for item in _array("evaluation missing_outputs", raw.get("missing_outputs")))
+        expected_missing = tuple(row.output for row in verdict_records if row.verdict == "missing")
+        if missing_outputs != expected_missing:
+            raise ArgumentError("evaluation missing_outputs do not reconcile with verdict rows")
+        first_divergence = _optional_mapping("evaluation first_divergence", raw.get("first_divergence"))
+        first_divergence_record = None if first_divergence is None else EvaluationReproductionFirstDivergenceProjection.from_wire(first_divergence)
+        expected_first = next((row for row in verdict_records if row.verdict != "matched"), None)
+        if (expected_first is None) != (first_divergence_record is None):
+            raise ArgumentError("evaluation first_divergence does not reconcile with verdict rows")
+        if expected_first is not None and (
+            first_divergence_record.output != expected_first.output
+            or first_divergence_record.verdict.verdict != expected_first.verdict
+            or first_divergence_record.verdict.detail != expected_first.detail
+        ):
+            raise ArgumentError("evaluation first_divergence is not the earliest non-matching output")
+        portability = _bool("evaluation portability_demonstrated", raw.get("portability_demonstrated"))
+        if portability and (not reproduced or certificate_record.environment_pinned):
+            raise ArgumentError("evaluation portability cannot be demonstrated by a failed or pinned rerun")
+        validity = _optional_mapping("evaluation validity_claim", raw.get("validity_claim"))
+        validity_record = None if validity is None else EvaluationValidityClaimProjection.from_wire(validity)
         return cls(
             raw,
             True,
-            _route_mapping("evaluation certificate", raw.get("certificate")),
-            _bool("evaluation reproduced", raw.get("reproduced")),
-            _optional_mapping("evaluation first_divergence", raw.get("first_divergence")),
-            _array("evaluation missing_outputs", raw.get("missing_outputs")),
-            _bool("evaluation portability_demonstrated", raw.get("portability_demonstrated")),
-            _optional_mapping("evaluation validity_claim", raw.get("validity_claim")),
+            certificate,
+            reproduced,
+            first_divergence,
+            missing_outputs,
+            portability,
+            validity,
             None,
             None,
             False,
             None,
             _route_strings("evaluation reproduction guarantees", raw.get("guarantees")),
             _route_strings("evaluation reproduction limitations", raw.get("limitations")),
+            schema=schema,
+            certificate_record=certificate_record,
+            verdict_records=verdict_records,
+            first_divergence_record=first_divergence_record,
+            validity_record=validity_record,
+            verdict_count=verdict_count,
+            matched_count=matched_count,
+            diverged_count=diverged_count,
+            missing_count=missing_count,
         )
 
     @property
     def reproduced_and_portable(self) -> bool:
         return self.reproduced is True and self.portability_demonstrated is True
+
+    @property
+    def has_divergence(self) -> bool:
+        return self.diverged_count > 0
+
+    @property
+    def has_missing_outputs(self) -> bool:
+        return self.missing_count > 0
+
+    @property
+    def validity_is_separate(self) -> bool:
+        return self.validity_record is None or not self.validity_record.ok
 
 
 @dataclass(frozen=True)
@@ -847,8 +1021,14 @@ __all__ = [
     "ORACLE_COMBINE_SCHEMA",
     "ORACLE_EVIDENCE_TIERS",
     "ORACLE_STATUSES",
+    "EVALUATION_REPRODUCTION_SCHEMA",
+    "EVALUATION_REPRODUCTION_VERDICTS",
     "BioevalReferenceAuditReport",
+    "EvaluationReproductionCertificateProjection",
+    "EvaluationReproductionFirstDivergenceProjection",
     "EvaluationReproductionReport",
+    "EvaluationReproductionVerdictProjection",
+    "EvaluationValidityClaimProjection",
     "EvaluationDanglingReferenceProjection",
     "EvaluationLeakWitnessProjection",
     "EvaluationTrajectoryReport",

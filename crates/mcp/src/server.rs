@@ -39,7 +39,7 @@ use bioprism_bioethics::representation::{
 };
 use bioprism_bioethics::validation::ValidationDossier;
 use bioprism_bioeval::{Dispersion, ReferenceDistribution, ReferenceStandard};
-use bioprism_bioevalx::{Reexecution, Trajectory, Worldline as EvaluationWorldline};
+use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
 use bioprism_bundle::ResultBundle;
@@ -9197,6 +9197,7 @@ impl Server {
             Err(error) => {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/evaluation-reproduction-check/0.1",
                     "stage": "certification",
                     "refusal": error.to_string(),
                     "fail_closed": true,
@@ -9204,6 +9205,35 @@ impl Server {
                 }))
             }
         };
+        let verdicts: Vec<Value> = certificate
+            .verdicts()
+            .iter()
+            .map(|(output, verdict)| {
+                let mut record = serde_json::Map::new();
+                record.insert("output".into(), json!(output));
+                if let Value::Object(fields) =
+                    serde_json::to_value(verdict).map_err(|error| error.to_string())?
+                {
+                    record.extend(fields);
+                }
+                Ok(Value::Object(record))
+            })
+            .collect::<Result<_, String>>()?;
+        let matched_count = certificate
+            .verdicts()
+            .iter()
+            .filter(|(_, verdict)| matches!(verdict, OutputVerdict::Matched))
+            .count();
+        let diverged_count = certificate
+            .verdicts()
+            .iter()
+            .filter(|(_, verdict)| matches!(verdict, OutputVerdict::Diverged { .. }))
+            .count();
+        let missing_count = certificate
+            .verdicts()
+            .iter()
+            .filter(|(_, verdict)| matches!(verdict, OutputVerdict::Missing))
+            .count();
         let first_divergence = certificate
             .first_divergence()
             .map(|(output, verdict)| json!({ "output": output, "verdict": verdict }));
@@ -9221,7 +9251,13 @@ impl Server {
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/evaluation-reproduction-check/0.1",
             "certificate": certificate,
+            "verdicts": verdicts,
+            "verdict_count": certificate.verdicts().len(),
+            "matched_count": matched_count,
+            "diverged_count": diverged_count,
+            "missing_count": missing_count,
             "reproduced": certificate.reproduced(),
             "first_divergence": first_divergence,
             "missing_outputs": certificate.missing(),

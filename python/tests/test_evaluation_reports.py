@@ -127,17 +127,30 @@ class EvaluationReportTests(unittest.TestCase):
         self.assertEqual(worldline.leak_records[0].available_at, "2026-01-02T00:00:00Z")
         reproduction = evaluation_reproduction_check_report({
             "ok": True,
-            "certificate": {"workflow": "w1"},
+            "schema": "bioprism-mcp/evaluation-reproduction-check/0.1",
+            "certificate": {
+                "workflow": "w1",
+                "environment_pinned": True,
+                "verdicts": [["score", {"verdict": "diverged", "detail": "delta exceeds tolerance"}]],
+            },
+            "verdicts": [{"output": "score", "verdict": "diverged", "detail": "delta exceeds tolerance"}],
+            "verdict_count": 1,
+            "matched_count": 0,
+            "diverged_count": 1,
+            "missing_count": 0,
             "reproduced": False,
-            "first_divergence": {"output": "score"},
+            "first_divergence": {"output": "score", "verdict": {"verdict": "diverged", "detail": "delta exceeds tolerance"}},
             "missing_outputs": [],
             "portability_demonstrated": False,
-            "validity_claim": {"ok": False, "refusal": "not biological validity"},
+            "validity_claim": {"ok": False, "refusal": "not biological validity", "fail_closed": True},
             "guarantees": ["separate validity"],
             "limitations": ["no execution"],
         })
         self.assertIsInstance(reproduction, EvaluationReproductionReport)
         self.assertFalse(reproduction.reproduced_and_portable)
+        self.assertTrue(reproduction.has_divergence)
+        self.assertTrue(reproduction.validity_is_separate)
+        self.assertEqual(reproduction.first_divergence_record.output, "score")
         trajectory = evaluation_trajectory_check_report({
             "ok": True,
             "steps": 2,
@@ -172,6 +185,35 @@ class EvaluationReportTests(unittest.TestCase):
             "ok": False, "stage": "certification", "refusal": "empty", "fail_closed": True,
         })
         self.assertTrue(refused.fail_closed)
+        valid_reproduction = {
+            "ok": True,
+            "schema": "bioprism-mcp/evaluation-reproduction-check/0.1",
+            "certificate": {
+                "workflow": "w1",
+                "environment_pinned": True,
+                "verdicts": [["score", {"verdict": "diverged", "detail": "delta exceeds tolerance"}]],
+            },
+            "verdicts": [{"output": "score", "verdict": "diverged", "detail": "delta exceeds tolerance"}],
+            "verdict_count": 1,
+            "matched_count": 0,
+            "diverged_count": 1,
+            "missing_count": 0,
+            "reproduced": False,
+            "first_divergence": {"output": "score", "verdict": {"verdict": "diverged", "detail": "delta exceeds tolerance"}},
+            "missing_outputs": [],
+            "portability_demonstrated": False,
+            "validity_claim": {"ok": False, "refusal": "not biological validity", "fail_closed": True},
+            "guarantees": [],
+            "limitations": [],
+        }
+        for mutation in (
+            {"matched_count": 1},
+            {"missing_outputs": ["score"]},
+            {"first_divergence": {"output": "other", "verdict": {"verdict": "diverged", "detail": "delta exceeds tolerance"}}},
+            {"validity_claim": {"ok": False, "refusal": "not biological validity", "fail_closed": False}},
+        ):
+            with self.assertRaises(ArgumentError):
+                evaluation_reproduction_check_report({**valid_reproduction, **mutation})
         no_decision = oracle_combine_report({
             "ok": True, "subject": "s", "at": "2026-01-01T00:00:00Z", "status": "underdetermined",
             "underdetermined": True, "deciding_tier": None, "judge_only": False,

@@ -385,7 +385,10 @@ and modal summaries separate; see
 [`docs/BIOEVAL_REFERENCE_AUDIT.md`](../docs/BIOEVAL_REFERENCE_AUDIT.md).
 `evaluationWorldlineAudit` types accessibility-clock leak witnesses and separate dangling
 references; see [`docs/EVALUATION_WORLDLINE_AUDIT.md`](../docs/EVALUATION_WORLDLINE_AUDIT.md);
-`evaluationReproductionCheck` keeps reproducibility separate from biological validity; and
+`evaluationReproductionCheck` types the stable schema, ordered certificate verdicts,
+matched/diverged/missing summary counts, first divergence, portability posture, and explicit
+biological-validity refusal, keeping reproducibility separate from biological validity; see
+[`docs/EVALUATION_REPRODUCTION_CHECK.md`](../docs/EVALUATION_REPRODUCTION_CHECK.md); and
 `evaluationTrajectoryCheck` exposes non-vacuous property outcomes and bounded suffix completeness.
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and

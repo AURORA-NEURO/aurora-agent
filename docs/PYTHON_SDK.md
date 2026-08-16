@@ -794,7 +794,10 @@ mass, resolution, dispersion attribution, and unresolved/not-evaluable reference
 [`docs/ORACLE_COMBINE.md`](ORACLE_COMBINE.md) and
 [`docs/BIOEVAL_REFERENCE_AUDIT.md`](BIOEVAL_REFERENCE_AUDIT.md). `EvaluationWorldlineReport`
 additionally types accessibility leak witnesses and dangling-reference pairs; see
-[`docs/EVALUATION_WORLDLINE_AUDIT.md`](EVALUATION_WORLDLINE_AUDIT.md).
+[`docs/EVALUATION_WORLDLINE_AUDIT.md`](EVALUATION_WORLDLINE_AUDIT.md). `EvaluationReproductionReport`
+additionally types the certificate's ordered verdict ledger, matched/diverged/missing count
+reconciliation, first-divergence row, portability posture, and fail-closed biological-validity
+refusal; see [`docs/EVALUATION_REPRODUCTION_CHECK.md`](EVALUATION_REPRODUCTION_CHECK.md).
 
 ## Biological stress profiling
 

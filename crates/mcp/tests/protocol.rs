@@ -5277,7 +5277,17 @@ fn evaluation_reproduction_check_keeps_divergence_and_validity_refusal_visible()
         }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/evaluation-reproduction-check/0.1")
+    );
     assert_eq!(result["reproduced"], json!(false));
+    assert_eq!(result["verdict_count"], json!(2));
+    assert_eq!(result["matched_count"], json!(1));
+    assert_eq!(result["diverged_count"], json!(1));
+    assert_eq!(result["missing_count"], json!(0));
+    assert_eq!(result["verdicts"][1]["output"], json!("score"));
+    assert_eq!(result["verdicts"][1]["verdict"], json!("diverged"));
     assert_eq!(result["first_divergence"]["output"], json!("score"));
     assert_eq!(result["validity_claim"]["ok"], json!(false));
     assert_eq!(result["portability_demonstrated"], json!(false));
