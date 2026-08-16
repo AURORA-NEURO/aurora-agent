@@ -3859,6 +3859,62 @@ export interface CiExecutionEvidenceResult extends JsonObject {
   limitations: string[];
 }
 
+export interface DelegatedCheckEvidenceArgs extends JsonObject {
+  name: string;
+  kind: string;
+  required: boolean;
+  status: "passed" | "failed" | "refused" | "not_run" | "unknown";
+  result_digest: string;
+  source: string;
+  trace_sequence?: number;
+}
+
+export interface ExecutionProvenanceArgs extends JsonObject {
+  mission: JsonObject;
+  delegated_checks?: DelegatedCheckEvidenceArgs[];
+}
+
+export interface ExecutionProvenanceFindingResult extends JsonObject {
+  code: string;
+  severity: string;
+  subject: string;
+  detail: string;
+}
+
+export interface ExecutionProvenanceResult extends JsonObject {
+  ok: boolean;
+  workflow: "execution_provenance_audit";
+  schema: "bioprism-devplat-execution-provenance/0.1";
+  valid: boolean;
+  provenance_ready: boolean;
+  mission_id: string;
+  plan_digest: string;
+  trace_digest: string;
+  provenance_digest: string;
+  mission_execution: string;
+  mission_status: string;
+  planned_step_count: number;
+  result_count: number;
+  trace_event_count: number;
+  delegated_check_count: number;
+  required_failure_count: number;
+  required_check_count: number;
+  passed_check_count: number;
+  nonpassing_required_checks: string[];
+  missing_step_results: string[];
+  unknown_step_results: string[];
+  duplicate_trace_sequences: number[];
+  trace_identity_errors: string[];
+  complete: boolean;
+  structurally_valid: boolean;
+  release_candidate: boolean;
+  execution: string;
+  verification: string;
+  findings: ExecutionProvenanceFindingResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CapabilityDiscoverArgs extends JsonObject {
   query?: string;
   group_id?: string;

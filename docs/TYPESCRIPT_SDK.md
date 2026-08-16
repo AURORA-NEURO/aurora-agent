@@ -108,6 +108,9 @@ Convenience methods currently cover:
   generated workbench plan, with per-check result digests, complete/missing/non-passing findings,
   provider provenance, and structural-only verification. Its ready flag is a handoff signal, not
   proof that a runner, provider signature, deployment, or scientific workflow was verified;
+- `executionProvenanceAudit`: reconciles a returned mission report with its plan, terminal trace,
+  and delegated-check digests, exposing structural validity and a bounded provenance-ready signal
+  without replaying the mission or contacting a provider;
 - `agentMission`: deterministic cross-domain mission planning or explicitly allow-listed execution
   with refusal propagation, output budgets, and optional JSON-pointer bindings;
 - `submitMission`, `missionStatus`, and `cancelMission`: typed asynchronous mission jobs with
@@ -166,7 +169,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 170-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 171-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,

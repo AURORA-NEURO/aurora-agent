@@ -399,6 +399,10 @@ invent defaults:
   digests, missing/unknown/duplicate/non-passing findings, provider provenance, structural-only
   verification, and the bounded `ci_evidence_ready` handoff. It never executes or authenticates a
   provider run; see [`docs/CI_EVIDENCE.md`](CI_EVIDENCE.md).
+- `execution_provenance_audit(...)` reconciles an `agent_mission` report with terminal results,
+  contiguous trace identity, and optional delegated checks. `ExecutionProvenanceReport` preserves
+  content digests, missingness, non-passing checks, and the structural-only `provenance_ready`
+  handoff across `Workspace`, `AsyncWorkspace`, and the HTTP clients; it never replays the mission.
 - `developer_platform_status(...)` exposes the in-repository developer-platform contract through
   sync MCP, async MCP, and HTTP. `DeveloperPlatformStatusReport` types the module classification
   ledger, every walkthrough's checkable/partly-outside/entirely-outside standing, cookbook

@@ -124,6 +124,39 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
+      if (path === "/v1/tools/execution_provenance_audit") return jsonResponse({ ok: true, tool: "execution_provenance_audit", request_id: "r28", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "execution_provenance_audit",
+        schema: "bioprism-devplat-execution-provenance/0.1",
+        valid: true,
+        provenance_ready: true,
+        mission_id: "mission-ts",
+        plan_digest: "p".repeat(64),
+        trace_digest: "t".repeat(64),
+        provenance_digest: "v".repeat(64),
+        mission_execution: "executed",
+        mission_status: "succeeded",
+        planned_step_count: 1,
+        result_count: 1,
+        trace_event_count: 3,
+        delegated_check_count: 1,
+        required_failure_count: 0,
+        required_check_count: 1,
+        passed_check_count: 1,
+        nonpassing_required_checks: [],
+        missing_step_results: [],
+        unknown_step_results: [],
+        duplicate_trace_sequences: [],
+        trace_identity_errors: [],
+        complete: true,
+        structurally_valid: true,
+        release_candidate: true,
+        execution: "evidence_supplied_not_executed_here",
+        verification: "structural_only",
+        findings: [],
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/developer_platform_status") return jsonResponse({ ok: true, tool: "developer_platform_status", request_id: "r16", mcp: { result: { structuredContent: {
         ok: true,
         root: "workspace",
@@ -1542,6 +1575,13 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(ciEvidence.mcp.result.structuredContent.workflow, "ci_execution_evidence_audit");
   assert.equal(ciEvidence.mcp.result.structuredContent.ci_evidence_ready, true);
   assert.equal(ciEvidence.mcp.result.structuredContent.audit.verification, "structural_only");
+  const provenance = await client.executionProvenanceAudit({
+    mission: { plan: { mission_id: "mission-ts", digest: "p".repeat(64) }, execution: "executed" },
+    delegated_checks: [{ name: "unit_tests", kind: "test", required: true, status: "passed", result_digest: "r".repeat(64), source: "caller_attested" }],
+  });
+  assert.equal(provenance.mcp.result.structuredContent.workflow, "execution_provenance_audit");
+  assert.equal(provenance.mcp.result.structuredContent.provenance_ready, true);
+  assert.deepEqual(JSON.parse(seen.at(-1).init.body).delegated_checks[0].name, "unit_tests");
   const platform = await client.developerPlatformStatus({ include_details: false, max_items: 3 });
   assert.equal(platform.mcp.result.structuredContent.detail_mode, "summary");
   assert.equal(platform.mcp.result.structuredContent.devplat.modules_classified, 4);

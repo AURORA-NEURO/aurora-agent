@@ -113,6 +113,15 @@ from .ci_evidence import (
     CiExecutionEvidenceRequest,
     ci_execution_evidence_report,
 )
+from .execution_provenance import (
+    EXECUTION_PROVENANCE_SCHEMA,
+    MAX_DELEGATED_CHECKS,
+    DelegatedCheckEvidenceArgs,
+    ExecutionProvenanceFindingReport,
+    ExecutionProvenanceReport,
+    ExecutionProvenanceRequest,
+    execution_provenance_report,
+)
 from .conformance import (
     ConformanceCaseReport,
     ConformanceOutcomeReport,
@@ -2242,6 +2251,13 @@ __all__ = [
     "CiExecutionEvidenceReport",
     "CiExecutionEvidenceRequest",
     "ci_execution_evidence_report",
+    "EXECUTION_PROVENANCE_SCHEMA",
+    "MAX_DELEGATED_CHECKS",
+    "DelegatedCheckEvidenceArgs",
+    "ExecutionProvenanceFindingReport",
+    "ExecutionProvenanceReport",
+    "ExecutionProvenanceRequest",
+    "execution_provenance_report",
     "DeliveryTargetReport",
     "DeliveryReadinessReport",
     "DeliveryExternalSurfaceReport",

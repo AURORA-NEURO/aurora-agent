@@ -10,6 +10,7 @@ from prism_sdk import (
     AsyncWorkspace,
     CiExecutionEvidenceRequest,
     Client,
+    ExecutionProvenanceRequest,
     LifecycleError,
     RemoteError,
     ToolRefusal,
@@ -82,6 +83,10 @@ class SyncClientTests(unittest.TestCase):
             )
             self.assertEqual(report["echo"]["release_request"]["id"], "sdk-test")
             self.assertEqual(report["echo"]["ci_evidence"]["evidence"]["run_id"], "run-42")
+            provenance = Workspace(client).execution_provenance_audit(
+                ExecutionProvenanceRequest({"plan": {"mission_id": "mission-sdk"}})
+            )
+            self.assertEqual(provenance["echo"]["mission"]["plan"]["mission_id"], "mission-sdk")
             otel = Workspace(client).trace_otel_ingest(
                 "otel-test",
                 otlp_json='{"resourceSpans":[]}',
@@ -154,6 +159,10 @@ class AsyncClientTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(report["echo"]["release_request"]["id"], "async-test")
             self.assertEqual(report["echo"]["ci_evidence"]["evidence"]["run_id"], "run-42")
+            provenance = await AsyncWorkspace(client).execution_provenance_audit(
+                ExecutionProvenanceRequest({"plan": {"mission_id": "mission-async"}})
+            )
+            self.assertEqual(provenance["echo"]["mission"]["plan"]["mission_id"], "mission-async")
             context = await AsyncWorkspace(client).compile_context(
                 {"world": "fixture"},
                 {"query": "fixture"},

@@ -34,6 +34,7 @@ from .capability import (
 )
 from .capability_dashboard import CapabilityDashboardQueryArgs, CapabilityDashboardReport, capability_dashboard_report
 from .ci_evidence import CiExecutionEvidenceReport, CiExecutionEvidenceRequest, ci_execution_evidence_report
+from .execution_provenance import ExecutionProvenanceReport, ExecutionProvenanceRequest, execution_provenance_report
 from .conformance import ConformanceRunReport, conformance_run_report
 from .context_requests import (
     ContextLayer,
@@ -1344,6 +1345,23 @@ class ApiClient:
         """Return typed structural CI evidence through HTTP."""
 
         return ci_execution_evidence_report(self.ci_execution_evidence_audit(request))
+
+    def execution_provenance_audit(
+        self,
+        request: ExecutionProvenanceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Reconcile mission and delegated-check provenance through HTTP."""
+
+        normalized = request if isinstance(request, ExecutionProvenanceRequest) else ExecutionProvenanceRequest(**dict(request))
+        return self.call_tool("execution_provenance_audit", normalized.to_mcp_arguments())
+
+    def execution_provenance_report(
+        self,
+        request: ExecutionProvenanceRequest | Mapping[str, Any],
+    ) -> ExecutionProvenanceReport:
+        """Return typed mission/delegated-check provenance through HTTP."""
+
+        return execution_provenance_report(self.execution_provenance_audit(request))
 
     def capability_discover_report(
         self,
@@ -4083,6 +4101,23 @@ class AsyncApiClient:
         """Return typed structural CI evidence through async HTTP."""
 
         return ci_execution_evidence_report(await self.ci_execution_evidence_audit(request))
+
+    async def execution_provenance_audit(
+        self,
+        request: ExecutionProvenanceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.execution_provenance_audit`."""
+
+        normalized = request if isinstance(request, ExecutionProvenanceRequest) else ExecutionProvenanceRequest(**dict(request))
+        return await self.call_tool("execution_provenance_audit", normalized.to_mcp_arguments())
+
+    async def execution_provenance_report(
+        self,
+        request: ExecutionProvenanceRequest | Mapping[str, Any],
+    ) -> ExecutionProvenanceReport:
+        """Return typed async mission/delegated-check provenance through HTTP."""
+
+        return execution_provenance_report(await self.execution_provenance_audit(request))
 
     async def capability_discover_report(
         self,

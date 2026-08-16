@@ -696,6 +696,8 @@ crate/CLI/Python/MCP surface counts separate, and labels missing transports with
 declared surface has been executed. Its `dashboard_digest`, filters, and truncation warnings make
 the inventory reproducible before a caller selects tools for a mission; see
 [`docs/CAPABILITY_DASHBOARD.md`](docs/CAPABILITY_DASHBOARD.md).
+Mission/delegated-check handoffs are similarly available through the digest-bound
+[`docs/EXECUTION_PROVENANCE.md`](docs/EXECUTION_PROVENANCE.md) projection.
 `ci_execution_evidence_audit` closes the next authoring boundary: it regenerates the canonical
 workbench CI plan, binds caller-supplied run evidence to its digest and exact check set, requires
 per-check result digests, and keeps provider/caller provenance separate from structural verification.
@@ -705,6 +707,10 @@ validity was established.
 When a delivery decision needs this signal, `developer_delivery_audit` accepts the exact
 `ci_evidence` payload and exposes a separate `ci_execution_evidence` target; missing evidence blocks
 that target without changing the semantics of other delivery targets.
+`execution_provenance_audit` closes the adjacent mission handoff: it reconciles the returned plan,
+terminal results, deterministic trace, and delegated check digests into one structural artifact.
+It flags missing, duplicated, or identity-mismatched evidence, but never replays the mission or
+upgrades caller/provider evidence into execution authority.
 Typed discovery projections now preserve the complete matched group context—domains, Rust crates,
 CLI entrypoints, Python artifacts, ranked fields, matched tools, catalog digest, and optional
 authoritative tool schemas—so cross-domain routing can inspect coverage without falling back to

@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 170);
+    assert_eq!(tools.len(), 171);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4221,6 +4221,57 @@ fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
 }
 
 #[test]
+fn execution_provenance_reconciles_mission_trace_and_delegated_checks() {
+    let mut server = server();
+    let mission = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "mission-provenance-1",
+            "goal": "produce a bounded provenance trace",
+            "steps": [
+                {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}
+            ],
+            "policy": {"execute": true, "allowed_tools": ["workspace_capabilities"]}
+        }),
+    );
+    assert_eq!(mission["mission_status"], json!("succeeded"));
+    let provenance = call(
+        &mut server,
+        "execution_provenance_audit",
+        json!({
+            "mission": mission.clone(),
+            "delegated_checks": [{
+                "name": "mission_trace_shape",
+                "kind": "structural",
+                "required": true,
+                "status": "passed",
+                "result_digest": "a".repeat(64),
+                "source": "caller_attested"
+            }]
+        }),
+    );
+    assert_eq!(provenance["workflow"], json!("execution_provenance_audit"));
+    assert_eq!(provenance["valid"], json!(true));
+    assert_eq!(provenance["provenance_ready"], json!(true));
+    assert_eq!(provenance["delegated_check_count"], json!(1));
+
+    let mut tampered = mission;
+    tampered["execution_trace"][1]["sequence"] = json!(99);
+    let rejected = call(
+        &mut server,
+        "execution_provenance_audit",
+        json!({"mission": tampered}),
+    );
+    assert_eq!(rejected["valid"], json!(false));
+    assert!(rejected["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "trace_identity_error"));
+}
+
+#[test]
 fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     let mut server = server();
     let planned = call(
@@ -4630,12 +4681,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(170));
-    assert_eq!(result["advertised_tool_count"], json!(170));
+    assert_eq!(result["unique_catalog_tools"], json!(171));
+    assert_eq!(result["advertised_tool_count"], json!(171));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(170));
-    assert_eq!(result["schema_quality"]["valid"], json!(170));
+    assert_eq!(result["schema_quality"]["checked"], json!(171));
+    assert_eq!(result["schema_quality"]["valid"], json!(171));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

@@ -128,11 +128,13 @@ use bioprism_dataops::{
     DataClass, Plane, TenantPattern,
 };
 use bioprism_devplat::{
-    apply_binding, audit_ci_execution_evidence, build_dashboard, plan_mission, run_workbench,
+    apply_binding, audit_ci_execution_evidence, audit_execution_provenance, build_dashboard,
+    plan_mission, run_workbench,
     standard_walkthroughs,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    CiExecutionEvidenceRequest, DevPlatReport, MissionReport, MissionRequest,
-    MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver, WorkbenchRequest,
+    CiExecutionEvidenceRequest, DevPlatReport, ExecutionProvenanceRequest, MissionReport,
+    MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
+    WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
     SandboxManifest,
@@ -1483,6 +1485,7 @@ impl Server {
             "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "ci_execution_evidence_audit" => self.ci_execution_evidence_audit(&arguments),
+            "execution_provenance_audit" => self.execution_provenance_audit(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
             "capability_audit" => self.capability_audit(&arguments),
             "capability_dashboard" => self.capability_dashboard(&arguments),
@@ -23179,6 +23182,25 @@ impl Server {
         Ok(output)
     }
 
+    /// Reconcile a returned mission report with delegated check evidence without executing it.
+    fn execution_provenance_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode execution provenance input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("execution provenance input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: ExecutionProvenanceRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid execution provenance input: {error}"))?;
+        let audit = audit_execution_provenance(&request)?;
+        let mut output = serde_json::to_value(&audit)
+            .map_err(|error| format!("cannot encode execution provenance audit: {error}"))?;
+        output["ok"] = json!(true);
+        output["workflow"] = json!("execution_provenance_audit");
+        output["valid"] = json!(audit.structurally_valid);
+        output["provenance_ready"] = json!(audit.release_candidate);
+        Ok(output)
+    }
+
     /// Plan or execute an explicit, bounded DAG of existing domain tools.
     ///
     /// Planning is the default. Execution invokes the same internal tool dispatcher used by the
@@ -26972,7 +26994,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_execution_evidence_audit", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -29376,6 +29398,35 @@ pub fn tool_definitions() -> Vec<Value> {
                     "evidence": { "type": "object", "description": "CiRunEvidence with run_id, provider, source, plan_digest, conclusion, checks, and optional environment_digest/run_url. Each check requires a valid result_digest." }
                 },
                 "required": ["ci", "evidence"]
+            }
+        }),
+        json!({
+            "name": "execution_provenance_audit",
+            "description": "Reconcile a returned agent mission report with its embedded plan, terminal step results, deterministic trace ordering, and optional delegated check evidence. It recomputes trace/provenance digests and emits a bounded structural readiness signal without replaying the mission, contacting providers, or approving deployment, security, scientific, clinical, or release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission": { "type": "object", "description": "The exact MissionReport returned by agent_mission, including plan, results, execution_trace, execution, and mission_status." },
+                    "delegated_checks": {
+                        "type": "array",
+                        "maxItems": 64,
+                        "description": "Optional check evidence attached to the mission. Each row needs name, kind, required, status, result_digest, source, and may reference a mission trace sequence.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string" },
+                                "kind": { "type": "string" },
+                                "required": { "type": "boolean" },
+                                "status": { "type": "string", "enum": ["passed", "failed", "refused", "not_run", "unknown"] },
+                                "result_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+                                "source": { "type": "string" },
+                                "trace_sequence": { "type": "integer", "minimum": 0 }
+                            },
+                            "required": ["name", "kind", "required", "status", "result_digest", "source"]
+                        }
+                    }
+                },
+                "required": ["mission"]
             }
         }),
         json!({

@@ -247,6 +247,10 @@ deployment approval, or scientific validity.
 `developer_delivery_audit` now accepts that result only through an explicit `ci_evidence` argument;
 the independent `ci_execution_evidence` release target is fail-closed when the evidence is absent or
 not ready, while unrelated local-delivery targets remain independently auditable.
+`execution_provenance_audit` adds the corresponding mission-side handoff: returned plan identity,
+terminal results, deterministic trace ordering/tool identity, and delegated-check digests are
+reconciled in one structural projection. It does not replay a mission or replace external execution,
+provider authentication, deployment approval, or durable audit storage.
 The mission layer now composes the shipped domain tools into a deterministic DAG with an explicit
 preview/execute boundary, tool allow-list, side-effect policy, output budgets, and refusal-to-blocked
 dependency propagation. This materially improves agent usefulness across domains without claiming

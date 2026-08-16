@@ -227,6 +227,8 @@ import type {
   DeveloperWorkbenchArgs,
   CiExecutionEvidenceArgs,
   CiExecutionEvidenceResult,
+  ExecutionProvenanceArgs,
+  ExecutionProvenanceResult,
   EventMetrics,
   EventPersistenceStatus,
   EventsResponse,
@@ -678,6 +680,10 @@ export class ApiClient {
 
   async ciExecutionEvidenceAudit(args: CiExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiExecutionEvidenceResult>> {
     return this.callTool<CiExecutionEvidenceResult>("ci_execution_evidence_audit", args, options);
+  }
+
+  async executionProvenanceAudit(args: ExecutionProvenanceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ExecutionProvenanceResult>> {
+    return this.callTool<ExecutionProvenanceResult>("execution_provenance_audit", args, options);
   }
 
   async capabilityDiscover(args: CapabilityDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityDiscoverResult>> {
