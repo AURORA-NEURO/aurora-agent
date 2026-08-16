@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 134);
+    assert_eq!(tools.len(), 135);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(134));
-    assert_eq!(result["advertised_tool_count"], json!(134));
+    assert_eq!(result["unique_catalog_tools"], json!(135));
+    assert_eq!(result["advertised_tool_count"], json!(135));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(134));
-    assert_eq!(result["schema_quality"]["valid"], json!(134));
+    assert_eq!(result["schema_quality"]["checked"], json!(135));
+    assert_eq!(result["schema_quality"]["valid"], json!(135));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -7938,6 +7938,66 @@ fn benchmark_counterfactual_check_enforces_one_factor_matching_and_grades_contra
     assert_eq!(refused["stage"], json!("matched_pair"));
     assert_eq!(refused["fail_closed"], json!(true));
     assert!(refused["refusal"].as_str().unwrap().contains("not matched"));
+}
+
+#[test]
+fn benchmark_oracle_review_requires_gate_before_grading_or_cell_packaging() {
+    let proposal = json!({
+        "oracle_id": "oracle-demo",
+        "decision_point": "choose evidence",
+        "strength": "exact_state_predicate",
+        "acceptable_verdicts": ["pass"],
+        "required_witnesses": ["evidence"],
+        "can_see": ["declared world"],
+        "blind_spots": ["hidden grader state"],
+        "exploits": []
+    });
+    let result = call(
+        &mut server(),
+        "benchmark_oracle_review",
+        json!({
+            "proposal": proposal,
+            "reviewer": "reviewer-1",
+            "grade": { "verdict": "pass", "witnesses": ["evidence"], "closure_complete": true },
+            "cell": {
+                "cell_id": "cell-reviewed",
+                "world": { "locator": "world.json", "sha256": "a".repeat(64) },
+                "query": { "locator": "query.json", "sha256": "b".repeat(64) }
+            }
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["grade"]["acceptance"]["outcome"], json!("passed"));
+    assert_eq!(result["grade"]["passed"], json!(true));
+    assert_eq!(result["cell"]["cell_id"], json!("cell-reviewed"));
+    assert_eq!(result["cell"]["acceptable_verdicts"], json!(["pass"]));
+    assert_eq!(result["reviewer"], json!("reviewer-1"));
+    assert_eq!(result["review_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(result["reviewed_oracle"]["reviewer"], json!("reviewer-1"));
+
+    let exploit = call(
+        &mut server(),
+        "benchmark_oracle_review",
+        json!({
+            "proposal": {
+                "oracle_id": "oracle-exploit",
+                "decision_point": "choose",
+                "strength": "exact_state_predicate",
+                "acceptable_verdicts": ["pass"],
+                "required_witnesses": [],
+                "can_see": ["world"],
+                "blind_spots": ["grader"],
+                "exploits": [{ "name": "grader-read", "description": "read grader", "scored_as_pass": true, "fulfils_task_intent": false }]
+            },
+            "reviewer": "reviewer-1"
+        }),
+    );
+    assert_eq!(exploit["__isError"], json!(false));
+    assert_eq!(exploit["ok"], json!(false));
+    assert_eq!(exploit["stage"], json!("oracle_review"));
+    assert_eq!(exploit["fail_closed"], json!(true));
+    assert!(exploit["refusal"].as_str().unwrap().contains("exploit"));
 }
 
 #[test]

@@ -464,6 +464,14 @@ from .benchmark_counterfactual import (
     BenchmarkCounterfactualCheckReport,
     benchmark_counterfactual_check_report,
 )
+from .benchmark_oracle import (
+    BENCHMARK_ORACLE_REVIEW_SCHEMA,
+    MAX_ORACLE_REVIEW_INPUT_BYTES,
+    ORACLE_ACCEPTANCE_OUTCOMES,
+    BenchmarkOracleReviewArgs,
+    BenchmarkOracleReviewReport,
+    benchmark_oracle_review_report,
+)
 from .foundation import (
     COUNTERFACTUAL_CLAIMS,
     FOUNDATION_MAX_INPUT_BYTES,
@@ -1582,6 +1590,12 @@ __all__ = [
     "BenchmarkCounterfactualCheckArgs",
     "BenchmarkCounterfactualCheckReport",
     "benchmark_counterfactual_check_report",
+    "BENCHMARK_ORACLE_REVIEW_SCHEMA",
+    "ORACLE_ACCEPTANCE_OUTCOMES",
+    "MAX_ORACLE_REVIEW_INPUT_BYTES",
+    "BenchmarkOracleReviewArgs",
+    "BenchmarkOracleReviewReport",
+    "benchmark_oracle_review_report",
     "FOUNDATION_MAX_INPUT_BYTES",
     "COUNTERFACTUAL_CLAIMS",
     "FOUNDATION_VERDICTS",

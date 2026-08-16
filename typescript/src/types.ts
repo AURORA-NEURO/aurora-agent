@@ -1811,6 +1811,32 @@ export interface BenchmarkCounterfactualCheckResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface BenchmarkOracleReviewArgs extends JsonObject {
+  proposal: JsonObject;
+  reviewer: string;
+  grade?: JsonObject;
+  cell?: JsonObject;
+}
+
+export interface BenchmarkOracleReviewResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/benchmark-oracle-review/0.1";
+  proposal?: JsonObject;
+  reviewed_oracle?: JsonObject;
+  reviewer?: string;
+  review_digest?: string;
+  strength?: "exact_state_predicate" | "execution_test" | "property_relation" | "trajectory_constraint" | "statistical_tolerance" | "model_judge";
+  deterministic?: boolean;
+  grade?: JsonObject;
+  cell?: JsonObject;
+  synthesis_order?: string[];
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface FoundationContractCheckArgs extends JsonObject {
   contract: JsonObject;
   parent?: JsonObject;

@@ -40,8 +40,9 @@ use bioprism_benchcompiler::{
     ExposureLedger as BenchmarkExposureLedger, Instance as BenchmarkInstance,
     ExpectedResponse as BenchmarkExpectedResponse, Intervention as BenchmarkIntervention,
     LeakProbe as BenchmarkLeakProbe, NoRealismReview as BenchmarkNoRealismReview,
-    PanelRun as BenchmarkPanelRun,
+    PanelRun as BenchmarkPanelRun, ProposedOracle as BenchmarkProposedOracle,
     ConstraintRecord as BenchmarkConstraintRecord,
+    SYNTHESIS_ORDER as BENCHMARK_SYNTHESIS_ORDER,
 };
 use bioprism_benchcompiler::counterfactual::pair as benchmark_counterfactual_pair;
 use bioprism_bioethics::action::{refer as refer_physical_action, ActionPlan, Authorisation};
@@ -1344,6 +1345,7 @@ impl Server {
             "benchmark_decision_audit" => self.benchmark_decision_audit(&arguments),
             "benchmark_integrity_audit" => self.benchmark_integrity_audit(&arguments),
             "benchmark_counterfactual_check" => self.benchmark_counterfactual_check(&arguments),
+            "benchmark_oracle_review" => self.benchmark_oracle_review(&arguments),
             "pack_catalogue" => self.pack_catalogue(&arguments),
             "pack_health_assess" => self.pack_health_assess(&arguments),
             "foundation_contract_check" => self.foundation_contract_check(&arguments),
@@ -8797,6 +8799,145 @@ impl Server {
             "limitations": [
                 "this endpoint validates and contrasts caller-constructed cells; it does not apply an intervention or execute a world",
                 "realism_reviewed is false because the MCP boundary has no domain validator; caller-side realism evidence remains required",
+            ],
+        }))
+    }
+
+    fn benchmark_oracle_review(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_proposal = arguments
+            .get("proposal")
+            .cloned()
+            .ok_or("proposal is required and must be a serialized ProposedOracle")?;
+        let reviewer = arguments
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .ok_or("reviewer is required and must be a string")?;
+        let encoded = serde_json::to_vec(&json!({
+            "proposal": raw_proposal.clone(),
+            "reviewer": reviewer,
+            "grade": arguments.get("grade"),
+            "cell": arguments.get("cell"),
+        }))
+        .map_err(|error| format!("cannot measure oracle review envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("oracle review input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let proposal: BenchmarkProposedOracle = serde_json::from_value(raw_proposal.clone())
+            .map_err(|error| format!("invalid ProposedOracle: {error}"))?;
+        let proposal_value = serde_json::to_value(&proposal)
+            .map_err(|error| format!("cannot serialize ProposedOracle: {error}"))?;
+        let reviewed = match proposal.review(reviewer) {
+            Ok(reviewed) => reviewed,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/benchmark-oracle-review/0.1",
+                    "stage": "oracle_review",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "proposal": proposal_value,
+                    "reviewer": reviewer,
+                    "synthesis_order": BENCHMARK_SYNTHESIS_ORDER.iter().map(|strength| strength.as_str()).collect::<Vec<_>>(),
+                    "guarantees": [
+                        "an unreviewed proposal cannot grade or package a DecisionCell",
+                        "unattributed review, empty acceptance, missing gap analysis, successful exploits, and weak-oracle-alone proposals remain blocking findings",
+                    ],
+                }))
+            }
+        };
+
+        let proposal = reviewed.proposal();
+        let grade = match arguments.get("grade") {
+            None => Value::Null,
+            Some(raw_grade) => {
+                let grade = raw_grade
+                    .as_object()
+                    .ok_or("grade must be an object")?;
+                let verdict = grade
+                    .get("verdict")
+                    .and_then(Value::as_str)
+                    .ok_or("grade.verdict must be a string")?;
+                let witnesses = grade
+                    .get("witnesses")
+                    .and_then(Value::as_array)
+                    .ok_or("grade.witnesses must be an array of strings")?;
+                let mut witness_set = BTreeSet::new();
+                for witness in witnesses {
+                    witness_set.insert(
+                        witness
+                            .as_str()
+                            .ok_or("grade.witnesses must be an array of strings")?
+                            .to_string(),
+                    );
+                }
+                let closure_complete = grade
+                    .get("closure_complete")
+                    .and_then(Value::as_bool)
+                    .ok_or("grade.closure_complete must be a boolean")?;
+                let acceptance = reviewed.grade(verdict, &witness_set, closure_complete);
+                let passed = acceptance.passed();
+                let reason = acceptance.reason();
+                json!({
+                    "verdict": verdict,
+                    "witnesses": witness_set,
+                    "closure_complete": closure_complete,
+                    "acceptance": acceptance,
+                    "passed": passed,
+                    "reason": reason,
+                })
+            }
+        };
+
+        let cell = match arguments.get("cell") {
+            None => Value::Null,
+            Some(raw_cell) => {
+                let cell = raw_cell
+                    .as_object()
+                    .ok_or("cell must be an object")?;
+                let cell_id = cell
+                    .get("cell_id")
+                    .and_then(Value::as_str)
+                    .ok_or("cell.cell_id must be a string")?;
+                let world: bioprism_prism::InputRef = serde_json::from_value(
+                    cell.get("world")
+                        .cloned()
+                        .ok_or("cell.world is required")?,
+                )
+                .map_err(|error| format!("invalid cell.world InputRef: {error}"))?;
+                let query: bioprism_prism::InputRef = serde_json::from_value(
+                    cell.get("query")
+                        .cloned()
+                        .ok_or("cell.query is required")?,
+                )
+                .map_err(|error| format!("invalid cell.query InputRef: {error}"))?;
+                serde_json::to_value(reviewed.clone().into_cell(cell_id, world, query))
+                    .map_err(|error| format!("cannot serialize reviewed DecisionCell: {error}"))?
+            }
+        };
+
+        let reviewed_value = serde_json::to_value(&reviewed)
+            .map_err(|error| format!("cannot serialize ReviewedOracle: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/benchmark-oracle-review/0.1",
+            "proposal": proposal,
+            "reviewed_oracle": reviewed_value,
+            "reviewer": reviewed.reviewer(),
+            "review_digest": reviewed.review_digest(),
+            "strength": proposal.strength,
+            "deterministic": proposal.strength.deterministic(),
+            "grade": grade,
+            "cell": cell,
+            "synthesis_order": BENCHMARK_SYNTHESIS_ORDER.iter().map(|strength| strength.as_str()).collect::<Vec<_>>(),
+            "guarantees": [
+                "only the kernel review gate creates a ReviewedOracle; serialized reviewed output is not accepted as trusted input",
+                "grading preserves wrong-verdict, missing-witness, closure-incomplete, and passed outcomes",
+                "cell packaging copies the reviewed set-valued verdict and witness contract",
+            ],
+            "limitations": [
+                "oracle contracts are declarative; this endpoint does not execute checker code, run attacks, or validate an external world",
+                "a model judge or statistical tolerance remains non-deterministic and cannot stand alone without a paired deterministic oracle",
             ],
         }))
     }
@@ -18702,7 +18843,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "trajectory_and_decision_cells",
             "domains": ["JSONL trajectory ingestion", "OTLP JSON span ingestion", "semantic-loss accounting", "divergence localization", "decision segmentation", "review-gated cell proposals"],
             "crates": ["bioprism-trace", "bioprism-prism", "bioprism-benchcompiler"],
-            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check"],
+            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18718,7 +18859,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "benchmark_pack_portfolio",
             "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
             "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
-            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "mutation_family", "scale_family_split_verify"],
+            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "mutation_family", "scale_family_split_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18734,7 +18875,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "mutation_and_causal_discovery",
             "domains": ["metamorphic testing", "causal divergence", "robustness"],
             "crates": ["bioprism-mutation", "bioprism-benchcompiler", "bioprism-stress", "bioprism-influence"],
-            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "stress_profile", "stress_report", "influence_analyze"],
+            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "stress_profile", "stress_report", "influence_analyze"],
             "cli_entrypoints": ["mutate family"],
             "status": "available"
         },
@@ -20483,6 +20624,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "followup_verdict": { "type": "string", "minLength": 1, "description": "Candidate verdict on the follow-up cell." }
                 },
                 "required": ["source", "followup", "intervention", "expected", "source_verdict", "followup_verdict"]
+            }
+        }),
+        json!({
+            "name": "benchmark_oracle_review",
+            "description": "Review a serialized ProposedOracle through the typed human-review gate, optionally grade an observed verdict with witnesses and protected-closure state, and optionally package the reviewed contract into a DecisionCell. Unreviewed proposals cannot grade or package; exploits, missing blind spots, weak-oracle-alone declarations, empty acceptance sets, and unattributed reviewers fail closed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "proposal": { "type": "object", "description": "Serialized bioprism-benchcompiler ProposedOracle; this is not trusted as a ReviewedOracle." },
+                    "reviewer": { "type": "string", "description": "Named reviewer required by the typed review gate; an empty name is refused." },
+                    "grade": { "type": "object", "description": "Optional observed grade with verdict, witnesses array, and closure_complete boolean." },
+                    "cell": { "type": "object", "description": "Optional packaging request with cell_id, world InputRef, and query InputRef; only reviewed contracts can populate a DecisionCell." }
+                },
+                "required": ["proposal", "reviewer"]
             }
         }),
         json!({

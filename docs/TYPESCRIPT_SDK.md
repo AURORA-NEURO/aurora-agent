@@ -207,6 +207,11 @@ readiness.
 `DecisionCell` pairs, one-factor field declarations, invariant/must-change response outcomes, and
 source/follow-up digests. Unmatched movement, no-realism-review status, execution nonclaims, and
 fail-closed refusals remain typed rather than flattened into a pass/fail score.
+`benchmarkOracleReview` returns `BenchmarkOracleReviewResult` after the kernel reviews a serialized
+`ProposedOracle`. The result keeps the reviewer and digest, synthesis strength and determinism,
+optional four-way acceptance outcome, and optional `DecisionCell` package visible. Callers cannot
+turn serialized reviewed output into a trusted oracle, and exploit, gap-analysis, weak-oracle, or
+unattributed-review refusals remain fail-closed.
 `foundationContractCheck` returns typed `FoundationContractCheckResult` evidence with separate
 contract, parent-refinement, applicability/maturity, world-class, and transition-plane gates. A
 top-level `ok` transport result does not imply admission: callers must inspect the explicit

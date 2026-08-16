@@ -139,6 +139,13 @@ invent defaults:
   preserves changed fields, source/follow-up digests, the explicit no-realism-review limitation,
   and fail-closed unmatched-pair refusals through every sync/async MCP, HTTP, and workspace
   facade.
+- `BenchmarkOracleReviewArgs` and `benchmark_oracle_review_report(...)` preserve the compiler's
+  proposal-to-reviewed-oracle type gate. The report exposes named reviewer identity, review
+  digest, synthesis strength, deterministic status, optional set-valued acceptance grading, and
+  optional reviewed `DecisionCell` packaging. Exploits, missing blind spots, weak-oracle-alone
+  proposals, empty acceptance sets, and unattributed review remain fail-closed across every
+  sync/async MCP, HTTP, and workspace facade; serialized reviewed JSON is never treated as a
+  trusted replacement for the kernel gate.
 - `FoundationContractCheckArgs` and `foundation_contract_check_report(...)` type the foundation
   declaration gate across sync MCP, async MCP, and HTTP. `FoundationContractGateReport`,
   `FoundationParentRelationReport`, `FoundationEnvelopeReport`, `FoundationWorldReport`, and

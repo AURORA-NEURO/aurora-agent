@@ -246,6 +246,7 @@ from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisRe
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
 from .benchmark_counterfactual import BenchmarkCounterfactualCheckArgs, BenchmarkCounterfactualCheckReport, benchmark_counterfactual_check_report
+from .benchmark_oracle import BenchmarkOracleReviewArgs, BenchmarkOracleReviewReport, benchmark_oracle_review_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
@@ -2097,6 +2098,26 @@ class Workspace:
         """Return typed matched-pair and contrast evidence."""
 
         return benchmark_counterfactual_check_report(self.benchmark_counterfactual_check(request))
+
+    def benchmark_oracle_review(
+        self,
+        request: BenchmarkOracleReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Review, grade, and optionally package a benchmark oracle through the workspace MCP client."""
+
+        normalized = request if isinstance(request, BenchmarkOracleReviewArgs) else BenchmarkOracleReviewArgs.from_wire(request)
+        result = self.client.call_tool("benchmark_oracle_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def benchmark_oracle_review_report(
+        self,
+        request: BenchmarkOracleReviewArgs | Mapping[str, Any],
+    ) -> BenchmarkOracleReviewReport:
+        """Return typed oracle review-gate, grade, and packaging evidence."""
+
+        return benchmark_oracle_review_report(self.benchmark_oracle_review(request))
 
     def foundation_contract_check(
         self,
@@ -4280,6 +4301,26 @@ class AsyncWorkspace:
         """Return typed async counterfactual evidence."""
 
         return benchmark_counterfactual_check_report(await self.benchmark_counterfactual_check(request))
+
+    async def benchmark_oracle_review(
+        self,
+        request: BenchmarkOracleReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Review, grade, and optionally package a benchmark oracle through async workspace MCP."""
+
+        normalized = request if isinstance(request, BenchmarkOracleReviewArgs) else BenchmarkOracleReviewArgs.from_wire(request)
+        result = await self.client.call_tool("benchmark_oracle_review", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def benchmark_oracle_review_report(
+        self,
+        request: BenchmarkOracleReviewArgs | Mapping[str, Any],
+    ) -> BenchmarkOracleReviewReport:
+        """Return typed async oracle review-gate evidence."""
+
+        return benchmark_oracle_review_report(await self.benchmark_oracle_review(request))
 
     async def foundation_contract_check(
         self,

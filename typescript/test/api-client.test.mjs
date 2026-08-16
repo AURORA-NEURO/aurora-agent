@@ -217,6 +217,21 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["one factor"],
         limitations: ["no realism validator"],
       } } } });
+      if (path === "/v1/tools/benchmark_oracle_review") return jsonResponse({ ok: true, tool: "benchmark_oracle_review", request_id: "r20e", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/benchmark-oracle-review/0.1",
+        proposal: { oracle_id: "oracle-demo", strength: "exact_state_predicate", acceptable_verdicts: ["pass"] },
+        reviewed_oracle: { inner: { oracle_id: "oracle-demo" }, reviewer: "reviewer-1", review_digest: "c".repeat(64) },
+        reviewer: "reviewer-1",
+        review_digest: "c".repeat(64),
+        strength: "exact_state_predicate",
+        deterministic: true,
+        grade: { acceptance: { outcome: "passed" }, passed: true },
+        cell: { cell_id: "cell-reviewed", acceptable_verdicts: ["pass"], required_witnesses: ["evidence"] },
+        synthesis_order: ["exact_state_predicate", "execution_test", "property_relation", "trajectory_constraint", "statistical_tolerance", "model_judge"],
+        guarantees: ["only the kernel review gate creates a ReviewedOracle"],
+        limitations: ["declarative contract"],
+      } } } });
       if (path === "/v1/tools/foundation_contract_check") return jsonResponse({ ok: true, tool: "foundation_contract_check", request_id: "r21", mcp: { result: { structuredContent: {
         ok: true,
         verdict: "refused",
@@ -1212,6 +1227,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   });
   assert.equal(counterfactual.mcp.result.structuredContent.outcome.outcome, "as_predicted");
   assert.equal(counterfactual.mcp.result.structuredContent.pair.realism_reviewed, false);
+  const oracleReview = await client.benchmarkOracleReview({
+    proposal: { oracle_id: "oracle-demo", decision_point: "choose evidence", strength: "exact_state_predicate", acceptable_verdicts: ["pass"], required_witnesses: ["evidence"], can_see: ["world"], blind_spots: ["hidden grader state"], exploits: [] },
+    reviewer: "reviewer-1",
+    grade: { verdict: "pass", witnesses: ["evidence"], closure_complete: true },
+    cell: { cell_id: "cell-reviewed", world: { locator: "world", sha256: "a".repeat(64) }, query: { locator: "query", sha256: "b".repeat(64) } },
+  });
+  assert.equal(oracleReview.mcp.result.structuredContent.schema, "bioprism-mcp/benchmark-oracle-review/0.1");
+  assert.equal(oracleReview.mcp.result.structuredContent.grade.acceptance.outcome, "passed");
+  assert.equal(oracleReview.mcp.result.structuredContent.cell.cell_id, "cell-reviewed");
   const foundation = await client.foundationContractCheck({
     contract: { id: "fbc:test:001", intent: "check", falsifiers: ["disagree"], actions: ["inspect"], claim_schema: "typed", reference_standard: "fixture", terminations: ["success"] },
     claim: "real_treatment_effect",
