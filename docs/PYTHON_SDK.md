@@ -146,6 +146,12 @@ invent defaults:
   proposals, empty acceptance sets, and unattributed review remain fail-closed across every
   sync/async MCP, HTTP, and workspace facade; serialized reviewed JSON is never treated as a
   trusted replacement for the kernel gate.
+- `BenchmarkCompileArgs` and `benchmark_compile_report(...)` expose the assembled causal,
+  hierarchical-minimization, oracle-synthesis, confidence, and provenance pipeline. The typed
+  request keeps the caller-supplied `InterestSignature` observation table explicit and bounded;
+  the report refuses when any subset requested by minimization is missing instead of interpolating
+  a preservation proof. It returns an unreviewed proposal only, with fail-closed causal,
+  nondeterministic-probe, budget, and property-loss outcomes preserved across all facades.
 - `FoundationContractCheckArgs` and `foundation_contract_check_report(...)` type the foundation
   declaration gate across sync MCP, async MCP, and HTTP. `FoundationContractGateReport`,
   `FoundationParentRelationReport`, `FoundationEnvelopeReport`, `FoundationWorldReport`, and

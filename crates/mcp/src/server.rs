@@ -34,6 +34,8 @@ use bioprism_benchcompiler::{
     contrast as benchmark_contrast,
     deduplicate as benchmark_deduplicate, effective_diversity as benchmark_effective_diversity,
     episodes as benchmark_episodes, failure_card as benchmark_failure_card,
+    compile as benchmark_compile, ContextItem as BenchmarkContextItem,
+    InterestSignature as BenchmarkInterestSignature, MinimizeBudget as BenchmarkMinimizeBudget,
     repetitions as benchmark_repetitions, Assertion as BenchmarkAssertion,
     BenchInstance as BenchmarkBenchInstance, CandidateAction as BenchmarkCandidateAction,
     CandidateActionSet as BenchmarkCandidateActionSet, ContaminationRisk as BenchmarkContaminationRisk,
@@ -1346,6 +1348,7 @@ impl Server {
             "benchmark_integrity_audit" => self.benchmark_integrity_audit(&arguments),
             "benchmark_counterfactual_check" => self.benchmark_counterfactual_check(&arguments),
             "benchmark_oracle_review" => self.benchmark_oracle_review(&arguments),
+            "benchmark_compile" => self.benchmark_compile(&arguments),
             "pack_catalogue" => self.pack_catalogue(&arguments),
             "pack_health_assess" => self.pack_health_assess(&arguments),
             "foundation_contract_check" => self.foundation_contract_check(&arguments),
@@ -8938,6 +8941,245 @@ impl Server {
             "limitations": [
                 "oracle contracts are declarative; this endpoint does not execute checker code, run attacks, or validate an external world",
                 "a model judge or statistical tolerance remains non-deterministic and cannot stand alone without a paired deterministic oracle",
+            ],
+        }))
+    }
+
+    fn benchmark_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure benchmark compiler input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("benchmark compiler input exceeds the 20000000-byte safety bound".into());
+        }
+        let failing: TraceIr = serde_json::from_value(
+            arguments
+                .get("trace")
+                .cloned()
+                .ok_or("trace is required and must be a serialized bioprism_trace Trace")?,
+        )
+        .map_err(|error| format!("invalid benchmark failing trace: {error}"))?;
+        if failing.events.len() > 100_000 {
+            return Err("trace may contain at most 100000 events".into());
+        }
+        let reference: Option<TraceIr> = match arguments.get("reference") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                serde_json::from_value(value.clone())
+                    .map_err(|error| format!("invalid benchmark reference trace: {error}"))?,
+            ),
+        };
+        if reference.as_ref().is_some_and(|trace| trace.events.len() > 100_000) {
+            return Err("reference trace may contain at most 100000 events".into());
+        }
+        let context: Vec<BenchmarkContextItem> = serde_json::from_value(
+            arguments.get("context").cloned().unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid benchmark context: {error}"))?;
+        if context.len() > 5_000 {
+            return Err("context may contain at most 5000 items".into());
+        }
+        let mut context_ids = BTreeSet::new();
+        for item in &context {
+            if !context_ids.insert(item.id.clone()) {
+                return Err(format!("context contains duplicate item id {}", item.id));
+            }
+        }
+
+        let observation_values = arguments
+            .get("probe_observations")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if observation_values.len() > 100_000 {
+            return Err("probe_observations may contain at most 100000 rows".into());
+        }
+        let mut observations = BTreeMap::<String, BenchmarkInterestSignature>::new();
+        for row in observation_values {
+            let row = row
+                .as_object()
+                .ok_or("each probe_observations row must be an object")?;
+            let kept = row
+                .get("kept")
+                .and_then(Value::as_array)
+                .ok_or("each probe_observations row requires kept as an array")?;
+            let mut ids = BTreeSet::new();
+            for id in kept {
+                ids.insert(
+                    id.as_str()
+                        .ok_or("probe_observations.kept must contain strings")?
+                        .to_string(),
+                );
+            }
+            if ids.iter().any(|id| !context_ids.contains(id)) {
+                return Err("probe_observations.kept names an id outside context".into());
+            }
+            let signature: BenchmarkInterestSignature = serde_json::from_value(
+                row.get("signature")
+                    .cloned()
+                    .ok_or("each probe_observations row requires signature")?,
+            )
+            .map_err(|error| format!("invalid probe observation signature: {error}"))?;
+            let key = ids.iter().cloned().collect::<Vec<_>>().join("\u{1f}");
+            if observations.insert(key, signature).is_some() {
+                return Err("probe_observations contains duplicate kept subsets".into());
+            }
+        }
+        if !context.is_empty() && arguments.get("probe_observations").is_none() {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/benchmark-compile/0.1",
+                "stage": "minimization_probe",
+                "refusal": "context is non-empty but no caller-supplied probe observations were provided",
+                "fail_closed": true,
+                "guarantees": [
+                    "the compiler never invents an interest signature or silently executes a caller probe",
+                    "a minimization without an observable preservation contract cannot produce an oracle proposal",
+                ],
+            }));
+        }
+        let budget_value = arguments
+            .get("budget")
+            .cloned()
+            .unwrap_or_else(|| json!({"max_evaluations": 4096}));
+        let budget: BenchmarkMinimizeBudget = serde_json::from_value(budget_value)
+            .map_err(|error| format!("invalid benchmark minimization budget: {error}"))?;
+        if budget.max_evaluations == 0 || budget.max_evaluations > 100_000 {
+            return Err("budget.max_evaluations must be between 1 and 100000".into());
+        }
+        let ledger: Vec<BenchmarkConstraintRecord> = serde_json::from_value(
+            arguments.get("ledger").cloned().unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid benchmark constraint ledger: {error}"))?;
+        if ledger.len() > 10_000 {
+            return Err("ledger may contain at most 10000 records".into());
+        }
+        let claims: Vec<BenchmarkAssertion> = serde_json::from_value(
+            arguments.get("claims").cloned().unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid benchmark claims: {error}"))?;
+        if claims.len() > 10_000 {
+            return Err("claims may contain at most 10000 records".into());
+        }
+
+        let mut missing_observations = BTreeSet::new();
+        let mut probe = |kept: &BTreeSet<String>| -> BenchmarkInterestSignature {
+            let key = kept.iter().cloned().collect::<Vec<_>>().join("\u{1f}");
+            match observations.get(&key) {
+                Some(signature) => signature.clone(),
+                None => {
+                    missing_observations.insert(key);
+                    BenchmarkInterestSignature::new("__missing_probe_observation__")
+                }
+            }
+        };
+        let compilation = match benchmark_compile(
+            &failing,
+            reference.as_ref(),
+            &context,
+            &mut probe,
+            budget,
+            &ledger,
+            claims,
+        ) {
+            Ok(compilation) => compilation,
+            Err(error) => {
+                if !missing_observations.is_empty() {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": "bioprism-mcp/benchmark-compile/0.1",
+                        "stage": "minimization_probe",
+                        "trace_id": failing.trace_id,
+                        "refusal": "the caller-supplied probe observation table did not cover every subset requested by deterministic minimization",
+                        "compiler_error": error.to_string(),
+                        "fail_closed": true,
+                        "provided_rows": observations.len(),
+                        "missing_rows": missing_observations.len(),
+                        "missing_subsets": missing_observations.iter().take(100).cloned().collect::<Vec<_>>(),
+                        "missing_subsets_omitted": missing_observations.len().saturating_sub(100),
+                        "guarantees": [
+                            "a partial observation table cannot be interpolated into a preservation proof",
+                            "no proposed oracle is returned when minimization evidence is incomplete",
+                        ],
+                    }));
+                }
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/benchmark-compile/0.1",
+                    "stage": "benchmark_compile",
+                    "trace_id": failing.trace_id,
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "missing_probe_rows": missing_observations.len(),
+                    "guarantees": [
+                        "causal, minimization, and oracle errors remain typed compiler refusals",
+                        "no rejected compilation is presented as a DecisionCell or benchmark score",
+                    ],
+                }));
+            }
+        };
+        if !missing_observations.is_empty() {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/benchmark-compile/0.1",
+                "stage": "minimization_probe",
+                "trace_id": failing.trace_id,
+                "refusal": "the caller-supplied probe observation table did not cover every subset requested by deterministic minimization",
+                "fail_closed": true,
+                "provided_rows": observations.len(),
+                "missing_rows": missing_observations.len(),
+                "missing_subsets": missing_observations.iter().take(100).cloned().collect::<Vec<_>>(),
+                "missing_subsets_omitted": missing_observations.len().saturating_sub(100),
+                "guarantees": [
+                    "a partial observation table cannot be interpolated into a preservation proof",
+                    "no proposed oracle is returned when minimization evidence is incomplete",
+                ],
+            }));
+        }
+        let compilation_value = serde_json::to_value(&compilation)
+            .map_err(|error| format!("cannot serialize benchmark compilation: {error}"))?;
+        let minimization = compilation.minimization.as_ref().map(|result| {
+            json!({
+                "started_from": result.started_from,
+                "minimal": result.minimal,
+                "removed": result.removed,
+                "pinned": result.pinned,
+                "preserved": result.preserved,
+                "evaluations": result.evaluations,
+                "passes": result.passes,
+                "reduction_ratio": result.reduction_ratio(),
+                "minimality_witness_count": result.minimality_witnesses.len(),
+                "guarantee": result.guarantee,
+            })
+        });
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/benchmark-compile/0.1",
+            "trace_id": compilation.trace_id,
+            "trace_digest": failing.digest().to_string(),
+            "reference_digest": reference.as_ref().map(|trace| trace.digest().to_string()),
+            "compilation": compilation_value,
+            "class": compilation.class,
+            "cell_step": compilation.cell_step(),
+            "episodes": compilation.episodes,
+            "boundary_count": compilation.boundaries.len(),
+            "oracle": compilation.oracle,
+            "minimization": minimization,
+            "confidence": compilation.confidence,
+            "limiting_stage": compilation.confidence.limiting_stage(),
+            "unmeasured_stages": compilation.confidence.unmeasured_stages(),
+            "probe": {
+                "provided_rows": observations.len(),
+                "evaluations": compilation.minimization.as_ref().map(|result| result.evaluations).unwrap_or(0),
+                "execution": "caller-supplied observation table; no world or architecture was run",
+            },
+            "guarantees": [
+                "causal localization, reduction, oracle synthesis, and decomposed confidence are returned from the typed benchcompiler pipeline",
+                "the output stops at an unreviewed ProposedOracle; only benchmark_oracle_review can create a ReviewedOracle",
+                "unmeasured pipeline stages remain explicit and are never collapsed into an aggregate score",
+            ],
+            "limitations": [
+                "the MCP boundary replays no world and accepts no executable probe; callers must provide an exact observation row for every subset requested",
+                "the pipeline does not generate mutations, run exploit attacks, validate realism, or publish a benchmark pack",
             ],
         }))
     }
@@ -18843,7 +19085,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "trajectory_and_decision_cells",
             "domains": ["JSONL trajectory ingestion", "OTLP JSON span ingestion", "semantic-loss accounting", "divergence localization", "decision segmentation", "review-gated cell proposals"],
             "crates": ["bioprism-trace", "bioprism-prism", "bioprism-benchcompiler"],
-            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review"],
+            "mcp_tools": ["trace_analyze", "trace_otel_ingest", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18859,7 +19101,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "benchmark_pack_portfolio",
             "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
             "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
-            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "mutation_family", "scale_family_split_verify"],
+            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "mutation_family", "scale_family_split_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -18875,7 +19117,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "mutation_and_causal_discovery",
             "domains": ["metamorphic testing", "causal divergence", "robustness"],
             "crates": ["bioprism-mutation", "bioprism-benchcompiler", "bioprism-stress", "bioprism-influence"],
-            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "stress_profile", "stress_report", "influence_analyze"],
+            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "stress_profile", "stress_report", "influence_analyze"],
             "cli_entrypoints": ["mutate family"],
             "status": "available"
         },
@@ -20638,6 +20880,23 @@ pub fn tool_definitions() -> Vec<Value> {
                     "cell": { "type": "object", "description": "Optional packaging request with cell_id, world InputRef, and query InputRef; only reviewed contracts can populate a DecisionCell." }
                 },
                 "required": ["proposal", "reviewer"]
+            }
+        }),
+        json!({
+            "name": "benchmark_compile",
+            "description": "Run the non-executing benchmark compiler over a failing Trace and optional reference, deterministic caller-supplied probe observations, constraint ledger, and evidence claims. It returns causal localization, hierarchical 1-minimality, ProposedOracle synthesis, decomposed confidence, and provenance; incomplete probe coverage, causal refusal, and every unmeasured stage remain fail closed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "trace": { "type": "object", "description": "Serialized failing bioprism_trace Trace with trace_id, events, and succeeded." },
+                    "reference": { "type": ["object", "null"], "description": "Optional serialized passing/reference Trace used for causal divergence analysis." },
+                    "context": { "type": "array", "maxItems": 5000, "description": "Optional serialized ContextItem values. Non-empty context requires an exact observation row for every subset requested by minimization." },
+                    "probe_observations": { "type": "array", "maxItems": 100000, "description": "Caller-supplied deterministic table of {kept:[context ids], signature: InterestSignature}; the server never executes or interpolates a probe." },
+                    "budget": { "type": "object", "description": "Optional {max_evaluations}; bounded to 1..100000." },
+                    "ledger": { "type": "array", "maxItems": 10000, "description": "Optional serialized ConstraintRecord values for typed attribution and task-defect precedence." },
+                    "claims": { "type": "array", "maxItems": 10000, "description": "Optional serialized Assertion values; uncited hypotheses remain outside backed failure findings." }
+                },
+                "required": ["trace"]
             }
         }),
         json!({

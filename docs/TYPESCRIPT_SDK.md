@@ -212,6 +212,11 @@ fail-closed refusals remain typed rather than flattened into a pass/fail score.
 optional four-way acceptance outcome, and optional `DecisionCell` package visible. Callers cannot
 turn serialized reviewed output into a trusted oracle, and exploit, gap-analysis, weak-oracle, or
 unattributed-review refusals remain fail-closed.
+`benchmarkCompile` returns `BenchmarkCompileResult` for the assembled causal-to-oracle pipeline.
+Its input carries an explicit bounded `probe_observations` table; missing subsets are returned as a
+fail-closed minimization-probe refusal rather than being guessed. The result keeps the unreviewed
+oracle proposal, reduction ratio, confidence decomposition, unmeasured stages, provenance, and
+non-execution limitations visible.
 `foundationContractCheck` returns typed `FoundationContractCheckResult` evidence with separate
 contract, parent-refinement, applicability/maturity, world-class, and transition-plane gates. A
 top-level `ok` transport result does not imply admission: callers must inspect the explicit

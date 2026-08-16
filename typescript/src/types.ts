@@ -1837,6 +1837,40 @@ export interface BenchmarkOracleReviewResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface BenchmarkCompileArgs extends JsonObject {
+  trace: JsonObject;
+  reference?: JsonObject;
+  context?: JsonObject[];
+  probe_observations?: JsonObject[];
+  budget?: JsonObject;
+  ledger?: JsonObject[];
+  claims?: JsonObject[];
+}
+
+export interface BenchmarkCompileResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/benchmark-compile/0.1";
+  trace_id?: string;
+  trace_digest?: string;
+  reference_digest?: string | null;
+  compilation?: JsonObject;
+  class?: JsonObject;
+  cell_step?: number | null;
+  episodes?: number;
+  boundary_count?: number;
+  oracle?: JsonObject | null;
+  minimization?: JsonObject | null;
+  confidence?: JsonObject;
+  limiting_stage?: JsonObject | null;
+  unmeasured_stages?: string[];
+  probe?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface FoundationContractCheckArgs extends JsonObject {
   contract: JsonObject;
   parent?: JsonObject;

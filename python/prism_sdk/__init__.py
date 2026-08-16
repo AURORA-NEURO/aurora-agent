@@ -472,6 +472,16 @@ from .benchmark_oracle import (
     BenchmarkOracleReviewReport,
     benchmark_oracle_review_report,
 )
+from .benchmark_compile import (
+    BENCHMARK_COMPILE_SCHEMA,
+    MAX_BENCHMARK_COMPILE_CONTEXT,
+    MAX_BENCHMARK_COMPILE_INPUT_BYTES,
+    MAX_BENCHMARK_COMPILE_OBSERVATIONS,
+    MAX_BENCHMARK_COMPILE_RECORDS,
+    BenchmarkCompileArgs,
+    BenchmarkCompileReport,
+    benchmark_compile_report,
+)
 from .foundation import (
     COUNTERFACTUAL_CLAIMS,
     FOUNDATION_MAX_INPUT_BYTES,
@@ -1596,6 +1606,14 @@ __all__ = [
     "BenchmarkOracleReviewArgs",
     "BenchmarkOracleReviewReport",
     "benchmark_oracle_review_report",
+    "BENCHMARK_COMPILE_SCHEMA",
+    "MAX_BENCHMARK_COMPILE_CONTEXT",
+    "MAX_BENCHMARK_COMPILE_OBSERVATIONS",
+    "MAX_BENCHMARK_COMPILE_RECORDS",
+    "MAX_BENCHMARK_COMPILE_INPUT_BYTES",
+    "BenchmarkCompileArgs",
+    "BenchmarkCompileReport",
+    "benchmark_compile_report",
     "FOUNDATION_MAX_INPUT_BYTES",
     "COUNTERFACTUAL_CLAIMS",
     "FOUNDATION_VERDICTS",

@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 135);
+    assert_eq!(tools.len(), 136);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(135));
-    assert_eq!(result["advertised_tool_count"], json!(135));
+    assert_eq!(result["unique_catalog_tools"], json!(136));
+    assert_eq!(result["advertised_tool_count"], json!(136));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(135));
-    assert_eq!(result["schema_quality"]["valid"], json!(135));
+    assert_eq!(result["schema_quality"]["checked"], json!(136));
+    assert_eq!(result["schema_quality"]["valid"], json!(136));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -7998,6 +7998,83 @@ fn benchmark_oracle_review_requires_gate_before_grading_or_cell_packaging() {
     assert_eq!(exploit["stage"], json!("oracle_review"));
     assert_eq!(exploit["fail_closed"], json!(true));
     assert!(exploit["refusal"].as_str().unwrap().contains("exploit"));
+}
+
+#[test]
+fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_execution() {
+    let trace = |trace_id: &str, tool: &str, succeeded: bool| {
+        json!({
+            "trace_id": trace_id,
+            "succeeded": succeeded,
+            "events": [
+                { "step": 0, "kind": "goal", "payload": { "summary": "rank the candidates" } },
+                { "step": 1, "kind": "action", "payload": { "tool": "choose_assay", "irreversible": true }, "caused_by": 0 },
+                { "step": 2, "kind": "result", "payload": { "summary": "assay selected" }, "caused_by": 1 },
+                { "step": 3, "kind": "action", "payload": { "tool": tool }, "caused_by": 2 },
+                { "step": 4, "kind": "claim", "payload": { "summary": "reported a hit" }, "caused_by": 3 },
+                { "step": 5, "kind": "termination", "payload": { "summary": "done" }, "caused_by": 4 }
+            ]
+        })
+    };
+    let signature = |invalid: bool| {
+        if invalid {
+            json!({ "verdict": "invalid", "witnesses": ["identity_leakage"], "divergence_step": 3 })
+        } else {
+            json!({ "verdict": "valid", "witnesses": [], "divergence_step": 3 })
+        }
+    };
+    let subsets = vec![
+        (vec![], false),
+        (vec!["panel_manifest"], true),
+        (vec!["unused_service"], false),
+        (vec!["stale_memory"], false),
+        (vec!["panel_manifest", "unused_service"], true),
+        (vec!["panel_manifest", "stale_memory"], true),
+        (vec!["unused_service", "stale_memory"], false),
+        (vec!["panel_manifest", "unused_service", "stale_memory"], true),
+    ];
+    let observations = subsets
+        .into_iter()
+        .map(|(kept, invalid)| json!({ "kept": kept, "signature": signature(invalid) }))
+        .collect::<Vec<_>>();
+    let arguments = json!({
+        "trace": trace("run_fail", "run_wrong_panel", false),
+        "reference": trace("run_pass", "run_right_panel", true),
+        "context": [
+            { "id": "panel_manifest", "tier": "artifact", "guard": "removable" },
+            { "id": "unused_service", "tier": "service", "guard": "removable" },
+            { "id": "stale_memory", "tier": "memory_entry", "guard": "removable" }
+        ],
+        "probe_observations": observations,
+        "budget": { "max_evaluations": 100 }
+    });
+    let result = call(&mut server(), "benchmark_compile", arguments.clone());
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/benchmark-compile/0.1"));
+    assert_eq!(result["class"], json!({ "class": "candidate_research_cell" }));
+    assert_eq!(result["cell_step"], json!(3));
+    assert_eq!(result["minimization"]["minimal"], json!(["panel_manifest"]));
+    assert_eq!(result["minimization"]["removed"].as_array().unwrap().len(), 2);
+    assert_eq!(result["oracle"]["strength"], json!("exact_state_predicate"));
+    assert!(result["unmeasured_stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|stage| stage == "state_reconstruction"));
+    assert_eq!(result["probe"]["execution"], json!("caller-supplied observation table; no world or architecture was run"));
+
+    let mut missing = arguments;
+    missing["probe_observations"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    let refused = call(&mut server(), "benchmark_compile", missing);
+    assert_eq!(refused["__isError"], json!(false));
+    assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["stage"], json!("minimization_probe"));
+    assert_eq!(refused["fail_closed"], json!(true));
+    assert!(refused["refusal"].as_str().unwrap().contains("observation"));
 }
 
 #[test]

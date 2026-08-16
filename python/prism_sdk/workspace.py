@@ -247,6 +247,7 @@ from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAud
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
 from .benchmark_counterfactual import BenchmarkCounterfactualCheckArgs, BenchmarkCounterfactualCheckReport, benchmark_counterfactual_check_report
 from .benchmark_oracle import BenchmarkOracleReviewArgs, BenchmarkOracleReviewReport, benchmark_oracle_review_report
+from .benchmark_compile import BenchmarkCompileArgs, BenchmarkCompileReport, benchmark_compile_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
@@ -2118,6 +2119,26 @@ class Workspace:
         """Return typed oracle review-gate, grade, and packaging evidence."""
 
         return benchmark_oracle_review_report(self.benchmark_oracle_review(request))
+
+    def benchmark_compile(
+        self,
+        request: BenchmarkCompileArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the non-executing assembled benchmark compiler through workspace MCP."""
+
+        normalized = request if isinstance(request, BenchmarkCompileArgs) else BenchmarkCompileArgs.from_wire(request)
+        result = self.client.call_tool("benchmark_compile", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    def benchmark_compile_report(
+        self,
+        request: BenchmarkCompileArgs | Mapping[str, Any],
+    ) -> BenchmarkCompileReport:
+        """Return typed benchmark compiler pipeline evidence."""
+
+        return benchmark_compile_report(self.benchmark_compile(request))
 
     def foundation_contract_check(
         self,
@@ -4321,6 +4342,26 @@ class AsyncWorkspace:
         """Return typed async oracle review-gate evidence."""
 
         return benchmark_oracle_review_report(await self.benchmark_oracle_review(request))
+
+    async def benchmark_compile(
+        self,
+        request: BenchmarkCompileArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the non-executing assembled benchmark compiler through async workspace MCP."""
+
+        normalized = request if isinstance(request, BenchmarkCompileArgs) else BenchmarkCompileArgs.from_wire(request)
+        result = await self.client.call_tool("benchmark_compile", normalized.to_mcp_arguments())
+        if result.is_error:
+            return result.require_ok()
+        return result.require_object()
+
+    async def benchmark_compile_report(
+        self,
+        request: BenchmarkCompileArgs | Mapping[str, Any],
+    ) -> BenchmarkCompileReport:
+        """Return typed async benchmark compiler evidence."""
+
+        return benchmark_compile_report(await self.benchmark_compile(request))
 
     async def foundation_contract_check(
         self,
