@@ -181,6 +181,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         transition: { ok: false, verdict: "plane_confusion", refusal: "latent state", fail_closed: true },
         guarantees: ["contract gates remain separate"],
       } } } });
+      if (path === "/v1/tools/pack_catalogue") return jsonResponse({ ok: true, tool: "pack_catalogue", request_id: "r22", mcp: { result: { structuredContent: {
+        ok: true,
+        section: "15",
+        portfolio_count: 46,
+        section_counts: { "15": 25, "29": 21 },
+        returned: [{ id: "prism.context-acquisition", title: "Context", blueprint_module: "15.01", axis: "mechanism", measures: "evidence", capabilities: ["A00"], domains: ["coding"], decision_families: ["choose"], oracles: ["deterministic"], strongest_oracle: "deterministic", has_execution_grounded_oracle: true, release_wave: { wave: 1 }, capability_signature: "Mechanism|A00|coding" }],
+        omitted: 24,
+        duplicate_signature_groups: [{ signature: "Domain|B5|biomedical research", pack_ids: ["a", "b"] }],
+        guarantees: ["catalogue rows are declarations"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -646,6 +656,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   });
   assert.equal(foundation.mcp.result.structuredContent.verdict, "refused");
   assert.equal(foundation.mcp.result.structuredContent.transition.verdict, "plane_confusion");
+  const packCatalogue = await client.packCatalogue({ section: "15", max_items: 1 });
+  assert.equal(packCatalogue.mcp.result.structuredContent.returned[0].blueprint_module, "15.01");
+  assert.equal(packCatalogue.mcp.result.structuredContent.returned[0].release_wave.wave, 1);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

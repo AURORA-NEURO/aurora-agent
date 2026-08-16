@@ -415,6 +415,17 @@ from .foundation import (
     FoundationWorldReport,
     foundation_contract_check_report,
 )
+from .pack_catalogue import (
+    ORACLE_TIERS,
+    PACK_AXES,
+    PACK_CATALOGUE_MAX_ITEMS,
+    PACK_CATALOGUE_SECTIONS,
+    PackCatalogueArgs,
+    PackCatalogueEntryReport,
+    PackCatalogueReport,
+    PackDuplicateSignatureReport,
+    pack_catalogue_report,
+)
 from .bioethics import (
     ENGAGEMENT_KINDS,
     MISUSE_SURFACES,
@@ -992,6 +1003,15 @@ __all__ = [
     "FoundationTransitionReport",
     "FoundationContractCheckReport",
     "foundation_contract_check_report",
+    "PACK_CATALOGUE_MAX_ITEMS",
+    "PACK_CATALOGUE_SECTIONS",
+    "ORACLE_TIERS",
+    "PACK_AXES",
+    "PackCatalogueArgs",
+    "PackCatalogueEntryReport",
+    "PackDuplicateSignatureReport",
+    "PackCatalogueReport",
+    "pack_catalogue_report",
     "CONTEXT_REQUEST_SCHEMA",
     "MAX_CONTEXT_HANDLE_BYTES",
     "MAX_CONTEXT_PATH_BYTES",

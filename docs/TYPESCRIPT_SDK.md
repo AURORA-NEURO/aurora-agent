@@ -181,6 +181,10 @@ contract, parent-refinement, applicability/maturity, world-class, and transition
 top-level `ok` transport result does not imply admission: callers must inspect the explicit
 `verdict` and gate objects, and a refused world claim or plane confusion remains visible rather
 than being flattened into a generic invalid-contract error.
+`packCatalogue` returns typed `PackCatalogueResult` rows for the bounded benchmark portfolio,
+including section counts, capability/domain signatures, oracle ceilings, execution-grounded
+flags, release-wave declarations, omitted counts, and duplicate-signature review candidates. It
+is a declaration inventory; it does not claim measured performance or a reportable health score.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

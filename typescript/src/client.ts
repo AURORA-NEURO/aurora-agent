@@ -120,6 +120,8 @@ import type {
   BenchmarkTraceAnalysisResult,
   FoundationContractCheckArgs,
   FoundationContractCheckResult,
+  PackCatalogueArgs,
+  PackCatalogueResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -390,6 +392,10 @@ export class ApiClient {
 
   async foundationContractCheck(args: FoundationContractCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FoundationContractCheckResult>> {
     return this.callTool<FoundationContractCheckResult>("foundation_contract_check", args, options);
+  }
+
+  async packCatalogue(args: PackCatalogueArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<PackCatalogueResult>> {
+    return this.callTool<PackCatalogueResult>("pack_catalogue", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

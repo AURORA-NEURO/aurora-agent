@@ -113,6 +113,12 @@ invent defaults:
   counterfactual authority/reveal policy, and transition-plane consistency independent. The
   aggregate `admitted` property is conservative: a valid contract can still be refused by an
   optional gate, and no declaration is promoted to evidence, treatment authority, or execution.
+- `PackCatalogueArgs` and `pack_catalogue_report(...)` expose the bounded section-15/section-29
+  portfolio inventory across sync MCP, async MCP, and HTTP. `PackCatalogueEntryReport` keeps
+  construct, capability/domain axes, decision families, oracle ceilings, execution-grounded
+  posture, release-wave sequencing, and capability signatures visible; duplicate signatures are
+  returned as review candidates. The report is explicitly declaration-only and never substitutes
+  for observed pack calibration or the separate health/reportability gate.
 - `WorldClaimCheckRequest`, `LabPlanRequest`, and `RoutingDecisionRequest` expose typed envelope
   helpers for world support checks, no-execution acquisition planning, and unseen-task routing over
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and

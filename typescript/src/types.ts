@@ -1057,6 +1057,43 @@ export interface FoundationContractCheckResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface PackCatalogueArgs extends JsonObject {
+  section?: "all" | "15" | "29";
+  max_items?: number;
+}
+
+export interface PackCatalogueEntryResult extends JsonObject {
+  id: string;
+  title: string;
+  blueprint_module: string;
+  axis: "mechanism" | "domain" | "platform";
+  measures: string;
+  capabilities: string[];
+  domains: string[];
+  decision_families: string[];
+  oracles: string[];
+  strongest_oracle?: "deterministic" | "executable" | "policy_veto" | "statistical" | "expert_review" | "rubric";
+  has_execution_grounded_oracle: boolean;
+  release_wave?: { wave: number } | "unsequenced";
+  capability_signature: string;
+}
+
+export interface PackDuplicateSignatureResult extends JsonObject {
+  signature: string;
+  pack_ids: string[];
+}
+
+export interface PackCatalogueResult extends JsonObject {
+  ok: boolean;
+  section: "all" | "15" | "29";
+  portfolio_count: number;
+  section_counts: { "15": number; "29": number };
+  returned: PackCatalogueEntryResult[];
+  omitted: number;
+  duplicate_signature_groups: PackDuplicateSignatureResult[];
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

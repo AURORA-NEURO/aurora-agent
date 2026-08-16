@@ -446,6 +446,9 @@ turning declarations into measured scores.
 `pack_health_assess` runs the typed pack-health gate over observed calibration, trivial baselines,
 contamination, oracle posture, and materialization, binding every finding to the pack digest and
 refusing a numeric score for an unreportable revision.
+`pack_catalogue` exposes the corresponding bounded declaration inventory with typed axes, oracle
+ceilings, release sequencing, and duplicate-signature review candidates; it does not turn a
+portfolio declaration into observed performance.
 `foundation_contract_check` validates falsifiable-contract admissibility, safe refinement, claim
 applicability, world-class counterfactual strength, reveal policy, and transition-plane consistency
 as separate gates.

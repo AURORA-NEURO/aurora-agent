@@ -183,6 +183,7 @@ from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_c
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
+from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -765,6 +766,34 @@ class ApiClient:
         """Return typed HTTP foundation gate evidence."""
 
         return foundation_contract_check_report(self.foundation_contract_check(request))
+
+    def pack_catalogue(
+        self,
+        request: PackCatalogueArgs | Mapping[str, Any] | None = None,
+        *,
+        section: str = "all",
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Read bounded pack portfolio declarations through the HTTP gateway."""
+
+        if request is not None:
+            if section != "all" or max_items != 100:
+                raise ArgumentError("request cannot be combined with section or max_items")
+            normalized = request if isinstance(request, PackCatalogueArgs) else PackCatalogueArgs.from_wire(request)
+        else:
+            normalized = PackCatalogueArgs(section, max_items)
+        return self.call_tool("pack_catalogue", normalized.to_mcp_arguments())
+
+    def pack_catalogue_report(
+        self,
+        request: PackCatalogueArgs | Mapping[str, Any] | None = None,
+        *,
+        section: str = "all",
+        max_items: int = 100,
+    ) -> PackCatalogueReport:
+        """Return typed HTTP pack portfolio declarations."""
+
+        return pack_catalogue_report(self.pack_catalogue(request, section=section, max_items=max_items))
 
     def developer_delivery_audit_report(
         self,
@@ -2461,6 +2490,34 @@ class AsyncApiClient:
         """Return async typed HTTP foundation gate evidence."""
 
         return foundation_contract_check_report(await self.foundation_contract_check(request))
+
+    async def pack_catalogue(
+        self,
+        request: PackCatalogueArgs | Mapping[str, Any] | None = None,
+        *,
+        section: str = "all",
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Async bounded pack portfolio declarations through HTTP."""
+
+        if request is not None:
+            if section != "all" or max_items != 100:
+                raise ArgumentError("request cannot be combined with section or max_items")
+            normalized = request if isinstance(request, PackCatalogueArgs) else PackCatalogueArgs.from_wire(request)
+        else:
+            normalized = PackCatalogueArgs(section, max_items)
+        return await self.call_tool("pack_catalogue", normalized.to_mcp_arguments())
+
+    async def pack_catalogue_report(
+        self,
+        request: PackCatalogueArgs | Mapping[str, Any] | None = None,
+        *,
+        section: str = "all",
+        max_items: int = 100,
+    ) -> PackCatalogueReport:
+        """Return async typed HTTP pack portfolio declarations."""
+
+        return pack_catalogue_report(await self.pack_catalogue(request, section=section, max_items=max_items))
 
     async def developer_delivery_audit_report(
         self,

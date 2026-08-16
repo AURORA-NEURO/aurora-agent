@@ -220,6 +220,7 @@ from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_c
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
+from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -304,6 +305,23 @@ class Workspace:
         if max_items is not None:
             arguments["max_items"] = max_items
         return self.tool("pack_catalogue", arguments)
+
+    def pack_catalogue_report(
+        self,
+        request: PackCatalogueArgs | Mapping[str, Any] | None = None,
+        *,
+        section: str = "all",
+        max_items: int = 100,
+    ) -> PackCatalogueReport:
+        """Return typed pack declarations, oracle ceilings, release waves, and duplicate reviews."""
+
+        if request is not None:
+            if section != "all" or max_items != 100:
+                raise ArgumentError("request cannot be combined with section or max_items")
+            normalized = request if isinstance(request, PackCatalogueArgs) else PackCatalogueArgs.from_wire(request)
+        else:
+            normalized = PackCatalogueArgs(section, max_items)
+        return pack_catalogue_report(self.tool("pack_catalogue", normalized.to_mcp_arguments()))
 
     def mutation_family(
         self,
@@ -2002,6 +2020,23 @@ class AsyncWorkspace:
         if max_items is not None:
             arguments["max_items"] = max_items
         return await self.tool("pack_catalogue", arguments)
+
+    async def pack_catalogue_report(
+        self,
+        request: PackCatalogueArgs | Mapping[str, Any] | None = None,
+        *,
+        section: str = "all",
+        max_items: int = 100,
+    ) -> PackCatalogueReport:
+        """Async typed pack portfolio declaration report."""
+
+        if request is not None:
+            if section != "all" or max_items != 100:
+                raise ArgumentError("request cannot be combined with section or max_items")
+            normalized = request if isinstance(request, PackCatalogueArgs) else PackCatalogueArgs.from_wire(request)
+        else:
+            normalized = PackCatalogueArgs(section, max_items)
+        return pack_catalogue_report(await self.tool("pack_catalogue", normalized.to_mcp_arguments()))
 
     async def mutation_family(
         self,
