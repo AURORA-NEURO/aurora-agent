@@ -9313,13 +9313,57 @@ impl Server {
             _ => return Err("step and horizon must be supplied together".into()),
         };
 
+        let checked = trajectory.check();
+        let property_outcomes: Vec<Value> = checked
+            .iter()
+            .map(|outcome| {
+                json!({
+                    "property": outcome.property,
+                    "violations": outcome.violations,
+                    "vacuous": outcome.vacuous,
+                    "held": outcome.held(),
+                })
+            })
+            .collect();
+        let property_records: Vec<Value> = trajectory
+            .properties()
+            .iter()
+            .map(|property| json!({ "name": property.name(), "property": property }))
+            .collect();
+        let recovery = trajectory.recovery();
+        let recovery_records: Vec<Value> = recovery
+            .iter()
+            .map(|(failure_step, strategy_change_after)| {
+                json!({
+                    "failure_step": failure_step,
+                    "strategy_change_after": strategy_change_after,
+                    "latency": strategy_change_after.map(|step| step.saturating_sub(*failure_step)),
+                })
+            })
+            .collect();
+        let held_count = checked.iter().filter(|outcome| outcome.held()).count();
+        let violated_count = checked
+            .iter()
+            .filter(|outcome| !outcome.violations.is_empty())
+            .count();
+        let vacuous_count = checked.iter().filter(|outcome| outcome.vacuous).count();
+
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/evaluation-trajectory-check/0.1",
             "steps": trajectory.steps().len(),
             "acts": trajectory.acts(),
+            "step_records": trajectory.steps(),
             "properties": trajectory.properties(),
-            "property_outcomes": trajectory.check(),
-            "recovery": trajectory.recovery(),
+            "property_records": property_records,
+            "property_outcomes": property_outcomes,
+            "property_count": checked.len(),
+            "held_count": held_count,
+            "violated_count": violated_count,
+            "vacuous_count": vacuous_count,
+            "recovery": recovery,
+            "recovery_records": recovery_records,
+            "recovery_count": recovery.len(),
             "bounded_suffix": bounded_suffix,
             "guarantees": [
                 "violations retain step indices and vacuous properties are not credited as held",

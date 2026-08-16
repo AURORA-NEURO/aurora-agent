@@ -798,6 +798,9 @@ additionally types accessibility leak witnesses and dangling-reference pairs; se
 additionally types the certificate's ordered verdict ledger, matched/diverged/missing count
 reconciliation, first-divergence row, portability posture, and fail-closed biological-validity
 refusal; see [`docs/EVALUATION_REPRODUCTION_CHECK.md`](EVALUATION_REPRODUCTION_CHECK.md).
+`EvaluationTrajectoryReport` additionally types step records, named path-property declarations,
+held/violated/vacuous outcomes, recovery transitions, and bounded-suffix completeness; see
+[`docs/EVALUATION_TRAJECTORY_CHECK.md`](EVALUATION_TRAJECTORY_CHECK.md).
 
 ## Biological stress profiling
 

@@ -155,15 +155,49 @@ class EvaluationReportTests(unittest.TestCase):
             "ok": True,
             "steps": 2,
             "acts": ["edit", "verify"],
-            "properties": [{"kind": "preceded_by"}],
-            "property_outcomes": [{"held": False, "violations": [0]}],
-            "recovery": [{"failure": 0, "changed_to": 1}],
-            "bounded_suffix": {"complete": True, "value": {"downstream": 1.0}},
+            "step_records": [
+                {"act": "edit", "irreversible": False, "succeeded": True, "progress": 2.0},
+                {"act": "verify", "irreversible": False, "succeeded": True, "progress": 1.0},
+            ],
+            "properties": [{"shape": "preceded_by", "before": "edit", "after": "inspect"}],
+            "property_records": [{"name": "inspect-before-edit", "property": {"shape": "preceded_by", "before": "edit", "after": "inspect"}}],
+            "property_outcomes": [{"property": "inspect-before-edit", "held": False, "vacuous": False, "violations": [0]}],
+            "property_count": 1, "held_count": 0, "violated_count": 1, "vacuous_count": 0,
+            "recovery": [],
+            "recovery_records": [], "recovery_count": 0,
+            "bounded_suffix": {"ok": True, "complete": True, "value": {"step": 0, "horizon": 1, "immediate": 2.0, "downstream": 1.0, "observed": 1}},
             "guarantees": ["nonvacuous"],
             "limitations": ["declared path"],
         })
         self.assertIsInstance(trajectory, EvaluationTrajectoryReport)
         self.assertTrue(trajectory.bounded_suffix_complete)
+        self.assertTrue(trajectory.outcome_records[0].violations)
+        self.assertFalse(trajectory.has_unrecovered_failures)
+        recovery = evaluation_trajectory_check_report({
+            "ok": True,
+            "schema": "bioprism-mcp/evaluation-trajectory-check/0.1",
+            "steps": 3,
+            "acts": ["inspect", "submit"],
+            "step_records": [
+                {"act": "submit", "irreversible": False, "succeeded": False, "progress": None},
+                {"act": "submit", "irreversible": False, "succeeded": False, "progress": None},
+                {"act": "inspect", "irreversible": False, "succeeded": True, "progress": 3.0},
+            ],
+            "properties": [{"shape": "no_blind_retry", "act": "submit"}],
+            "property_records": [{"name": "no-blind-retry-submit", "property": {"shape": "no_blind_retry", "act": "submit"}}],
+            "property_outcomes": [{"property": "no-blind-retry-submit", "violations": [1], "vacuous": False, "held": False}],
+            "property_count": 1, "held_count": 0, "violated_count": 1, "vacuous_count": 0,
+            "recovery": [[0, 2], [1, 2]],
+            "recovery_records": [
+                {"failure_step": 0, "strategy_change_after": 2, "latency": 2},
+                {"failure_step": 1, "strategy_change_after": 2, "latency": 1},
+            ],
+            "recovery_count": 2,
+            "bounded_suffix": None,
+            "guarantees": [], "limitations": [],
+        })
+        self.assertEqual(recovery.recovery_records[1].latency, 1)
+        self.assertFalse(recovery.has_unrecovered_failures)
 
     def test_evaluation_parsers_reject_forged_state_reconciliations(self) -> None:
         with self.assertRaises(ArgumentError):

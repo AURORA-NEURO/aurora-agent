@@ -389,7 +389,9 @@ references; see [`docs/EVALUATION_WORLDLINE_AUDIT.md`](../docs/EVALUATION_WORLDL
 matched/diverged/missing summary counts, first divergence, portability posture, and explicit
 biological-validity refusal, keeping reproducibility separate from biological validity; see
 [`docs/EVALUATION_REPRODUCTION_CHECK.md`](../docs/EVALUATION_REPRODUCTION_CHECK.md); and
-`evaluationTrajectoryCheck` exposes non-vacuous property outcomes and bounded suffix completeness.
+`evaluationTrajectoryCheck` types step/property ledgers, non-vacuous property outcomes, recovery
+transitions, and bounded suffix completeness; see
+[`docs/EVALUATION_TRAJECTORY_CHECK.md`](../docs/EVALUATION_TRAJECTORY_CHECK.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

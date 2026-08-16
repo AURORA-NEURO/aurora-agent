@@ -22,6 +22,8 @@ ORACLE_EVIDENCE_TIERS = frozenset({"deterministic", "execution", "property", "st
 ORACLE_COMBINE_SCHEMA = "bioprism-mcp/oracle-combine/0.1"
 EVALUATION_REPRODUCTION_SCHEMA = "bioprism-mcp/evaluation-reproduction-check/0.1"
 EVALUATION_REPRODUCTION_VERDICTS = frozenset({"matched", "diverged", "missing"})
+EVALUATION_TRAJECTORY_SCHEMA = "bioprism-mcp/evaluation-trajectory-check/0.1"
+EVALUATION_TRAJECTORY_PROPERTY_SHAPES = frozenset({"preceded_by", "no_blind_retry", "followed_by"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -953,27 +955,61 @@ class EvaluationTrajectoryReport:
     bounded_suffix_complete: bool | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    step_records: tuple["EvaluationTrajectoryStepProjection", ...] = field(default_factory=tuple)
+    property_records: tuple["EvaluationPathPropertyProjection", ...] = field(default_factory=tuple)
+    outcome_records: tuple["EvaluationPropertyOutcomeProjection", ...] = field(default_factory=tuple)
+    recovery_records: tuple["EvaluationRecoveryProjection", ...] = field(default_factory=tuple)
+    bounded_suffix_record: "EvaluationBoundedSuffixProjection | None" = None
+    property_count: int = 0
+    held_count: int = 0
+    violated_count: int = 0
+    vacuous_count: int = 0
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationTrajectoryReport":
         raw = _projection_payload(value, description="evaluation trajectory", direct_keys=("property_outcomes", "steps"))
         if not _bool("evaluation trajectory ok", raw.get("ok")):
             raise ArgumentError("evaluation trajectory is not successful")
+        schema = None if raw.get("schema") is None else _route_text("evaluation trajectory schema", raw.get("schema"))
+        if schema is not None and schema != EVALUATION_TRAJECTORY_SCHEMA:
+            raise ArgumentError(f"unknown evaluation trajectory schema: {schema!r}")
         steps = _route_count("evaluation trajectory steps", raw.get("steps"))
         acts = _array("evaluation trajectory acts", raw.get("acts"))
-        outcomes = tuple(_route_mapping("evaluation property outcome", item) for item in _array("evaluation property_outcomes", raw.get("property_outcomes")))
-        if len(acts) != steps:
-            raise ArgumentError("evaluation trajectory acts do not reconcile with steps")
+        step_records = tuple(EvaluationTrajectoryStepProjection.from_wire(item) for item in _array("evaluation trajectory step_records", raw.get("step_records")))
+        if len(step_records) != steps:
+            raise ArgumentError("evaluation trajectory step_records do not reconcile with steps")
+        if tuple(sorted({step.act for step in step_records})) != tuple(acts):
+            raise ArgumentError("evaluation trajectory acts do not reconcile with step records")
+        property_records = tuple(EvaluationPathPropertyProjection.from_wire(item) for item in _array("evaluation trajectory property_records", raw.get("property_records")))
+        outcomes = tuple(EvaluationPropertyOutcomeProjection.from_wire(item) for item in _array("evaluation property_outcomes", raw.get("property_outcomes")))
+        if len(property_records) != len(outcomes):
+            raise ArgumentError("evaluation trajectory property records do not reconcile with outcomes")
+        if tuple(record.name for record in property_records) != tuple(outcome.property for outcome in outcomes):
+            raise ArgumentError("evaluation trajectory property names do not reconcile with outcomes")
+        property_count = _route_count("evaluation trajectory property_count", raw.get("property_count"))
+        held_count = _route_count("evaluation trajectory held_count", raw.get("held_count"))
+        violated_count = _route_count("evaluation trajectory violated_count", raw.get("violated_count"))
+        vacuous_count = _route_count("evaluation trajectory vacuous_count", raw.get("vacuous_count"))
+        if property_count != len(outcomes) or (held_count, violated_count, vacuous_count) != (
+            sum(outcome.held for outcome in outcomes),
+            sum(bool(outcome.violations) for outcome in outcomes),
+            sum(outcome.vacuous for outcome in outcomes),
+        ):
+            raise ArgumentError("evaluation trajectory property counts do not reconcile")
+        recovery = _array("evaluation trajectory recovery", raw.get("recovery"))
+        recovery_records = tuple(EvaluationRecoveryProjection.from_wire(item) for item in _array("evaluation trajectory recovery_records", raw.get("recovery_records")))
+        if len(recovery) != len(recovery_records) or _route_count("evaluation trajectory recovery_count", raw.get("recovery_count")) != len(recovery_records):
+            raise ArgumentError("evaluation trajectory recovery does not reconcile")
+        for pair, record in zip(recovery, recovery_records):
+            values = _array("evaluation trajectory recovery pair", pair)
+            if len(values) != 2 or _route_count("evaluation recovery pair failure", values[0]) != record.failure_step or (
+                None if values[1] is None else _route_count("evaluation recovery pair change", values[1])
+            ) != record.strategy_change_after:
+                raise ArgumentError("evaluation trajectory recovery pair does not reconcile with its record")
         suffix = _optional_mapping("evaluation bounded_suffix", raw.get("bounded_suffix"))
-        if suffix is None:
-            suffix_complete = None
-        elif suffix.get("ok") is False:
-            if not _bool("evaluation bounded_suffix fail_closed", suffix.get("fail_closed")):
-                raise ArgumentError("refused bounded suffix results must be fail-closed")
-            _route_text("evaluation bounded suffix refusal", suffix.get("refusal"))
-            suffix_complete = None
-        else:
-            suffix_complete = _bool("evaluation bounded_suffix complete", suffix.get("complete"))
+        suffix_record = None if suffix is None else EvaluationBoundedSuffixProjection.from_wire(suffix)
+        suffix_complete = None if suffix_record is None else suffix_record.complete
         return cls(
             raw,
             True,
@@ -981,13 +1017,176 @@ class EvaluationTrajectoryReport:
             acts,
             _array("evaluation trajectory properties", raw.get("properties")),
             outcomes,
-            _array("evaluation trajectory recovery", raw.get("recovery")),
+            recovery,
             suffix,
             suffix_complete,
             _route_strings("evaluation trajectory guarantees", raw.get("guarantees")),
             _route_strings("evaluation trajectory limitations", raw.get("limitations")),
+            schema=schema,
+            step_records=step_records,
+            property_records=property_records,
+            outcome_records=outcomes,
+            recovery_records=recovery_records,
+            bounded_suffix_record=suffix_record,
+            property_count=property_count,
+            held_count=held_count,
+            violated_count=violated_count,
+            vacuous_count=vacuous_count,
         )
 
+    @property
+    def has_vacuous_properties(self) -> bool:
+        return self.vacuous_count > 0
+
+    @property
+    def has_unrecovered_failures(self) -> bool:
+        return any(record.strategy_change_after is None for record in self.recovery_records)
+
+
+@dataclass(frozen=True)
+class EvaluationTrajectoryStepProjection:
+    raw: dict[str, Any]
+    act: str
+    irreversible: bool
+    succeeded: bool
+    progress: float | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationTrajectoryStepProjection":
+        raw = _route_mapping("evaluation trajectory step", value)
+        return cls(
+            raw,
+            _route_text("evaluation trajectory step act", raw.get("act")),
+            _bool("evaluation trajectory step irreversible", raw.get("irreversible")),
+            _bool("evaluation trajectory step succeeded", raw.get("succeeded")),
+            _optional_finite("evaluation trajectory step progress", raw.get("progress")),
+        )
+
+
+@dataclass(frozen=True)
+class EvaluationPathPropertyProjection:
+    raw: dict[str, Any]
+    name: str
+    shape: str
+    before: str | None
+    after: str | None
+    act: str | None
+    trigger: str | None
+    follow_up: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationPathPropertyProjection":
+        wrapper = _route_mapping("evaluation trajectory property record", value)
+        name = _route_text("evaluation trajectory property name", wrapper.get("name"))
+        raw = _route_mapping("evaluation trajectory property", wrapper.get("property"))
+        shape = _route_text("evaluation trajectory property shape", raw.get("shape"))
+        if shape not in EVALUATION_TRAJECTORY_PROPERTY_SHAPES:
+            raise ArgumentError(f"unknown evaluation trajectory property shape: {shape!r}")
+        before = None if raw.get("before") is None else _route_text("evaluation trajectory before", raw.get("before"))
+        after = None if raw.get("after") is None else _route_text("evaluation trajectory after", raw.get("after"))
+        act = None if raw.get("act") is None else _route_text("evaluation trajectory act property", raw.get("act"))
+        trigger = None if raw.get("trigger") is None else _route_text("evaluation trajectory trigger", raw.get("trigger"))
+        follow_up = None if raw.get("follow_up") is None else _route_text("evaluation trajectory follow_up", raw.get("follow_up"))
+        required = {
+            "preceded_by": (before, after),
+            "no_blind_retry": (act,),
+            "followed_by": (trigger, follow_up),
+        }[shape]
+        if any(item is None for item in required):
+            raise ArgumentError(f"evaluation trajectory property {shape!r} is missing its parameters")
+        return cls(raw, name, shape, before, after, act, trigger, follow_up)
+
+
+def _nonnegative_indices(name: str, value: Any) -> tuple[int, ...]:
+    entries = _array(name, value)
+    result: list[int] = []
+    for entry in entries:
+        if isinstance(entry, bool) or not isinstance(entry, int) or entry < 0:
+            raise ArgumentError(f"{name} must contain non-negative integers")
+        result.append(entry)
+    return tuple(result)
+
+
+@dataclass(frozen=True)
+class EvaluationPropertyOutcomeProjection:
+    raw: dict[str, Any]
+    property: str
+    violations: tuple[int, ...]
+    vacuous: bool
+    held: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationPropertyOutcomeProjection":
+        raw = _route_mapping("evaluation property outcome", value)
+        violations = _nonnegative_indices("evaluation property violations", raw.get("violations"))
+        vacuous = _bool("evaluation property vacuous", raw.get("vacuous"))
+        held = _bool("evaluation property held", raw.get("held"))
+        if held != (not violations and not vacuous):
+            raise ArgumentError("evaluation property held does not reconcile with violations and vacuity")
+        return cls(raw, _route_text("evaluation property name", raw.get("property")), violations, vacuous, held)
+
+
+@dataclass(frozen=True)
+class EvaluationRecoveryProjection:
+    raw: dict[str, Any]
+    failure_step: int
+    strategy_change_after: int | None
+    latency: int | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationRecoveryProjection":
+        raw = _route_mapping("evaluation recovery record", value)
+        failure_step = _route_count("evaluation recovery failure_step", raw.get("failure_step"))
+        changed = raw.get("strategy_change_after")
+        strategy_change_after = None if changed is None else _route_count("evaluation recovery strategy_change_after", changed)
+        if strategy_change_after is not None and strategy_change_after <= failure_step:
+            raise ArgumentError("evaluation recovery strategy change must follow the failure")
+        latency_value = raw.get("latency")
+        latency = None if latency_value is None else _route_count("evaluation recovery latency", latency_value)
+        expected_latency = None if strategy_change_after is None else strategy_change_after - failure_step
+        if latency != expected_latency:
+            raise ArgumentError("evaluation recovery latency does not reconcile with its step pair")
+        return cls(raw, failure_step, strategy_change_after, latency)
+
+
+@dataclass(frozen=True)
+class EvaluationBoundedSuffixProjection:
+    raw: dict[str, Any]
+    ok: bool
+    step: int | None
+    horizon: int | None
+    immediate: float | None
+    downstream: float | None
+    observed: int | None
+    complete: bool | None
+    refusal: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvaluationBoundedSuffixProjection":
+        raw = _route_mapping("evaluation bounded suffix", value)
+        ok = _bool("evaluation bounded suffix ok", raw.get("ok"))
+        if not ok:
+            if not _bool("evaluation bounded suffix fail_closed", raw.get("fail_closed")):
+                raise ArgumentError("refused bounded suffix results must be fail-closed")
+            return cls(raw, False, None, None, None, None, None, None, _route_text("evaluation bounded suffix refusal", raw.get("refusal")))
+        value_record = _route_mapping("evaluation bounded suffix value", raw.get("value"))
+        step = _route_count("evaluation bounded suffix step", value_record.get("step"))
+        horizon = _route_count("evaluation bounded suffix horizon", value_record.get("horizon"))
+        observed = _route_count("evaluation bounded suffix observed", value_record.get("observed"))
+        complete = _bool("evaluation bounded suffix complete", raw.get("complete"))
+        if complete != (observed == horizon):
+            raise ArgumentError("evaluation bounded suffix completeness does not reconcile with observed steps")
+        return cls(
+            raw,
+            True,
+            step,
+            horizon,
+            _optional_finite("evaluation bounded suffix immediate", value_record.get("immediate")),
+            _optional_finite("evaluation bounded suffix downstream", value_record.get("downstream")),
+            observed,
+            complete,
+            None,
+        )
 
 def oracle_combine_report(value: Mapping[str, Any]) -> OracleCombineReport:
     return OracleCombineReport.from_wire(value)
@@ -1023,6 +1222,8 @@ __all__ = [
     "ORACLE_STATUSES",
     "EVALUATION_REPRODUCTION_SCHEMA",
     "EVALUATION_REPRODUCTION_VERDICTS",
+    "EVALUATION_TRAJECTORY_PROPERTY_SHAPES",
+    "EVALUATION_TRAJECTORY_SCHEMA",
     "BioevalReferenceAuditReport",
     "EvaluationReproductionCertificateProjection",
     "EvaluationReproductionFirstDivergenceProjection",
@@ -1031,6 +1232,11 @@ __all__ = [
     "EvaluationValidityClaimProjection",
     "EvaluationDanglingReferenceProjection",
     "EvaluationLeakWitnessProjection",
+    "EvaluationBoundedSuffixProjection",
+    "EvaluationPathPropertyProjection",
+    "EvaluationPropertyOutcomeProjection",
+    "EvaluationRecoveryProjection",
+    "EvaluationTrajectoryStepProjection",
     "EvaluationTrajectoryReport",
     "EvaluationWorldlineReport",
     "OracleCombineReport",

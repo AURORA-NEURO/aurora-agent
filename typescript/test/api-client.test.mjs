@@ -784,7 +784,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         validity_claim: { ok: false, refusal: "not biological validity", fail_closed: true },
         guarantees: ["first divergence"], limitations: ["no execution"],
       } } } });
-      if (path === "/v1/tools/evaluation_trajectory_check") return jsonResponse({ ok: true, tool: "evaluation_trajectory_check", request_id: "r43", mcp: { result: { structuredContent: { ok: true, steps: 1 } } } });
+      if (path === "/v1/tools/evaluation_trajectory_check") return jsonResponse({ ok: true, tool: "evaluation_trajectory_check", request_id: "r43", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/evaluation-trajectory-check/0.1",
+        steps: 1, acts: ["verify"],
+        step_records: [{ act: "verify", irreversible: false, succeeded: true, progress: 1 }],
+        properties: [{ shape: "followed_by", trigger: "verify", follow_up: "report" }],
+        property_records: [{ name: "report-after-verify", property: { shape: "followed_by", trigger: "verify", follow_up: "report" } }],
+        property_outcomes: [{ property: "report-after-verify", violations: [], vacuous: false, held: true }],
+        property_count: 1, held_count: 1, violated_count: 0, vacuous_count: 0,
+        recovery: [], recovery_records: [], recovery_count: 0,
+        bounded_suffix: null,
+        guarantees: ["nonvacuous"], limitations: ["declared path"],
+      } } } });
       if (path === "/v1/tools/agent_mission") return jsonResponse({ ok: true, tool: "agent_mission", request_id: "r5", mcp: { result: { structuredContent: {
         workflow: "agent_mission",
         execution: "planned",
@@ -1191,6 +1203,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(reproduction.mcp.result.structuredContent.schema, "bioprism-mcp/evaluation-reproduction-check/0.1");
   assert.equal(reproduction.mcp.result.structuredContent.diverged_count, 1);
   assert.equal(reproduction.mcp.result.structuredContent.first_divergence.output, "score");
+  assert.equal(trajectory.mcp.result.structuredContent.schema, "bioprism-mcp/evaluation-trajectory-check/0.1");
+  assert.equal(trajectory.mcp.result.structuredContent.property_outcomes[0].held, true);
   assert.equal(lineage.mcp.result.structuredContent.identity_complete, true);
   assert.equal(preanalytic.mcp.result.structuredContent.fail_closed, true);
   assert.equal(contradiction.mcp.result.structuredContent.stage, "pose");

@@ -4321,14 +4321,73 @@ export interface EvaluationTrajectoryArgs extends JsonObject {
   horizon?: number;
 }
 
+export interface EvaluationTrajectoryStepResult extends JsonObject {
+  act: string;
+  irreversible: boolean;
+  succeeded: boolean;
+  progress: number | null;
+}
+
+export type EvaluationTrajectoryPropertyShape = "preceded_by" | "no_blind_retry" | "followed_by";
+
+export interface EvaluationTrajectoryPropertyResult extends JsonObject {
+  name: string;
+  property: {
+    shape: EvaluationTrajectoryPropertyShape;
+    before?: string;
+    after?: string;
+    act?: string;
+    trigger?: string;
+    follow_up?: string;
+  };
+}
+
+export interface EvaluationTrajectoryOutcomeResult extends JsonObject {
+  property: string;
+  violations: number[];
+  vacuous: boolean;
+  held: boolean;
+}
+
+export interface EvaluationTrajectoryRecoveryResult extends JsonObject {
+  failure_step: number;
+  strategy_change_after: number | null;
+  latency: number | null;
+}
+
+export interface EvaluationBoundedSuffixValueResult extends JsonObject {
+  step: number;
+  horizon: number;
+  immediate: number | null;
+  downstream: number | null;
+  observed: number;
+}
+
+export interface EvaluationBoundedSuffixResult extends JsonObject {
+  ok: boolean;
+  value?: EvaluationBoundedSuffixValueResult;
+  complete?: boolean;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
 export interface EvaluationTrajectoryResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/evaluation-trajectory-check/0.1";
   steps?: number;
   acts?: JsonValue[];
+  step_records?: EvaluationTrajectoryStepResult[];
   properties?: JsonValue[];
-  property_outcomes?: JsonObject[];
+  property_records?: EvaluationTrajectoryPropertyResult[];
+  property_outcomes?: EvaluationTrajectoryOutcomeResult[];
+  property_count?: number;
+  held_count?: number;
+  violated_count?: number;
+  vacuous_count?: number;
   recovery?: JsonValue[];
-  bounded_suffix?: JsonObject | null;
+  recovery_records?: EvaluationTrajectoryRecoveryResult[];
+  recovery_count?: number;
+  bounded_suffix?: EvaluationBoundedSuffixResult | null;
   guarantees?: string[];
   limitations?: string[];
 }

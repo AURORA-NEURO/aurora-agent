@@ -562,10 +562,12 @@ the typed reference, resolution, and dispersion layers. See
 `evaluation_reproduction_check` certifies rerun outputs without promoting reproducibility to
 biological validity, and `evaluation_trajectory_check` evaluates declared path properties with
 bounded immediate/downstream suffixes. The SDKs preserve typed accessibility-clock leak witnesses,
-dangling-reference pairs, ordered reproduction verdicts, reconciled divergence/missing counts, and
-fail-closed validity refusals; see
+dangling-reference pairs, ordered reproduction verdicts, reconciled divergence/missing counts,
+fail-closed validity refusals, step/property/outcome ledgers, recovery transitions, and bounded
+suffix completeness; see
 [`docs/EVALUATION_WORLDLINE_AUDIT.md`](docs/EVALUATION_WORLDLINE_AUDIT.md) and
-[`docs/EVALUATION_REPRODUCTION_CHECK.md`](docs/EVALUATION_REPRODUCTION_CHECK.md).
+[`docs/EVALUATION_REPRODUCTION_CHECK.md`](docs/EVALUATION_REPRODUCTION_CHECK.md) and
+[`docs/EVALUATION_TRAJECTORY_CHECK.md`](docs/EVALUATION_TRAJECTORY_CHECK.md).
 `runtime_effect_check` authorizes effects under an explicit
 deny-by-default policy without executing them, while `runtime_tape_verify` verifies hash-chained
 world tapes, checkpoints, artifacts, simulated provenance, and first divergence. `onco_boundary_check`

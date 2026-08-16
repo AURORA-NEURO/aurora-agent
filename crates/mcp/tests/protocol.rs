@@ -5317,6 +5317,16 @@ fn evaluation_trajectory_check_reports_vacuity_and_bounded_suffix_separately() {
         }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/evaluation-trajectory-check/0.1")
+    );
+    assert_eq!(result["step_records"].as_array().unwrap().len(), 3);
+    assert_eq!(result["property_count"], json!(1));
+    assert_eq!(result["violated_count"], json!(1));
+    assert_eq!(result["vacuous_count"], json!(0));
+    assert_eq!(result["property_outcomes"][0]["held"], json!(false));
+    assert_eq!(result["recovery_count"], json!(0));
     assert_eq!(result["property_outcomes"][0]["violations"][0], json!(0));
     assert_eq!(result["bounded_suffix"]["complete"], json!(true));
     assert_eq!(result["bounded_suffix"]["value"]["downstream"], json!(1.0));
