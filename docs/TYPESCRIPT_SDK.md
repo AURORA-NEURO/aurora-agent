@@ -320,6 +320,11 @@ relation. It keeps modality/claim eligibility, first refusal, root refusal, and 
 pseudoreplication evidence distinct while preserving custom descriptor and claim-requirement
 metadata; a supported result is not a claim of truth or statistical validity. See
 [`docs/MODALITY_SUPPORT_CHECK.md`](MODALITY_SUPPORT_CHECK.md).
+`modalityTransportCheck` returns `ModalityTransportCheckResult` with loss ledgers,
+exact-versus-estimated fidelity, scope-mapping checks, invertibility refusals, post-transport
+resolution, and optional claim-support deltas. The client exposes structural transport evidence
+without implying moved values, validated references, or recovery of discarded information. See
+[`docs/MODALITY_TRANSPORT_CHECK.md`](MODALITY_TRANSPORT_CHECK.md).
 `hubSearch` returns `HubSearchResult` with typed exact-facet matches, required `why` evidence,
 near-miss exclusions, trust tier, authority provenance, freshness variants, and explicit bounded
 truncation. Federation and catalog values remain JSON inputs because the Rust hubapi owns their

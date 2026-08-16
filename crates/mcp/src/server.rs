@@ -125,7 +125,7 @@ use bioprism_modalities::{
     cites as modality_cites, independent_unit as modality_independent_unit,
     supported_claims as modality_supported_claims, supports_descriptor as modality_supports_descriptor,
     ClaimKind, EvaluationHorizon, EvidenceTier, LiteratureClaim, Modality, ModalityDescriptor,
-    Resolution,
+    ModalityTransport, Resolution, TransportKind,
 };
 use bioprism_mutation::{
     generate as generate_mutations, measure as measure_diversity, standard_suite,
@@ -1206,6 +1206,7 @@ impl Server {
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
             "modality_support_check" => self.modality_support_check(&arguments),
+            "modality_transport_check" => self.modality_transport_check(&arguments),
             "literature_bind_check" => self.literature_bind_check(&arguments),
             "mutation_family" => self.mutation_family(&arguments),
             "prism_minimize" => self.prism_minimize(&arguments),
@@ -2344,6 +2345,240 @@ impl Server {
                 "failure modes marked not mechanised remain visible but are not detected by this check",
             ],
         }))
+    }
+
+    fn modality_transport_check(&self, arguments: &Value) -> Result<Value, String> {
+        let from: Modality = serde_json::from_value(
+            arguments
+                .get("from")
+                .cloned()
+                .ok_or("from is required and must be a serialized Modality")?,
+        )
+        .map_err(|error| format!("invalid source modality: {error}"))?;
+        let to: Modality = serde_json::from_value(
+            arguments
+                .get("to")
+                .cloned()
+                .ok_or("to is required and must be a serialized Modality")?,
+        )
+        .map_err(|error| format!("invalid destination modality: {error}"))?;
+        let axis: Resolution = serde_json::from_value(
+            arguments
+                .get("axis")
+                .cloned()
+                .ok_or("axis is required and must be a serialized Resolution")?,
+        )
+        .map_err(|error| format!("invalid transported resolution axis: {error}"))?;
+        let source: ModalityDescriptor = match arguments.get("source_descriptor") {
+            None | Some(Value::Null) => bioprism_modalities::catalog::descriptor(from),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("invalid source modality descriptor: {error}"))?,
+        };
+        if source.modality != from {
+            return Err(format!(
+                "source descriptor modality {:?} does not match from {:?}",
+                source.modality, from
+            ));
+        }
+        if source.purpose.len() > 100_000 {
+            return Err("source modality descriptor purpose exceeds the 100000-byte safety bound".into());
+        }
+        let kind: TransportKind = serde_json::from_value(
+            arguments
+                .get("transport")
+                .cloned()
+                .ok_or("transport is required and must be a serialized TransportKind")?,
+        )
+        .map_err(|error| format!("invalid modality transport kind: {error}"))?;
+        let claims: Vec<ClaimKind> = arguments
+            .get("claims")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()
+            .map_err(|error| format!("invalid modality transport claim kind: {error}"))?
+            .unwrap_or_default();
+        if claims.len() > ClaimKind::ALL.len() {
+            return Err("modality transport claim checks exceed the 20-claim safety bound".into());
+        }
+        let transport = match &kind {
+            TransportKind::Aggregation { operator } => {
+                ModalityTransport::aggregating(&source, to, axis, *operator)
+            }
+            TransportKind::Deconvolution {
+                reference,
+                recomposition,
+            } => ModalityTransport::deconvolving(
+                &source,
+                to,
+                axis,
+                reference.clone(),
+                *recomposition,
+            ),
+            TransportKind::Imputation { model } => {
+                ModalityTransport::imputing(&source, to, axis, model.clone())
+            }
+        };
+        let refusal_projection = |refusal: &bioprism_modalities::TransportRefusal| {
+            serde_json::to_value(refusal)
+                .map(|value| {
+                    json!({
+                        "refusal": value.clone(),
+                        "refusal_kind": value.get("transport_refusal").cloned(),
+                        "refusal_text": refusal.to_string(),
+                    })
+                })
+                .map_err(|error| format!("cannot serialize modality transport refusal: {error}"))
+        };
+        let support_row = |descriptor: &ModalityDescriptor, claim: ClaimKind| -> Result<Value, String> {
+            match modality_supports_descriptor(descriptor, claim) {
+                Ok(()) => Ok(json!({
+                    "claim": claim,
+                    "supported": true,
+                    "refusal": Value::Null,
+                    "refusal_kind": Value::Null,
+                    "refusal_text": Value::Null,
+                })),
+                Err(refusal) => {
+                    let value = serde_json::to_value(&refusal).map_err(|error| {
+                        format!("cannot serialize claim support refusal after transport: {error}")
+                    })?;
+                    Ok(json!({
+                        "claim": claim,
+                        "supported": false,
+                        "refusal": value.clone(),
+                        "refusal_kind": value.get("unsupported").cloned(),
+                        "refusal_text": refusal.to_string(),
+                    }))
+                }
+            }
+        };
+        match transport {
+            Err(refusal) => {
+                let projection = refusal_projection(&refusal)?;
+                Ok(json!({
+                    "ok": true,
+                    "schema": "bioprism-mcp/modality-transport-check/0.1",
+                    "outcome_kind": "refused",
+                    "constructed": false,
+                    "from": from,
+                    "to": to,
+                    "axis": axis,
+                    "transport": kind,
+                    "source_descriptor": {
+                        "modality": source.modality,
+                        "measurand": source.measurand,
+                        "design": source.design,
+                        "resolution": Resolution::ALL.into_iter().map(|axis| json!({"axis": axis, "status": source.resolution(axis)})).collect::<Vec<_>>(),
+                    },
+                    "transport_evidence": projection,
+                    "claims": [],
+                    "guarantees": [
+                        "transport constructors refuse unnamed bases and source-axis violations",
+                        "failed construction never emits a partial transported descriptor",
+                    ],
+                    "limitations": [
+                        "no values are moved and no estimator or arithmetic is executed",
+                    ],
+                }))
+            }
+            Ok(transport) => {
+                let mapped = transport.to_scope_mapping();
+                let mapping_check = match mapped.check() {
+                    bioprism_scope::MappingCheck::Sound => "sound",
+                    bioprism_scope::MappingCheck::MisdeclaredRestriction => "misdeclared_restriction",
+                    bioprism_scope::MappingCheck::UndeclaredLoss => "undeclared_loss",
+                };
+                let inverse = match transport.invert() {
+                    Ok(inverse) => json!({
+                        "invertible": true,
+                        "inverse": serde_json::to_value(inverse).map_err(|error| error.to_string())?,
+                        "refusal": Value::Null,
+                        "refusal_kind": Value::Null,
+                        "refusal_text": Value::Null,
+                    }),
+                    Err(refusal) => {
+                        let projection = refusal_projection(&refusal)?;
+                        json!({
+                            "invertible": false,
+                            "inverse": Value::Null,
+                            "refusal": projection["refusal"].clone(),
+                            "refusal_kind": projection["refusal_kind"].clone(),
+                            "refusal_text": projection["refusal_text"].clone(),
+                        })
+                    }
+                };
+                let applied = transport.apply(&source);
+                let (applied_descriptor, application, claim_rows) = match applied {
+                    Ok(descriptor) => {
+                        let claim_rows = claims
+                            .iter()
+                            .map(|claim| {
+                                let before = support_row(&source, *claim)?;
+                                let after = support_row(&descriptor, *claim)?;
+                                Ok(json!({
+                                    "claim": claim,
+                                    "before": before,
+                                    "after": after,
+                                    "support_lost": before["supported"] == json!(true) && after["supported"] == json!(false),
+                                    "support_gained": before["supported"] == json!(false) && after["supported"] == json!(true),
+                                }))
+                            })
+                            .collect::<Result<Vec<_>, String>>()?;
+                        (json!({
+                            "descriptor": {
+                                "modality": descriptor.modality,
+                                "measurand": descriptor.measurand,
+                                "design": descriptor.design,
+                                "complete": descriptor.is_complete(),
+                                "resolutions": Resolution::ALL.into_iter().map(|axis| json!({"axis": axis, "status": descriptor.resolution(axis)})).collect::<Vec<_>>(),
+                                "resolved_axes": descriptor.resolved_axes(),
+                                "unresolved_axes": descriptor.unresolved_axes(),
+                                "undeclared_axes": descriptor.undeclared_axes(),
+                            }
+                        }), json!({"applied": true, "refusal": Value::Null, "refusal_kind": Value::Null, "refusal_text": Value::Null}), claim_rows)
+                    }
+                    Err(refusal) => {
+                        let projection = refusal_projection(&refusal)?;
+                        (Value::Null, json!({"applied": false, "refusal": projection["refusal"].clone(), "refusal_kind": projection["refusal_kind"].clone(), "refusal_text": projection["refusal_text"].clone()}), Vec::new())
+                    }
+                };
+                Ok(json!({
+                    "ok": true,
+                    "schema": "bioprism-mcp/modality-transport-check/0.1",
+                    "outcome_kind": "constructed",
+                    "constructed": true,
+                    "from": from,
+                    "to": to,
+                    "axis": axis,
+                    "transport": serde_json::to_value(&transport).map_err(|error| error.to_string())?,
+                    "fidelity": serde_json::to_value(transport.fidelity()).map_err(|error| error.to_string())?,
+                    "loss": serde_json::to_value(transport.loss()).map_err(|error| error.to_string())?,
+                    "scope_mapping": serde_json::to_value(&mapped).map_err(|error| error.to_string())?,
+                    "scope_mapping_check": mapping_check,
+                    "inverse": inverse,
+                    "application": application,
+                    "applied_descriptor": applied_descriptor,
+                    "claims": claim_rows,
+                    "guarantees": [
+                        "loss ledgers travel with every constructed transport",
+                        "exact aggregation is distinct from estimated deconvolution and imputation",
+                        "invertibility is reported separately from fidelity and never implies value recovery",
+                        "claim support is compared before and after the resolution change rather than inferred",
+                    ],
+                    "limitations": [
+                        "the workflow audits declarations only; it does not move values, fit models, or validate a reference panel",
+                        "a successful descriptor transition does not establish transport accuracy or biological equivalence",
+                        "a round-trip or inverse mapping remains a structural operation, not proof that discarded information was recovered",
+                    ],
+                }))
+            }
+        }
     }
 
     fn literature_bind_check(&self, arguments: &Value) -> Result<Value, String> {
@@ -17599,7 +17834,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "biological_domains",
             "domains": ["BioIR", "oncology", "modalities", "specimen lineage", "reference worlds"],
             "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
-            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "modality_support_check", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
+            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "modality_support_check", "modality_transport_check", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -17947,6 +18182,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "counted_unit": { "type": ["string", "null"], "enum": ["population", "cell", "location", "molecule", "subject", "timepoint", "perturbation", null], "description": "Optional Resolution used as the analysis unit for the independent-unit/pseudoreplication audit." }
                 },
                 "required": ["modality", "claim"]
+            }
+        }),
+        json!({
+            "name": "modality_transport_check",
+            "description": "Construct and audit a declared modality transport using the real aggregation, deconvolution, or imputation kernel. Returns the loss ledger, exact-versus-estimated fidelity, scope mapping, invertibility refusal, transported descriptor, and optional before/after claim-support rows; no values are moved and no estimator is executed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Source Modality enum value." },
+                    "to": { "type": "string", "description": "Destination Modality enum value." },
+                    "axis": { "type": "string", "enum": ["population", "cell", "location", "molecule", "subject", "timepoint", "perturbation"], "description": "Resolution axis removed, created, or imputed." },
+                    "transport": { "type": "object", "description": "TransportKind: {kind: aggregation, operator}, {kind: deconvolution, reference, recomposition}, or {kind: imputation, model}." },
+                    "source_descriptor": { "type": ["object", "null"], "description": "Optional study-specific ModalityDescriptor; omit for the catalogue descriptor." },
+                    "claims": { "type": "array", "maxItems": 20, "description": "Optional ClaimKind values to compare before and after applying the transport." }
+                },
+                "required": ["from", "to", "axis", "transport"]
             }
         }),
         json!({

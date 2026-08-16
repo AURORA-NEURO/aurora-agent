@@ -1458,6 +1458,45 @@ test("client exposes typed modality support and pseudoreplication evidence", asy
   assert.equal(result.mcp.result.structuredContent.analysis_unit.admissible, false);
 });
 
+test("client exposes typed modality transport loss and inverse evidence", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async () => jsonResponse({
+      ok: true,
+      tool: "modality_transport_check",
+      request_id: "transport-1",
+      mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/modality-transport-check/0.1",
+        outcome_kind: "constructed",
+        constructed: true,
+        from: "single_cell",
+        to: "bulk_transcriptomics",
+        axis: "cell",
+        transport: { kind: "aggregation", operator: "mean" },
+        fidelity: { fidelity: "exact" },
+        loss: { discarded: ["cell distribution"] },
+        scope_mapping: {},
+        scope_mapping_check: "sound",
+        inverse: { invertible: false, refusal_kind: "not_invertible" },
+        application: { applied: true },
+        applied_descriptor: {},
+        claims: [{ claim: "cell_intrinsic_change", support_lost: true }],
+      } } },
+    }),
+  });
+  const result = await client.modalityTransportCheck({
+    from: "single_cell",
+    to: "bulk_transcriptomics",
+    axis: "cell",
+    transport: { kind: "aggregation", operator: "mean" },
+    claims: ["cell_intrinsic_change"],
+  });
+  assert.equal(result.mcp.result.structuredContent.fidelity.fidelity, "exact");
+  assert.equal(result.mcp.result.structuredContent.inverse.invertible, false);
+  assert.equal(result.mcp.result.structuredContent.claims[0].support_lost, true);
+});
+
 test("client parses cursor SSE and validates webhook mutations", async () => {
   const client = new ApiClient({
     baseUrl: "https://example.test",

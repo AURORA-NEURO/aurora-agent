@@ -335,9 +335,9 @@ serialize behind a global router mutex.
 The same server exposes the broader workspace: `world_validate` checks a world before compilation,
 `context_compare` runs the equal-engineering baseline panel, `bioworlds_catalog` runs the reference
 vertical slices, `modality_catalog` exposes assay resolution and failure-mode contracts,
-`modality_support_check` evaluates all 17 modality families against typed claims and separately
-audits analysis-unit independence, preserving root versus named refusal evidence for measurand,
-resolution, imputation, design, and pseudoreplication,
+`modality_support_check` evaluates typed claim eligibility and analysis-unit independence across
+the 17 modality families, while `modality_transport_check` reports loss, fidelity, invertibility,
+and before/after support without moving values,
 and `literature_bind_check` binds source claims to typed populations and historical horizons while
 keeping citation support separate from biological measurement support; reviews cannot be silently
 laundered into primary evidence, unstated populations refuse, and flagged sources require a
@@ -636,6 +636,8 @@ claim may be citable only as `published_claim_support`; see
 [`docs/LITERATURE_BIND_CHECK.md`](docs/LITERATURE_BIND_CHECK.md).
 The modality support boundary is documented in
 [`docs/MODALITY_SUPPORT_CHECK.md`](docs/MODALITY_SUPPORT_CHECK.md).
+The modality transport boundary is documented alongside the SDK contracts in
+`docs/MODALITY_TRANSPORT_CHECK.md`.
 The Python and TypeScript SDKs expose the OncoWorlds workflows as typed MCP and HTTP projections,
 retaining domain refusals, QC abstention, version-conditioned disagreement, transport assumptions,
 clonal ambiguity, era/site comparability, resource absence, descriptor boundaries, and subgroup

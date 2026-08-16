@@ -180,6 +180,7 @@ from .oncoworlds import (
 )
 from .literature import LiteratureBindCheckArgs, LiteratureBindCheckReport, literature_bind_check_report
 from .modality import ModalitySupportCheckArgs, ModalitySupportCheckReport, modality_support_check_report
+from .transport import ModalityTransportCheckArgs, ModalityTransportCheckReport, modality_transport_check_report
 from .stress import (
     StressProfileArgs,
     StressProfileReport,
@@ -1397,6 +1398,19 @@ class ApiClient:
         request: ModalitySupportCheckArgs | Mapping[str, Any],
     ) -> ModalitySupportCheckReport:
         return modality_support_check_report(self.modality_support_check(request))
+
+    def modality_transport_check(
+        self,
+        request: ModalityTransportCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ModalityTransportCheckArgs) else ModalityTransportCheckArgs.from_wire(request)
+        return self.call_tool("modality_transport_check", normalized.to_mcp_arguments())
+
+    def modality_transport_check_report(
+        self,
+        request: ModalityTransportCheckArgs | Mapping[str, Any],
+    ) -> ModalityTransportCheckReport:
+        return modality_transport_check_report(self.modality_transport_check(request))
 
     def hub_search(
         self,
@@ -3490,6 +3504,19 @@ class AsyncApiClient:
         request: ModalitySupportCheckArgs | Mapping[str, Any],
     ) -> ModalitySupportCheckReport:
         return modality_support_check_report(await self.modality_support_check(request))
+
+    async def modality_transport_check(
+        self,
+        request: ModalityTransportCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ModalityTransportCheckArgs) else ModalityTransportCheckArgs.from_wire(request)
+        return await self.call_tool("modality_transport_check", normalized.to_mcp_arguments())
+
+    async def modality_transport_check_report(
+        self,
+        request: ModalityTransportCheckArgs | Mapping[str, Any],
+    ) -> ModalityTransportCheckReport:
+        return modality_transport_check_report(await self.modality_transport_check(request))
 
     async def hub_search(
         self,

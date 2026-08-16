@@ -306,7 +306,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 128);
+    assert_eq!(tools.len(), 129);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1303,6 +1303,60 @@ fn modality_support_check_separates_claim_eligibility_from_analysis_unit() {
     assert_eq!(admitted["analysis_unit"]["admissible"], json!(true));
     assert!(admitted["claim_requirements"]["axes"].is_array());
     assert!(admitted["descriptor"]["supported_catalogue_claims"].is_array());
+}
+
+#[test]
+fn modality_transport_check_preserves_loss_fidelity_and_support_changes() {
+    let aggregated = call(
+        &mut server(),
+        "modality_transport_check",
+        json!({
+            "from": "single_cell",
+            "to": "bulk_transcriptomics",
+            "axis": "cell",
+            "transport": {"kind": "aggregation", "operator": "mean"},
+            "claims": ["cell_intrinsic_change", "cell_composition"]
+        }),
+    );
+    assert_eq!(aggregated["ok"], json!(true));
+    assert_eq!(aggregated["outcome_kind"], json!("constructed"));
+    assert_eq!(aggregated["constructed"], json!(true));
+    assert_eq!(aggregated["fidelity"]["fidelity"], json!("exact"));
+    assert_eq!(aggregated["inverse"]["invertible"], json!(false));
+    assert_eq!(aggregated["scope_mapping_check"], json!("sound"));
+    assert!(aggregated["loss"]["discarded"].as_array().unwrap().len() >= 2);
+    assert_eq!(aggregated["application"]["applied"], json!(true));
+    assert_eq!(aggregated["claims"][0]["support_lost"], json!(true));
+
+    let deconvolved = call(
+        &mut server(),
+        "modality_transport_check",
+        json!({
+            "from": "bulk_transcriptomics",
+            "to": "single_cell",
+            "axis": "cell",
+            "transport": {"kind": "deconvolution", "reference": "signature-matrix-v1", "recomposition": "sum"},
+            "claims": ["cell_composition", "cell_intrinsic_change"]
+        }),
+    );
+    assert_eq!(deconvolved["fidelity"]["fidelity"], json!("estimated"));
+    assert_eq!(deconvolved["inverse"]["invertible"], json!(true));
+    assert_eq!(deconvolved["claims"][0]["after"]["supported"], json!(true));
+    assert_eq!(deconvolved["claims"][1]["after"]["supported"], json!(false));
+
+    let refused = call(
+        &mut server(),
+        "modality_transport_check",
+        json!({
+            "from": "bulk_transcriptomics",
+            "to": "single_cell",
+            "axis": "cell",
+            "transport": {"kind": "deconvolution", "reference": "", "recomposition": "sum"}
+        }),
+    );
+    assert_eq!(refused["outcome_kind"], json!("refused"));
+    assert_eq!(refused["constructed"], json!(false));
+    assert_eq!(refused["transport_evidence"]["refusal_kind"], json!("unstated_basis"));
 }
 
 #[test]
@@ -4038,12 +4092,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(128));
-    assert_eq!(result["advertised_tool_count"], json!(128));
+    assert_eq!(result["unique_catalog_tools"], json!(129));
+    assert_eq!(result["advertised_tool_count"], json!(129));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(128));
-    assert_eq!(result["schema_quality"]["valid"], json!(128));
+    assert_eq!(result["schema_quality"]["checked"], json!(129));
+    assert_eq!(result["schema_quality"]["valid"], json!(129));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

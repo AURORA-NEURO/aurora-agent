@@ -549,6 +549,11 @@ invent defaults:
   requirements and resolution states, and accepts a bounded study-specific descriptor. A
   supported modality is not parsed as statistical or biological truth. See
   [`docs/MODALITY_SUPPORT_CHECK.md`](MODALITY_SUPPORT_CHECK.md).
+- `ModalityTransportCheckArgs` and `modality_transport_check(...)` expose aggregation,
+  deconvolution, and imputation loss ledgers, exact-versus-estimated fidelity, invertibility,
+  scope-mapping evidence, post-transport descriptors, and before/after claim-support rows. The
+  parser keeps an inverse separate from value recovery and never treats a declaration audit as a
+  computation. See [`docs/MODALITY_TRANSPORT_CHECK.md`](MODALITY_TRANSPORT_CHECK.md).
 - `HubSearchArgs` and `hub_search(...)` preserve caller-supplied federation, catalog, and exact
   facet query declarations under the server's catalog/release/result bounds. `HubSearchReport`
   types every match, non-empty facet explanation, near miss, trust tier, namespace authority,

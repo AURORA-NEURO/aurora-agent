@@ -3767,6 +3767,39 @@ export interface ModalitySupportCheckResult extends JsonObject {
   limitations?: string[];
 }
 
+export type ModalityTransportOutcomeKind = "constructed" | "refused";
+
+export interface ModalityTransportCheckArgs extends JsonObject {
+  from: string;
+  to: string;
+  axis: string;
+  transport: JsonObject;
+  source_descriptor?: JsonObject | null;
+  claims?: string[];
+}
+
+export interface ModalityTransportCheckResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/modality-transport-check/0.1";
+  outcome_kind: ModalityTransportOutcomeKind;
+  constructed: boolean;
+  from: string;
+  to: string;
+  axis: string;
+  transport: JsonObject;
+  fidelity?: JsonObject;
+  loss?: JsonObject;
+  scope_mapping?: JsonObject;
+  scope_mapping_check?: string;
+  inverse?: JsonObject;
+  application: JsonObject;
+  applied_descriptor?: JsonObject | null;
+  claims: JsonObject[];
+  transport_evidence?: JsonObject;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface LineageAuditArgs extends JsonObject {
   registry: JsonObject;
   max_items?: number;

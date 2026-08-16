@@ -996,6 +996,15 @@ from .modality import (
     ModalitySupportCheckReport,
     modality_support_check_report,
 )
+from .transport import (
+    AGGREGATION_OPERATORS,
+    MODALITY_TRANSPORT_KINDS,
+    MODALITY_TRANSPORT_OUTCOME_KINDS,
+    MODALITY_TRANSPORT_SCHEMA,
+    ModalityTransportCheckArgs,
+    ModalityTransportCheckReport,
+    modality_transport_check_report,
+)
 from .preanalytic import (
     PREANALYTIC_RESPONSES,
     PREANALYTIC_STAGES,
@@ -2303,5 +2312,12 @@ __all__ = [
     "ModalitySupportCheckArgs",
     "ModalitySupportCheckReport",
     "modality_support_check_report",
+    "MODALITY_TRANSPORT_KINDS",
+    "AGGREGATION_OPERATORS",
+    "MODALITY_TRANSPORT_OUTCOME_KINDS",
+    "MODALITY_TRANSPORT_SCHEMA",
+    "ModalityTransportCheckArgs",
+    "ModalityTransportCheckReport",
+    "modality_transport_check_report",
     "__version__",
 ]

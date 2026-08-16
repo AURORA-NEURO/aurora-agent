@@ -48,6 +48,8 @@ import type {
   LiteratureBindCheckResult,
   ModalitySupportCheckArgs,
   ModalitySupportCheckResult,
+  ModalityTransportCheckArgs,
+  ModalityTransportCheckResult,
   LineageAuditArgs,
   LineageAuditResult,
   PreanalyticApplyArgs,
@@ -594,6 +596,10 @@ export class ApiClient {
 
   async modalitySupportCheck(args: ModalitySupportCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ModalitySupportCheckResult>> {
     return this.callTool<ModalitySupportCheckResult>("modality_support_check", args, options);
+  }
+
+  async modalityTransportCheck(args: ModalityTransportCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ModalityTransportCheckResult>> {
+    return this.callTool<ModalityTransportCheckResult>("modality_transport_check", args, options);
   }
 
   async lineageAudit(args: LineageAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LineageAuditResult>> {
