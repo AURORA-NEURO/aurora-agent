@@ -247,6 +247,9 @@ deployment approval, or scientific validity.
 `developer_delivery_audit` now accepts that result only through an explicit `ci_evidence` argument;
 the independent `ci_execution_evidence` release target is fail-closed when the evidence is absent or
 not ready, while unrelated local-delivery targets remain independently auditable.
+The delivery audit also exposes a separate `execution_provenance` target, allowing a caller to
+request mission-trace readiness independently of CI evidence or to require both explicit signals;
+neither path silently upgrades structural evidence into execution authority.
 `execution_provenance_audit` adds the corresponding mission-side handoff: returned plan identity,
 terminal results, deterministic trace ordering/tool identity, and delegated-check digests are
 reconciled in one structural projection. It does not replay a mission or replace external execution,

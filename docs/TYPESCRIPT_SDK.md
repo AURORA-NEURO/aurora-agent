@@ -101,7 +101,8 @@ Convenience methods currently cover:
   projections; it does not claim durable storage or read a clock;
 - `bioCapabilityEvidenceAudit`: evidence posture;
 - `bioAtlasPublicationAudit`: atlas, evidence, card, and leaderboard release gates;
-- `developerDeliveryAudit`: developer-platform delivery evidence;
+- `developerDeliveryAudit`: developer-platform delivery evidence, with independent opt-in
+  `ci_execution_evidence` and `execution_provenance` targets;
 - `developerWorkbench`: digest-bound authoring/notebook audit, capability dashboard query, and
   review-only CI workflow planning;
 - `ciExecutionEvidenceAudit`: digest-bound reconciliation of a supplied CI run against a freshly
@@ -182,9 +183,11 @@ transport coverage only and is not permission, execution, scientific, or deploym
 returns typed `BioCapabilityEvidenceAuditResult` evidence rows, dimension rollups, claim blockers,
 omission accounting, optional subaudits, and explicit release posture; `developerDeliveryAudit`
 returns typed `DeveloperDeliveryAuditResult` readiness gates, explicit target blockers, release
-request state, foreign-surface posture, and optional CI evidence readiness. Requesting the
-`ci_execution_evidence` target requires an explicit `ci_evidence` payload; absence or structural
-failure blocks only that target. `bioAtlasPublicationAudit` returns typed
+request state, foreign-surface posture, and optional CI/mission-provenance evidence. Requesting the
+`ci_execution_evidence` target requires an explicit `ci_evidence` payload, while requesting the
+`execution_provenance` target requires an explicit mission provenance payload; absence or structural
+failure blocks only the requested target. Neither signal proves provider execution or deployment
+approval. `bioAtlasPublicationAudit` returns typed
 `BioAtlasPublicationAuditResult` atlas aggregation, score/evidence gates, leaderboard state, and
 `developerPlatformStatus` returns typed `DeveloperPlatformStatusResult` evidence for walkthrough
 standing, module classification, cookbook verification, declared contract surfaces, diagnostic

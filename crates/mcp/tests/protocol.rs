@@ -4201,7 +4201,7 @@ fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
     );
     assert_eq!(payload["readiness"]["ci_execution_evidence_ready"], json!(true));
     assert_eq!(payload["ci_evidence"]["ci_evidence_ready"], json!(true));
-    assert_eq!(payload["release_request"]["available_target_count"], json!(11));
+    assert_eq!(payload["release_request"]["available_target_count"], json!(12));
     assert_eq!(payload["release_request"]["ready"], json!(true));
     assert_eq!(payload["release_request"]["targets"][0]["eligible"], json!(true));
 
@@ -4255,6 +4255,44 @@ fn execution_provenance_reconciles_mission_trace_and_delegated_checks() {
     assert_eq!(provenance["valid"], json!(true));
     assert_eq!(provenance["provenance_ready"], json!(true));
     assert_eq!(provenance["delegated_check_count"], json!(1));
+
+    let delivery = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "execution_provenance": {
+                "mission": mission.clone(),
+                "delegated_checks": [{
+                    "name": "mission_trace_shape",
+                    "kind": "structural",
+                    "required": true,
+                    "status": "passed",
+                    "result_digest": "a".repeat(64),
+                    "source": "caller_attested"
+                }]
+            },
+            "release_request": {"id": "delivery-provenance-1", "targets": ["execution_provenance"]}
+        }),
+    );
+    assert_eq!(delivery["readiness"]["execution_provenance_ready"], json!(true));
+    assert_eq!(delivery["execution_provenance"]["provenance_ready"], json!(true));
+    assert_eq!(delivery["release_request"]["available_target_count"], json!(12));
+    assert_eq!(delivery["release_request"]["ready"], json!(true));
+    assert_eq!(delivery["release_request"]["targets"][0]["eligible"], json!(true));
+
+    let missing_provenance = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "release_request": {"id": "delivery-provenance-2", "targets": ["execution_provenance"]}
+        }),
+    );
+    assert_eq!(missing_provenance["readiness"]["execution_provenance_ready"], json!(false));
+    assert_eq!(missing_provenance["release_request"]["ready"], json!(false));
+    assert_eq!(
+        missing_provenance["release_request"]["targets"][0]["blockers"],
+        json!(["execution_provenance_arguments_missing"])
+    );
 
     let mut tampered = mission;
     tampered["execution_trace"][1]["sequence"] = json!(99);

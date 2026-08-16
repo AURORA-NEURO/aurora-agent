@@ -590,6 +590,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         governance: {},
         release: {},
         ci_evidence: { ci_evidence_ready: true },
+        execution_provenance: { provenance_ready: true },
         readiness: {
           platform_checks_clean: true,
           unguarded_claims: 0,
@@ -602,6 +603,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           governance_document_clean: true,
           release_audit_ready: true,
           ci_execution_evidence_ready: true,
+          execution_provenance_ready: true,
           local_delivery_ready: true,
         },
         external_surface_posture: {
@@ -618,7 +620,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           ready: true,
           fail_closed: false,
           no_implicit_release: true,
-          available_target_count: 11,
+          available_target_count: 12,
         },
         guarantees: ["no implicit release"],
         limitations: ["external execution remains outside the workflow"],
@@ -1773,15 +1775,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(leaderboard.mcp.result.structuredContent.unranked_count, 1);
   const delivery = await client.developerDeliveryAudit({
     ci_evidence: { ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } },
+    execution_provenance: { mission: { plan: { mission_id: "mission-ts" } }, delegated_checks: [] },
     release_request: { id: "delivery-1", targets: ["ci_execution_evidence"] },
   });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.ci_evidence.ci_evidence_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.readiness.ci_execution_evidence_ready, true);
+  assert.equal(delivery.mcp.result.structuredContent.execution_provenance.provenance_ready, true);
+  assert.equal(delivery.mcp.result.structuredContent.readiness.execution_provenance_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "ci_execution_evidence");
   const deliveryRequest = JSON.parse(seen.at(-1).init.body);
   assert.deepEqual(deliveryRequest.ci_evidence, { ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } });
+  assert.deepEqual(deliveryRequest.execution_provenance, { mission: { plan: { mission_id: "mission-ts" } }, delegated_checks: [] });
   const engineering = await client.engineeringManifestAudit({
     project: { id: "aurora-agent", version: "0.1.0", repository: "github.com/AURORA-NEURO/aurora-agent" },
     baseline: { language: "Rust 2021", runtime: "cargo", api: "MCP JSON-RPC", storage: "in-memory", observability: "structured", deployment: "local" },

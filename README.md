@@ -707,6 +707,9 @@ validity was established.
 When a delivery decision needs this signal, `developer_delivery_audit` accepts the exact
 `ci_evidence` payload and exposes a separate `ci_execution_evidence` target; missing evidence blocks
 that target without changing the semantics of other delivery targets.
+The same delivery audit accepts an optional `execution_provenance` payload and exposes an independent
+`execution_provenance` target, so callers can require mission-trace handoff, CI evidence, or both
+without conflating structural evidence with execution authority.
 `execution_provenance_audit` closes the adjacent mission handoff: it reconciles the returned plan,
 terminal results, deterministic trace, and delegated check digests into one structural artifact.
 It flags missing, duplicated, or identity-mismatched evidence, but never replays the mission or

@@ -1497,6 +1497,7 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             governance=None,
             release=None,
             ci_evidence=None,
+            execution_provenance=None,
         )
 
     def test_delivery_audit_report_preserves_explicit_ci_evidence_target(self) -> None:
@@ -1523,6 +1524,35 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         report = DeveloperDeliveryAuditReport.from_wire(payload)
         self.assertTrue(report.readiness.ci_execution_evidence_ready)
         self.assertEqual(report.checks["ci_evidence"]["ci_evidence_ready"], True)
+        self.assertTrue(report.ready_for_requested_release)
+
+    def test_delivery_audit_report_preserves_explicit_execution_provenance_target(self) -> None:
+        payload = developer_delivery_audit_payload()
+        payload["execution_provenance"] = {
+            "provenance_ready": True,
+            "audit": {"verification": "structural_only"},
+        }
+        payload["readiness"]["execution_provenance_ready"] = True
+        payload["release_request"] = {
+            "present": True,
+            "id": "delivery-provenance-1",
+            "targets": [
+                {
+                    "target": "execution_provenance",
+                    "available": True,
+                    "eligible": True,
+                    "blockers": [],
+                    "notes": ["mission provenance structurally reconciled"],
+                }
+            ],
+            "ready": True,
+            "fail_closed": False,
+            "no_implicit_release": True,
+            "available_target_count": 12,
+        }
+        report = DeveloperDeliveryAuditReport.from_wire(payload)
+        self.assertTrue(report.readiness.execution_provenance_ready)
+        self.assertEqual(report.checks["execution_provenance"]["provenance_ready"], True)
         self.assertTrue(report.ready_for_requested_release)
 
     def test_sync_workspace_typed_developer_platform_report(self) -> None:
@@ -1749,6 +1779,7 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             governance=None,
             release=None,
             ci_evidence=None,
+            execution_provenance=None,
         )
 
     async def test_async_workspace_typed_developer_platform_report(self) -> None:

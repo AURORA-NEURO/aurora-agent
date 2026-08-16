@@ -853,6 +853,7 @@ class HttpApiClientTests(unittest.TestCase):
             governance=None,
             release=None,
             ci_evidence=None,
+            execution_provenance=None,
         )
 
     def test_http_developer_platform_status_round_trips_bounded_arguments(self) -> None:
@@ -1263,6 +1264,7 @@ class HttpApiClientTests(unittest.TestCase):
                 governance=None,
                 release=None,
                 ci_evidence=None,
+                execution_provenance=None,
             )
             with patch.object(
                 AsyncApiClient,

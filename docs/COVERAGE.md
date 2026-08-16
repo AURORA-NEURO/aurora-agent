@@ -61,6 +61,9 @@ state, foreign-artifact posture, and omitted optional evidence instead of collap
 delivery review into a green score. The explicit `ci_execution_evidence` target consumes the
 structurally reconciled CI result only when the caller supplies it; it never turns structural
 evidence into execution or deployment approval.
+The independent `execution_provenance` target accepts a structurally reconciled mission report and
+delegated checks through the typed SDKs; it is likewise opt-in and fail-closed, so CI evidence and
+mission provenance can be requested independently or together without being conflated.
 `execution_provenance_audit` adds the corresponding mission-side projection: plan identity,
 terminal result coverage, contiguous trace sequence/tool identity, delegated-check status, and
 content digests are reconciled without mission replay or provider contact. Its ready flag is
