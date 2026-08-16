@@ -277,6 +277,42 @@ class LabAndOncoReportTests(unittest.TestCase):
         self.assertTrue(report.withheld_progression)
         self.assertEqual(report.call_label, "not evaluable")
         self.assertEqual(report.hypothesis_count, 3)
+        versioned = onco_response_report({
+            "ok": True,
+            "schema": "bioprism-mcp/onco-response-assess/0.1",
+            "outcome_kind": "assessment",
+            "call_kind": "not_evaluable",
+            "unconfirmed_reading": "progression",
+            "criterion": {"id": "rano-hgg", "version": "2010"},
+            "treatment": {"modality": "radiotherapy"},
+            "criterion_recognises_post_treatment_change": True,
+            "post_treatment_window_days": 84,
+            "pseudoresponse_possible": False,
+            "measurement_error_fraction": 0.1,
+            "evidence_present": False,
+            "criterion_divergence_present": True,
+            "sensitivity_flips": False,
+            "hypothesis_non_identifiable": True,
+            "assessment": {
+                "criterion_id": "rano-hgg",
+                "criterion_version": "2010",
+                "unconfirmed_reading": "progression",
+                "call": {"call": "not_evaluable", "reason": {"not_evaluable": "post_treatment_change_not_excluded"}},
+                "sensitivity": {"flips_within_measurement_error": False},
+                "hypotheses": {"entries": [{"hypothesis": "progression"}, {"hypothesis": "treatment_effect"}]},
+                "divergence_from_criterion": {"criterion_would_call": "progression"},
+            },
+            "call_label": "not evaluable",
+            "withheld_progression": True,
+            "hypothesis_count": 2,
+            "evidence_requests": ["histopathology"],
+            "guarantees": [],
+            "limitations": [],
+        })
+        self.assertEqual(versioned.schema, "bioprism-mcp/onco-response-assess/0.1")
+        self.assertEqual(versioned.call_kind, "not_evaluable")
+        self.assertTrue(versioned.criterion_divergence_present)
+        self.assertTrue(versioned.hypothesis_non_identifiable)
         with self.assertRaises(ArgumentError):
             onco_response_report({
                 "ok": True,

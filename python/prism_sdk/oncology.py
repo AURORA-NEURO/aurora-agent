@@ -34,6 +34,10 @@ ONCO_TERMINAL_ACTIONS = frozenset({"stop", "abstain", "escalate"})
 ONCO_WORLDLINE_SCHEMA = "bioprism-mcp/onco-worldline-view/0.1"
 ONCO_WORLDLINE_CLOCK_AXES = ("acquired", "recorded", "released", "visible")
 ONCO_WORLDLINE_VISIBILITY_STATES = frozenset({"visible", "hidden_from_agent", "not_filtered"})
+ONCO_RESPONSE_SCHEMA = "bioprism-mcp/onco-response-assess/0.1"
+ONCO_RESPONSE_CALL_KINDS = frozenset({"complete", "partial", "stable", "progression", "not_evaluable"})
+ONCO_RESPONSE_OUTCOME_KINDS = frozenset({"assessment", "refused"})
+ONCO_RESPONSE_REFUSAL_KINDS = frozenset({"assessment_error"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -201,6 +205,52 @@ class OncoResponseAssessArgs:
         return result
 
 
+ONCO_RESPONSE_SCHEMA = "bioprism-mcp/onco-response-assess/0.1"
+ONCO_RESPONSE_CALL_KINDS = frozenset({"complete", "partial", "stable", "progression", "not_evaluable"})
+ONCO_RESPONSE_OUTCOME_KINDS = frozenset({"assessment", "refused"})
+ONCO_RESPONSE_REFUSAL_KINDS = frozenset({"assessment_error"})
+ONCO_RESPONSE_CALL_LABELS = {
+    "complete": "complete response",
+    "partial": "partial response",
+    "stable": "stable disease",
+    "progression": "confirmed progression",
+    "not_evaluable": "not evaluable",
+}
+
+
+@dataclass(frozen=True)
+class OncoResponseAssessmentProjection:
+    raw: dict[str, Any]
+    criterion_id: str
+    criterion_version: str
+    unconfirmed_reading: str
+    call_kind: str
+    call: dict[str, Any]
+    sensitivity: dict[str, Any]
+    hypotheses: dict[str, Any]
+    divergence_from_criterion: dict[str, Any] | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoResponseAssessmentProjection":
+        raw = _route_mapping("oncology response assessment", value)
+        call = _route_mapping("oncology response call", raw.get("call"))
+        call_kind = _route_text("oncology response call kind", call.get("call"))
+        if call_kind not in ONCO_RESPONSE_CALL_KINDS:
+            raise ArgumentError(f"unknown oncology response call kind: {call_kind!r}")
+        hypotheses = _route_mapping("oncology response hypotheses", raw.get("hypotheses"))
+        return cls(
+            raw,
+            _route_text("oncology response criterion id", raw.get("criterion_id")),
+            _route_text("oncology response criterion version", raw.get("criterion_version")),
+            _route_text("oncology response unconfirmed reading", raw.get("unconfirmed_reading")),
+            call_kind,
+            call,
+            _route_mapping("oncology response sensitivity", raw.get("sensitivity")),
+            hypotheses,
+            _optional_mapping("oncology response criterion divergence", raw.get("divergence_from_criterion")),
+        )
+
+
 @dataclass(frozen=True)
 class OncoResponseReport:
     raw: dict[str, Any]
@@ -216,16 +266,55 @@ class OncoResponseReport:
     guarantee: str | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+    refusal_kind: str | None = None
+    call_kind: str | None = None
+    unconfirmed_reading: str | None = None
+    criterion: dict[str, Any] | None = None
+    treatment: dict[str, Any] | None = None
+    criterion_recognises_post_treatment_change: bool | None = None
+    post_treatment_window_days: int | None = None
+    pseudoresponse_possible: bool | None = None
+    measurement_error_fraction: float | None = None
+    evidence_present: bool | None = None
+    criterion_divergence_present: bool | None = None
+    sensitivity_flips: bool | None = None
+    hypothesis_non_identifiable: bool | None = None
+    assessment_record: OncoResponseAssessmentProjection | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoResponseReport":
         raw = _projection_payload(value, description="oncology response", direct_keys=("assessment", "stage"))
         ok = _bool("oncology response ok", raw.get("ok"))
         fail_closed = _bool("oncology response fail_closed", raw.get("fail_closed", False))
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("oncology response schema", schema_value)
+        if schema is not None and schema != ONCO_RESPONSE_SCHEMA:
+            raise ArgumentError(f"unknown oncology response schema: {schema!r}")
+        outcome_kind_value = raw.get("outcome_kind")
+        outcome_kind = "assessment" if ok else "refused"
+        if outcome_kind_value is not None:
+            outcome_kind = _route_text("oncology response outcome kind", outcome_kind_value)
+            if outcome_kind not in ONCO_RESPONSE_OUTCOME_KINDS or outcome_kind != ("assessment" if ok else "refused"):
+                raise ArgumentError("oncology response outcome kind does not reconcile with transport state")
+        criterion = None if raw.get("criterion") is None else _route_mapping("oncology response criterion", raw.get("criterion"))
+        treatment = None if raw.get("treatment") is None else _route_mapping("oncology response treatment", raw.get("treatment"))
+        criterion_recognises = None if raw.get("criterion_recognises_post_treatment_change") is None else _bool("oncology response criterion post-treatment flag", raw.get("criterion_recognises_post_treatment_change"))
+        post_treatment_window_days = None if raw.get("post_treatment_window_days") is None else _signed_integer("oncology response post-treatment window", raw.get("post_treatment_window_days"))
+        pseudoresponse_possible = None if raw.get("pseudoresponse_possible") is None else _bool("oncology response pseudoresponse flag", raw.get("pseudoresponse_possible"))
+        measurement_error_fraction = None if raw.get("measurement_error_fraction") is None else _finite_nonnegative("oncology response measurement error", raw.get("measurement_error_fraction"))
+        evidence_present = None if raw.get("evidence_present") is None else _bool("oncology response evidence presence", raw.get("evidence_present"))
         if not ok:
             refusal = _route_text("oncology response refusal", raw.get("refusal"))
             if not fail_closed:
                 raise ArgumentError("refused oncology response results must be fail-closed")
+            refusal_kind_value = raw.get("refusal_kind")
+            refusal_kind = None if refusal_kind_value is None else _route_text("oncology response refusal kind", refusal_kind_value)
+            if refusal_kind is not None and refusal_kind not in ONCO_RESPONSE_REFUSAL_KINDS:
+                raise ArgumentError(f"unknown oncology response refusal kind: {refusal_kind!r}")
+            if schema is not None and refusal_kind is None:
+                raise ArgumentError("versioned oncology response refusals require refusal_kind")
             return cls(
                 raw,
                 False,
@@ -240,22 +329,63 @@ class OncoResponseReport:
                 None if raw.get("guarantee") is None else _route_text("oncology response guarantee", raw.get("guarantee")),
                 (),
                 (),
+                schema,
+                outcome_kind,
+                refusal_kind,
+                None,
+                None,
+                criterion,
+                treatment,
+                criterion_recognises,
+                post_treatment_window_days,
+                pseudoresponse_possible,
+                measurement_error_fraction,
+                evidence_present,
+                None,
+                None,
+                None,
+                None,
             )
         if fail_closed or raw.get("refusal") is not None or raw.get("stage") is not None:
             raise ArgumentError("successful oncology response results cannot carry refusal evidence")
         assessment = _route_mapping("oncology response assessment", raw.get("assessment"))
+        assessment_record = None
+        if all(key in assessment for key in ("criterion_id", "criterion_version", "sensitivity", "hypotheses")):
+            assessment_record = OncoResponseAssessmentProjection.from_wire(assessment)
+        elif schema is not None:
+            raise ArgumentError("versioned oncology responses require a complete assessment projection")
         call_label = _route_text("oncology response call_label", raw.get("call_label"))
+        call_projection = _route_mapping("oncology response call", assessment.get("call"))
+        call_kind_value = raw.get("call_kind")
+        call_kind = _route_text("oncology response call kind", call_projection.get("call")) if call_kind_value is None else _route_text("oncology response call kind", call_kind_value)
+        if call_kind not in ONCO_RESPONSE_CALL_KINDS or (assessment_record is not None and call_kind != assessment_record.call_kind) or ONCO_RESPONSE_CALL_LABELS[call_kind] != call_label:
+            raise ArgumentError("oncology response call kind or label does not reconcile with assessment")
         withheld = _bool("oncology response withheld_progression", raw.get("withheld_progression"))
         if withheld and call_label != "not evaluable":
             raise ArgumentError("withheld progression must have a not evaluable reportable call")
         evidence_requests = _array("oncology response evidence_requests", raw.get("evidence_requests"))
+        hypothesis_count = _route_count("oncology response hypothesis_count", raw.get("hypothesis_count"))
+        entries = _array("oncology response hypothesis entries", assessment_record.hypotheses.get("entries", [])) if assessment_record is not None else ()
+        if assessment_record is not None and hypothesis_count != len(entries):
+            raise ArgumentError("oncology response hypothesis count does not reconcile with assessment")
+        criterion_divergence_present = _bool("oncology response criterion divergence presence", raw.get("criterion_divergence_present", assessment_record is not None and assessment_record.divergence_from_criterion is not None))
+        if assessment_record is not None and criterion_divergence_present != (assessment_record.divergence_from_criterion is not None):
+            raise ArgumentError("oncology response criterion divergence does not reconcile with assessment")
+        sensitivity_flips = _bool("oncology response sensitivity flips", raw.get("sensitivity_flips", assessment_record is not None and assessment_record.sensitivity.get("flips_within_measurement_error", False)))
+        if assessment_record is not None and "flips_within_measurement_error" in assessment_record.sensitivity and sensitivity_flips != _bool("oncology response assessment sensitivity flips", assessment_record.sensitivity.get("flips_within_measurement_error")):
+            raise ArgumentError("oncology response sensitivity flip state does not reconcile")
+        hypothesis_non_identifiable = _bool("oncology response hypothesis identifiability", raw.get("hypothesis_non_identifiable", len(entries) > 1 if assessment_record is not None else False))
+        if assessment_record is not None and hypothesis_non_identifiable != (len(entries) > 1):
+            raise ArgumentError("oncology response hypothesis identifiability does not reconcile")
+        if schema is not None and ("call_kind" not in raw or criterion is None or treatment is None):
+            raise ArgumentError("versioned oncology responses require call, criterion, and treatment projections")
         return cls(
             raw,
             True,
             assessment,
             call_label,
             withheld,
-            _route_count("oncology response hypothesis_count", raw.get("hypothesis_count")),
+            hypothesis_count,
             evidence_requests,
             None,
             None,
@@ -263,6 +393,22 @@ class OncoResponseReport:
             None,
             _route_strings("oncology response guarantees", raw.get("guarantees")),
             _route_strings("oncology response limitations", raw.get("limitations")),
+            schema,
+            outcome_kind,
+            None,
+            call_kind,
+            assessment_record.unconfirmed_reading if assessment_record is not None else (None if assessment.get("unconfirmed_reading") is None else _route_text("oncology response unconfirmed reading", assessment.get("unconfirmed_reading"))),
+            criterion,
+            treatment,
+            criterion_recognises,
+            post_treatment_window_days,
+            pseudoresponse_possible,
+            measurement_error_fraction,
+            evidence_present,
+            criterion_divergence_present,
+            sensitivity_flips,
+            hypothesis_non_identifiable,
+            assessment_record,
         )
 
 
@@ -1364,12 +1510,17 @@ __all__ = [
     "ONCO_OUTCOME_POPULATIONS",
     "ONCO_OUTCOME_SCHEMA",
     "ONCO_TERMINAL_ACTIONS",
+    "ONCO_RESPONSE_CALL_KINDS",
+    "ONCO_RESPONSE_OUTCOME_KINDS",
+    "ONCO_RESPONSE_REFUSAL_KINDS",
+    "ONCO_RESPONSE_SCHEMA",
     "ONCO_WORLDLINE_CLOCK_AXES",
     "ONCO_WORLDLINE_SCHEMA",
     "ONCO_WORLDLINE_VISIBILITY_STATES",
     "OncoBoundaryArgs",
     "OncoBoundaryDispositionReport",
     "OncoBoundaryReport",
+    "OncoResponseAssessmentProjection",
     "OncoAnalysisOutcomeProjection",
     "OncoAnalysisRecordProjection",
     "OncoClassificationArgs",

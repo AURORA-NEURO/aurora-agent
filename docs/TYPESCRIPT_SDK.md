@@ -339,7 +339,8 @@ versus individual-clinical refusal and human-escalation state, including fail-cl
 handling.
 `oncoResponseAssess` types the criteria-aware response projection, retaining the unconfirmed
 reading separately from the reportable call and exposing post-treatment progression withholding,
-surviving hypotheses, and evidence requests. `oncoWorldlineView` keeps biological and record
+surviving hypotheses, evidence requests, call kind, criterion divergence, treatment-window, and
+sensitivity metadata. `oncoWorldlineView` keeps biological and record
 orders separate and makes the agent-visibility cutoff/visible-hidden partition explicit.
 `oncoClassificationCheck` preserves integrated versus unresolved molecular classification and
 assay obligations; `oncoworldsIdentityJoin` returns a typed `joinable: false` domain verdict

@@ -578,6 +578,9 @@ preserves typed recording/replay, policy-journal, budget, and fork evidence; see
 `onco_boundary_check`
 keeps research output separate from individualized clinical use, and `onco_response_assess` keeps
 post-treatment progression, threshold sensitivity, and non-identifiable change states explicit.
+Its versioned projection separates call kind, unconfirmed reading, treatment-window metadata,
+criterion divergence, sensitivity flips, and hypothesis identifiability; see
+[`docs/ONCO_RESPONSE_ASSESS.md`](docs/ONCO_RESPONSE_ASSESS.md).
 `onco_worldline_view` keeps acquisition, recording, release, and agent-visibility clocks distinct,
 reports indexed biological and record orders, and exposes a versioned visibility partition at a
 caller-supplied cutoff. Its typed SDK projection rejects forged clock copies, order indices, and

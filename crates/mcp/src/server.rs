@@ -9888,15 +9888,39 @@ impl Server {
             Err(error) => {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/onco-response-assess/0.1",
+                    "outcome_kind": "refused",
+                    "refusal_kind": "assessment_error",
                     "stage": "response_assessment",
                     "refusal": error.to_string(),
                     "fail_closed": true,
+                    "criterion": criterion,
+                    "treatment": treatment,
+                    "evidence_present": arguments.get("evidence").is_some(),
                     "guarantee": "invalid or unsupported measurements never become stable, response, or progression calls"
                 }))
             }
         };
+        let assessment_value = serde_json::to_value(&assessment).map_err(|error| error.to_string())?;
+        let call_kind = assessment_value["call"]["call"]
+            .as_str()
+            .ok_or("response assessment must carry a tagged call")?;
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/onco-response-assess/0.1",
+            "outcome_kind": "assessment",
+            "call_kind": call_kind,
+            "unconfirmed_reading": assessment.unconfirmed_reading,
+            "criterion": criterion,
+            "treatment": treatment,
+            "criterion_recognises_post_treatment_change": criterion.recognises_post_treatment_change,
+            "post_treatment_window_days": treatment.modality.post_treatment_window_days(),
+            "pseudoresponse_possible": treatment.modality.causes_pseudoresponse(),
+            "measurement_error_fraction": measurement_error_fraction,
+            "evidence_present": arguments.get("evidence").is_some(),
+            "criterion_divergence_present": assessment.divergence_from_criterion.is_some(),
+            "sensitivity_flips": assessment.sensitivity.flips_within_measurement_error,
+            "hypothesis_non_identifiable": assessment.hypotheses.is_non_identifiable(),
             "assessment": assessment,
             "call_label": assessment.call.label(),
             "withheld_progression": assessment.withheld_progression(),

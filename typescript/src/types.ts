@@ -3958,6 +3958,20 @@ export interface OncoResponseAssessArgs extends JsonObject {
 
 export interface OncoResponseResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/onco-response-assess/0.1";
+  outcome_kind?: "assessment" | "refused";
+  call_kind?: "complete" | "partial" | "stable" | "progression" | "not_evaluable";
+  unconfirmed_reading?: "complete" | "partial" | "stable" | "progression";
+  criterion?: JsonObject;
+  treatment?: JsonObject;
+  criterion_recognises_post_treatment_change?: boolean;
+  post_treatment_window_days?: number;
+  pseudoresponse_possible?: boolean;
+  measurement_error_fraction?: number;
+  evidence_present?: boolean;
+  criterion_divergence_present?: boolean;
+  sensitivity_flips?: boolean;
+  hypothesis_non_identifiable?: boolean;
   assessment?: JsonObject;
   call_label?: string;
   withheld_progression?: boolean;
@@ -3965,6 +3979,7 @@ export interface OncoResponseResult extends JsonObject {
   evidence_requests?: JsonValue[];
   stage?: string;
   refusal?: string;
+  refusal_kind?: "assessment_error";
   fail_closed?: boolean;
   guarantee?: string;
   guarantees?: string[];

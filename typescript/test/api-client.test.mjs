@@ -719,7 +719,27 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/contradiction_review") return jsonResponse({ ok: true, tool: "contradiction_review", request_id: "r29", mcp: { result: { structuredContent: { ok: false, stage: "pose", refusal: "readings agree", fail_closed: true } } } });
       if (path === "/v1/tools/lab_plan") return jsonResponse({ ok: true, tool: "lab_plan", request_id: "r30", mcp: { result: { structuredContent: { ok: true, goal: "safe assay", should_escalate: true } } } });
       if (path === "/v1/tools/onco_boundary_check") return jsonResponse({ ok: true, tool: "onco_boundary_check", request_id: "r31", mcp: { result: { structuredContent: { ok: true, released: ["cohort_analysis"], refused: ["treatment_recommendation"], terminal_action: "escalate" } } } });
-      if (path === "/v1/tools/onco_response_assess") return jsonResponse({ ok: true, tool: "onco_response_assess", request_id: "r32", mcp: { result: { structuredContent: { ok: true, call_label: "not evaluable", withheld_progression: true, hypothesis_count: 2 } } } });
+      if (path === "/v1/tools/onco_response_assess") return jsonResponse({ ok: true, tool: "onco_response_assess", request_id: "r32", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/onco-response-assess/0.1",
+        outcome_kind: "assessment",
+        call_kind: "not_evaluable",
+        unconfirmed_reading: "progression",
+        criterion: { id: "rano-hgg", version: "2010" },
+        treatment: { modality: "radiotherapy" },
+        criterion_recognises_post_treatment_change: true,
+        post_treatment_window_days: 84,
+        pseudoresponse_possible: false,
+        measurement_error_fraction: 0.1,
+        evidence_present: false,
+        criterion_divergence_present: true,
+        sensitivity_flips: false,
+        hypothesis_non_identifiable: true,
+        call_label: "not evaluable",
+        withheld_progression: true,
+        hypothesis_count: 2,
+        evidence_requests: ["histopathology", "interval_follow_up"],
+      } } } });
       if (path === "/v1/tools/onco_worldline_view") return jsonResponse({ ok: true, tool: "onco_worldline_view", request_id: "r33", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/onco-worldline-view/0.1",
@@ -1290,6 +1310,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(onco.mcp.result.structuredContent.terminal_action, "escalate");
   assert.equal(responseAssessment.mcp.result.structuredContent.withheld_progression, true);
   assert.equal(responseAssessment.mcp.result.structuredContent.call_label, "not evaluable");
+  assert.equal(responseAssessment.mcp.result.structuredContent.schema, "bioprism-mcp/onco-response-assess/0.1");
+  assert.equal(responseAssessment.mcp.result.structuredContent.call_kind, "not_evaluable");
+  assert.equal(responseAssessment.mcp.result.structuredContent.criterion_divergence_present, true);
   assert.equal(worldline.mcp.result.structuredContent.record_order_differs, false);
   assert.equal(worldline.mcp.result.structuredContent.schema, "bioprism-mcp/onco-worldline-view/0.1");
   assert.equal(worldline.mcp.result.structuredContent.timepoints[0].clocks.visible, "2026-01-01T00:00:00Z");

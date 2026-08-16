@@ -178,9 +178,11 @@ invent defaults:
   escalated, and direct-identifier refusals remain fail-closed without echoing request data.
 - `OncoResponseAssessArgs`/`onco_response_report(...)` expose the criteria-aware response gate:
   the raw radiologic reading, reportable call, withheld-progression flag, surviving hypothesis
-  count, and discriminating evidence requests remain separate. A structured refusal is retained
+  count, and discriminating evidence requests remain separate. The typed report also carries call
+  kind, criterion/treatment metadata, criterion divergence, sensitivity, and identifiability.
+  A structured refusal is retained
   as a fail-closed domain value, and the parser rejects a forged `withheld_progression` value that
-  does not carry the kernel's `not evaluable` call label.
+  does not carry the kernel's `not evaluable` call label. See `docs/ONCO_RESPONSE_ASSESS.md`.
 - `OncoWorldlineViewArgs`/`onco_worldline_report(...)` reconcile biological acquisition order,
   record order, indexed four-clock timepoint rows, and the optional agent-visibility partition.
   `OncoWorldlineReport.timepoint_records` exposes typed clock and visibility projections; a cutoff

@@ -5666,6 +5666,18 @@ fn onco_response_assess_withholds_post_treatment_progression() {
     );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/onco-response-assess/0.1")
+    );
+    assert_eq!(result["outcome_kind"], json!("assessment"));
+    assert_eq!(result["call_kind"], json!("not_evaluable"));
+    assert_eq!(result["unconfirmed_reading"], json!("progression"));
+    assert_eq!(result["post_treatment_window_days"], json!(84));
+    assert_eq!(result["pseudoresponse_possible"], json!(false));
+    assert_eq!(result["criterion_divergence_present"], json!(true));
+    assert_eq!(result["sensitivity_flips"], json!(false));
+    assert_eq!(result["hypothesis_non_identifiable"], json!(true));
+    assert_eq!(
         result["assessment"]["unconfirmed_reading"],
         json!("progression")
     );
