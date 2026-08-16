@@ -234,6 +234,7 @@ from .stress import (
 from .influence import InfluenceAnalysisReport, InfluenceAnalyzeArgs, influence_analysis_report
 from .routing import RoutingDecisionReport, routing_decision_report
 from .routing_lab import RoutingLabRunArgs, RoutingLabRunReport, routing_lab_run_report
+from .lab_pareto import LabParetoAuditArgs, LabParetoAuditReport, lab_pareto_audit_report
 from .provider import ProviderCapabilityGateArgs, ProviderCapabilityGateReport, provider_capability_gate_report
 from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_registry_check_report
 from .token_context import (
@@ -1105,6 +1106,23 @@ class Workspace:
         """Return typed holdout, regret, and calibration evidence."""
 
         return routing_lab_run_report(self.routing_lab_run(request))
+
+    def lab_pareto_audit(
+        self,
+        request: LabParetoAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Build the offline inference-lab Pareto archive through workspace MCP."""
+
+        normalized = request if isinstance(request, LabParetoAuditArgs) else LabParetoAuditArgs.from_wire(request)
+        return self.tool("lab_pareto_audit", normalized.to_mcp_arguments())
+
+    def lab_pareto_audit_report(
+        self,
+        request: LabParetoAuditArgs | Mapping[str, Any],
+    ) -> LabParetoAuditReport:
+        """Return typed front, archive, hole, and selection evidence."""
+
+        return lab_pareto_audit_report(self.lab_pareto_audit(request))
 
     def provider_capability_gate(
         self,
@@ -3409,6 +3427,23 @@ class AsyncWorkspace:
         """Return typed async routing-lab evidence."""
 
         return routing_lab_run_report(await self.routing_lab_run(request))
+
+    async def lab_pareto_audit(
+        self,
+        request: LabParetoAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Build the offline inference-lab Pareto archive through async workspace MCP."""
+
+        normalized = request if isinstance(request, LabParetoAuditArgs) else LabParetoAuditArgs.from_wire(request)
+        return await self.tool("lab_pareto_audit", normalized.to_mcp_arguments())
+
+    async def lab_pareto_audit_report(
+        self,
+        request: LabParetoAuditArgs | Mapping[str, Any],
+    ) -> LabParetoAuditReport:
+        """Return typed front, archive, hole, and selection evidence."""
+
+        return lab_pareto_audit_report(await self.lab_pareto_audit(request))
 
     async def provider_capability_gate(
         self,

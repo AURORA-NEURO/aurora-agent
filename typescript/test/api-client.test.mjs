@@ -2289,6 +2289,47 @@ test("client exposes offline routing lab regret and holdout evidence", async () 
   assert.equal(result.mcp.result.structuredContent.report.task_rows_omitted, 1);
 });
 
+test("client exposes typed inference-lab Pareto trade-offs and holes", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/lab_pareto_audit");
+      return jsonResponse({ ok: true, tool: "lab_pareto_audit", request_id: "pareto-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/lab-pareto-audit/0.1",
+        objective_count: 2,
+        profile_count: 2,
+        objectives: [],
+        admissions: [],
+        admissions_omitted: 2,
+        front: {
+          count: 2,
+          members: [],
+          unresolved_count: 1,
+          unresolved: [{ candidate: "hole", axes: ["cost_units"] }],
+          selection: { selection: "ambiguous", front: ["cheap", "accurate"], unresolved: [] },
+        },
+        archived_count: 0,
+        archived: [],
+        archived_omitted: 0,
+        relations: [{ left: "cheap", right: "accurate", relation: { relation: "incomparable" } }],
+        relations_omitted: 0,
+        max_rows: 100,
+        guarantees: ["trade-offs remain incomparable"],
+        limitations: ["point measurements"],
+      } } } });
+    },
+  });
+  const result = await client.labParetoAudit({
+    objectives: [{ axis: "admissible_rate", direction: "higher_is_better" }],
+    profiles: [{ candidate: "cheap", values: {} }],
+    max_rows: 1,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/lab-pareto-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.front.selection.selection, "ambiguous");
+  assert.equal(result.mcp.result.structuredContent.relations[0].relation.relation, "incomparable");
+});
+
 test("client exposes provider gate states and differential indeterminacy", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

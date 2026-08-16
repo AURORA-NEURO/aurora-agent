@@ -6204,6 +6204,54 @@ export interface RoutingLabRunResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface LabParetoAuditArgs extends JsonObject {
+  objectives: JsonObject[];
+  profiles: JsonObject[];
+  relations?: JsonObject[];
+  max_rows?: number;
+}
+
+export interface LabParetoSelectionResult extends JsonObject {
+  selection: "unique" | "ambiguous" | "empty";
+  candidate?: string;
+  front?: string[];
+  unresolved?: JsonObject[];
+}
+
+export interface LabParetoFrontResult extends JsonObject {
+  count: number;
+  members: JsonObject[];
+  unresolved_count: number;
+  unresolved: JsonObject[];
+  selection: LabParetoSelectionResult;
+}
+
+export interface LabParetoAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/lab-pareto-audit/0.1";
+  objective_count?: number;
+  profile_count?: number;
+  objectives?: JsonObject[];
+  admissions?: JsonObject[];
+  admissions_omitted?: number;
+  front?: LabParetoFrontResult;
+  archived_count?: number;
+  archived?: JsonObject[];
+  archived_omitted?: number;
+  relations?: JsonObject[];
+  relations_omitted?: number;
+  max_rows?: number;
+  stage?: string;
+  profile_index?: number;
+  candidate?: string;
+  refusal?: string;
+  error?: JsonObject;
+  fail_closed?: boolean;
+  inserted_profiles?: number;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface ProviderCapabilityGateArgs extends JsonObject {
   card: JsonObject;
   required: string[];

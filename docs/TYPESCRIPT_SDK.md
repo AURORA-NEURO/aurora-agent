@@ -452,6 +452,10 @@ a routed win.
 envelopes. Its report keeps task/regime holdout posture, fixed-default and oracle comparators,
 regret, calibration, abstention, task outcome counts, and explicit row omissions visible; it is
 not a production routing or deployment approval. See [`docs/ROUTING_LAB_RUN.md`](../docs/ROUTING_LAB_RUN.md).
+`labParetoAudit` exposes the inference-lab multi-objective archive. Its typed result retains
+dominated candidates, displaced members, measured-versus-unmeasured axes, front-only relations,
+unresolved holes, and `unique`/`ambiguous`/`empty` selection without scalarizing the front. See
+[`docs/LAB_PARETO_AUDIT.md`](../docs/LAB_PARETO_AUDIT.md).
 `providerCapabilityGate` preserves untested/failed/passed provider states, conjunctive gate
 outcomes, measurement counts, reproducible run evidence, and indeterminate cross-provider drift;
 performance observations remain measurements rather than invented pass/fail claims.

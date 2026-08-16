@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 140);
+    assert_eq!(tools.len(), 141);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(140));
-    assert_eq!(result["advertised_tool_count"], json!(140));
+    assert_eq!(result["unique_catalog_tools"], json!(141));
+    assert_eq!(result["advertised_tool_count"], json!(141));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(140));
-    assert_eq!(result["schema_quality"]["valid"], json!(140));
+    assert_eq!(result["schema_quality"]["checked"], json!(141));
+    assert_eq!(result["schema_quality"]["valid"], json!(141));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5295,6 +5295,84 @@ fn lab_plan_orders_reachable_evidence_and_refuses_privacy_crossings() {
         json!("crosses_boundary")
     );
     assert_eq!(result["should_escalate"], json!(true));
+}
+
+#[test]
+fn lab_pareto_audit_preserves_tradeoffs_holes_archive_and_ambiguous_selection() {
+    let result = call(
+        &mut server(),
+        "lab_pareto_audit",
+        json!({
+            "objectives": [
+                { "axis": "admissible_rate", "direction": "higher_is_better" },
+                { "axis": "cost_units", "direction": "lower_is_better" }
+            ],
+            "profiles": [
+                {
+                    "candidate": "cheap",
+                    "values": {
+                        "admissible_rate": { "state": "measured", "value": 0.80 },
+                        "cost_units": { "state": "measured", "value": 10.0 }
+                    }
+                },
+                {
+                    "candidate": "accurate",
+                    "values": {
+                        "admissible_rate": { "state": "measured", "value": 0.95 },
+                        "cost_units": { "state": "measured", "value": 40.0 }
+                    }
+                },
+                {
+                    "candidate": "dominated",
+                    "values": {
+                        "admissible_rate": { "state": "measured", "value": 0.70 },
+                        "cost_units": { "state": "measured", "value": 50.0 }
+                    }
+                },
+                {
+                    "candidate": "hole",
+                    "values": {
+                        "admissible_rate": { "state": "measured", "value": 0.90 },
+                        "cost_units": { "state": "unmeasured", "reason": "not_attempted" }
+                    }
+                }
+            ],
+            "relations": [{ "left": "cheap", "right": "accurate" }],
+            "max_rows": 10
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/lab-pareto-audit/0.1"));
+    assert_eq!(result["front"]["count"], json!(3));
+    assert_eq!(result["archived_count"], json!(1));
+    assert_eq!(result["front"]["unresolved_count"], json!(1));
+    assert_eq!(result["front"]["selection"]["selection"], json!("ambiguous"));
+    assert_eq!(
+        result["relations"][0]["relation"]["relation"],
+        json!("incomparable")
+    );
+    assert_eq!(
+        result["relations"][0]["relation"]["incomparable_because"],
+        json!("trade_off")
+    );
+    assert_eq!(result["archived"][0]["dominated_by"], json!("accurate"));
+
+    let refused = call(
+        &mut server(),
+        "lab_pareto_audit",
+        json!({
+            "objectives": [{ "axis": "cost_units", "direction": "lower_is_better" }],
+            "profiles": [{
+                "candidate": "missing-axis",
+                "values": {}
+            }]
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(false));
+    assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["stage"], json!("profile_insertion"));
+    assert_eq!(refused["fail_closed"], json!(true));
 }
 
 #[test]

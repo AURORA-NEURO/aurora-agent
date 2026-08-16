@@ -124,7 +124,9 @@ use bioprism_infra::{
 use bioprism_interweave::workflow::{catalogue as interweave_catalogue, outstanding_deliverables};
 use bioprism_lab::{
     expand as expand_acquisitions, separate as separate_hypotheses, AcquisitionAction,
-    AcquisitionCost, HypothesisSet as LabHypothesisSet, Observations,
+    AcquisitionCost, HypothesisSet as LabHypothesisSet,
+    pareto::{ParetoFront, Profile as LabParetoProfile},
+    Observations,
 };
 use bioprism_ledger::{ClassCounts, Event, EventLedger, SubjectLatest, TemporalCut};
 use bioprism_lens::{catalogue as lens_catalogue, run as run_lens, CohortLeakageLens, CohortSplit};
@@ -1269,6 +1271,7 @@ impl Server {
             "preanalytic_apply" => self.preanalytic_apply(&arguments),
             "contradiction_review" => self.contradiction_review(&arguments),
             "lab_plan" => self.lab_plan(&arguments),
+            "lab_pareto_audit" => self.lab_pareto_audit(&arguments),
             "obligation_gate_check" => self.obligation_gate_check(&arguments),
             "lens_catalogue" => Ok(json!({
                 "ok": true,
@@ -6904,6 +6907,236 @@ impl Server {
                 "the tool plans named acquisitions; it does not read files, query databases, run tests, or ask a user",
                 "values, costs, privacy declarations, and observations are caller-supplied",
                 "hypothesis generation, posterior probabilities, confidence intervals, and execution scheduling are outside the crate",
+            ]
+        }))
+    }
+
+    fn lab_pareto_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure Pareto-audit input: {error}"))?;
+        if encoded.len() > 10_000_000 {
+            return Err("Pareto-audit input exceeds the 10000000-byte safety bound".into());
+        }
+        let raw_objectives = arguments
+            .get("objectives")
+            .and_then(Value::as_array)
+            .ok_or("objectives is required and must be an array of Objective values")?;
+        if raw_objectives.is_empty() || raw_objectives.len() > 64 {
+            return Err("objectives must contain between 1 and 64 values".into());
+        }
+        let objectives: Vec<bioprism_lab::pareto::Objective> = raw_objectives
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let objective: bioprism_lab::pareto::Objective = serde_json::from_value(value.clone())
+                    .map_err(|error| format!("invalid objectives[{index}]: {error}"))?;
+                if objective.axis.trim().is_empty() || objective.axis.len() > 256 {
+                    return Err(format!(
+                        "objectives[{index}].axis must contain between 1 and 256 bytes"
+                    ));
+                }
+                Ok(objective)
+            })
+            .collect::<Result<_, String>>()?;
+
+        let raw_profiles = arguments
+            .get("profiles")
+            .and_then(Value::as_array)
+            .ok_or("profiles is required and must be an array of Profile values")?;
+        if raw_profiles.is_empty() || raw_profiles.len() > 512 {
+            return Err("profiles must contain between 1 and 512 values".into());
+        }
+        let profiles: Vec<LabParetoProfile> = raw_profiles
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let profile: LabParetoProfile = serde_json::from_value(value.clone())
+                    .map_err(|error| format!("invalid profiles[{index}]: {error}"))?;
+                if profile.candidate.as_str().trim().is_empty()
+                    || profile.candidate.as_str().len() > 512
+                {
+                    return Err(format!(
+                        "profiles[{index}].candidate must contain between 1 and 512 bytes"
+                    ));
+                }
+                if profile.values.len() > 64 {
+                    return Err(format!(
+                        "profiles[{index}].values must contain at most 64 axes"
+                    ));
+                }
+                if profile
+                    .values
+                    .keys()
+                    .any(|axis| axis.trim().is_empty() || axis.len() > 256)
+                {
+                    return Err(format!(
+                        "profiles[{index}].values axis names must contain between 1 and 256 bytes"
+                    ));
+                }
+                Ok(profile)
+            })
+            .collect::<Result<_, String>>()?;
+
+        let max_rows = arguments
+            .get("max_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_rows == 0 || max_rows > 1_000 {
+            return Err("max_rows must be between 1 and 1000".into());
+        }
+        let max_rows = max_rows as usize;
+
+        let mut front = match ParetoFront::new(objectives.clone()) {
+            Ok(front) => front,
+            Err(error) => {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "pareto_error_serialization_failed"
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-pareto-audit/0.1",
+                    "stage": "objective_validation",
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "guarantees": [
+                        "an empty or duplicate objective set never becomes a vacuous front",
+                        "no partial Pareto archive is returned after objective validation fails"
+                    ]
+                }));
+            }
+        };
+
+        let mut admissions = Vec::with_capacity(profiles.len());
+        for (index, profile) in profiles.into_iter().enumerate() {
+            let candidate = profile.candidate.to_string();
+            let admission = match front.insert(profile) {
+                Ok(admission) => admission,
+                Err(error) => {
+                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                        "error": "pareto_error_serialization_failed"
+                    }));
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": "bioprism-mcp/lab-pareto-audit/0.1",
+                        "stage": "profile_insertion",
+                        "profile_index": index,
+                        "candidate": candidate,
+                        "refusal": error.to_string(),
+                        "error": detail,
+                        "fail_closed": true,
+                        "inserted_profiles": index,
+                        "guarantees": [
+                            "a profile with an absent or unknown objective axis is refused rather than imputed",
+                            "a failed archive build never returns the partial front as if it were complete"
+                        ]
+                    }));
+                }
+            };
+            admissions.push(json!({
+                "input_index": index,
+                "candidate": candidate,
+                "admission": admission,
+            }));
+        }
+
+        let raw_relations = arguments
+            .get("relations")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let raw_relations = raw_relations
+            .as_array()
+            .ok_or("relations must be an array when supplied")?;
+        if raw_relations.len() > 256 {
+            return Err("relations exceeds the 256-relation safety bound".into());
+        }
+        let mut relations = Vec::with_capacity(raw_relations.len());
+        for (index, raw_relation) in raw_relations.iter().enumerate() {
+            let object = raw_relation
+                .as_object()
+                .ok_or_else(|| format!("relations[{index}] must be an object"))?;
+            let left = object
+                .get("left")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("relations[{index}].left must be a string"))?;
+            let right = object
+                .get("right")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("relations[{index}].right must be a string"))?;
+            if left.trim().is_empty() || right.trim().is_empty() {
+                return Err(format!("relations[{index}] identifiers must be non-empty"));
+            }
+            let left_id = bioprism_lab::space::ConfigurationId::new(left);
+            let right_id = bioprism_lab::space::ConfigurationId::new(right);
+            let relation = match front.relation(&left_id, &right_id) {
+                Ok(relation) => relation,
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": "bioprism-mcp/lab-pareto-audit/0.1",
+                        "stage": "relation_projection",
+                        "relation_index": index,
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "guarantees": [
+                            "pairwise relations are emitted only for candidates that remain on the final front",
+                            "an unavailable relation never becomes an inferred dominance result"
+                        ]
+                    }));
+                }
+            };
+            relations.push(json!({
+                "left": left,
+                "right": right,
+                "relation": relation,
+            }));
+        }
+
+        let archived = front
+            .archived()
+            .iter()
+            .take(max_rows)
+            .map(|(profile, dominated_by)| {
+                json!({
+                    "profile": profile,
+                    "dominated_by": dominated_by,
+                })
+            })
+            .collect::<Vec<_>>();
+        let unresolved = front.unresolved();
+        let selection = front.select();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/lab-pareto-audit/0.1",
+            "objective_count": front.objectives().len(),
+            "profile_count": admissions.len(),
+            "objectives": front.objectives(),
+            "admissions": admissions.iter().take(max_rows).collect::<Vec<_>>(),
+            "admissions_omitted": admissions.len().saturating_sub(max_rows),
+            "front": {
+                "count": front.members().len(),
+                "members": front.members(),
+                "unresolved_count": unresolved.len(),
+                "unresolved": unresolved,
+                "selection": selection,
+            },
+            "archived_count": front.archived().len(),
+            "archived": archived,
+            "archived_omitted": front.archived().len().saturating_sub(max_rows),
+            "relations": relations.iter().take(max_rows).collect::<Vec<_>>(),
+            "relations_omitted": relations.len().saturating_sub(max_rows),
+            "max_rows": max_rows,
+            "guarantees": [
+                "dominance is computed by the in-tree Pareto kernel over every declared objective",
+                "trade-offs remain incomparable and survive on the front without a caller-hidden scalarizer",
+                "unmeasured axes remain unresolved rather than being treated as zero, worst-case, or missing-at-random",
+                "dominated profiles remain archived with their dominator and are not erased from the audit",
+                "a multi-member front returns ambiguous selection rather than an invented deployment choice"
+            ],
+            "limitations": [
+                "objective directions and profile values are caller-declared point measurements; no statistical uncertainty or replication model is inferred",
+                "the archive describes candidate declarations and does not execute components, select providers, or validate biological performance",
+                "a Pareto front is a decision surface, not a release approval, safety gate, or evidence of a deployable architecture"
             ]
         }))
     }
@@ -19821,7 +20054,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "inference_lab",
             "domains": ["hypothesis separation", "evidence acquisition", "holdout-aware improvement", "risk-triggered research"],
             "crates": ["bioprism-lab", "bioprism-obligation", "bioprism-routing", "bioprism-evalengine"],
-            "mcp_tools": ["lab_plan", "routing_decide", "routing_lab_run"],
+            "mcp_tools": ["lab_plan", "lab_pareto_audit", "routing_decide", "routing_lab_run"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -20641,6 +20874,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum frontier, ordered, and excluded rows returned; defaults to 100." }
                 },
                 "required": ["graph", "actions", "budget"]
+            }
+        }),
+        json!({
+            "name": "lab_pareto_audit",
+            "description": "Build a bounded multi-objective Pareto archive from serialized inference-lab profiles. It preserves dominated and displaced candidates, incomparable trade-offs, unmeasured-axis unresolved states, pairwise front relations, and ambiguous selection; it never scalarizes the front or executes an architecture.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "objectives": { "type": "array", "minItems": 1, "maxItems": 64, "description": "Serialized bioprism-lab Objective values with axis and direction higher_is_better or lower_is_better." },
+                    "profiles": { "type": "array", "minItems": 1, "maxItems": 512, "description": "Serialized bioprism-lab Profile values. Every objective axis must be measured or explicitly unmeasured with a reason." },
+                    "relations": { "type": "array", "maxItems": 256, "description": "Optional front-only pairwise relation requests: {left, right}. A relation for an archived candidate is refused." },
+                    "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum admission, archive, and relation rows returned; omission counts remain explicit. Defaults to 100." }
+                },
+                "required": ["objectives", "profiles"]
             }
         }),
         json!({

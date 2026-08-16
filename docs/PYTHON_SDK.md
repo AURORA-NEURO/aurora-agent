@@ -220,6 +220,11 @@ invent defaults:
 - `lab_plan_report(...)` types inference-lab acquisition ordering, privacy and budget exclusions,
   optional hypothesis separation, declared spend, stop reason, and the explicit `should_escalate`
   predicate. Planning remains visibly non-executing.
+- `LabParetoAuditArgs` / `lab_pareto_audit_report(...)` expose the multi-objective inference-lab
+  archive with typed objective directions, measured versus unmeasured profile axes, dominated
+  and displaced candidates, front-only relations, unresolved holes, and ambiguous selection.
+  The parser rejects partial-front refusals presented as success and reconciles every bounded row
+  omission. See [`docs/LAB_PARETO_AUDIT.md`](LAB_PARETO_AUDIT.md).
 - `OncoBoundaryArgs` and `onco_boundary_report(...)` preserve oncology's partial-release contract:
   aggregate research uses can remain released while individual clinical uses are refused and
   escalated, and direct-identifier refusals remain fail-closed without echoing request data. The
