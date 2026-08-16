@@ -761,7 +761,22 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
-      if (path === "/v1/tools/oncoworlds_identity_join") return jsonResponse({ ok: true, tool: "oncoworlds_identity_join", request_id: "r35", mcp: { result: { structuredContent: { ok: true, joinable: false, bridge_declared: false } } } });
+      if (path === "/v1/tools/oncoworlds_identity_join") return jsonResponse({ ok: true, tool: "oncoworlds_identity_join", request_id: "r35", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/oncoworlds-identity-join/0.1",
+        joinable: false,
+        report: { left: "left", right: "right", unit: "specimen", verdict: { verdict: "declined", reason: { refusal: "no_identity_evidence" } } },
+        verdict_kind: "declined",
+        refusal_kind: "no_identity_evidence",
+        bridge_declared: false,
+        epoch_bridge: null,
+        identity_evidence_present: false,
+        identity_link_count: 0,
+        bridge_warrant_present: false,
+        checked_dimensions: ["participant_identity", "identity_evidence"],
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/onco_outcome_analyze") return jsonResponse({ ok: true, tool: "onco_outcome_analyze", request_id: "r36", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/onco-outcome-analyze/0.1",
@@ -1284,6 +1299,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(classification.mcp.result.structuredContent.resolution_kind, "unresolved");
   assert.equal(classification.mcp.result.structuredContent.unobserved_panel_state_count, 1);
   assert.equal(identity.mcp.result.structuredContent.joinable, false);
+  assert.equal(identity.mcp.result.structuredContent.schema, "bioprism-mcp/oncoworlds-identity-join/0.1");
+  assert.equal(identity.mcp.result.structuredContent.refusal_kind, "no_identity_evidence");
+  assert.equal(identity.mcp.result.structuredContent.identity_link_count, 0);
   assert.equal(outcome.mcp.result.structuredContent.censoring_reason, "lost_to_follow_up");
   assert.equal(outcome.mcp.result.structuredContent.schema, "bioprism-mcp/onco-outcome-analyze/0.1");
   assert.equal(outcome.mcp.result.structuredContent.analysis.estimand.endpoint, "time_to_progression");

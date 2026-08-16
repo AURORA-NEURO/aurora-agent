@@ -775,6 +775,8 @@ class OncoClassificationReport:
 
 
 ONCO_ANALYSIS_UNITS = frozenset({"participant", "lesion", "specimen", "imaging_series"})
+ONCO_IDENTITY_SCHEMA = "bioprism-mcp/oncoworlds-identity-join/0.1"
+ONCO_IDENTITY_REFUSAL_KINDS = frozenset({"different_participant", "truncated_identifier", "different_lesion", "incompatible_epoch", "different_specimen", "no_identity_evidence", "unlicensed_relation", "undeclared_permissible_use", "no_regional_provenance", "incomparable_coordinates"})
 ONCO_BIAS_FLAGS = frozenset({"left_truncation", "informative_loss_to_follow_up", "competing_death", "treatment_switching"})
 ONCO_OUTCOME_SCHEMA = "bioprism-mcp/onco-outcome-analyze/0.1"
 ONCO_OUTCOME_ENDPOINTS = frozenset({"overall_survival", "progression_free_survival", "time_to_progression", "time_to_treatment_failure"})
@@ -816,6 +818,37 @@ class OncoIdentityJoinArgs:
 
 
 @dataclass(frozen=True)
+class OncoIdentityJoinDecisionProjection:
+    raw: dict[str, Any]
+    left: str
+    right: str
+    unit: str
+    verdict: str
+    refusal: dict[str, Any] | None
+    refusal_kind: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoIdentityJoinDecisionProjection":
+        raw = _route_mapping("oncology identity join report", value)
+        left = _route_text("oncology identity report left", raw.get("left"))
+        right = _route_text("oncology identity report right", raw.get("right"))
+        unit = _route_text("oncology identity report unit", raw.get("unit"))
+        if unit not in ONCO_ANALYSIS_UNITS:
+            raise ArgumentError(f"unknown oncology identity report unit: {unit!r}")
+        verdict = _route_mapping("oncology identity verdict", raw.get("verdict"))
+        verdict_kind = _route_text("oncology identity verdict kind", verdict.get("verdict"))
+        if verdict_kind == "joinable":
+            return cls(raw, left, right, unit, verdict_kind, None, None)
+        if verdict_kind != "declined":
+            raise ArgumentError(f"unknown oncology identity verdict: {verdict_kind!r}")
+        refusal = _route_mapping("oncology identity refusal", verdict.get("reason"))
+        refusal_kind = _route_text("oncology identity refusal kind", refusal.get("refusal"))
+        if refusal_kind not in ONCO_IDENTITY_REFUSAL_KINDS:
+            raise ArgumentError(f"unknown oncology identity refusal: {refusal_kind!r}")
+        return cls(raw, left, right, unit, verdict_kind, refusal, refusal_kind)
+
+
+@dataclass(frozen=True)
 class OncoIdentityJoinReport:
     raw: dict[str, Any]
     ok: bool
@@ -824,20 +857,59 @@ class OncoIdentityJoinReport:
     bridge_declared: bool
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    verdict_kind: str | None = None
+    decision_record: OncoIdentityJoinDecisionProjection | None = None
+    refusal_kind: str | None = None
+    identity_evidence_present: bool = False
+    identity_link_count: int = 0
+    epoch_bridge: dict[str, Any] | None = None
+    bridge_warrant_present: bool = False
+    checked_dimensions: tuple[str, ...] = ()
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoIdentityJoinReport":
         raw = _projection_payload(value, description="oncology identity join", direct_keys=("joinable", "report"))
         if not _bool("oncology identity ok", raw.get("ok")):
             raise ArgumentError("oncology identity join transport projection is not successful")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("oncology identity schema", schema_value)
+        if schema is not None and schema != ONCO_IDENTITY_SCHEMA:
+            raise ArgumentError(f"unknown oncology identity schema: {schema!r}")
+        joinable = _bool("oncology identity joinable", raw.get("joinable"))
+        report = _route_mapping("oncology identity report", raw.get("report"))
+        decision_record = OncoIdentityJoinDecisionProjection.from_wire(report)
+        if joinable != (decision_record.verdict == "joinable"):
+            raise ArgumentError("oncology identity joinable does not reconcile with the tagged verdict")
+        bridge_declared = _bool("oncology identity bridge_declared", raw.get("bridge_declared"))
+        bridge = _optional_mapping("oncology identity epoch_bridge", raw.get("epoch_bridge"))
+        if bridge_declared != (bridge is not None):
+            raise ArgumentError("oncology identity bridge declaration does not reconcile with bridge evidence")
+        evidence_present = _bool("oncology identity_evidence_present", raw.get("identity_evidence_present"))
+        link_count = _route_count("oncology identity_link_count", raw.get("identity_link_count"))
+        if evidence_present != (link_count > 0):
+            raise ArgumentError("oncology identity evidence presence does not reconcile with link count")
+        bridge_warrant_present = _bool("oncology bridge_warrant_present", raw.get("bridge_warrant_present"))
+        if bridge_warrant_present != (bridge is not None and isinstance(bridge.get("warrant"), str) and bool(bridge.get("warrant"))):
+            raise ArgumentError("oncology bridge warrant presence does not reconcile with bridge evidence")
+        checked_dimensions = _route_strings("oncology checked dimensions", raw.get("checked_dimensions"))
         return cls(
             raw,
             True,
-            _bool("oncology identity joinable", raw.get("joinable")),
-            _route_mapping("oncology identity report", raw.get("report")),
-            _bool("oncology identity bridge_declared", raw.get("bridge_declared")),
+            joinable,
+            report,
+            bridge_declared,
             _route_strings("oncology identity guarantees", raw.get("guarantees")),
             _route_strings("oncology identity limitations", raw.get("limitations")),
+            schema=schema,
+            verdict_kind=decision_record.verdict,
+            decision_record=decision_record,
+            refusal_kind=decision_record.refusal_kind,
+            identity_evidence_present=evidence_present,
+            identity_link_count=link_count,
+            epoch_bridge=bridge,
+            bridge_warrant_present=bridge_warrant_present,
+            checked_dimensions=checked_dimensions,
         )
 
     @property
@@ -1277,6 +1349,8 @@ __all__ = [
     "ONCO_DISPOSITIONS",
     "ONCO_ANALYSIS_UNITS",
     "ONCO_BIAS_FLAGS",
+    "ONCO_IDENTITY_REFUSAL_KINDS",
+    "ONCO_IDENTITY_SCHEMA",
     "ONCO_CLASSIFICATION_CALLS",
     "ONCO_CLASSIFICATION_MARKERS",
     "ONCO_CLASSIFICATION_RESOLUTION_KINDS",
@@ -1307,6 +1381,7 @@ __all__ = [
     "OncoEstimandProjection",
     "OncoEscalationReport",
     "OncoIdentityJoinArgs",
+    "OncoIdentityJoinDecisionProjection",
     "OncoIdentityJoinReport",
     "OncoMarkerObservationProjection",
     "OncoOutcomeAnalyzeArgs",

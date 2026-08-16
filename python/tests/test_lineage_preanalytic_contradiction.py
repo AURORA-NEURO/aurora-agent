@@ -446,13 +446,29 @@ class LabAndOncoReportTests(unittest.TestCase):
         self.assertEqual(classification.unobserved_panel_state_count, 1)
         identity = onco_identity_join_report({
             "ok": True,
+            "schema": "bioprism-mcp/oncoworlds-identity-join/0.1",
             "joinable": False,
-            "report": {"verdict": {"declined": {"reason": "no_identity_evidence"}}},
+            "report": {
+                "left": "left",
+                "right": "right",
+                "unit": "specimen",
+                "verdict": {"verdict": "declined", "reason": {"refusal": "no_identity_evidence", "left": "left", "right": "right"}},
+            },
             "bridge_declared": False,
+            "epoch_bridge": None,
+            "identity_evidence_present": False,
+            "identity_link_count": 0,
+            "bridge_warrant_present": False,
+            "checked_dimensions": ["participant_identity", "identity_evidence"],
             "guarantees": ["auditable"],
             "limitations": ["caller evidence"],
         })
         self.assertTrue(identity.declined)
+        self.assertEqual(identity.schema, "bioprism-mcp/oncoworlds-identity-join/0.1")
+        self.assertEqual(identity.verdict_kind, "declined")
+        self.assertEqual(identity.decision_record.refusal_kind, "no_identity_evidence")
+        self.assertEqual(identity.identity_link_count, 0)
+        self.assertEqual(identity.checked_dimensions, ("participant_identity", "identity_evidence"))
         outcome = onco_outcome_report({
             "ok": True,
             "schema": "bioprism-mcp/onco-outcome-analyze/0.1",

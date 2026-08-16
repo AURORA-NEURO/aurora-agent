@@ -10151,11 +10151,35 @@ impl Server {
             unit,
             verdict,
         };
+        let report_value = serde_json::to_value(&report).map_err(|error| error.to_string())?;
+        let verdict_kind = report_value["verdict"]["verdict"]
+            .as_str()
+            .ok_or("identity join report must carry a tagged verdict")?;
+        let refusal_kind = report_value["verdict"]["reason"]["refusal"]
+            .as_str()
+            .map(str::to_owned);
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/oncoworlds-identity-join/0.1",
             "joinable": report.verdict.is_joinable(),
             "report": report,
+            "verdict_kind": verdict_kind,
+            "refusal_kind": refusal_kind,
             "bridge_declared": bridge.is_some(),
+            "epoch_bridge": bridge,
+            "identity_evidence_present": !evidence.links().is_empty(),
+            "identity_link_count": evidence.links().len(),
+            "bridge_warrant_present": bridge.as_ref().is_some_and(|item| !item.warrant.is_empty()),
+            "checked_dimensions": [
+                "participant_identity",
+                "identifier_width",
+                "identity_evidence",
+                "relation_licence",
+                "permissible_use",
+                "lesion_identity",
+                "disease_epoch",
+                "specimen_identity"
+            ],
             "guarantees": [
                 "participant identity is checked before local specimen or lesion identifiers",
                 "truncated identifiers, unlicensed relations, missing permissible use, epoch mismatch, and specimen mismatch are typed refusals",

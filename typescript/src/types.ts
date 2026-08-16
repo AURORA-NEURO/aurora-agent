@@ -4104,11 +4104,32 @@ export interface OncoIdentityJoinArgs extends JsonObject {
   epoch_bridge?: JsonObject;
 }
 
+export type OncoIdentityJoinRefusalKind = "different_participant" | "truncated_identifier" | "different_lesion" | "incompatible_epoch" | "different_specimen" | "no_identity_evidence" | "unlicensed_relation" | "undeclared_permissible_use" | "no_regional_provenance" | "incomparable_coordinates";
+
+export type OncoIdentityJoinVerdictResult =
+  | ({ verdict: "joinable" } & JsonObject)
+  | ({ verdict: "declined"; reason: { refusal: OncoIdentityJoinRefusalKind } & JsonObject } & JsonObject);
+
+export interface OncoIdentityJoinReportResult extends JsonObject {
+  left: string;
+  right: string;
+  unit: "participant" | "lesion" | "specimen" | "imaging_series";
+  verdict: OncoIdentityJoinVerdictResult;
+}
+
 export interface OncoIdentityJoinResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/oncoworlds-identity-join/0.1";
   joinable?: boolean;
-  report?: JsonObject;
+  report?: OncoIdentityJoinReportResult;
+  verdict_kind?: "joinable" | "declined";
+  refusal_kind?: OncoIdentityJoinRefusalKind | null;
   bridge_declared?: boolean;
+  epoch_bridge?: JsonObject | null;
+  identity_evidence_present?: boolean;
+  identity_link_count?: number;
+  bridge_warrant_present?: boolean;
+  checked_dimensions?: string[];
   guarantees?: string[];
   limitations?: string[];
 }

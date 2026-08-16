@@ -586,8 +586,9 @@ leakage partitions; see [`docs/ONCO_WORLDLINE_VIEW.md`](docs/ONCO_WORLDLINE_VIEW
 uncollected assays as negative, and its typed projection preserves all five resolution states,
 obligations, satisfied evidence, and panel-state accounting; see [`docs/ONCO_CLASSIFICATION_CHECK.md`](docs/ONCO_CLASSIFICATION_CHECK.md).
 `oncoworlds_identity_join` checks participant,
-lesion, specimen, disease-epoch, relation, and permissible-use boundaries and returns typed join
-refusals rather than silently discarding cross-modal mismatches.
+lesion, specimen, disease-epoch, relation, and permissible-use boundaries and returns a versioned
+decision record with typed join refusals, evidence counts, and bridge warrants rather than silently
+discarding cross-modal mismatches; see [`docs/ONCOWORLDS_IDENTITY_JOIN.md`](docs/ONCOWORLDS_IDENTITY_JOIN.md).
 `oncoworlds_model_transport` checks whether a model-system result can carry a declared, lossy
 research claim toward patients. `oncoworlds_methylation_classify` preserves QC abstention,
 threshold, calibration, and tumour-content caveats, while `oncoworlds_methylation_compare` keeps

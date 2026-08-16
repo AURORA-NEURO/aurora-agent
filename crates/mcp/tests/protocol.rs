@@ -5820,7 +5820,19 @@ fn oncoworlds_identity_join_returns_typed_refusals_and_accepts_a_warranted_bridg
         }),
     );
     assert_eq!(refused["ok"], json!(true));
+    assert_eq!(
+        refused["schema"],
+        json!("bioprism-mcp/oncoworlds-identity-join/0.1")
+    );
     assert_eq!(refused["joinable"], json!(false));
+    assert_eq!(refused["verdict_kind"], json!("declined"));
+    assert_eq!(refused["refusal_kind"], json!("no_identity_evidence"));
+    assert_eq!(refused["identity_evidence_present"], json!(false));
+    assert_eq!(refused["identity_link_count"], json!(0));
+    assert_eq!(refused["bridge_declared"], json!(false));
+    assert_eq!(refused["epoch_bridge"], json!(null));
+    assert_eq!(refused["bridge_warrant_present"], json!(false));
+    assert!(refused["checked_dimensions"].as_array().unwrap().len() >= 8);
     assert_eq!(
         refused["report"]["verdict"]["reason"]["refusal"],
         json!("no_identity_evidence")
@@ -5851,7 +5863,11 @@ fn oncoworlds_identity_join_returns_typed_refusals_and_accepts_a_warranted_bridg
     );
     assert_eq!(accepted["ok"], json!(true));
     assert_eq!(accepted["joinable"], json!(true));
+    assert_eq!(accepted["verdict_kind"], json!("joinable"));
+    assert_eq!(accepted["refusal_kind"], json!(null));
     assert_eq!(accepted["bridge_declared"], json!(true));
+    assert!(accepted["epoch_bridge"].is_object());
+    assert_eq!(accepted["bridge_warrant_present"], json!(true));
 }
 
 #[test]
