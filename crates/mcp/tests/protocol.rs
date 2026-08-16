@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 151);
+    assert_eq!(tools.len(), 152);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(151));
-    assert_eq!(result["advertised_tool_count"], json!(151));
+    assert_eq!(result["unique_catalog_tools"], json!(152));
+    assert_eq!(result["advertised_tool_count"], json!(152));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(151));
-    assert_eq!(result["schema_quality"]["valid"], json!(151));
+    assert_eq!(result["schema_quality"]["checked"], json!(152));
+    assert_eq!(result["schema_quality"]["valid"], json!(152));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6182,6 +6182,85 @@ fn bioeval_evaluator_audit_separates_harness_health_task_outcomes_and_hidden_dat
     assert_eq!(hidden_refusal["ok"], json!(false));
     assert_eq!(hidden_refusal["stage"], json!("hidden_data_policy"));
     assert_eq!(hidden_refusal["fail_closed"], json!(true));
+}
+
+#[test]
+fn bioeval_plane_audit_keeps_unscored_and_inapplicable_out_of_the_fold() {
+    let incomplete = call(
+        &mut server(),
+        "bioeval_plane_audit",
+        json!({
+            "plane": {
+                "system": "fixed-model",
+                "tier": "fixed_input_model",
+                "dimensions": [
+                    { "id": "accuracy", "required": "fixed_input_model", "weight": 2.0 },
+                    { "id": "assay-selection", "required": "tool_using_agent", "weight": 1.0 },
+                    { "id": "calibration", "required": "fixed_input_model", "weight": 1.0 }
+                ],
+                "cells": {
+                    "accuracy": { "state": "scored", "score": 0.8 },
+                    "assay-selection": { "state": "inapplicable", "required": "tool_using_agent", "declared": "fixed_input_model" },
+                    "calibration": { "state": "unscored", "reason": "no_reference_standard", "note": "reference panel pending" }
+                }
+            },
+            "max_items": 2
+        }),
+    );
+    assert_eq!(incomplete["__isError"], json!(false));
+    assert_eq!(incomplete["ok"], json!(true));
+    assert_eq!(incomplete["schema"], json!("bioprism-mcp/bioeval-plane-audit/0.1"));
+    assert_eq!(incomplete["plane"]["scored_count"], json!(1));
+    assert_eq!(incomplete["plane"]["unscored_count"], json!(1));
+    assert_eq!(incomplete["plane"]["inapplicable_count"], json!(1));
+    assert_eq!(incomplete["findings"]["fold_blocked"], json!(true));
+    assert_eq!(incomplete["findings"]["unscored_dimensions"]["ids"], json!(["calibration"]));
+    assert_eq!(incomplete["dimensions"]["omitted"], json!(1));
+    assert!(incomplete["fold"]["value"].is_null());
+
+    let required = call(
+        &mut server(),
+        "bioeval_plane_audit",
+        json!({
+            "plane": {
+                "system": "fixed-model",
+                "tier": "fixed_input_model",
+                "dimensions": [{ "id": "accuracy", "required": "fixed_input_model", "weight": 1.0 }],
+                "cells": { "accuracy": { "state": "unscored", "reason": "not_attempted" } }
+            },
+            "require_fold": true
+        }),
+    );
+    assert_eq!(required["ok"], json!(false));
+    assert_eq!(required["stage"], json!("fold_policy"));
+    assert_eq!(required["fail_closed"], json!(true));
+
+    let folded = call(
+        &mut server(),
+        "bioeval_plane_audit",
+        json!({
+            "plane": {
+                "system": "pipeline",
+                "tier": "workflow_pipeline",
+                "dimensions": [
+                    { "id": "accuracy", "required": "fixed_input_model", "weight": 2.0 },
+                    { "id": "workflow", "required": "workflow_pipeline", "weight": 1.0 },
+                    { "id": "agent-action", "required": "tool_using_agent", "weight": 1.0 }
+                ],
+                "cells": {
+                    "accuracy": { "state": "scored", "score": 0.75 },
+                    "workflow": { "state": "scored", "score": 0.9 },
+                    "agent-action": { "state": "inapplicable", "required": "tool_using_agent", "declared": "workflow_pipeline" }
+                }
+            },
+            "require_fold": true
+        }),
+    );
+    assert_eq!(folded["ok"], json!(true));
+    assert_eq!(folded["fold"]["folded"], json!(true));
+    assert!((folded["fold"]["value"].as_f64().unwrap() - 0.8).abs() < 1e-12);
+    assert_eq!(folded["fold"]["included"], json!(["accuracy", "workflow"]));
+    assert_eq!(folded["fold"]["excluded"][0]["id"], json!("agent-action"));
 }
 
 #[test]

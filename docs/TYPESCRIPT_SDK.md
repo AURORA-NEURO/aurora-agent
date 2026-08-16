@@ -525,6 +525,11 @@ kernel-rendered claim language and fail-closed policy options. See
 hidden-data access, panel posture, unscored/refused findings, and bounded run projections. It
 keeps a broken harness separate from a task failure and retains fail-closed panel and hidden-data
 policies. See [`docs/BIOEVAL_EVALUATOR_AUDIT.md`](../docs/BIOEVAL_EVALUATOR_AUDIT.md).
+`bioevalPlaneAudit` types capability tiers, dimensions, discriminated scored/unscored/inapplicable
+cells, weighted fold projections, fold blockers, and bounded omission metadata. It keeps a
+dimension that was not measured distinct from a capability the system could not be asked to
+perform, and preserves the explicit `require_fold` refusal posture. See
+[`docs/BIOEVAL_PLANE_AUDIT.md`](../docs/BIOEVAL_PLANE_AUDIT.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

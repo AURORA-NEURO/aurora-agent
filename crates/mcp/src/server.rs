@@ -74,6 +74,9 @@ use bioprism_bioevalx::evaluator::{
     EvaluatorRun as BioevalEvaluatorRun, Panel as BioevalEvaluatorPanel,
     TaskOutcome as BioevalTaskOutcome,
 };
+use bioprism_bioevalx::plane::{
+    Cell as BioevalCell, FoldPolicy as BioevalFoldPolicy, ScorePlane as BioevalScorePlane,
+};
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
@@ -1362,6 +1365,7 @@ impl Server {
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
             "bioeval_estimand_audit" => self.bioeval_estimand_audit(&arguments),
             "bioeval_evaluator_audit" => self.bioeval_evaluator_audit(&arguments),
+            "bioeval_plane_audit" => self.bioeval_plane_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -14667,6 +14671,232 @@ impl Server {
         }))
     }
 
+    fn bioeval_plane_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-plane-audit/0.1";
+        const MAX_DIMENSIONS: usize = 4_096;
+        const MAX_ID_BYTES: usize = 256;
+
+        let raw_plane = arguments
+            .get("plane")
+            .ok_or("plane is required and must be a serialized ScorePlane")?;
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure plane audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("plane audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_plane_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "a missing score remains unscored rather than becoming zero",
+                    "inapplicable dimensions remain outside the fold denominator",
+                    "a fold is accepted only after the real ScorePlane policy accepts it",
+                ],
+                "limitations": [
+                    "the route does not measure scores, select dimensions, or compare systems",
+                    "weights and cells are caller-supplied serialized evidence",
+                ],
+            })
+        };
+
+        let plane: BioevalScorePlane = match serde_json::from_value(raw_plane.clone()) {
+            Ok(plane) => plane,
+            Err(error) => {
+                return Ok(refusal(
+                    "plane_deserialization",
+                    format!("plane is not a valid ScorePlane: {error}"),
+                ));
+            }
+        };
+        if plane.system.trim().is_empty() || plane.system.len() > MAX_ID_BYTES {
+            return Ok(refusal(
+                "plane_validation",
+                format!("plane.system must contain 1 to {MAX_ID_BYTES} bytes"),
+            ));
+        }
+        if plane.dimensions().len() > MAX_DIMENSIONS {
+            return Ok(refusal(
+                "plane_validation",
+                format!("plane dimensions are bounded at {MAX_DIMENSIONS} rows"),
+            ));
+        }
+
+        let serialized = serde_json::to_value(&plane).expect("ScorePlane serializes");
+        let serialized_cells = serialized
+            .get("cells")
+            .and_then(Value::as_object)
+            .ok_or("serialized ScorePlane did not contain its cells map")?;
+        let declared_ids = plane
+            .dimensions()
+            .iter()
+            .map(|dimension| dimension.id.clone())
+            .collect::<BTreeSet<_>>();
+        if serialized_cells.keys().any(|id| !declared_ids.contains(id)) {
+            return Ok(refusal(
+                "plane_validation",
+                "cells contains an undeclared dimension".into(),
+            ));
+        }
+
+        let mut dimension_ids = BTreeSet::new();
+        let mut cells = Vec::with_capacity(plane.dimensions().len());
+        let mut scored_count = 0usize;
+        let mut unscored_count = 0usize;
+        let mut inapplicable_count = 0usize;
+        let mut unscored_ids = Vec::new();
+        let mut inapplicable_ids = Vec::new();
+        for dimension in plane.dimensions() {
+            if dimension.id.trim().is_empty() || dimension.id.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "plane_validation",
+                    format!("dimension ids must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            if !dimension_ids.insert(dimension.id.clone()) {
+                return Ok(refusal(
+                    "plane_validation",
+                    format!("dimension {:?} appears more than once", dimension.id),
+                ));
+            }
+            if !dimension.weight.is_finite() || dimension.weight <= 0.0 {
+                return Ok(refusal(
+                    "plane_validation",
+                    format!("dimension {:?} has a non-positive or non-finite weight", dimension.id),
+                ));
+            }
+            let cell = plane.cell(&dimension.id).ok_or_else(|| {
+                format!("dimension {:?} has no corresponding cell", dimension.id)
+            })?;
+            let cell_value = serde_json::to_value(cell).expect("Cell serializes");
+            let parsed_cell: BioevalCell = serde_json::from_value(cell_value.clone())
+                .map_err(|error| format!("dimension {:?} has an invalid Cell: {error}", dimension.id))?;
+            match &parsed_cell {
+                BioevalCell::Scored { .. } => {
+                    if !plane.tier.admits(dimension.required) {
+                        return Ok(refusal(
+                            "plane_validation",
+                            format!("dimension {:?} is scored despite being out of tier", dimension.id),
+                        ));
+                    }
+                    scored_count += 1;
+                }
+                BioevalCell::Unscored { .. } => {
+                    unscored_count += 1;
+                    unscored_ids.push(dimension.id.clone());
+                }
+                BioevalCell::Inapplicable { required, declared } => {
+                    if *required != dimension.required || *declared != plane.tier {
+                        return Ok(refusal(
+                            "plane_validation",
+                            format!("dimension {:?} carries an inconsistent inapplicable tier", dimension.id),
+                        ));
+                    }
+                    inapplicable_count += 1;
+                    inapplicable_ids.push(dimension.id.clone());
+                }
+            }
+            cells.push(json!({
+                "id": dimension.id,
+                "required": dimension.required,
+                "weight": dimension.weight,
+                "cell": cell_value,
+                "measured": parsed_cell.is_measured(),
+                "blocks_fold": parsed_cell.blocks_fold(),
+            }));
+        }
+
+        let fold = plane.fold(BioevalFoldPolicy::ExcludeInapplicable);
+        let fold_projection = match fold {
+            Ok(fold) => json!({
+                "folded": true,
+                "policy": fold.policy,
+                "value": fold.value,
+                "included": fold.included,
+                "excluded": fold.excluded,
+                "refusal": Value::Null,
+            }),
+            Err(error) => json!({
+                "folded": false,
+                "policy": BioevalFoldPolicy::ExcludeInapplicable,
+                "value": Value::Null,
+                "included": [],
+                "excluded": [],
+                "refusal": error.to_string(),
+            }),
+        };
+        if arguments
+            .get("require_fold")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && !fold_projection["folded"].as_bool().unwrap_or(false)
+        {
+            return Ok(refusal(
+                "fold_policy",
+                fold_projection["refusal"]
+                    .as_str()
+                    .unwrap_or("ScorePlane fold was refused")
+                    .to_string(),
+            ));
+        }
+        let bounded = |values: &[String]| {
+            json!({
+                "ids": values.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": values.len(),
+                "omitted": values.len().saturating_sub(max_items),
+            })
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_plane_audit",
+            "plane": {
+                "system": plane.system,
+                "tier": plane.tier,
+                "dimension_count": plane.dimensions().len(),
+                "scored_count": scored_count,
+                "unscored_count": unscored_count,
+                "inapplicable_count": inapplicable_count,
+            },
+            "dimensions": {
+                "rows": cells.into_iter().take(max_items).collect::<Vec<_>>(),
+                "returned": plane.dimensions().len().min(max_items),
+                "total": plane.dimensions().len(),
+                "omitted": plane.dimensions().len().saturating_sub(max_items),
+            },
+            "findings": {
+                "unscored_dimensions": bounded(&unscored_ids),
+                "inapplicable_dimensions": bounded(&inapplicable_ids),
+                "fold_blocked": !fold_projection["folded"].as_bool().unwrap_or(false),
+                "fold_refusal": fold_projection["refusal"].clone(),
+            },
+            "fold": fold_projection,
+            "guarantees": [
+                "unscored dimensions retain their reason and never become zero",
+                "inapplicable dimensions are excluded only by the named ExcludeInapplicable policy",
+                "fold value, included dimensions, and excluded dimensions remain bound together",
+                "dimension rows and identifier findings retain total and omitted counts",
+            ],
+            "limitations": [
+                "the route audits caller-supplied scores and does not run an evaluator",
+                "the route does not impute, reweight by preference, rank systems, or compare incompatible bases",
+                "a folded value is a descriptive aggregation, not biological truth, causal effect, or release approval",
+            ],
+        }))
+    }
+
     fn bioeval_acquisition_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-acquisition-audit/0.1";
         let raw_obligations = arguments
@@ -23254,7 +23484,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -23284,9 +23514,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -24630,6 +24860,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "fail_on_hidden_data": { "type": "boolean", "description": "Fail closed when any diagnostic records hidden-data access; defaults false so the finding remains reviewable." }
                 },
                 "required": ["runs"]
+            }
+        }),
+        json!({
+            "name": "bioeval_plane_audit",
+            "description": "Audit a serialized bioevalx ScorePlane without turning missing measurements into zeros. It preserves scored, unscored, and inapplicable cells, invokes the real ExcludeInapplicable fold policy, reports fold blockers and bounded cell findings, and never imputes, ranks systems, or compares incompatible bases.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "plane": { "type": "object", "description": "Serialized ScorePlane with system, tier, declared dimensions, and state-tagged cells." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum dimension rows and identifier findings returned." },
+                    "require_fold": { "type": "boolean", "description": "Fail closed when the real fold policy cannot produce a value because dimensions remain unscored or empty." }
+                },
+                "required": ["plane"]
             }
         }),
         json!({

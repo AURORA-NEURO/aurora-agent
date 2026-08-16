@@ -969,6 +969,11 @@ identities, and bounded omission counts distinct. Timed-out, errored, and broken
 become task failures, while healthy `not_met` rows without diagnostics remain refused by the real
 evaluator kernel. `require_task_evidence` and `fail_on_hidden_data` are explicit fail-closed policy
 gates. See [`docs/BIOEVAL_EVALUATOR_AUDIT.md`](BIOEVAL_EVALUATOR_AUDIT.md).
+`BioevalPlaneAuditArgs` / `bioeval_plane_audit_report(...)` preserve scored, unscored, and
+inapplicable cells, capability-tier metadata, weighted fold inclusion/exclusion, fold blockers,
+and bounded dimension omission counts. The typed `BioevalScorePlaneArgs` validates cell/tier
+consistency before transport; `require_fold` makes an unresolved fold fail closed. See
+[`docs/BIOEVAL_PLANE_AUDIT.md`](BIOEVAL_PLANE_AUDIT.md).
 
 ## Biological stress profiling
 

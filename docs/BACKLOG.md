@@ -407,5 +407,7 @@ The transport now exposes the implemented 26.03 claim-grounding, 26.05 acquisiti
 estimand/identification kernels through `bioeval_grounding_audit`, `bioeval_acquisition_audit`, and
 `bioeval_estimand_audit`. The evaluator-health kernel is also exposed through
 `bioeval_evaluator_audit`, preserving harness failures as unscored rather than task failures;
-the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand, or
-evaluator-health wrapper.
+the 26.17 scoring-plane kernel is exposed through `bioeval_plane_audit`, preserving unscored and
+inapplicable dimensions rather than manufacturing zeros;
+the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
+evaluator-health, or scoring-plane wrapper.

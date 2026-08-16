@@ -2779,3 +2779,44 @@ test("client exposes evaluator health separately from task outcomes and hidden d
   assert.equal(result.mcp.result.structuredContent.panel.posture, "review_required_hidden_data");
   assert.equal(result.mcp.result.structuredContent.findings.hidden_data_evaluators.ids[0], "grader");
 });
+
+test("client exposes scoring-plane cells and fold refusal posture", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_plane_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.plane.cells.accuracy.state, "scored");
+      assert.equal(body.plane.cells.assay_selection.state, "inapplicable");
+      return jsonResponse({ ok: true, tool: "bioeval_plane_audit", request_id: "plane-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-plane-audit/0.1",
+        workflow: "bioeval_plane_audit",
+        plane: { system: "pipeline", tier: "workflow_pipeline", dimension_count: 2, scored_count: 2, unscored_count: 0, inapplicable_count: 0 },
+        dimensions: { rows: [], returned: 0, total: 2, omitted: 2 },
+        findings: { unscored_dimensions: { ids: [], total: 0, omitted: 0 }, fold_blocked: false },
+        fold: { folded: true, value: 0.8, included: ["accuracy", "workflow"], excluded: [], refusal: null },
+        guarantees: ["missing remains distinct"],
+        limitations: ["no ranking"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalPlaneAudit({
+    plane: {
+      system: "fixed-model",
+      tier: "fixed_input_model",
+      dimensions: [
+        { id: "accuracy", required: "fixed_input_model", weight: 1 },
+        { id: "assay_selection", required: "tool_using_agent", weight: 1 },
+      ],
+      cells: {
+        accuracy: { state: "scored", score: 0.8 },
+        assay_selection: { state: "inapplicable", required: "tool_using_agent", declared: "fixed_input_model" },
+      },
+    },
+    require_fold: false,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-plane-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.fold.folded, true);
+  assert.equal(result.mcp.result.structuredContent.findings.fold_blocked, false);
+});

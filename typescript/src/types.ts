@@ -5119,6 +5119,63 @@ export interface BioevalEvaluatorAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export type BioevalPlaneTier = "fixed_input_model" | "workflow_pipeline" | "tool_using_agent" | "human_in_the_loop" | "multi_agent_molecule";
+
+export interface BioevalPlaneDimensionArgs extends JsonObject {
+  id: string;
+  required: BioevalPlaneTier;
+  weight: number;
+}
+
+export interface BioevalPlaneScoredCellArgs extends JsonObject {
+  state: "scored";
+  score: number;
+}
+
+export interface BioevalPlaneUnscoredCellArgs extends JsonObject {
+  state: "unscored";
+  reason: "not_attempted" | "evaluator_unhealthy" | "no_reference_standard" | "sealed";
+  evaluator?: string;
+  note?: string;
+  registration?: string;
+}
+
+export interface BioevalPlaneInapplicableCellArgs extends JsonObject {
+  state: "inapplicable";
+  required: BioevalPlaneTier;
+  declared: BioevalPlaneTier;
+}
+
+export type BioevalPlaneCellArgs = BioevalPlaneScoredCellArgs | BioevalPlaneUnscoredCellArgs | BioevalPlaneInapplicableCellArgs;
+
+export interface BioevalScorePlaneArgs extends JsonObject {
+  system: string;
+  tier: BioevalPlaneTier;
+  dimensions: BioevalPlaneDimensionArgs[];
+  cells: Record<string, BioevalPlaneCellArgs>;
+}
+
+export interface BioevalPlaneAuditArgs extends JsonObject {
+  plane: BioevalScorePlaneArgs;
+  max_items?: number;
+  require_fold?: boolean;
+}
+
+export interface BioevalPlaneAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-plane-audit/0.1";
+  workflow?: "bioeval_plane_audit";
+  plane?: JsonObject;
+  dimensions?: JsonObject;
+  findings?: JsonObject;
+  fold?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;
