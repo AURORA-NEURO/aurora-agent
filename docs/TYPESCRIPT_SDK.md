@@ -230,6 +230,13 @@ than being flattened into a generic invalid-contract error.
 including section counts, capability/domain signatures, oracle ceilings, execution-grounded
 flags, release-wave declarations, omitted counts, and duplicate-signature review candidates. It
 is a declaration inventory; it does not claim measured performance or a reportable health score.
+`packCoverageAudit` returns a typed `PackCoverageAuditResult` from the real portfolio coverage and
+capability-family matrix kernels. It keeps the selected pack subset, covered and uncovered family
+sets, singly/weakly covered warnings, bounded rows and matrix cells, omission counts, and gap
+summary visible. Unknown identifiers and empty selections are fail-closed; coverage remains a
+declaration-level portfolio projection, not measured performance. See
+[`docs/PACK_COVERAGE_AUDIT.md`](PACK_COVERAGE_AUDIT.md) for the wire contract and interpretation
+rules.
 `packHealthAssess` accepts a serialized pack, observed calibration, optional baselines and
 contamination signals, and an optional health policy, returning `PackHealthAssessmentResult` with
 the digest-bound health report, calibration denominators, tagged findings, and an explicit score

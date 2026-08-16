@@ -199,6 +199,7 @@ use bioprism_packs::ir::PackIr;
 use bioprism_packs::portfolio::{
     all as all_packs, duplicate_signatures as duplicate_pack_signatures,
 };
+use bioprism_packs::{coverage as pack_coverage, matrix as pack_coverage_matrix};
 use bioprism_policy::{PolicyLabel, PolicyLattice, PolicyRule, Request as PolicyRequest};
 use bioprism_prism::{minimize, minimize_world, preserves};
 use bioprism_registry::{
@@ -1351,6 +1352,7 @@ impl Server {
             "benchmark_oracle_review" => self.benchmark_oracle_review(&arguments),
             "benchmark_compile" => self.benchmark_compile(&arguments),
             "benchmark_compile_review" => self.benchmark_compile_review(&arguments),
+            "pack_coverage_audit" => self.pack_coverage_audit(&arguments),
             "pack_catalogue" => self.pack_catalogue(&arguments),
             "pack_health_assess" => self.pack_health_assess(&arguments),
             "foundation_contract_check" => self.foundation_contract_check(&arguments),
@@ -10306,6 +10308,124 @@ impl Server {
         }))
     }
 
+    fn pack_coverage_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let section = arguments
+            .get("section")
+            .and_then(Value::as_str)
+            .unwrap_or("all");
+        if !matches!(section, "all" | "15" | "29") {
+            return Err("section must be one of all, 15, or 29".into());
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_items == 0 || max_items > 1_000 {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let requested_ids = arguments.get("pack_ids").and_then(Value::as_array);
+        if let Some(ids) = requested_ids {
+            if ids.is_empty() || ids.len() > 100 {
+                return Err("pack_ids must contain between 1 and 100 ids when supplied".into());
+            }
+        }
+        let mut selected = Vec::new();
+        let mut selected_ids = BTreeSet::new();
+        let mut unknown = Vec::new();
+        if let Some(ids) = requested_ids {
+            for id in ids {
+                let id = id.as_str().ok_or("pack_ids must be an array of strings")?;
+                if !selected_ids.insert(id.to_string()) {
+                    return Err(format!("pack_ids contains duplicate id {id}"));
+                }
+                match all_packs().iter().find(|pack| pack.id == id) {
+                    Some(pack)
+                        if section == "all"
+                            || (section == "15" && pack.blueprint_module.starts_with("15."))
+                            || (section == "29" && pack.blueprint_module.starts_with("29.")) =>
+                    {
+                        selected.push(pack);
+                    }
+                    Some(_) => {}
+                    None => unknown.push(id.to_string()),
+                }
+            }
+        } else {
+            selected = all_packs()
+                .iter()
+                .filter(|pack| {
+                    section == "all"
+                        || (section == "15" && pack.blueprint_module.starts_with("15."))
+                        || (section == "29" && pack.blueprint_module.starts_with("29."))
+                })
+                .collect();
+            selected_ids.extend(selected.iter().map(|pack| pack.id.to_string()));
+        }
+        if !unknown.is_empty() {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/pack-coverage-audit/0.1",
+                "stage": "pack_selection",
+                "unknown_pack_ids": unknown,
+                "refusal": "coverage cannot be computed for unknown pack identifiers",
+                "fail_closed": true,
+                "guarantees": [
+                    "an unknown pack is not silently dropped from a coverage denominator",
+                    "coverage rows describe only the explicitly selected portfolio",
+                ],
+            }));
+        }
+        if selected.is_empty() {
+            return Ok(json!({
+                "ok": false,
+                "schema": "bioprism-mcp/pack-coverage-audit/0.1",
+                "stage": "pack_selection",
+                "refusal": "the selected section and pack_ids intersection is empty",
+                "fail_closed": true,
+                "guarantees": ["an empty portfolio is not rendered as zero coverage"],
+            }));
+        }
+        let report = pack_coverage(&selected);
+        let matrix = pack_coverage_matrix(&selected);
+        let max_items = max_items as usize;
+        let covered = report.rows.iter().filter(|row| !row.packs.is_empty()).count();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/pack-coverage-audit/0.1",
+            "section": section,
+            "selected_pack_count": selected.len(),
+            "selected_pack_ids": selected_ids,
+            "summary": {
+                "families": report.rows.len(),
+                "covered": covered,
+                "uncovered": report.uncovered.len(),
+                "singly_covered": report.singly_covered.len(),
+                "weakly_covered": report.weakly_covered.len(),
+                "coverage_fraction": covered as f64 / report.rows.len().max(1) as f64,
+                "gap_summary": report.gap_summary(),
+            },
+            "rows": report.rows.iter().take(max_items).collect::<Vec<_>>(),
+            "rows_omitted": report.rows.len().saturating_sub(max_items),
+            "uncovered": report.uncovered.iter().take(max_items).collect::<Vec<_>>(),
+            "uncovered_omitted": report.uncovered.len().saturating_sub(max_items),
+            "singly_covered": report.singly_covered.iter().take(max_items).collect::<Vec<_>>(),
+            "singly_covered_omitted": report.singly_covered.len().saturating_sub(max_items),
+            "weakly_covered": report.weakly_covered.iter().take(max_items).collect::<Vec<_>>(),
+            "weakly_covered_omitted": report.weakly_covered.len().saturating_sub(max_items),
+            "matrix": matrix.iter().take(max_items).collect::<Vec<_>>(),
+            "matrix_omitted": matrix.len().saturating_sub(max_items),
+            "guarantees": [
+                "uncovered, singly covered, weakly covered, and execution-grounded families remain separate",
+                "coverage is computed by the packs kernel over the selected portfolio, not by counting catalogue rows",
+                "omission counts remain visible for every bounded projection",
+            ],
+            "limitations": [
+                "this is declaration-level portfolio coverage; it does not execute instances or apply health findings to remove packs",
+                "maintainer, refresh, and registry state are outside PackDefinition and are not fabricated here",
+            ],
+        }))
+    }
+
     fn foundation_contract_check(&self, arguments: &Value) -> Result<Value, String> {
         let raw_contract = arguments
             .get("contract")
@@ -19249,7 +19369,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "benchmark_pack_portfolio",
             "domains": ["agent benchmark packs", "biological benchmark packs", "capability coverage", "oracle tiers", "release sequencing"],
             "crates": ["bioprism-packs", "bioprism-scale", "bioprism-mutation", "bioprism-benchcompiler"],
-            "mcp_tools": ["pack_catalogue", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "mutation_family", "scale_family_split_verify"],
+            "mcp_tools": ["pack_catalogue", "pack_coverage_audit", "pack_health_assess", "benchmark_trace_analyze", "benchmark_decision_audit", "benchmark_integrity_audit", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "mutation_family", "scale_family_split_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -21076,6 +21196,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "section": { "type": "string", "enum": ["all", "15", "29"], "description": "Optional portfolio section filter; defaults to all." },
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum catalogue rows returned; defaults to 100." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "pack_coverage_audit",
+            "description": "Compute capability-family and family-by-domain coverage over the declared benchmark-pack portfolio or an explicit pack subset. It reports uncovered, singly covered, weakly covered, execution-grounded, and bounded matrix rows without treating declarations as measured health or performance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "section": { "type": "string", "enum": ["all", "15", "29"], "description": "Optional portfolio section filter; defaults to all." },
+                    "pack_ids": { "type": "array", "maxItems": 100, "description": "Optional explicit pack-id subset; unknown or duplicate ids refuse rather than disappearing from the denominator." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows, gaps, and matrix cells returned; defaults to 100." }
                 },
                 "required": []
             }

@@ -262,6 +262,26 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["reviewed before packaging"],
         limitations: ["no execution"],
       } } } });
+      if (path === "/v1/tools/pack_coverage_audit") return jsonResponse({ ok: true, tool: "pack_coverage_audit", request_id: "r20h", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/pack-coverage-audit/0.1",
+        section: "15",
+        selected_pack_count: 1,
+        selected_pack_ids: ["prism.context-acquisition"],
+        summary: { families: 14, covered: 10, uncovered: 4, singly_covered: 3, weakly_covered: 2, coverage_fraction: 0.714, gap_summary: "10 of 14 capability families have at least one pack" },
+        rows: [{ family: "evidence_acquisition", code: "B1", packs: ["prism.context-acquisition"], grounded: true }],
+        rows_omitted: 13,
+        uncovered: ["tool_use"],
+        uncovered_omitted: 3,
+        singly_covered: ["verification"],
+        singly_covered_omitted: 2,
+        weakly_covered: ["planning"],
+        weakly_covered_omitted: 1,
+        matrix: [{ family: "evidence_acquisition", domain: "coding", packs: ["prism.context-acquisition"] }],
+        matrix_omitted: 4,
+        guarantees: ["gaps remain visible"],
+        limitations: ["declaration level"],
+      } } } });
       if (path === "/v1/tools/foundation_contract_check") return jsonResponse({ ok: true, tool: "foundation_contract_check", request_id: "r21", mcp: { result: { structuredContent: {
         ok: true,
         verdict: "refused",
@@ -1286,6 +1306,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(benchmarkCompileReview.mcp.result.structuredContent.schema, "bioprism-mcp/benchmark-compile-review/0.1");
   assert.equal(benchmarkCompileReview.mcp.result.structuredContent.cell.cell_id, "dc_run_fail#step3");
   assert.equal(benchmarkCompileReview.mcp.result.structuredContent.grade.acceptance.outcome, "passed");
+  const coverage = await client.packCoverageAudit({ section: "15", max_items: 3 });
+  assert.equal(coverage.mcp.result.structuredContent.schema, "bioprism-mcp/pack-coverage-audit/0.1");
+  assert.equal(coverage.mcp.result.structuredContent.summary.uncovered, 4);
+  assert.equal(coverage.mcp.result.structuredContent.rows_omitted, 13);
   const foundation = await client.foundationContractCheck({
     contract: { id: "fbc:test:001", intent: "check", falsifiers: ["disagree"], actions: ["inspect"], claim_schema: "typed", reference_standard: "fixture", terminations: ["success"] },
     claim: "real_treatment_effect",

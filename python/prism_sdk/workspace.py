@@ -251,6 +251,7 @@ from .benchmark_compile import BenchmarkCompileArgs, BenchmarkCompileReport, ben
 from .benchmark_compile_review import BenchmarkCompileReviewArgs, BenchmarkCompileReviewReport, benchmark_compile_review_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
+from .pack_coverage import PackCoverageAuditArgs, PackCoverageAuditReport, pack_coverage_audit_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
@@ -586,6 +587,23 @@ class Workspace:
         else:
             normalized = PackCatalogueArgs(section, max_items)
         return pack_catalogue_report(self.tool("pack_catalogue", normalized.to_mcp_arguments()))
+
+    def pack_coverage_audit(
+        self,
+        request: PackCoverageAuditArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Audit benchmark-pack capability-family and domain coverage through workspace MCP."""
+
+        normalized = request if isinstance(request, PackCoverageAuditArgs) else PackCoverageAuditArgs.from_wire(request or {})
+        return self.tool("pack_coverage_audit", normalized.to_mcp_arguments())
+
+    def pack_coverage_audit_report(
+        self,
+        request: PackCoverageAuditArgs | Mapping[str, Any] | None = None,
+    ) -> PackCoverageAuditReport:
+        """Return typed selected-portfolio coverage and gap evidence."""
+
+        return pack_coverage_audit_report(self.pack_coverage_audit(request))
 
     def mutation_family(
         self,
@@ -2845,6 +2863,23 @@ class AsyncWorkspace:
         else:
             normalized = PackCatalogueArgs(section, max_items)
         return pack_catalogue_report(await self.tool("pack_catalogue", normalized.to_mcp_arguments()))
+
+    async def pack_coverage_audit(
+        self,
+        request: PackCoverageAuditArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Audit benchmark-pack coverage through async workspace MCP."""
+
+        normalized = request if isinstance(request, PackCoverageAuditArgs) else PackCoverageAuditArgs.from_wire(request or {})
+        return await self.tool("pack_coverage_audit", normalized.to_mcp_arguments())
+
+    async def pack_coverage_audit_report(
+        self,
+        request: PackCoverageAuditArgs | Mapping[str, Any] | None = None,
+    ) -> PackCoverageAuditReport:
+        """Return typed async selected-portfolio coverage evidence."""
+
+        return pack_coverage_audit_report(await self.pack_coverage_audit(request))
 
     async def mutation_family(
         self,

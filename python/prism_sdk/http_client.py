@@ -207,6 +207,7 @@ from .benchmark_compile import BenchmarkCompileArgs, BenchmarkCompileReport, ben
 from .benchmark_compile_review import BenchmarkCompileReviewArgs, BenchmarkCompileReviewReport, benchmark_compile_review_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
+from .pack_coverage import PackCoverageAuditArgs, PackCoverageAuditReport, pack_coverage_audit_report
 from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .security_redteam import SecurityRedteamReport, SecurityRedteamSimulateArgs, security_redteam_simulate_report
 from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_generate_report
@@ -937,6 +938,23 @@ class ApiClient:
         """Return typed HTTP pack portfolio declarations."""
 
         return pack_catalogue_report(self.pack_catalogue(request, section=section, max_items=max_items))
+
+    def pack_coverage_audit(
+        self,
+        request: PackCoverageAuditArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Audit capability-family and domain coverage across the benchmark portfolio."""
+
+        normalized = request if isinstance(request, PackCoverageAuditArgs) else PackCoverageAuditArgs.from_wire(request or {})
+        return self.call_tool("pack_coverage_audit", normalized.to_mcp_arguments())
+
+    def pack_coverage_audit_report(
+        self,
+        request: PackCoverageAuditArgs | Mapping[str, Any] | None = None,
+    ) -> PackCoverageAuditReport:
+        """Return typed selected-portfolio gap and coverage evidence."""
+
+        return pack_coverage_audit_report(self.pack_coverage_audit(request))
 
     def pack_health_assess(
         self,
@@ -3171,6 +3189,23 @@ class AsyncApiClient:
         """Return async typed HTTP pack portfolio declarations."""
 
         return pack_catalogue_report(await self.pack_catalogue(request, section=section, max_items=max_items))
+
+    async def pack_coverage_audit(
+        self,
+        request: PackCoverageAuditArgs | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Audit benchmark-pack coverage through async HTTP."""
+
+        normalized = request if isinstance(request, PackCoverageAuditArgs) else PackCoverageAuditArgs.from_wire(request or {})
+        return await self.call_tool("pack_coverage_audit", normalized.to_mcp_arguments())
+
+    async def pack_coverage_audit_report(
+        self,
+        request: PackCoverageAuditArgs | Mapping[str, Any] | None = None,
+    ) -> PackCoverageAuditReport:
+        """Return typed async benchmark-pack coverage evidence."""
+
+        return pack_coverage_audit_report(await self.pack_coverage_audit(request))
 
     async def pack_health_assess(
         self,

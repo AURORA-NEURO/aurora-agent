@@ -148,6 +148,8 @@ import type {
   BenchmarkCompileResult,
   BenchmarkCompileReviewArgs,
   BenchmarkCompileReviewResult,
+  PackCoverageAuditArgs,
+  PackCoverageAuditResult,
   FoundationContractCheckArgs,
   FoundationContractCheckResult,
   PackCatalogueArgs,
@@ -496,6 +498,10 @@ export class ApiClient {
 
   async benchmarkCompileReview(args: BenchmarkCompileReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BenchmarkCompileReviewResult>> {
     return this.callTool<BenchmarkCompileReviewResult>("benchmark_compile_review", args, options);
+  }
+
+  async packCoverageAudit(args: PackCoverageAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<PackCoverageAuditResult>> {
+    return this.callTool<PackCoverageAuditResult>("pack_coverage_audit", args, options);
   }
 
   async foundationContractCheck(args: FoundationContractCheckArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FoundationContractCheckResult>> {

@@ -489,6 +489,16 @@ from .benchmark_compile_review import (
     BenchmarkCompileReviewReport,
     benchmark_compile_review_report,
 )
+from .pack_coverage import (
+    MAX_PACK_COVERAGE_IDS,
+    MAX_PACK_COVERAGE_INPUT_BYTES,
+    MAX_PACK_COVERAGE_ITEMS,
+    PACK_COVERAGE_SCHEMA,
+    PACK_COVERAGE_SECTIONS,
+    PackCoverageAuditArgs,
+    PackCoverageAuditReport,
+    pack_coverage_audit_report,
+)
 from .foundation import (
     COUNTERFACTUAL_CLAIMS,
     FOUNDATION_MAX_INPUT_BYTES,
@@ -1626,6 +1636,14 @@ __all__ = [
     "BenchmarkCompileReviewArgs",
     "BenchmarkCompileReviewReport",
     "benchmark_compile_review_report",
+    "PACK_COVERAGE_SCHEMA",
+    "PACK_COVERAGE_SECTIONS",
+    "MAX_PACK_COVERAGE_IDS",
+    "MAX_PACK_COVERAGE_ITEMS",
+    "MAX_PACK_COVERAGE_INPUT_BYTES",
+    "PackCoverageAuditArgs",
+    "PackCoverageAuditReport",
+    "pack_coverage_audit_report",
     "FOUNDATION_MAX_INPUT_BYTES",
     "COUNTERFACTUAL_CLAIMS",
     "FOUNDATION_VERDICTS",

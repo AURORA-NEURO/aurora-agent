@@ -169,6 +169,14 @@ invent defaults:
   posture, release-wave sequencing, and capability signatures visible; duplicate signatures are
   returned as review candidates. The report is explicitly declaration-only and never substitutes
   for observed pack calibration or the separate health/reportability gate.
+- `PackCoverageAuditArgs` and `pack_coverage_audit_report(...)` project the real pack-coverage and
+  capability-family matrix kernels across sync MCP, async MCP, and HTTP. `PackCoverageAuditReport`
+  preserves selected-pack identity, covered/uncovered/singly-covered/weakly-covered families,
+  bounded rows and matrix cells, omission counts, and the kernel's gap summary. Unknown packs,
+  empty intersections, and malformed requests remain fail-closed; the projection is still
+  declaration-level coverage and does not claim measured instance performance or health. See
+  [`docs/PACK_COVERAGE_AUDIT.md`](PACK_COVERAGE_AUDIT.md) for the wire contract and interpretation
+  rules.
 - `PackHealthAssessArgs` and `pack_health_assessment_report(...)` expose the observed pack-health
   gate across sync MCP, async MCP, and HTTP. `PackCalibrationReport` retains system-level pass and
   trial denominators; `PackDiscriminationReport` distinguishes undetermined, saturated, floored,

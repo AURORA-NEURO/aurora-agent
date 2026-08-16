@@ -1901,6 +1901,36 @@ export interface BenchmarkCompileReviewResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface PackCoverageAuditArgs extends JsonObject {
+  section?: "all" | "15" | "29";
+  pack_ids?: string[];
+  max_items?: number;
+}
+
+export interface PackCoverageAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/pack-coverage-audit/0.1";
+  section?: "all" | "15" | "29";
+  selected_pack_count?: number;
+  selected_pack_ids?: string[];
+  summary?: { families: number; covered: number; uncovered: number; singly_covered: number; weakly_covered: number; coverage_fraction: number; gap_summary: string };
+  rows?: JsonObject[];
+  rows_omitted?: number;
+  uncovered?: string[];
+  uncovered_omitted?: number;
+  singly_covered?: string[];
+  singly_covered_omitted?: number;
+  weakly_covered?: string[];
+  weakly_covered_omitted?: number;
+  matrix?: JsonObject[];
+  matrix_omitted?: number;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface FoundationContractCheckArgs extends JsonObject {
   contract: JsonObject;
   parent?: JsonObject;

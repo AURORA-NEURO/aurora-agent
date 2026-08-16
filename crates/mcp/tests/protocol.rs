@@ -311,7 +311,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 137);
+    assert_eq!(tools.len(), 138);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4142,12 +4142,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(137));
-    assert_eq!(result["advertised_tool_count"], json!(137));
+    assert_eq!(result["unique_catalog_tools"], json!(138));
+    assert_eq!(result["advertised_tool_count"], json!(138));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(137));
-    assert_eq!(result["schema_quality"]["valid"], json!(137));
+    assert_eq!(result["schema_quality"]["checked"], json!(138));
+    assert_eq!(result["schema_quality"]["valid"], json!(138));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -8129,6 +8129,34 @@ fn pack_catalogue_exposes_agent_and_biological_declarations_without_scores() {
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("not measured")));
+}
+
+#[test]
+fn pack_coverage_audit_exposes_portfolio_gaps_and_refuses_unknown_subsets() {
+    let result = call(
+        &mut server(),
+        "pack_coverage_audit",
+        json!({ "section": "15", "max_items": 3 }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/pack-coverage-audit/0.1"));
+    assert_eq!(result["selected_pack_count"], json!(25));
+    assert!(result["summary"]["families"].as_u64().unwrap() > 0);
+    assert!(result["summary"]["covered"].as_u64().unwrap() > 0);
+    assert_eq!(result["rows"].as_array().unwrap().len(), 3);
+    assert!(result["rows_omitted"].as_u64().unwrap() > 0);
+    assert!(result["summary"]["gap_summary"].as_str().unwrap().contains("capability families"));
+
+    let refused = call(
+        &mut server(),
+        "pack_coverage_audit",
+        json!({ "pack_ids": ["pack-does-not-exist"] }),
+    );
+    assert_eq!(refused["__isError"], json!(false));
+    assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["stage"], json!("pack_selection"));
+    assert_eq!(refused["fail_closed"], json!(true));
 }
 
 #[test]
