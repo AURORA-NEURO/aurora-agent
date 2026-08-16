@@ -3928,15 +3928,26 @@ export interface OncoDispositionResult extends JsonObject {
 
 export interface OncoBoundaryResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/onco-boundary-check/0.1";
+  outcome_kind?: "disposition" | "refused";
+  disposition_kind?: OncoDispositionResult["disposition"];
   permitted?: string[];
   disposition?: OncoDispositionResult;
   released?: string[];
   refused?: string[];
   terminal_action?: "stop" | "abstain" | "escalate";
   escalation?: OncoEscalationResult | null;
+  escalation_present?: boolean;
+  escalation_trigger?: string | null;
+  escalation_route?: string | null;
+  requested_use_count?: number;
+  released_count?: number;
+  refused_count?: number;
+  identifier_fields_present?: boolean;
   research_statement?: string;
   stage?: string;
   refusal?: string;
+  refusal_kind?: "identifiers_present";
   fail_closed: boolean;
   guarantee?: string;
   guarantees?: string[];

@@ -575,8 +575,9 @@ divergence. See [`docs/RUNTIME_TAPE_VERIFY.md`](docs/RUNTIME_TAPE_VERIFY.md).
 `runtime_execution_simulate` runs bounded programs in the deterministic in-process world and
 preserves typed recording/replay, policy-journal, budget, and fork evidence; see
 [`docs/RUNTIME_EXECUTION_SIMULATE.md`](docs/RUNTIME_EXECUTION_SIMULATE.md).
-`onco_boundary_check`
-keeps research output separate from individualized clinical use, and `onco_response_assess` keeps
+`onco_boundary_check` keeps research output separate from individualized clinical use, preserving
+partial-release counts, escalation routing, and fail-closed identifier refusals; see
+[`docs/ONCO_BOUNDARY_CHECK.md`](docs/ONCO_BOUNDARY_CHECK.md). `onco_response_assess` keeps
 post-treatment progression, threshold sensitivity, and non-identifiable change states explicit.
 Its versioned projection separates call kind, unconfirmed reading, treatment-window metadata,
 criterion divergence, sensitivity flips, and hypothesis identifiability; see

@@ -5608,9 +5608,22 @@ fn onco_boundary_check_releases_aggregate_work_and_escalates_individual_use() {
         json!({ "request": serde_json::to_value(request).unwrap() }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/onco-boundary-check/0.1")
+    );
+    assert_eq!(result["outcome_kind"], json!("disposition"));
+    assert_eq!(result["disposition_kind"], json!("release_partial"));
     assert_eq!(result["released"][0], json!("cohort_analysis"));
     assert_eq!(result["refused"][0], json!("treatment_recommendation"));
     assert_eq!(result["terminal_action"], json!("escalate"));
+    assert_eq!(result["requested_use_count"], json!(2));
+    assert_eq!(result["released_count"], json!(1));
+    assert_eq!(result["refused_count"], json!(1));
+    assert_eq!(result["escalation_present"], json!(true));
+    assert_eq!(result["escalation_trigger"], json!("individual_clinical_request"));
+    assert_eq!(result["escalation_route"], json!("treating_clinical_team"));
+    assert_eq!(result["identifier_fields_present"], json!(false));
 
     let identifiers = BoundaryRequest {
         purpose: "research".into(),
@@ -5627,6 +5640,14 @@ fn onco_boundary_check_releases_aggregate_work_and_escalates_individual_use() {
         json!({ "request": serde_json::to_value(identifiers).unwrap() }),
     );
     assert_eq!(refused["ok"], json!(false));
+    assert_eq!(
+        refused["schema"],
+        json!("bioprism-mcp/onco-boundary-check/0.1")
+    );
+    assert_eq!(refused["outcome_kind"], json!("refused"));
+    assert_eq!(refused["refusal_kind"], json!("identifiers_present"));
+    assert_eq!(refused["requested_use_count"], json!(1));
+    assert_eq!(refused["identifier_fields_present"], json!(true));
     assert_eq!(refused["fail_closed"], json!(true));
 }
 

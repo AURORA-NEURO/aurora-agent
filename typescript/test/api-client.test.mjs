@@ -718,7 +718,25 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/preanalytic_apply") return jsonResponse({ ok: true, tool: "preanalytic_apply", request_id: "r28", mcp: { result: { structuredContent: { ok: false, applied: false, refusal: "biology changed", fail_closed: true } } } });
       if (path === "/v1/tools/contradiction_review") return jsonResponse({ ok: true, tool: "contradiction_review", request_id: "r29", mcp: { result: { structuredContent: { ok: false, stage: "pose", refusal: "readings agree", fail_closed: true } } } });
       if (path === "/v1/tools/lab_plan") return jsonResponse({ ok: true, tool: "lab_plan", request_id: "r30", mcp: { result: { structuredContent: { ok: true, goal: "safe assay", should_escalate: true } } } });
-      if (path === "/v1/tools/onco_boundary_check") return jsonResponse({ ok: true, tool: "onco_boundary_check", request_id: "r31", mcp: { result: { structuredContent: { ok: true, released: ["cohort_analysis"], refused: ["treatment_recommendation"], terminal_action: "escalate" } } } });
+      if (path === "/v1/tools/onco_boundary_check") return jsonResponse({ ok: true, tool: "onco_boundary_check", request_id: "r31", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/onco-boundary-check/0.1",
+        outcome_kind: "disposition",
+        disposition_kind: "release_partial",
+        permitted: ["cohort_analysis", "method_development"],
+        disposition: { disposition: "release_partial", released: ["cohort_analysis"], refused: ["treatment_recommendation"], escalation: { trigger: "individual_clinical_request", route: "treating_clinical_team" } },
+        released: ["cohort_analysis"],
+        refused: ["treatment_recommendation"],
+        terminal_action: "escalate",
+        escalation: { trigger: "individual_clinical_request", route: "treating_clinical_team" },
+        escalation_present: true,
+        escalation_trigger: "individual_clinical_request",
+        escalation_route: "treating_clinical_team",
+        requested_use_count: 2,
+        released_count: 1,
+        refused_count: 1,
+        identifier_fields_present: false,
+      } } } });
       if (path === "/v1/tools/onco_response_assess") return jsonResponse({ ok: true, tool: "onco_response_assess", request_id: "r32", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/onco-response-assess/0.1",
@@ -1308,6 +1326,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(contradiction.mcp.result.structuredContent.stage, "pose");
   assert.equal(lab.mcp.result.structuredContent.should_escalate, true);
   assert.equal(onco.mcp.result.structuredContent.terminal_action, "escalate");
+  assert.equal(onco.mcp.result.structuredContent.schema, "bioprism-mcp/onco-boundary-check/0.1");
+  assert.equal(onco.mcp.result.structuredContent.disposition_kind, "release_partial");
+  assert.equal(onco.mcp.result.structuredContent.escalation_present, true);
+  assert.equal(onco.mcp.result.structuredContent.refused_count, 1);
   assert.equal(responseAssessment.mcp.result.structuredContent.withheld_progression, true);
   assert.equal(responseAssessment.mcp.result.structuredContent.call_label, "not evaluable");
   assert.equal(responseAssessment.mcp.result.structuredContent.schema, "bioprism-mcp/onco-response-assess/0.1");

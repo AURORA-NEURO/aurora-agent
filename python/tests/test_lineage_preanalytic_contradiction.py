@@ -234,6 +234,9 @@ class LabAndOncoReportTests(unittest.TestCase):
         self.assertTrue(refused.refused)
         onco = onco_boundary_report({
             "ok": True,
+            "schema": "bioprism-mcp/onco-boundary-check/0.1",
+            "outcome_kind": "disposition",
+            "disposition_kind": "release_partial",
             "permitted": ["cohort_analysis", "method_development"],
             "disposition": {
                 "disposition": "release_partial",
@@ -245,11 +248,22 @@ class LabAndOncoReportTests(unittest.TestCase):
             "refused": ["treatment_recommendation"],
             "terminal_action": "escalate",
             "escalation": {"trigger": "individual_clinical_request", "route": "treating_clinical_team"},
+            "escalation_present": True,
+            "escalation_trigger": "individual_clinical_request",
+            "escalation_route": "treating_clinical_team",
+            "requested_use_count": 2,
+            "released_count": 1,
+            "refused_count": 1,
+            "identifier_fields_present": False,
             "research_statement": "Research use only.",
             "guarantees": ["split"],
             "limitations": ["declared"],
         })
         self.assertTrue(onco.ok)
+        self.assertEqual(onco.schema, "bioprism-mcp/onco-boundary-check/0.1")
+        self.assertEqual(onco.disposition_kind, "release_partial")
+        self.assertEqual(onco.refused_count, 1)
+        self.assertTrue(onco.escalation_present)
         self.assertTrue(onco.refused_individual_use)
         self.assertFalse(onco.research_only)
 

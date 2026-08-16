@@ -9773,21 +9773,41 @@ impl Server {
             Err(error) => {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/onco-boundary-check/0.1",
+                    "outcome_kind": "refused",
+                    "refusal_kind": "identifiers_present",
                     "stage": "research_boundary",
                     "refusal": error.to_string(),
                     "fail_closed": true,
+                    "requested_use_count": request.requested_uses.len(),
+                    "identifier_fields_present": true,
                     "guarantee": "direct identifier presence is refused before the request is echoed or analysed"
                 }))
             }
         };
+        let disposition_value = serde_json::to_value(&disposition).map_err(|error| error.to_string())?;
+        let disposition_kind = disposition_value["disposition"]
+            .as_str()
+            .ok_or("boundary disposition must carry a tagged disposition")?;
+        let escalation = disposition.escalation();
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/onco-boundary-check/0.1",
+            "outcome_kind": "disposition",
+            "disposition_kind": disposition_kind,
             "permitted": boundary.permitted(),
             "disposition": disposition,
             "released": disposition.released(),
             "refused": disposition.refused(),
             "terminal_action": disposition.terminal_action(),
-            "escalation": disposition.escalation(),
+            "escalation": escalation,
+            "escalation_present": escalation.is_some(),
+            "escalation_trigger": escalation.map(|notice| notice.trigger()),
+            "escalation_route": escalation.map(|notice| notice.route()),
+            "requested_use_count": disposition.released().len() + disposition.refused().len(),
+            "released_count": disposition.released().len(),
+            "refused_count": disposition.refused().len(),
+            "identifier_fields_present": false,
             "research_statement": "Research use only. Not for use in the diagnosis, prognosis, treatment, or triage of any individual.",
             "guarantees": [
                 "research uses and individualized clinical uses are split rather than collapsed into a total refusal",

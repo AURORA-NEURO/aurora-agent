@@ -335,8 +335,9 @@ the resolved/not-yet-examined/unresolvable state machine in the REST/MCP envelop
 a correct modality. Nested domain records remain JSON objects where the Rust kernel is authoritative.
 `labPlan` adds typed acquisition ordering, privacy exclusions, spend, stop reasons, and escalation
 without executing a lab action. `oncoBoundaryCheck` preserves oncology's partial aggregate release
-versus individual-clinical refusal and human-escalation state, including fail-closed identifier
-handling.
+versus individual-clinical refusal and human-escalation state, including reconciled disposition
+counts, escalation routing, and fail-closed identifier handling. See
+`docs/ONCO_BOUNDARY_CHECK.md`.
 `oncoResponseAssess` types the criteria-aware response projection, retaining the unconfirmed
 reading separately from the reportable call and exposing post-treatment progression withholding,
 surviving hypotheses, evidence requests, call kind, criterion divergence, treatment-window, and

@@ -38,6 +38,9 @@ ONCO_RESPONSE_SCHEMA = "bioprism-mcp/onco-response-assess/0.1"
 ONCO_RESPONSE_CALL_KINDS = frozenset({"complete", "partial", "stable", "progression", "not_evaluable"})
 ONCO_RESPONSE_OUTCOME_KINDS = frozenset({"assessment", "refused"})
 ONCO_RESPONSE_REFUSAL_KINDS = frozenset({"assessment_error"})
+ONCO_BOUNDARY_SCHEMA = "bioprism-mcp/onco-boundary-check/0.1"
+ONCO_BOUNDARY_OUTCOME_KINDS = frozenset({"disposition", "refused"})
+ONCO_BOUNDARY_REFUSAL_KINDS = frozenset({"identifiers_present"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -1398,19 +1401,51 @@ class OncoBoundaryReport:
     guarantee: str | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    outcome_kind: str | None = None
+    disposition_kind: str | None = None
+    requested_use_count: int | None = None
+    released_count: int | None = None
+    refused_count: int | None = None
+    escalation_present: bool | None = None
+    identifier_fields_present: bool | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoBoundaryReport":
         raw = _payload(value)
         ok = _bool("oncology boundary ok", raw.get("ok"))
         fail_closed = _bool("oncology boundary fail_closed", raw.get("fail_closed", False))
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("oncology boundary schema", schema_value)
+        if schema is not None and schema != ONCO_BOUNDARY_SCHEMA:
+            raise ArgumentError(f"unknown oncology boundary schema: {schema!r}")
+        outcome_kind_value = raw.get("outcome_kind")
+        outcome_kind = "disposition" if ok else "refused"
+        if outcome_kind_value is not None:
+            outcome_kind = _route_text("oncology boundary outcome kind", outcome_kind_value)
+            if outcome_kind not in ONCO_BOUNDARY_OUTCOME_KINDS or outcome_kind != ("disposition" if ok else "refused"):
+                raise ArgumentError("oncology boundary outcome kind does not reconcile with transport state")
+        requested_use_count = None if raw.get("requested_use_count") is None else _route_count("oncology requested use count", raw.get("requested_use_count"))
+        released_count = None if raw.get("released_count") is None else _route_count("oncology released count", raw.get("released_count"))
+        refused_count = None if raw.get("refused_count") is None else _route_count("oncology refused count", raw.get("refused_count"))
+        identifier_fields_present = raw.get("identifier_fields_present")
+        if identifier_fields_present is not None:
+            _bool("oncology identifier fields present", identifier_fields_present)
         stage = None if raw.get("stage") is None else _route_text("oncology boundary stage", raw.get("stage"))
         refusal = None if raw.get("refusal") is None else _route_text("oncology boundary refusal", raw.get("refusal"))
         guarantee = None if raw.get("guarantee") is None else _route_text("oncology boundary guarantee", raw.get("guarantee"))
         if not ok:
             if refusal is None or not fail_closed:
                 raise ArgumentError("refused oncology boundary results require a fail-closed refusal")
-            return cls(raw, False, (), None, (), (), None, None, None, stage, refusal, True, guarantee, (), ())
+            refusal_kind_value = raw.get("refusal_kind")
+            refusal_kind = None if refusal_kind_value is None else _route_text("oncology boundary refusal kind", refusal_kind_value)
+            if refusal_kind is not None and refusal_kind not in ONCO_BOUNDARY_REFUSAL_KINDS:
+                raise ArgumentError(f"unknown oncology boundary refusal kind: {refusal_kind!r}")
+            if schema is not None and refusal_kind is None:
+                raise ArgumentError("versioned oncology boundary refusals require refusal_kind")
+            if schema is not None and identifier_fields_present is not True:
+                raise ArgumentError("versioned oncology boundary refusals must report identifier presence")
+            return cls(raw, False, (), None, (), (), None, None, None, stage, refusal, True, guarantee, (), (), schema, outcome_kind, None, requested_use_count, released_count, refused_count, None, identifier_fields_present)
         if fail_closed or refusal is not None or stage is not None:
             raise ArgumentError("successful oncology boundary results cannot carry refusal evidence")
         permitted = _route_strings("oncology permitted uses", raw.get("permitted"))
@@ -1428,6 +1463,24 @@ class OncoBoundaryReport:
         escalation = None if escalation_value is None else OncoEscalationReport.from_wire(escalation_value)
         if (escalation is None) != (disposition.escalation is None):
             raise ArgumentError("oncology escalation does not reconcile with disposition")
+        disposition_kind_value = raw.get("disposition_kind")
+        disposition_kind = disposition.kind if disposition_kind_value is None else _route_text("oncology disposition kind", disposition_kind_value)
+        if disposition_kind != disposition.kind:
+            raise ArgumentError("oncology disposition kind does not reconcile with disposition")
+        calculated_requested = len(released) + len(refused)
+        if requested_use_count is not None and requested_use_count != calculated_requested:
+            raise ArgumentError("oncology requested use count does not reconcile with disposition")
+        if released_count is not None and released_count != len(released):
+            raise ArgumentError("oncology released count does not reconcile with disposition")
+        if refused_count is not None and refused_count != len(refused):
+            raise ArgumentError("oncology refused count does not reconcile with disposition")
+        escalation_present = _bool("oncology escalation presence", raw.get("escalation_present", escalation is not None))
+        if escalation_present != (escalation is not None):
+            raise ArgumentError("oncology escalation presence does not reconcile with disposition")
+        if schema is not None and ("disposition_kind" not in raw or "requested_use_count" not in raw or "released_count" not in raw or "refused_count" not in raw):
+            raise ArgumentError("versioned oncology boundaries require disposition accounting")
+        if schema is not None and identifier_fields_present is not False:
+            raise ArgumentError("versioned oncology dispositions must report identifier absence")
         return cls(
             raw,
             True,
@@ -1444,6 +1497,14 @@ class OncoBoundaryReport:
             None,
             _route_strings("oncology guarantees", raw.get("guarantees")),
             _route_strings("oncology limitations", raw.get("limitations")),
+            schema,
+            outcome_kind,
+            disposition_kind,
+            requested_use_count,
+            released_count,
+            refused_count,
+            escalation_present,
+            identifier_fields_present,
         )
 
     @property
@@ -1493,6 +1554,9 @@ def onco_outcome_report(value: Mapping[str, Any]) -> OncoOutcomeReport:
 
 __all__ = [
     "ONCO_DISPOSITIONS",
+    "ONCO_BOUNDARY_OUTCOME_KINDS",
+    "ONCO_BOUNDARY_REFUSAL_KINDS",
+    "ONCO_BOUNDARY_SCHEMA",
     "ONCO_ANALYSIS_UNITS",
     "ONCO_BIAS_FLAGS",
     "ONCO_IDENTITY_REFUSAL_KINDS",

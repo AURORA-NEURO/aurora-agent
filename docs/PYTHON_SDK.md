@@ -175,7 +175,9 @@ invent defaults:
   predicate. Planning remains visibly non-executing.
 - `OncoBoundaryArgs` and `onco_boundary_report(...)` preserve oncology's partial-release contract:
   aggregate research uses can remain released while individual clinical uses are refused and
-  escalated, and direct-identifier refusals remain fail-closed without echoing request data.
+  escalated, and direct-identifier refusals remain fail-closed without echoing request data. The
+  versioned report adds reconciled disposition/count projections, escalation trigger/route, and
+  explicit identifier-presence state. See `docs/ONCO_BOUNDARY_CHECK.md`.
 - `OncoResponseAssessArgs`/`onco_response_report(...)` expose the criteria-aware response gate:
   the raw radiologic reading, reportable call, withheld-progression flag, surviving hypothesis
   count, and discriminating evidence requests remain separate. The typed report also carries call
