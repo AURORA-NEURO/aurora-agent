@@ -194,6 +194,7 @@ from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimula
 from .hub_disclosure import HubDisclosureReviewArgs, HubDisclosureReviewReport, hub_disclosure_review
 from .hub_card import HubCardRenderArgs, HubCardRenderReport, hub_card_render
 from .hub_publication import BioAtlasPublicationAuditArgs, BioAtlasPublicationAuditReport, HubLeaderboardRenderArgs, HubLeaderboardRenderReport, bioatlas_publication_audit, hub_leaderboard_render
+from .hub_submission import HubSubmissionReviewArgs, HubSubmissionReviewReport, hub_submission_review
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -974,6 +975,23 @@ class ApiClient:
         """Return typed leaderboard evidence through the HTTP gateway."""
 
         return hub_leaderboard_render(self.hub_leaderboard_render(request))
+
+    def hub_submission_review(
+        self,
+        request: HubSubmissionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Replay public-hub submission and moderation review through HTTP."""
+
+        normalized = request if isinstance(request, HubSubmissionReviewArgs) else HubSubmissionReviewArgs.from_wire(request)
+        return self.call_tool("hub_submission_review", normalized.to_mcp_arguments())
+
+    def hub_submission_review_report(
+        self,
+        request: HubSubmissionReviewArgs | Mapping[str, Any],
+    ) -> HubSubmissionReviewReport:
+        """Return typed submission and moderation evidence through HTTP."""
+
+        return hub_submission_review(self.hub_submission_review(request))
 
     def bioatlas_publication_audit(
         self,
@@ -2893,6 +2911,23 @@ class AsyncApiClient:
         """Return async typed leaderboard evidence through the HTTP gateway."""
 
         return hub_leaderboard_render(await self.hub_leaderboard_render(request))
+
+    async def hub_submission_review(
+        self,
+        request: HubSubmissionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async submission and moderation replay through HTTP."""
+
+        normalized = request if isinstance(request, HubSubmissionReviewArgs) else HubSubmissionReviewArgs.from_wire(request)
+        return await self.call_tool("hub_submission_review", normalized.to_mcp_arguments())
+
+    async def hub_submission_review_report(
+        self,
+        request: HubSubmissionReviewArgs | Mapping[str, Any],
+    ) -> HubSubmissionReviewReport:
+        """Return async typed submission evidence through HTTP."""
+
+        return hub_submission_review(await self.hub_submission_review(request))
 
     async def bioatlas_publication_audit(
         self,

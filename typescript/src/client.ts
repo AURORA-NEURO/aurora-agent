@@ -142,6 +142,8 @@ import type {
   HubCardRenderResult,
   HubLeaderboardRenderArgs,
   HubLeaderboardRenderResult,
+  HubSubmissionReviewArgs,
+  HubSubmissionReviewResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -456,6 +458,10 @@ export class ApiClient {
 
   async hubLeaderboardRender(args: HubLeaderboardRenderArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubLeaderboardRenderResult>> {
     return this.callTool<HubLeaderboardRenderResult>("hub_leaderboard_render", args, options);
+  }
+
+  async hubSubmissionReview(args: HubSubmissionReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubSubmissionReviewResult>> {
+    return this.callTool<HubSubmissionReviewResult>("hub_submission_review", args, options);
   }
 
   async bioatlasPublicationAudit(args: BioAtlasPublicationAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioAtlasPublicationAuditResult>> {

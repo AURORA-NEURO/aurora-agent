@@ -472,6 +472,7 @@ fn hub_submission_review_replays_append_only_public_moderation() {
         }),
     );
     assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["schema"], json!("bioprism-mcp/hub-submission/0.1"));
     assert_eq!(payload["state"], json!("accepted"));
     assert_eq!(payload["verification"], json!("reproduced"));
     assert_eq!(payload["event_count"], json!(4));

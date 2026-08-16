@@ -231,6 +231,7 @@ from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimula
 from .hub_disclosure import HubDisclosureReviewArgs, HubDisclosureReviewReport, hub_disclosure_review
 from .hub_card import HubCardRenderArgs, HubCardRenderReport, hub_card_render
 from .hub_publication import BioAtlasPublicationAuditArgs, BioAtlasPublicationAuditReport, HubLeaderboardRenderArgs, HubLeaderboardRenderReport, bioatlas_publication_audit, hub_leaderboard_render
+from .hub_submission import HubSubmissionReviewArgs, HubSubmissionReviewReport, hub_submission_review
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -500,6 +501,25 @@ class Workspace:
         normalized = request if isinstance(request, HubLeaderboardRenderArgs) else HubLeaderboardRenderArgs.from_wire(request)
         result = self.client.call_tool("hub_leaderboard_render", normalized.to_mcp_arguments())
         return hub_leaderboard_render(result.require_object())
+
+    def hub_submission_review(
+        self,
+        request: HubSubmissionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Accept a public-hub submission and optionally replay moderation actions."""
+
+        normalized = request if isinstance(request, HubSubmissionReviewArgs) else HubSubmissionReviewArgs.from_wire(request)
+        return self.tool("hub_submission_review", normalized.to_mcp_arguments())
+
+    def hub_submission_review_report(
+        self,
+        request: HubSubmissionReviewArgs | Mapping[str, Any],
+    ) -> HubSubmissionReviewReport:
+        """Return typed acceptance, moderation events, tombstones, and refusal stages."""
+
+        normalized = request if isinstance(request, HubSubmissionReviewArgs) else HubSubmissionReviewArgs.from_wire(request)
+        result = self.client.call_tool("hub_submission_review", normalized.to_mcp_arguments())
+        return hub_submission_review(result.require_object())
 
     def bioatlas_publication_audit(
         self,
@@ -2425,6 +2445,25 @@ class AsyncWorkspace:
         normalized = request if isinstance(request, HubLeaderboardRenderArgs) else HubLeaderboardRenderArgs.from_wire(request)
         result = await self.client.call_tool("hub_leaderboard_render", normalized.to_mcp_arguments())
         return hub_leaderboard_render(result.require_object())
+
+    async def hub_submission_review(
+        self,
+        request: HubSubmissionReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async public-hub submission and moderation replay."""
+
+        normalized = request if isinstance(request, HubSubmissionReviewArgs) else HubSubmissionReviewArgs.from_wire(request)
+        return await self.tool("hub_submission_review", normalized.to_mcp_arguments())
+
+    async def hub_submission_review_report(
+        self,
+        request: HubSubmissionReviewArgs | Mapping[str, Any],
+    ) -> HubSubmissionReviewReport:
+        """Return async typed submission and moderation evidence."""
+
+        normalized = request if isinstance(request, HubSubmissionReviewArgs) else HubSubmissionReviewArgs.from_wire(request)
+        result = await self.client.call_tool("hub_submission_review", normalized.to_mcp_arguments())
+        return hub_submission_review(result.require_object())
 
     async def bioatlas_publication_audit(
         self,

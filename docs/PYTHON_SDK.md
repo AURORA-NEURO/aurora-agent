@@ -73,6 +73,11 @@ invent defaults:
   fail-closed readiness; `BioAtlasCrossLayerReport` keeps numeric-score evidence requirements and
   withheld-score semantics visible. The audit is not a publisher, identity service, assay runner,
   leakage detector, or scientific/clinical approval.
+- `HubSubmissionReviewArgs` and `hub_submission_review(...)` type the public-hub acceptance and
+  moderation replay across sync MCP, async MCP, and HTTP. `HubModerationEventReport` preserves
+  opened/transition/attestation events, actors, monotonic epochs, reasons, supersession, and
+  verification movement; records retain history and withdrawal tombstones; refusal stages remain
+  fail-closed. The facade does not authenticate identities, persist a ledger, or publish a page.
 - `BioCapabilityEvidenceAuditRequest`, `EvidenceItem`, and `ClaimRequest` provide a bounded typed
   input for `Workspace.biocapability_evidence_audit(...)` and its async/HTTP counterparts. They
   enumerate the nine evidence dimensions, keep observed/reproduced support distinct from declared

@@ -496,6 +496,9 @@ failed disclosure or publication gates preserve the card while keeping its numer
 ranked and unranked entries retain typed reasons and scoped nonclaims, while atlas coverage,
 evidence-conditioned claims, card score attachment, and explicit release targets remain separate
 gates with fail-closed blockers.
+`hub_submission_review` exposes the preceding acceptance and moderation state machine with
+append-only events, reasons, verification attestations, and withdrawal tombstones; refusal stages
+remain explicit, and the endpoint still does not authenticate or publish externally.
 `runtime_execution_simulate` runs bounded serialized effect programs against the deterministic
 in-process world, returns policy and budget evidence, proves complete replay, and can open a forked
 suffix with observable state and divergence comparison. The Python and TypeScript SDKs expose typed

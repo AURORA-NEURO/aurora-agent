@@ -77,6 +77,9 @@ if (result.mcp.result?.isError) {
 - `hubLeaderboardRender` keeps rankable entries, typed unranked reasons, disclosure labels, and
   scoped headline nonclaims visible; `bioatlasPublicationAudit` keeps atlas/evidence/card/
   leaderboard gates and explicit release blockers separate from network publication.
+- `hubSubmissionReview` keeps submission acceptance, moderation stage, event history, verification,
+  publication state, and fail-closed refusal evidence typed without pretending the Fetch client is
+  an identity provider or durable moderation service.
 - `toolCatalogue()` snapshots the live `/v1/tools` definitions into a bounded SHA-256 catalogue;
   `planTool()` performs conservative JSON-shape preflight without a POST; and `toolChecked()`
   executes the reviewed call while preserving the raw refusal envelope. This covers every current

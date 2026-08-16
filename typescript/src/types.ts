@@ -1943,6 +1943,67 @@ export interface HubLeaderboardRenderResult extends JsonObject {
   guarantees: string[];
 }
 
+export type HubModerationState = "submitted" | "under-review" | "accepted" | "rejected" | "withdrawn" | "superseded";
+export type HubModerationVerification = "self-reported" | "reproduced" | "verified" | "prospectively-validated";
+export type HubModerationEventKind = "opened" | "transition" | "attestation";
+
+export interface HubSubmissionReviewArgs extends JsonObject {
+  draft: JsonObject;
+  submitter: JsonObject;
+  moderation?: JsonObject;
+}
+
+export interface HubModerationEventResult extends JsonObject {
+  submission: string;
+  kind: HubModerationEventKind;
+  actor: string;
+  at: number;
+  reason?: string | null;
+  superseded_by?: string | null;
+  from?: string;
+  to?: string;
+}
+
+export interface HubTombstoneResult extends JsonObject {
+  submission: string;
+  submitter: string;
+  content: string;
+  withdrawn_at: number;
+  actor: string;
+  reason: string;
+  states_traversed: HubModerationState[];
+}
+
+export interface HubModerationRecordResult extends JsonObject {
+  submission: JsonObject;
+  state: HubModerationState;
+  verification: HubModerationVerification;
+  history: HubModerationEventResult[];
+  tombstone?: HubTombstoneResult | null;
+}
+
+export interface HubModerationLedgerResult extends JsonObject {
+  records: Record<string, HubModerationRecordResult>;
+  events: HubModerationEventResult[];
+  last_epoch: number;
+}
+
+export interface HubSubmissionReviewResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/hub-submission/0.1";
+  stage: string;
+  submission: JsonObject | null;
+  limitation_card?: string | null;
+  moderation?: JsonObject | null;
+  state?: HubModerationState;
+  verification?: HubModerationVerification;
+  published?: string[];
+  event_count?: number;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

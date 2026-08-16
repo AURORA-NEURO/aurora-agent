@@ -326,6 +326,12 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         ledger: { packs: { "pack-1": { disclosure: "disclosed", since: 5 } } },
         guarantees: ["disclosure is keyed by immutable pack digest rather than a mutable name", "disclosure is a ratchet and contamination cannot be walked back", "headline eligibility returns a caveat or a typed refusal instead of a bare score", "the review does not detect leaks"],
       } } } });
+      if (path === "/v1/tools/hub_submission_review") return jsonResponse({ ok: true, tool: "hub_submission_review", request_id: "r32", mcp: { result: { structuredContent: {
+        ok: true, schema: "bioprism-mcp/hub-submission/0.1", stage: "moderation_ledger",
+        submission: { id: "sub-1", content: "digest-1" }, limitation_card: "bounded", state: "accepted", verification: "reproduced", published: ["sub-1"], event_count: 1,
+        ledger: { records: {}, events: [{ submission: "sub-1", kind: "opened", actor: "hub", at: 1, reason: null, superseded_by: null }], last_epoch: 1 },
+        guarantees: ["moderation is an append-only in-memory state machine with monotonic epochs", "self-review and self-asserted verification are refused"],
+      } } } });
       if (path === "/v1/tools/hub_card_render") return jsonResponse({ ok: true, tool: "hub_card_render", request_id: "r30", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/hub-card/0.1",
@@ -867,6 +873,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(disclosure.mcp.result.structuredContent.trace[2].result.eligible, false);
   assert.equal(disclosure.mcp.result.structuredContent.trace[2].result.fail_closed, true);
   assert.equal(disclosure.mcp.result.structuredContent.trace[3].result.label.label, "disclosed_pack");
+  const submission = await client.hubSubmissionReview({
+    draft: { id: "sub-1", content: "digest-1" },
+    submitter: { id: "lab-a", conflicts_declared: true },
+    moderation: { transitions: [], attestations: [], revocations: [] },
+  });
+  assert.equal(submission.mcp.result.structuredContent.schema, "bioprism-mcp/hub-submission/0.1");
+  assert.equal(submission.mcp.result.structuredContent.stage, "moderation_ledger");
+  assert.equal(submission.mcp.result.structuredContent.verification, "reproduced");
   const card = await client.hubCardRender({
     moderation: { records: {} },
     submission: "sub-card",

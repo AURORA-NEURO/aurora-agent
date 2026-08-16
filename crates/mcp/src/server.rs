@@ -7427,6 +7427,7 @@ impl Server {
             Err(error) => {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/hub-submission/0.1",
                     "stage": "submission_acceptance",
                     "refusal": error.to_string(),
                     "fail_closed": true,
@@ -7445,6 +7446,7 @@ impl Server {
         let Some(raw_moderation) = arguments.get("moderation") else {
             return Ok(json!({
                 "ok": true,
+                "schema": "bioprism-mcp/hub-submission/0.1",
                 "stage": "submission_acceptance",
                 "submission": submission_value,
                 "limitation_card": submission.limitations_card(),
@@ -7474,6 +7476,7 @@ impl Server {
         if let Err(error) = ledger.open(submission, open_actor, open_at) {
             return Ok(json!({
                 "ok": false,
+                "schema": "bioprism-mcp/hub-submission/0.1",
                 "stage": "moderation_open",
                 "refusal": error.to_string(),
                 "fail_closed": true,
@@ -7532,6 +7535,7 @@ impl Server {
             if let Err(error) = ledger.transition(&submission_id, to, decision) {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/hub-submission/0.1",
                     "stage": "moderation_transition",
                     "refusal": error.to_string(),
                     "fail_closed": true,
@@ -7560,6 +7564,7 @@ impl Server {
             if let Err(error) = ledger.attest(&submission_id, to, actor, at) {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/hub-submission/0.1",
                     "stage": "moderation_attestation",
                     "refusal": error.to_string(),
                     "fail_closed": true,
@@ -7586,6 +7591,7 @@ impl Server {
             if let Err(error) = ledger.revoke_attestation(&submission_id, actor, at, reason) {
                 return Ok(json!({
                     "ok": false,
+                    "schema": "bioprism-mcp/hub-submission/0.1",
                     "stage": "moderation_attestation_revocation",
                     "refusal": error.to_string(),
                     "fail_closed": true,
@@ -7596,6 +7602,7 @@ impl Server {
         }
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/hub-submission/0.1",
             "stage": "moderation_ledger",
             "submission": submission_value,
             "limitation_card": ledger.record(&submission_id).map(|record| record.submission.limitations_card()),

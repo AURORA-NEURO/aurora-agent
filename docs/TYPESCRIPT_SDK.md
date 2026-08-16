@@ -245,6 +245,11 @@ the non-clinical/non-universal headline. `bioatlasPublicationAudit` returns
 `BioAtlasPublicationAuditResult`, keeping atlas/evidence/card/leaderboard gates separate from an
 explicit target-by-target release request. A ready target is contract eligibility, not web
 publication or scientific authority.
+`hubSubmissionReview` accepts serialized draft, submitter, and optional moderation inputs and
+returns `HubSubmissionReviewResult`. Acceptance stage, moderation stage, append-only event count,
+publication state, verification status, and fail-closed refusal fields remain visible; the raw
+ledger is retained for audit consumers. It is a contract replay, not authentication, persistence,
+identity verification, or network publication.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected
