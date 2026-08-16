@@ -540,6 +540,12 @@ complete waiver evidence, before/after blocking posture, safety-veto findings, a
 gate counts. A waiver does not rewrite the underlying verdict; `require_releasable` and
 `require_no_unevaluable` remain explicit fail-closed policies. See
 [`docs/BIOEVAL_WAIVER_AUDIT.md`](../docs/BIOEVAL_WAIVER_AUDIT.md).
+`bioevalDesignAudit` types factorial arms, explicit baselines, conclusion/tier vocabularies,
+single-factor contrasts, missing interaction cells, unattributable multi-factor arms, and
+causal-versus-descriptive attribution results. It keeps `require_contrasts`,
+`require_complete_interactions`, and `require_attribution` as explicit policy gates and never
+turns a design declaration into an effect estimate. See
+[`docs/BIOEVAL_DESIGN_AUDIT.md`](../docs/BIOEVAL_DESIGN_AUDIT.md).
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,

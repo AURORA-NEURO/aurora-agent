@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 154);
+    assert_eq!(tools.len(), 155);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(154));
-    assert_eq!(result["advertised_tool_count"], json!(154));
+    assert_eq!(result["unique_catalog_tools"], json!(155));
+    assert_eq!(result["advertised_tool_count"], json!(155));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(154));
-    assert_eq!(result["schema_quality"]["valid"], json!(154));
+    assert_eq!(result["schema_quality"]["checked"], json!(155));
+    assert_eq!(result["schema_quality"]["valid"], json!(155));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -6439,6 +6439,69 @@ fn bioeval_waiver_audit_preserves_gate_verdicts_and_nonwaivable_vetoes() {
     );
     assert_eq!(expiry_refusal["ok"], json!(false));
     assert_eq!(expiry_refusal["stage"], json!("waiver_application"));
+}
+
+#[test]
+fn bioeval_design_audit_keeps_single_factor_contrasts_and_interaction_holes_visible() {
+    let complete = json!({
+        "cell_id": "cell-7",
+        "factors": ["planner", "verifier"],
+        "baseline": "base",
+        "arms": [
+            { "id": "base", "levels": { "planner": "react", "verifier": "off" }, "conclusion": "fail", "tier": "execution" },
+            { "id": "p1", "levels": { "planner": "tree", "verifier": "off" }, "conclusion": "pass", "tier": "execution" },
+            { "id": "v1", "levels": { "planner": "react", "verifier": "on" }, "conclusion": "pass", "tier": "execution" },
+            { "id": "both", "levels": { "planner": "tree", "verifier": "on" }, "conclusion": "pass", "tier": "execution" }
+        ],
+        "controlled": true,
+        "max_items": 2,
+        "require_contrasts": true,
+        "require_complete_interactions": true,
+        "require_attribution": true
+    });
+    let result = call(&mut server(), "bioeval_design_audit", complete.clone());
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-design-audit/0.1"));
+    assert_eq!(result["design"]["contrast_count"], json!(4));
+    assert_eq!(result["design"]["unattributable_arm_count"], json!(1));
+    assert_eq!(result["interactions"]["estimable_count"], json!(1));
+    assert_eq!(result["interactions"]["missing_count"], json!(0));
+    assert_eq!(result["attributions"]["total"], json!(4));
+    assert_eq!(result["attributions"]["causal_count"], json!(4));
+    assert_eq!(result["findings"]["unattributable_arms"]["ids"], json!(["both"]));
+    assert_eq!(result["arms"]["omitted"], json!(2));
+    assert_eq!(result["attributions"]["rows"][0]["causal"], json!(true));
+
+    let incomplete = json!({
+        "cell_id": "cell-7",
+        "factors": ["planner", "verifier"],
+        "baseline": "base",
+        "arms": [
+            { "id": "base", "levels": { "planner": "react", "verifier": "off" }, "conclusion": "fail", "tier": "execution" },
+            { "id": "p1", "levels": { "planner": "tree", "verifier": "off" }, "conclusion": "pass", "tier": "execution" },
+            { "id": "v1", "levels": { "planner": "react", "verifier": "on" }, "conclusion": "pass", "tier": "execution" }
+        ],
+        "require_complete_interactions": true
+    });
+    let interaction_refusal = call(&mut server(), "bioeval_design_audit", incomplete);
+    assert_eq!(interaction_refusal["ok"], json!(false));
+    assert_eq!(interaction_refusal["stage"], json!("interaction_coverage"));
+    assert_eq!(interaction_refusal["fail_closed"], json!(true));
+
+    let no_contrast = json!({
+        "cell_id": "cell-7",
+        "factors": ["planner", "verifier"],
+        "baseline": "base",
+        "arms": [
+            { "id": "base", "levels": { "planner": "react", "verifier": "off" }, "conclusion": "fail", "tier": "execution" },
+            { "id": "both", "levels": { "planner": "tree", "verifier": "on" }, "conclusion": "pass", "tier": "execution" }
+        ],
+        "require_contrasts": true
+    });
+    let contrast_refusal = call(&mut server(), "bioeval_design_audit", no_contrast);
+    assert_eq!(contrast_refusal["ok"], json!(false));
+    assert_eq!(contrast_refusal["stage"], json!("contrast_coverage"));
 }
 
 #[test]

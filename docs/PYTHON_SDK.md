@@ -986,6 +986,12 @@ waivers, before/after blocking counts, safety-veto findings, and unevaluable-gat
 typed layer preserves the underlying verdict and exposes `require_releasable` and
 `require_no_unevaluable` as explicit fail-closed policies. See
 [`docs/BIOEVAL_WAIVER_AUDIT.md`](BIOEVAL_WAIVER_AUDIT.md).
+`BioevalDesignAuditArgs` / `bioeval_design_audit_report(...)` type complete factorial arms,
+explicit baseline selection, evalengine conclusions and tiers, one-factor contrasts, missing
+interaction cells, unattributable multi-factor arms, and causal-versus-descriptive attribution
+labels. `require_contrasts`, `require_complete_interactions`, and `require_attribution` are
+explicit policy gates; the SDK never estimates an effect or claims that a controlled declaration
+was independently verified. See [`docs/BIOEVAL_DESIGN_AUDIT.md`](BIOEVAL_DESIGN_AUDIT.md).
 
 ## Biological stress profiling
 

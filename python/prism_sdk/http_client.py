@@ -213,6 +213,7 @@ from .bioeval_evaluator import BioevalEvaluatorAuditArgs, BioevalEvaluatorAuditR
 from .bioeval_plane import BioevalPlaneAuditArgs, BioevalPlaneAuditReport, bioeval_plane_audit_report
 from .bioeval_metamorphic import BioevalMetamorphicAuditArgs, BioevalMetamorphicAuditReport, bioeval_metamorphic_audit_report
 from .bioeval_waiver import BioevalWaiverAuditArgs, BioevalWaiverAuditReport, bioeval_waiver_audit_report
+from .bioeval_design import BioevalDesignAuditArgs, BioevalDesignAuditReport, bioeval_design_audit_report
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .benchmark_decision import BenchmarkDecisionAuditArgs, BenchmarkDecisionAuditReport, benchmark_decision_audit_report
 from .benchmark_integrity import BenchmarkIntegrityAuditArgs, BenchmarkIntegrityAuditReport, benchmark_integrity_audit_report
@@ -1867,6 +1868,23 @@ class ApiClient:
         """Return typed HTTP release-gate waiver evidence."""
 
         return bioeval_waiver_audit_report(self.bioeval_waiver_audit(request))
+
+    def bioeval_design_audit(
+        self,
+        request: BioevalDesignAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit factorial-design contrasts through the HTTP gateway."""
+
+        normalized = request if isinstance(request, BioevalDesignAuditArgs) else BioevalDesignAuditArgs.from_wire(request)
+        return self.call_tool("bioeval_design_audit", normalized.to_mcp_arguments())
+
+    def bioeval_design_audit_report(
+        self,
+        request: BioevalDesignAuditArgs | Mapping[str, Any],
+    ) -> BioevalDesignAuditReport:
+        """Return typed HTTP factorial-design evidence."""
+
+        return bioeval_design_audit_report(self.bioeval_design_audit(request))
 
     def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None
@@ -4390,6 +4408,23 @@ class AsyncApiClient:
         """Return async typed HTTP release-gate waiver evidence."""
 
         return bioeval_waiver_audit_report(await self.bioeval_waiver_audit(request))
+
+    async def bioeval_design_audit(
+        self,
+        request: BioevalDesignAuditArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP factorial-design audit."""
+
+        normalized = request if isinstance(request, BioevalDesignAuditArgs) else BioevalDesignAuditArgs.from_wire(request)
+        return await self.call_tool("bioeval_design_audit", normalized.to_mcp_arguments())
+
+    async def bioeval_design_audit_report(
+        self,
+        request: BioevalDesignAuditArgs | Mapping[str, Any],
+    ) -> BioevalDesignAuditReport:
+        """Return async typed HTTP factorial-design evidence."""
+
+        return bioeval_design_audit_report(await self.bioeval_design_audit(request))
 
     async def evaluation_worldline_audit(
         self, worldline: Mapping[str, Any], *, at: str | None = None

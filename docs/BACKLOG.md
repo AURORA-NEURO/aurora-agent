@@ -415,5 +415,8 @@ them into a single pass rate;
 the release-gate waiver kernel is exposed through `bioeval_waiver_audit`, preserving the original
 gate verdict, exact affected-version scope, expiry, follow-up, unevaluable counts, and the
 non-waivable safety-veto rule rather than turning an exception into an untraceable pass;
+the factorial-design kernel is exposed through `bioeval_design_audit`, preserving explicit
+baselines, one-factor contrasts, unattributable multi-factor arms, and missing interaction cells
+rather than manufacturing component effects from unmatched arms;
 the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
-evaluator-health, scoring-plane, metamorphic, or waiver wrapper.
+evaluator-health, scoring-plane, metamorphic, waiver, or design wrapper.

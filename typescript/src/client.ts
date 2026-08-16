@@ -138,6 +138,8 @@ import type {
   BioevalMetamorphicAuditResult,
   BioevalWaiverAuditArgs,
   BioevalWaiverAuditResult,
+  BioevalDesignAuditArgs,
+  BioevalDesignAuditResult,
   EvaluationWorldlineArgs,
   EvaluationWorldlineResult,
   EvaluationReproductionArgs,
@@ -866,6 +868,10 @@ export class ApiClient {
 
   async bioevalWaiverAudit(args: BioevalWaiverAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalWaiverAuditResult>> {
     return this.callTool<BioevalWaiverAuditResult>("bioeval_waiver_audit", args, options);
+  }
+
+  async bioevalDesignAudit(args: BioevalDesignAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BioevalDesignAuditResult>> {
+    return this.callTool<BioevalDesignAuditResult>("bioeval_design_audit", args, options);
   }
 
   async evaluationWorldlineAudit(args: EvaluationWorldlineArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EvaluationWorldlineResult>> {

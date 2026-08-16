@@ -87,6 +87,8 @@ use bioprism_bioevalx::waiver::{
     Waiver as BioevalReleaseWaiver,
 };
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
+use bioprism_bioevalx::design::{Arm as BioevalDesignArm, FactorialDesign as BioevalFactorialDesign};
+use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
 use bioprism_bundle::ResultBundle;
@@ -1377,6 +1379,7 @@ impl Server {
             "bioeval_plane_audit" => self.bioeval_plane_audit(&arguments),
             "bioeval_metamorphic_audit" => self.bioeval_metamorphic_audit(&arguments),
             "bioeval_waiver_audit" => self.bioeval_waiver_audit(&arguments),
+            "bioeval_design_audit" => self.bioeval_design_audit(&arguments),
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
@@ -15262,6 +15265,310 @@ impl Server {
         }))
     }
 
+    fn bioeval_design_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/bioeval-design-audit/0.1";
+        const MAX_FACTORS: usize = 256;
+        const MAX_ARMS: usize = 4_096;
+        const MAX_ID_BYTES: usize = 256;
+
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "bioeval_design_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "partial factor assignments never become baseline values",
+                    "only pairs differing in one declared factor become component contrasts",
+                    "interaction estimability requires every observed two-by-two cell",
+                    "multi-factor baseline differences remain unattributable",
+                ],
+                "limitations": [
+                    "the route audits caller-supplied factorial arms and does not run an experiment or estimate an effect",
+                    "paired seeds, cost/latency deltas, hidden-confounder detection, and sign-reversal search are outside this kernel",
+                    "a controlled contrast carries a causal claim label from the attribution kernel but does not establish biological causality",
+                ],
+            })
+        };
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure design audit input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("design audit input exceeds the 20000000-byte safety bound".into());
+        }
+        let cell_id = arguments
+            .get("cell_id")
+            .and_then(Value::as_str)
+            .ok_or("cell_id is required and must be a string")?;
+        let baseline = arguments
+            .get("baseline")
+            .and_then(Value::as_str)
+            .ok_or("baseline is required and must name an arm")?;
+        if cell_id.trim().is_empty()
+            || cell_id.len() > MAX_ID_BYTES
+            || baseline.trim().is_empty()
+            || baseline.len() > MAX_ID_BYTES
+        {
+            return Ok(refusal(
+                "design_validation",
+                format!("cell_id and baseline must contain 1 to {MAX_ID_BYTES} bytes"),
+            ));
+        }
+        let raw_factors = arguments
+            .get("factors")
+            .and_then(Value::as_array)
+            .ok_or("factors is required and must be an array of factor names")?;
+        if raw_factors.is_empty() || raw_factors.len() > MAX_FACTORS {
+            return Err("factors must contain 1 to 256 names".into());
+        }
+        let mut factors = Vec::with_capacity(raw_factors.len());
+        let mut factor_ids = BTreeSet::new();
+        for (index, raw) in raw_factors.iter().enumerate() {
+            let factor = raw
+                .as_str()
+                .ok_or_else(|| format!("factors[{index}] must be a string"))?;
+            if factor.trim().is_empty() || factor.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "factor_validation",
+                    format!("factors[{index}] must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            if !factor_ids.insert(factor.to_string()) {
+                return Ok(refusal(
+                    "factor_validation",
+                    format!("factor {:?} appears more than once", factor),
+                ));
+            }
+            factors.push(factor.to_string());
+        }
+        let raw_arms = arguments
+            .get("arms")
+            .and_then(Value::as_array)
+            .ok_or("arms is required and must be an array of serialized Arm values")?;
+        if raw_arms.len() > MAX_ARMS {
+            return Err("arms are bounded at 4096 rows".into());
+        }
+        let controlled = match arguments.get("controlled") {
+            Some(value) => value
+                .as_bool()
+                .ok_or("controlled must be a boolean when supplied")?,
+            None => false,
+        };
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let require_contrasts = arguments
+            .get("require_contrasts")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let require_complete_interactions = arguments
+            .get("require_complete_interactions")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let require_attribution = arguments
+            .get("require_attribution")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let mut design = BioevalFactorialDesign::declare(
+            cell_id.to_string(),
+            factors.clone(),
+            baseline.to_string(),
+        );
+        for (index, raw) in raw_arms.iter().enumerate() {
+            let arm: BioevalDesignArm = match serde_json::from_value(raw.clone()) {
+                Ok(arm) => arm,
+                Err(error) => {
+                    return Ok(refusal(
+                        "arm_deserialization",
+                        format!("arms[{index}] is not a valid Arm: {error}"),
+                    ))
+                }
+            };
+            if arm.id.trim().is_empty() || arm.id.len() > MAX_ID_BYTES {
+                return Ok(refusal(
+                    "arm_validation",
+                    format!("arms[{index}].id must contain 1 to {MAX_ID_BYTES} bytes"),
+                ));
+            }
+            for (factor, level) in &arm.levels {
+                if factor.len() > MAX_ID_BYTES || level.trim().is_empty() || level.len() > MAX_ID_BYTES {
+                    return Ok(refusal(
+                        "arm_validation",
+                        format!("arms[{index}] has a factor or level outside the {MAX_ID_BYTES}-byte bound"),
+                    ));
+                }
+            }
+            if let Err(error) = design.add(arm) {
+                return Ok(refusal("arm_validation", error.to_string()));
+            }
+        }
+        if let Err(error) = design.validate() {
+            return Ok(refusal("design_validation", error.to_string()));
+        }
+
+        let contrasts = design.single_factor_contrasts();
+        if require_contrasts && contrasts.is_empty() {
+            return Ok(refusal(
+                "contrast_coverage",
+                "require_contrasts was true but no pair differs in exactly one factor".into(),
+            ));
+        }
+        let mut interaction_rows = Vec::new();
+        let mut missing_interactions = BTreeSet::new();
+        let factor_vec = design.factors().iter().cloned().collect::<Vec<_>>();
+        for (index, factor_a) in factor_vec.iter().enumerate() {
+            for factor_b in factor_vec.iter().skip(index + 1) {
+                let missing = design.missing_for_interaction(factor_a, factor_b);
+                if !missing.is_empty() {
+                    missing_interactions.insert(format!("{factor_a}::{factor_b}"));
+                }
+                interaction_rows.push(json!({
+                    "factors": [factor_a, factor_b],
+                    "estimable": missing.is_empty(),
+                    "missing_cells": missing.iter().map(|(a, b)| json!({ "level_a": a, "level_b": b })).collect::<Vec<_>>(),
+                }));
+            }
+        }
+        if require_complete_interactions && !missing_interactions.is_empty() {
+            return Ok(refusal(
+                "interaction_coverage",
+                format!(
+                    "require_complete_interactions was true but {} factor pair(s) are missing cells",
+                    missing_interactions.len()
+                ),
+            ));
+        }
+
+        let forks = match design.contrast_forks(controlled) {
+            Ok(forks) => forks,
+            Err(error) => return Ok(refusal("contrast_generation", error.to_string())),
+        };
+        let attribution_rows = forks
+            .iter()
+            .take(max_items)
+            .map(|fork| {
+                let attribution = bioeval_design_attribute(fork);
+                json!({
+                    "fork": fork,
+                    "attribution": attribution,
+                    "explanation": attribution.explain(),
+                    "refused": attribution.is_refused(),
+                    "causal": attribution.is_causal(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let attribution_total = forks.len();
+        let refused_attributions = forks
+            .iter()
+            .filter(|fork| bioeval_design_attribute(fork).is_refused())
+            .count();
+        if require_attribution && refused_attributions > 0 {
+            return Ok(refusal(
+                "attribution_policy",
+                format!(
+                    "require_attribution was true but {refused_attributions} generated contrast(s) were refused"
+                ),
+            ));
+        }
+        let unattributable = design
+            .unattributable()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>();
+        let arm_rows = design
+            .arms()
+            .iter()
+            .take(max_items)
+            .map(|arm| {
+                json!({
+                    "id": arm.id,
+                    "levels": arm.levels,
+                    "conclusion": arm.conclusion,
+                    "tier": arm.tier,
+                    "baseline": arm.id == baseline,
+                    "unattributable_from_baseline": unattributable.contains(&arm.id),
+                })
+            })
+            .collect::<Vec<_>>();
+        let bounded_ids = |ids: &BTreeSet<String>| {
+            json!({
+                "ids": ids.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "total": ids.len(),
+                "omitted": ids.len().saturating_sub(max_items),
+            })
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "bioeval_design_audit",
+            "design": {
+                "cell_id": cell_id,
+                "factors": factor_vec,
+                "baseline": baseline,
+                "arm_count": design.arms().len(),
+                "contrast_count": contrasts.len(),
+                "unattributable_arm_count": unattributable.len(),
+                "controlled": controlled,
+                "valid": true,
+            },
+            "arms": {
+                "rows": arm_rows,
+                "returned": design.arms().len().min(max_items),
+                "total": design.arms().len(),
+                "omitted": design.arms().len().saturating_sub(max_items),
+            },
+            "contrasts": {
+                "rows": contrasts.iter().take(max_items).collect::<Vec<_>>(),
+                "returned": contrasts.len().min(max_items),
+                "total": contrasts.len(),
+                "omitted": contrasts.len().saturating_sub(max_items),
+            },
+            "interactions": {
+                "rows": interaction_rows.iter().take(max_items).cloned().collect::<Vec<_>>(),
+                "returned": interaction_rows.len().min(max_items),
+                "total": interaction_rows.len(),
+                "omitted": interaction_rows.len().saturating_sub(max_items),
+                "estimable_count": interaction_rows.iter().filter(|row| row["estimable"] == json!(true)).count(),
+                "missing_count": missing_interactions.len(),
+            },
+            "attributions": {
+                "rows": attribution_rows,
+                "returned": attribution_total.min(max_items),
+                "total": attribution_total,
+                "omitted": attribution_total.saturating_sub(max_items),
+                "refused_count": refused_attributions,
+                "causal_count": forks.iter().filter(|fork| bioeval_design_attribute(fork).is_causal()).count(),
+            },
+            "findings": {
+                "unattributable_arms": bounded_ids(&unattributable),
+                "missing_interactions": bounded_ids(&missing_interactions),
+                "no_single_factor_contrasts": contrasts.is_empty(),
+                "attribution_refusal_count": refused_attributions,
+            },
+            "guarantees": [
+                "incomplete arms and undeclared factors fail before contrast generation",
+                "baseline selection is explicit and never inferred from observed conclusions",
+                "contrasts differ in exactly one factor and identify the held-fixed factors",
+                "interaction rows name missing two-by-two cells rather than reporting an unestimable effect",
+                "unattributable multi-factor arms remain visible and are not folded into component counts",
+                "bounded arm, contrast, interaction, attribution, and finding projections retain total and omitted counts",
+            ],
+            "limitations": [
+                "the route does not execute arms, estimate effect sizes, randomize, pair seeds, or measure cost/latency",
+                "controlled is a caller-supplied design declaration; a causal label is not independent causal verification",
+                "interaction rows establish cell coverage only and do not calculate an interaction effect",
+                "a valid design is not biological, clinical, or deployment validity",
+            ],
+        }))
+    }
+
     fn bioeval_plane_audit(&self, arguments: &Value) -> Result<Value, String> {
         const SCHEMA: &str = "bioprism-mcp/bioeval-plane-audit/0.1";
         const MAX_DIMENSIONS: usize = 4_096;
@@ -24073,9 +24380,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "evaluation_and_baselines",
-            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes"],
+            "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -24105,9 +24412,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "bioevaluation_reference_contracts",
-            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "evaluation refusal boundaries"],
+            "domains": ["reference distributions", "reference resolution", "dispersion attribution", "claim grounding", "contradiction edges", "specimen lineage", "stale evidence", "estimand declaration", "identification posture", "evaluator health", "harness failure", "scoring plane", "unscored dimensions", "metamorphic response", "false sensitivity", "false invariance", "release-gate waivers", "safety vetoes", "factorial designs", "component contrasts", "interaction cell coverage", "evaluation refusal boundaries"],
             "crates": ["bioprism-bioeval", "bioprism-bioevalx"],
-            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit"],
+            "mcp_tools": ["bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -25495,6 +25802,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "require_no_unevaluable": { "type": "boolean", "description": "Fail closed when any gate remains unevaluable, even if a waiver was applied." }
                 },
                 "required": ["version", "at", "gates"]
+            }
+        }),
+        json!({
+            "name": "bioeval_design_audit",
+            "description": "Audit a serialized bioevalx factorial design while preserving explicit baseline selection, single-factor contrasts, unattributable multi-factor arms, interaction cell coverage, and real evalengine attribution labels. It never estimates an effect, executes an arm, or turns missing factorial cells into an interaction claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cell_id": { "type": "string", "description": "Frozen decision cell resumed by every arm." },
+                    "factors": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Complete declared factor vocabulary." },
+                    "baseline": { "type": "string", "description": "Explicit baseline arm id; never inferred from outcomes." },
+                    "arms": { "type": "array", "maxItems": 4096, "description": "Serialized Arm values with complete factor assignments, conclusions, and evidence tiers." },
+                    "controlled": { "type": "boolean", "description": "Caller-declared control status carried into causal-versus-descriptive attribution labels; defaults false." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum arm, contrast, interaction, attribution, and finding rows returned." },
+                    "require_contrasts": { "type": "boolean", "description": "Fail closed when no pair differs in exactly one factor." },
+                    "require_complete_interactions": { "type": "boolean", "description": "Fail closed when any declared factor pair is missing an observed two-by-two cell." },
+                    "require_attribution": { "type": "boolean", "description": "Fail closed when a generated one-factor fork is refused by the real attribution kernel." }
+                },
+                "required": ["cell_id", "factors", "baseline", "arms"]
             }
         }),
         json!({

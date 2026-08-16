@@ -5273,6 +5273,55 @@ export interface BioevalWaiverAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export type BioevalDesignConclusion =
+  | "pass"
+  | "unsupported_pass"
+  | "contradicted_pass"
+  | "partial_credit"
+  | "fail"
+  | "vetoed"
+  | "disputed"
+  | "justification_unexamined"
+  | "unknown"
+  | "abstained";
+export type BioevalDesignTier = "judge" | "statistical" | "property" | "execution" | "deterministic";
+
+export interface BioevalDesignArmArgs extends JsonObject {
+  id: string;
+  levels: Record<string, string>;
+  conclusion: BioevalDesignConclusion;
+  tier: BioevalDesignTier;
+}
+
+export interface BioevalDesignAuditArgs extends JsonObject {
+  cell_id: string;
+  factors: string[];
+  baseline: string;
+  arms: BioevalDesignArmArgs[];
+  controlled?: boolean;
+  max_items?: number;
+  require_contrasts?: boolean;
+  require_complete_interactions?: boolean;
+  require_attribution?: boolean;
+}
+
+export interface BioevalDesignAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/bioeval-design-audit/0.1";
+  workflow?: "bioeval_design_audit";
+  design?: JsonObject;
+  arms?: JsonObject;
+  contrasts?: JsonObject;
+  interactions?: JsonObject;
+  attributions?: JsonObject;
+  findings?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface EvaluationWorldlineArgs extends JsonObject {
   worldline: JsonObject;
   at?: string;

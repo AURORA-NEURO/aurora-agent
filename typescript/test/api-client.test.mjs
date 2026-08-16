@@ -2922,3 +2922,45 @@ test("client exposes release-gate waiver evidence without rewriting verdicts", a
   assert.equal(result.mcp.result.structuredContent.findings.waived_gates.ids[0], "health");
   assert.equal(result.mcp.result.structuredContent.findings.unevaluable_gates.ids[0], "unknown-rate");
 });
+
+test("client exposes factorial contrasts and interaction coverage", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bioeval_design_audit");
+      const body = JSON.parse(init.body);
+      assert.equal(body.baseline, "base");
+      assert.deepEqual(body.arms[0].levels, { planner: "react", verifier: "off" });
+      return jsonResponse({ ok: true, tool: "bioeval_design_audit", request_id: "design-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-design-audit/0.1",
+        workflow: "bioeval_design_audit",
+        design: { cell_id: "cell-7", factors: ["planner", "verifier"], baseline: "base", arm_count: 4, contrast_count: 4, unattributable_arm_count: 1, controlled: true, valid: true },
+        arms: { rows: [], returned: 0, total: 4, omitted: 4 },
+        contrasts: { rows: [], returned: 0, total: 4, omitted: 4 },
+        interactions: { rows: [], returned: 0, total: 1, omitted: 1, estimable_count: 1, missing_count: 0 },
+        attributions: { rows: [], returned: 0, total: 4, omitted: 4, refused_count: 0, causal_count: 4 },
+        findings: { unattributable_arms: { ids: ["both"], total: 1, omitted: 0 }, missing_interactions: { ids: [], total: 0, omitted: 0 }, no_single_factor_contrasts: false, attribution_refusal_count: 0 },
+        guarantees: ["single-factor contrasts remain distinct"],
+        limitations: ["no arm execution"],
+      } } } });
+    },
+  });
+  const result = await client.bioevalDesignAudit({
+    cell_id: "cell-7",
+    factors: ["planner", "verifier"],
+    baseline: "base",
+    arms: [
+      { id: "base", levels: { planner: "react", verifier: "off" }, conclusion: "fail", tier: "execution" },
+      { id: "p1", levels: { planner: "tree", verifier: "off" }, conclusion: "pass", tier: "execution" },
+      { id: "v1", levels: { planner: "react", verifier: "on" }, conclusion: "pass", tier: "execution" },
+      { id: "both", levels: { planner: "tree", verifier: "on" }, conclusion: "pass", tier: "execution" },
+    ],
+    controlled: true,
+    require_complete_interactions: true,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-design-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.design.contrast_count, 4);
+  assert.equal(result.mcp.result.structuredContent.interactions.missing_count, 0);
+  assert.equal(result.mcp.result.structuredContent.findings.unattributable_arms.ids[0], "both");
+});
