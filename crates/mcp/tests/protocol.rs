@@ -6773,6 +6773,7 @@ fn ledger_ingest_preserves_quarantine_idempotency_time_axes_and_projections() {
         }),
     );
     assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["schema"], json!("bioprism-mcp/ledger-ingest/0.1"));
     assert_eq!(result["entries"], json!(2));
     assert_eq!(result["admissions"]["recorded"], json!(2));
     assert_eq!(result["admissions"]["duplicates"], json!(1));

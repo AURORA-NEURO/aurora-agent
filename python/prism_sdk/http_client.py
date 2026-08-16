@@ -256,6 +256,7 @@ from .repository_requests import (
     TelemetryProjectRequest,
 )
 from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry_project_report
+from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledger_ingest_report
 from .tooling import ToolCallPlan, ToolCatalogue
 
 
@@ -2165,6 +2166,17 @@ class ApiClient:
         """Return typed telemetry projection evidence through HTTP."""
 
         return telemetry_project_report(self.telemetry_project(event, policy, trace, metric=metric, observations=observations))
+
+    def ledger_ingest(self, request: LedgerIngestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Append a bounded event stream through the HTTP gateway."""
+
+        normalized = request if isinstance(request, LedgerIngestArgs) else LedgerIngestArgs.from_wire(request)
+        return self.call_tool("ledger_ingest", normalized.to_mcp_arguments())
+
+    def ledger_ingest_report(self, request: LedgerIngestArgs | Mapping[str, Any]) -> LedgerIngestReport:
+        """Return typed ledger evidence through HTTP."""
+
+        return ledger_ingest_report(self.ledger_ingest(request))
 
     def fiber_compile(
         self,
@@ -4108,6 +4120,17 @@ class AsyncApiClient:
         """Return async typed telemetry projection evidence through HTTP."""
 
         return telemetry_project_report(await self.telemetry_project(event, policy, trace, metric=metric, observations=observations))
+
+    async def ledger_ingest(self, request: LedgerIngestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.ledger_ingest`."""
+
+        normalized = request if isinstance(request, LedgerIngestArgs) else LedgerIngestArgs.from_wire(request)
+        return await self.call_tool("ledger_ingest", normalized.to_mcp_arguments())
+
+    async def ledger_ingest_report(self, request: LedgerIngestArgs | Mapping[str, Any]) -> LedgerIngestReport:
+        """Return async typed ledger evidence through HTTP."""
+
+        return ledger_ingest_report(await self.ledger_ingest(request))
 
     async def fiber_compile(
         self,

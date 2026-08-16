@@ -195,6 +195,8 @@ import type {
   SubscriptionResponse,
   TelemetryProjectArgs,
   TelemetryProjectionResult,
+  LedgerIngestArgs,
+  LedgerIngestResult,
   ToolCallPlan,
   ToolArguments,
   ToolsResponse,
@@ -387,6 +389,10 @@ export class ApiClient {
 
   async telemetryProject(args: TelemetryProjectArgs, options?: ClientRequestOptions): Promise<RestToolResponse<TelemetryProjectionResult>> {
     return this.callTool<TelemetryProjectionResult>("telemetry_project", args, options);
+  }
+
+  async ledgerIngest(args: LedgerIngestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LedgerIngestResult>> {
+    return this.callTool<LedgerIngestResult>("ledger_ingest", args, options);
   }
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {

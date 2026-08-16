@@ -82,6 +82,9 @@ Convenience methods currently cover:
 - `telemetryProject`: canonical-event redaction with a typed `TelemetryProjectionResult`; its
   record, exact dropped/coarsened loss, and observed-supported versus asserted-refused metric
   result remain visible without claiming OTLP export or backend delivery;
+- `ledgerIngest`: bounded event admission with typed recorded/duplicate/quarantined variants,
+  causal release receipts, chain and clock witnesses, temporal-cut entries, and digest-only
+  projections; it does not claim durable storage or read a clock;
 - `bioCapabilityEvidenceAudit`: evidence posture;
 - `bioAtlasPublicationAudit`: atlas, evidence, card, and leaderboard release gates;
 - `developerDeliveryAudit`: developer-platform delivery evidence;

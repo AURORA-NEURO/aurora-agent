@@ -408,6 +408,21 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         metric: null,
         guarantees: ["telemetry is a one-way projection of the canonical DomainEvent"],
       } } } });
+      if (path === "/v1/tools/ledger_ingest") return jsonResponse({ ok: true, tool: "ledger_ingest", request_id: "r15", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/ledger-ingest/0.1",
+        entries: 2,
+        next_seq: 2,
+        head: "entry-digest",
+        admissions: { recorded: 2, duplicates: 1, quarantined: 1, released: 1, receipts: null },
+        chain: { status: "intact" },
+        clock_anomalies: [{ seq: 1, previous_record: "2025-01-01T00:00:00Z", record: "2024-01-01T00:00:00Z" }],
+        quarantine: { count: 0, items: [], omitted: 0 },
+        class_counts: { material: 2 },
+        latest_by_subject: { count: 1, items: [{ subject: "patient-7/specimen-1", event: "evt-1", seq: 1, valid: "2025-01-01T00:00:00Z", payload_digest: "payload-digest" }], omitted: 0 },
+        cut: { requested: { as_of_record: "2024-06-01T00:00:00Z" }, count: 1, entries: [{ seq: 0, id: "evt-0", class: "material", kind: "specimen.collected", subject: "patient-7/specimen-1", valid: "2025-01-01T00:00:00Z", record: "2025-01-01T00:00:00Z", release: "2025-01-01T00:00:00Z" }], omitted: 0 },
+        guarantees: ["payload bodies are not returned by default; projections carry digests rather than copied payloads", "no durable storage, clock reading, network, or external side effect occurs"],
+      } } } });
       if (path === "/v1/tools/capability_discover") return jsonResponse({ ok: true, tool: "capability_discover", request_id: "r6", mcp: { result: { structuredContent: { workflow: "capability_discover", capability_schema_version: "bioprism-devplat-capability/0.1", schema_version: "bioprism-devplat-capability/0.1", catalog_digest: "c".repeat(64), total_groups: 1, query: {}, result_count: 1, matches: [{ group: { id: "testing", domains: ["verification"], crates: ["bioprism-devplat"], mcp_tools: ["echo"], cli_entrypoints: ["bioprism test"], python_artifacts: ["prism_sdk.testing"], status: "implemented" }, score: 100, matched_fields: ["domains"], matched_tools: ["echo"], tool_schemas: [] }], schema_attachment: { requested: false, returned: 0, missing: [] } } } } });
       if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: {
         ok: true,
@@ -774,12 +789,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const bundle = await client.repositoryBundle({ route: { id: "route-ts" }, policy: "exhaustive", max_depth: 2 });
   const impact = await client.repositoryImpact({ changed: "docs/README", route: { id: "route-ts" } });
   const telemetry = await client.telemetryProject({ event: { kind: "tool.completed" }, policy: { treatments: {} }, trace: "trace-ts" });
+  const ledger = await client.ledgerIngest({ events: [{ class: "material" }], include_receipts: false, max_items: 5 });
   assert.equal(catalog.mcp.result.structuredContent.workflow, "repository_catalog");
   assert.equal(bundle.mcp.result.structuredContent.policy, "exhaustive");
   assert.equal(impact.mcp.result.structuredContent.changed, "docs/README");
   assert.equal(telemetry.mcp.result.structuredContent.trace, "trace-ts");
   assert.equal(telemetry.mcp.result.structuredContent.record.event_id, "evt-ts");
   assert.equal(telemetry.mcp.result.structuredContent.lossless, true);
+  assert.equal(ledger.mcp.result.structuredContent.schema, "bioprism-mcp/ledger-ingest/0.1");
+  assert.equal(ledger.mcp.result.structuredContent.chain.status, "intact");
+  assert.equal(ledger.mcp.result.structuredContent.latest_by_subject.items[0].payload_digest, "payload-digest");
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
   const platform = await client.developerPlatformStatus({ include_details: false, max_items: 3 });

@@ -6831,6 +6831,7 @@ impl Server {
                 Err(error) => {
                     return Ok(json!({
                         "ok": false,
+                        "schema": "bioprism-mcp/ledger-ingest/0.1",
                         "stage": "append",
                         "event_index": index,
                         "refusal": error.to_string(),
@@ -6914,6 +6915,7 @@ impl Server {
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/ledger-ingest/0.1",
             "entries": ledger.len(),
             "next_seq": ledger.next_seq(),
             "head": ledger.head(),

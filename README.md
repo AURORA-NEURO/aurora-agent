@@ -427,7 +427,9 @@ family straddles; `stewardship_review_check` concludes evaluator reviews only wh
 dimensions, corpus support, and independence hold, keeping unreviewed dimensions explicit.
 `quality_gate_run` preserves pass, fail-with-witness, and not-runnable data-quality outcomes;
 `ledger_ingest` appends bitemporal events while exposing quarantine, idempotency, causal release,
-hash-chain, clock-anomaly, temporal-cut, and digest-only projection state.
+hash-chain, clock-anomaly, temporal-cut, and digest-only projection state; the Python and
+TypeScript SDKs preserve those admission, release, and projection witnesses without implying
+durable storage or a live clock.
 `fabric_synthesize` evaluates typed agent-composition candidates against hard effects, privacy,
 budget, assurance, and terminal-state constraints, then returns the rejection map and Pareto
 frontier without inventing a weighted winner.

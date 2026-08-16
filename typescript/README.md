@@ -47,6 +47,9 @@ if (result.mcp.result?.isError) {
   policy, trace, and optional observed-metric boundary without silently treating projected
   telemetry as a claim. Its `TelemetryProjectionResult` keeps record metadata, exact dropped /
   coarsened loss, and the supported-versus-refused metric union typed in the REST/MCP envelope.
+- `ledgerIngest` keeps recorded, duplicate, and quarantined admission unions, causal releases,
+  chain/clock evidence, temporal cuts, and digest-only latest-by-subject projections typed without
+  turning the Fetch client into a durable event store.
 - `packHealthAssess` keeps observed calibration counts, discrimination, health findings, digest
   binding, and score withholding in one raw REST/MCP envelope. A saturated, contaminated, or
   otherwise unreportable pack remains inspectable, but its numeric score is explicitly absent;

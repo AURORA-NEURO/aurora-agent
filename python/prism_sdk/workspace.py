@@ -73,6 +73,7 @@ from .repository_requests import (
     TelemetryProjectRequest,
 )
 from .telemetry import TelemetryProjectionReport, telemetry_project as telemetry_project_report
+from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledger_ingest_report
 from .tooling import ToolCallPlan, ToolCatalogue
 from .oracle import (
     EvidenceTier,
@@ -2088,6 +2089,17 @@ class Workspace:
 
         return telemetry_project_report(self.telemetry_project(event, policy, trace, metric=metric, observations=observations))
 
+    def ledger_ingest(self, request: LedgerIngestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Append a bounded event stream through the MCP ledger tool."""
+
+        normalized = request if isinstance(request, LedgerIngestArgs) else LedgerIngestArgs.from_wire(request)
+        return self.tool("ledger_ingest", normalized.to_mcp_arguments())
+
+    def ledger_ingest_report(self, request: LedgerIngestArgs | Mapping[str, Any]) -> LedgerIngestReport:
+        """Return typed admission, chain, cut, quarantine, and projection evidence."""
+
+        return ledger_ingest_report(self.ledger_ingest(request))
+
     def fiber_compile(
         self,
         world: str | FiberCompileRequest,
@@ -4012,6 +4024,17 @@ class AsyncWorkspace:
         """Async counterpart to :meth:`Workspace.telemetry_project_report`."""
 
         return telemetry_project_report(await self.telemetry_project(event, policy, trace, metric=metric, observations=observations))
+
+    async def ledger_ingest(self, request: LedgerIngestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.ledger_ingest`."""
+
+        normalized = request if isinstance(request, LedgerIngestArgs) else LedgerIngestArgs.from_wire(request)
+        return await self.tool("ledger_ingest", normalized.to_mcp_arguments())
+
+    async def ledger_ingest_report(self, request: LedgerIngestArgs | Mapping[str, Any]) -> LedgerIngestReport:
+        """Return async typed ledger evidence."""
+
+        return ledger_ingest_report(await self.ledger_ingest(request))
 
     async def fiber_compile(
         self,

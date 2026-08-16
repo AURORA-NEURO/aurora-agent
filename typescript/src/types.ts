@@ -374,6 +374,156 @@ export interface TelemetryProjectionResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface LedgerTemporalCutArgs extends JsonObject {
+  as_of_valid?: string;
+  as_of_record?: string;
+  as_of_release?: string;
+}
+
+export interface LedgerIngestArgs extends JsonObject {
+  events: JsonObject[];
+  cut?: LedgerTemporalCutArgs;
+  include_receipts?: boolean;
+  max_items?: number;
+}
+
+export interface LedgerRecordedAdmissionResult extends JsonObject {
+  admission: "recorded";
+  id: string;
+  seq: number;
+}
+
+export interface LedgerDuplicateAdmissionResult extends JsonObject {
+  admission: "duplicate";
+  id: string;
+}
+
+export interface LedgerQuarantinedAdmissionResult extends JsonObject {
+  admission: "quarantined";
+  key: string;
+  missing: string[];
+}
+
+export type LedgerAdmissionResult = LedgerRecordedAdmissionResult | LedgerDuplicateAdmissionResult | LedgerQuarantinedAdmissionResult;
+
+export interface LedgerAppendReceiptResult extends JsonObject {
+  event_index: number;
+  receipt: {
+    admission: LedgerAdmissionResult;
+    released: string[];
+  };
+}
+
+export interface LedgerAdmissionsResult extends JsonObject {
+  recorded: number;
+  duplicates: number;
+  quarantined: number;
+  released: number;
+  receipts: LedgerAppendReceiptResult[] | null;
+}
+
+export interface LedgerChainResult extends JsonObject {
+  status: "intact" | "broken";
+  at_seq?: number;
+  reason?: string;
+}
+
+export interface LedgerClockAnomalyResult extends JsonObject {
+  seq: number;
+  previous_record: string;
+  record: string;
+}
+
+export interface LedgerQuarantineItemResult extends JsonObject {
+  key: string;
+  missing: string[];
+  note?: string | null;
+}
+
+export interface LedgerQuarantineResult extends JsonObject {
+  count: number;
+  items: LedgerQuarantineItemResult[];
+  omitted: number;
+}
+
+export interface LedgerLatestFactResult extends JsonObject {
+  subject: string;
+  event: string;
+  seq: number;
+  valid: string;
+  payload_digest: string;
+}
+
+export interface LedgerLatestBySubjectResult extends JsonObject {
+  count: number;
+  items: LedgerLatestFactResult[];
+  omitted: number;
+}
+
+export interface LedgerCutEntryResult extends JsonObject {
+  seq: number;
+  id: string;
+  class: string;
+  kind: string;
+  subject: string;
+  valid: string;
+  record: string;
+  release: string;
+}
+
+export interface LedgerCutSuccessResult extends JsonObject {
+  requested: LedgerTemporalCutArgs;
+  ok?: true;
+  count: number;
+  entries: LedgerCutEntryResult[];
+  omitted: number;
+}
+
+export interface LedgerCutRefusalResult extends JsonObject {
+  requested: LedgerTemporalCutArgs;
+  ok: false;
+  refusal: string;
+  fail_closed: true;
+}
+
+export type LedgerCutResult = LedgerCutSuccessResult | LedgerCutRefusalResult;
+
+export interface LedgerBeforeRefusalResult extends JsonObject {
+  recorded_entries: number;
+  quarantined: number;
+  next_seq: number;
+  chain: LedgerChainResult;
+}
+
+export interface LedgerIngestSuccessResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-mcp/ledger-ingest/0.1";
+  entries: number;
+  next_seq: number;
+  head: string;
+  admissions: LedgerAdmissionsResult;
+  chain: LedgerChainResult;
+  clock_anomalies: LedgerClockAnomalyResult[];
+  quarantine: LedgerQuarantineResult;
+  class_counts: Record<string, number>;
+  latest_by_subject: LedgerLatestBySubjectResult;
+  cut: LedgerCutResult | null;
+  guarantees: string[];
+}
+
+export interface LedgerIngestRefusalResult extends JsonObject {
+  ok: false;
+  schema: "bioprism-mcp/ledger-ingest/0.1";
+  stage: "append";
+  event_index: number;
+  refusal: string;
+  fail_closed: true;
+  ledger_before_refusal: LedgerBeforeRefusalResult;
+  guarantee: string;
+}
+
+export type LedgerIngestResult = LedgerIngestSuccessResult | LedgerIngestRefusalResult;
+
 export interface MetricsProfileAuditArgs extends JsonObject {
   vectors: JsonValue[];
   waived_dimensions?: string[];
