@@ -107,6 +107,11 @@ from .sandbox_admission import (
     SandboxManifestArgs,
     sandbox_admission_audit_report,
 )
+from .sandbox_runtime import (
+    SandboxRuntimeAuditReport,
+    SandboxRuntimeManifestArgs,
+    sandbox_runtime_simulate_report,
+)
 from .security_program import (
     SecurityProgramAuditReport,
     SecurityProgramManifestArgs,
@@ -3061,6 +3066,17 @@ class Workspace:
 
         return sandbox_admission_audit_report(self.sandbox_admission_audit(request))
 
+    def sandbox_runtime_simulate(self, request: SandboxRuntimeManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Simulate bounded sandbox requests and preserve capability/resource refusals."""
+
+        normalized = request if isinstance(request, SandboxRuntimeManifestArgs) else SandboxRuntimeManifestArgs.from_wire(request)
+        return self.tool("sandbox_runtime_simulate", normalized.to_mcp_arguments())
+
+    def sandbox_runtime_simulate_report(self, request: SandboxRuntimeManifestArgs | Mapping[str, Any]) -> SandboxRuntimeAuditReport:
+        """Return typed sandbox runtime decisions, usage, and limitations."""
+
+        return sandbox_runtime_simulate_report(self.sandbox_runtime_simulate(request))
+
     def security_program_audit(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit authorized scope, red-team evidence, remediation, incidents, disclosure, and controls."""
 
@@ -5781,6 +5797,17 @@ class AsyncWorkspace:
         """Async counterpart to Workspace.sandbox_admission_audit_report."""
 
         return sandbox_admission_audit_report(await self.sandbox_admission_audit(request))
+
+    async def sandbox_runtime_simulate(self, request: SandboxRuntimeManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.sandbox_runtime_simulate."""
+
+        normalized = request if isinstance(request, SandboxRuntimeManifestArgs) else SandboxRuntimeManifestArgs.from_wire(request)
+        return (await self.client.call_tool("sandbox_runtime_simulate", normalized.to_mcp_arguments())).require_ok()
+
+    async def sandbox_runtime_simulate_report(self, request: SandboxRuntimeManifestArgs | Mapping[str, Any]) -> SandboxRuntimeAuditReport:
+        """Return typed sandbox runtime decisions through the async workspace."""
+
+        return sandbox_runtime_simulate_report(await self.sandbox_runtime_simulate(request))
 
     async def security_program_audit(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to Workspace.security_program_audit."""

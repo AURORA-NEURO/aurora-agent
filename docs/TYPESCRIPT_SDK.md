@@ -682,6 +682,16 @@ declaration-derived admission posture, not proof of code execution safety, kerne
 enforcement, secret isolation, quarantine operation, or output publication. See
 SANDBOX_ADMISSION_AUDIT.md.
 
+## Sandbox runtime simulation
+
+`ApiClient.sandboxRuntimeSimulate(...)` accepts `SandboxRuntimeManifestArgs` and returns
+`SandboxRuntimeToolResult`. Types retain admission and trace digests, exact capability and target
+matches, per-step resource validity and charges, cumulative usage, and explicit
+`simulated`/`refused`/`not_run` decisions. `sandbox_runtime_ready` requires a valid admission and
+a completely simulated trace; the method is still a policy simulation and does not start a host
+process or claim kernel, namespace, cgroup, credential, secret, filesystem, or network
+enforcement. See SANDBOX_RUNTIME_SIMULATION.md.
+
 ## Security, safety, and red-team program audit
 
 `ApiClient.securityProgramAudit(...)` accepts `SecurityProgramManifestArgs` and returns

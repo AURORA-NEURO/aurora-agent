@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 166);
+    assert_eq!(tools.len(), 167);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3829,6 +3829,55 @@ fn sandbox_admission_audit_keeps_artifact_isolation_capability_resource_and_outp
 }
 
 #[test]
+fn sandbox_runtime_simulate_preserves_admission_capability_resource_and_refusal_layers() {
+    let mut server = server();
+    let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let runtime_manifest = json!({
+        "schema": "bioprism-sandbox-runtime/0.1",
+        "admission": {
+            "schema": "bioprism-sandbox/0.1",
+            "system": { "id": "runtime", "version": "0.1.0", "owner": "platform" },
+            "artifacts": [
+                { "id": "source", "kind": "source_code", "digest": digest, "source": "repo/source.py", "producer": "ci", "trust": "reviewed" },
+                { "id": "dataset", "kind": "dataset", "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "source": "registry/dataset", "producer": "registry", "trust": "untrusted", "inputs": ["source"] }
+            ],
+            "profiles": [{
+                "id": "profile", "artifact": "dataset", "runtime": "oci", "image_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "environment_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "user": "runner", "rootless": true, "read_only_root": true, "no_privilege_escalation": true, "network": "allowlist", "network_allowlist": ["packages.example"], "mounts": [{ "id": "input", "source_artifact": "dataset", "target": "/inputs/data", "mode": "read_only" }], "capabilities": ["read", "network"], "resources": { "cpu_millis": 1000, "memory_mb": 1024, "wall_time_seconds": 60, "processes": 8, "output_bytes": 1000000 }, "output_quarantine": true, "release_requires_review": true
+            }],
+            "capabilities": [
+                { "id": "read", "profile": "profile", "kind": "filesystem_read", "target": "/inputs/data", "decision": "allow" },
+                { "id": "network", "profile": "profile", "kind": "network_egress", "target": "packages.example", "decision": "allow", "evidence_digest": digest }
+            ]
+        },
+        "profile": "profile",
+        "requests": [
+            { "id": "read-input", "kind": "filesystem_read", "target": "/inputs/data", "cpu_millis": 100, "memory_mb": 128, "wall_time_seconds": 5, "processes": 1, "output_bytes": 1000 },
+            { "id": "fetch-package", "kind": "network_egress", "target": "packages.example", "cpu_millis": 100, "memory_mb": 128, "wall_time_seconds": 5, "processes": 1, "output_bytes": 1000 }
+        ]
+    });
+    let result = call(&mut server, "sandbox_runtime_simulate", json!({ "manifest": runtime_manifest.clone() }));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["valid"], json!(true));
+    assert_eq!(result["sandbox_runtime_ready"], json!(true));
+    assert_eq!(result["audit"]["admission_valid"], json!(true));
+    assert_eq!(result["audit"]["simulated_count"], json!(2));
+    assert_eq!(result["audit"]["usage"]["cpu_millis"], json!(200));
+    assert_eq!(result["audit"]["steps"][0]["decision"], json!("simulated"));
+    assert!(result["trace_digest"].is_string());
+
+    let mut refused = runtime_manifest;
+    refused["requests"][0]["cpu_millis"] = json!(2000);
+    let refusal = call(&mut server, "sandbox_runtime_simulate", json!({ "manifest": refused }));
+    assert_eq!(refusal["ok"], json!(true));
+    assert_eq!(refusal["valid"], json!(false));
+    assert_eq!(refusal["audit"]["refused_count"], json!(1));
+    assert_eq!(refusal["audit"]["not_run_count"], json!(1));
+    assert_eq!(refusal["audit"]["stopped_on_refusal"], json!(true));
+    assert_eq!(refusal["audit"]["steps"][0]["refusal"], json!("resource_budget_exceeded"));
+    assert_eq!(refusal["audit"]["steps"][1]["decision"], json!("not_run"));
+}
+
+#[test]
 fn security_program_audit_keeps_scope_campaign_finding_incident_and_disclosure_layers_explicit() {
     let mut server = server();
     let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -4410,12 +4459,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(166));
-    assert_eq!(result["advertised_tool_count"], json!(166));
+    assert_eq!(result["unique_catalog_tools"], json!(167));
+    assert_eq!(result["advertised_tool_count"], json!(167));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(166));
-    assert_eq!(result["schema_quality"]["valid"], json!(166));
+    assert_eq!(result["schema_quality"]["checked"], json!(167));
+    assert_eq!(result["schema_quality"]["valid"], json!(167));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

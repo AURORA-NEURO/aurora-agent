@@ -287,6 +287,8 @@ import type {
   SecurityPrivacyToolResult,
   SandboxManifestArgs,
   SandboxAdmissionToolResult,
+  SandboxRuntimeManifestArgs,
+  SandboxRuntimeToolResult,
   SecurityProgramManifestArgs,
   SecurityProgramToolResult,
   AdaptivePanelRunArgs,
@@ -522,6 +524,10 @@ export class ApiClient {
 
   async sandboxAdmissionAudit(args: SandboxManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<SandboxAdmissionToolResult>> {
     return this.callTool<SandboxAdmissionToolResult>("sandbox_admission_audit", args, options);
+  }
+
+  async sandboxRuntimeSimulate(args: SandboxRuntimeManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<SandboxRuntimeToolResult>> {
+    return this.callTool<SandboxRuntimeToolResult>("sandbox_runtime_simulate", args, options);
   }
 
   async securityProgramAudit(args: SecurityProgramManifestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<SecurityProgramToolResult>> {

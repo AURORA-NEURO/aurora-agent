@@ -354,6 +354,13 @@ required controls need a process boundary, a network stack or a scanner, none of
 secondary work because the primary bucket is discharged would be the flattering answer, and this
 file's own rule forbids it.
 
+The sandbox surface now has both halves of its in-repository contract: `sandbox_admission_audit`
+checks whether a declaration is eligible, while `sandbox_runtime_simulate` evaluates an ordered
+bounded trace against that declaration and preserves exact resource charges, refusals, and
+not-run suffixes. This closes the deterministic policy/simulation artifact, not the external
+enforcement claim: no kernel/container launcher, syscall filter, namespace, cgroup, credential
+boundary, network appliance, quarantine store, or process execution is present in this repository.
+
 Three categories in that table were discovered rather than planned, each by a crate that read its
 section and refused to pad:
 

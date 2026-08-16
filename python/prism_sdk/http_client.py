@@ -311,6 +311,7 @@ from .release_pipeline import ReleasePipelineAuditReport, ReleasePipelineManifes
 from .operational_readiness import OperationalReadinessAuditReport, OperationalReadinessManifestArgs, operational_readiness_audit_report
 from .security_privacy import SecurityPrivacyAuditReport, SecurityPrivacyManifestArgs, security_privacy_audit_report
 from .sandbox_admission import SandboxAuditReport, SandboxManifestArgs, sandbox_admission_audit_report
+from .sandbox_runtime import SandboxRuntimeAuditReport, SandboxRuntimeManifestArgs, sandbox_runtime_simulate_report
 from .security_program import SecurityProgramAuditReport, SecurityProgramManifestArgs, security_program_audit_report
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
@@ -2926,6 +2927,17 @@ class ApiClient:
         """Return typed sandbox admission evidence through HTTP."""
 
         return sandbox_admission_audit_report(self.sandbox_admission_audit(request))
+
+    def sandbox_runtime_simulate(self, request: SandboxRuntimeManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Simulate bounded sandbox requests through the HTTP gateway."""
+
+        normalized = request if isinstance(request, SandboxRuntimeManifestArgs) else SandboxRuntimeManifestArgs.from_wire(request)
+        return self.call_tool("sandbox_runtime_simulate", normalized.to_mcp_arguments())
+
+    def sandbox_runtime_simulate_report(self, request: SandboxRuntimeManifestArgs | Mapping[str, Any]) -> SandboxRuntimeAuditReport:
+        """Return typed sandbox runtime decisions through HTTP."""
+
+        return sandbox_runtime_simulate_report(self.sandbox_runtime_simulate(request))
 
     def security_program_audit(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit the security, safety, and red-team program through HTTP."""
@@ -5605,6 +5617,17 @@ class AsyncApiClient:
         """Return async typed sandbox admission evidence through HTTP."""
 
         return sandbox_admission_audit_report(await self.sandbox_admission_audit(request))
+
+    async def sandbox_runtime_simulate(self, request: SandboxRuntimeManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.sandbox_runtime_simulate`."""
+
+        normalized = request if isinstance(request, SandboxRuntimeManifestArgs) else SandboxRuntimeManifestArgs.from_wire(request)
+        return await self.call_tool("sandbox_runtime_simulate", normalized.to_mcp_arguments())
+
+    async def sandbox_runtime_simulate_report(self, request: SandboxRuntimeManifestArgs | Mapping[str, Any]) -> SandboxRuntimeAuditReport:
+        """Return async typed sandbox runtime decisions through HTTP."""
+
+        return sandbox_runtime_simulate_report(await self.sandbox_runtime_simulate(request))
 
     async def security_program_audit(self, request: SecurityProgramManifestArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async security-program audit through HTTP."""

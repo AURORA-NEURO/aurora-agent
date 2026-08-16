@@ -740,6 +740,42 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         },
         guarantees: ["layers remain separate"], limitations: ["admission only"],
       } } } });
+      if (path === "/v1/tools/sandbox_runtime_simulate") return jsonResponse({ ok: true, tool: "sandbox_runtime_simulate", request_id: "r15runtime", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-sandbox-runtime-audit/0.1",
+        workflow: "sandbox_runtime_simulate",
+        manifest_digest: "a".repeat(64),
+        admission_digest: "b".repeat(64),
+        trace_digest: "c".repeat(64),
+        valid: true,
+        sandbox_runtime_ready: true,
+        blocking_issue_count: 0,
+        warning_count: 0,
+        audit: {
+          schema: "bioprism-sandbox-runtime-audit/0.1",
+          manifest_schema: "bioprism-sandbox-runtime/0.1",
+          admission_digest: "b".repeat(64),
+          trace_digest: "c".repeat(64),
+          valid: true,
+          profile_id: "profile",
+          admission_valid: true,
+          simulation_started: true,
+          completed: true,
+          stopped_on_refusal: false,
+          request_count: 2,
+          simulated_count: 2,
+          refused_count: 0,
+          not_run_count: 0,
+          usage: { cpu_millis: 200, memory_mb_peak: 128, wall_time_seconds: 10, processes_peak: 1, output_bytes: 2000 },
+          steps: [{ request_id: "read-input", kind: "filesystem_read", target: "/inputs/data", capability_id: "read", capability_valid: true, target_valid: true, resource_valid: true, decision: "simulated", charged: true, usage_after: { cpu_millis: 100, memory_mb_peak: 128, wall_time_seconds: 5, processes_peak: 1, output_bytes: 1000 }, refusal: null }],
+          admission_issues: [],
+          issues: [],
+          guarantees: ["decisions remain traceable"],
+          limitations: ["simulation only"],
+        },
+        guarantees: ["decisions remain traceable"],
+        limitations: ["simulation only"],
+      } } } });
       if (path === "/v1/tools/operational_readiness_audit") return jsonResponse({ ok: true, tool: "operational_readiness_audit", request_id: "r15operational", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-operational-readiness-audit/0.1",
@@ -1651,6 +1687,20 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(sandboxAdmission.mcp.result.structuredContent.sandbox_ready, true);
   assert.equal(sandboxAdmission.mcp.result.structuredContent.audit.profile_audits[0].isolation_valid, true);
   assert.equal(sandboxAdmission.mcp.result.structuredContent.audit.output_audits[0].quarantined, true);
+  const sandboxRuntime = await client.sandboxRuntimeSimulate({
+    schema: "bioprism-sandbox-runtime/0.1",
+    admission: {
+      schema: "bioprism-sandbox/0.1",
+      system: { id: "prism-sandbox", version: "0.1.0", owner: "platform" },
+      artifacts: [], profiles: [], capabilities: [], outputs: [],
+    },
+    profile: "profile",
+    requests: [{ id: "read-input", kind: "filesystem_read", target: "/inputs/data", cpu_millis: 100, memory_mb: 128, wall_time_seconds: 5, processes: 1, output_bytes: 1000 }],
+  });
+  assert.equal(sandboxRuntime.mcp.result.structuredContent.schema, "bioprism-sandbox-runtime-audit/0.1");
+  assert.equal(sandboxRuntime.mcp.result.structuredContent.sandbox_runtime_ready, true);
+  assert.equal(sandboxRuntime.mcp.result.structuredContent.audit.steps[0].decision, "simulated");
+  assert.equal(sandboxRuntime.mcp.result.structuredContent.audit.usage.cpu_millis, 200);
   const securityProgram = await client.securityProgramAudit({
     system: { id: "aurora-security", version: "0.1.0", owner: "security-owner", mission: "bounded adversarial assurance" },
     scopes: [{ id: "api-staging", name: "staging API", kind: "api", target: "api-staging.internal", owner: "service-owner", authorization_digest: "a".repeat(64), allowed_methods: ["authenticated-read"], forbidden_actions: ["production-write"], environments: ["isolated-staging"], data_handling: "synthetic fixtures only" }],

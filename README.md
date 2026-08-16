@@ -937,6 +937,17 @@ row families and blocking issue rows; it is not proof that code ran safely or th
 runtime enforced the declaration. The route never executes code, mounts paths, opens sockets,
 reads secrets, or mutates quarantine. See docs/SANDBOX_ADMISSION_AUDIT.md.
 
+## Sandbox runtime simulation
+
+The `sandbox_runtime_simulate` route is the deterministic process-side companion to admission. It
+selects an admitted profile, evaluates an ordered bounded request trace against exact capability
+targets and resource ceilings, charges cumulative usage, and preserves `simulated`, `refused`, and
+`not_run` rows plus a trace digest. `sandbox_runtime_ready` requires valid admission and a fully
+simulated trace; a refusal is never charged and, by default, stops the remaining requests. This is
+still a decision simulation: it does not start a process, execute code, resolve host paths, open
+sockets, read secrets, or enforce namespaces, syscalls, cgroups, credentials, or network policy.
+See docs/SANDBOX_RUNTIME_SIMULATION.md.
+
 ## Security, safety, and red-team program audit
 
 The `security_program_audit` route audits the program around red-team work: authorized scope,

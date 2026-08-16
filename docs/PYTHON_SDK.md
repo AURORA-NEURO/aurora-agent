@@ -1197,6 +1197,17 @@ It is a declaration-only admission projection: it does not execute code, mount p
 sockets, inspect kernels, read or revoke secrets, operate quarantine storage, or attest runtime
 enforcement. See SANDBOX_ADMISSION_AUDIT.md.
 
+## Sandbox runtime simulation
+
+`SandboxRuntimeManifestArgs` and `sandbox_runtime_simulate_report(...)` expose the ordered
+process-side simulation across sync/async MCP and HTTP. Requests carry exact capability kinds and
+targets plus positive CPU, memory, wall-time, process, and output charges. The typed
+`SandboxRuntimeAuditReport` preserves admission and trace digests, per-step capability/target/
+resource booleans, `simulated`/`refused`/`not_run` decisions, cumulative usage, stop-on-refusal,
+and stable blocking issues. It remains a simulation artifact: no Python facade implies host
+process execution, kernel enforcement, namespace/cgroup setup, secret access, network access, or
+quarantine operation. See SANDBOX_RUNTIME_SIMULATION.md.
+
 ## Security, safety, and red-team program audit
 
 `SecurityProgramManifestArgs` and `security_program_audit_report(...)` expose typed scope,

@@ -217,6 +217,7 @@ pub mod repro;
 pub mod security_privacy;
 pub mod security_program;
 pub mod sandbox_admission;
+pub mod sandbox_runtime;
 pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
@@ -307,6 +308,12 @@ pub use sandbox_admission::{
     SandboxMountMode, SandboxNetworkMode, SandboxOutput, SandboxOutputAudit, SandboxPolicies,
     SandboxProfileAudit, SandboxResourceAudit, SandboxResourceLimits, SandboxSystem, SandboxTrust,
     SANDBOX_AUDIT_SCHEMA, SANDBOX_MANIFEST_SCHEMA,
+};
+pub use sandbox_runtime::{
+    SandboxRuntimeAudit, SandboxRuntimeDecision, SandboxRuntimeError, SandboxRuntimeIssue,
+    SandboxRuntimeManifest, SandboxRuntimePolicies, SandboxRuntimeRequest,
+    SandboxRuntimeStepAudit, SandboxRuntimeUsage, SANDBOX_RUNTIME_AUDIT_SCHEMA,
+    SANDBOX_RUNTIME_MANIFEST_SCHEMA,
 };
 pub use repro::{
     figure_reproduction_case, forbidden_by_default, summarise, Effect, MoleculeCard, Obligation,

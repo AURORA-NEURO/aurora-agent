@@ -134,10 +134,11 @@ use bioprism_devplat::{
     EngineeringManifest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
     SandboxManifest,
+    SandboxRuntimeManifest,
     SecurityProgramManifest,
     CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
     RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA,
-    SECURITY_PROGRAM_AUDIT_SCHEMA,
+    SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
     MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
@@ -1475,6 +1476,7 @@ impl Server {
             "operational_readiness_audit" => self.operational_readiness_audit(&arguments),
             "security_privacy_audit" => self.security_privacy_audit(&arguments),
             "sandbox_admission_audit" => self.sandbox_admission_audit(&arguments),
+            "sandbox_runtime_simulate" => self.sandbox_runtime_simulate(&arguments),
             "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
@@ -24323,6 +24325,56 @@ impl Server {
         }))
     }
 
+    fn sandbox_runtime_simulate(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_manifest = arguments
+            .get("manifest")
+            .cloned()
+            .ok_or("manifest is required and must be a serialized SandboxRuntimeManifest")?;
+        let encoded = serde_json::to_vec(&raw_manifest)
+            .map_err(|error| format!("cannot measure sandbox runtime manifest: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("manifest exceeds the 20000000-byte safety bound".into());
+        }
+        let manifest: SandboxRuntimeManifest = serde_json::from_value(raw_manifest)
+            .map_err(|error| format!("invalid sandbox runtime manifest: {error}"))?;
+        let audit = manifest
+            .audit()
+            .map_err(|error| format!("cannot simulate sandbox runtime: {error}"))?;
+        let blocking_issue_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::SandboxIssueSeverity::Blocking)
+            .count();
+        let warning_count = audit
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == bioprism_devplat::SandboxIssueSeverity::Warning)
+            .count();
+        Ok(json!({
+            "ok": true,
+            "workflow": "sandbox_runtime_simulate",
+            "schema": SANDBOX_RUNTIME_AUDIT_SCHEMA,
+            "manifest_digest": manifest.digest().map_err(|error| error.to_string())?.to_string(),
+            "admission_digest": audit.admission_digest,
+            "trace_digest": audit.trace_digest,
+            "valid": audit.valid,
+            "sandbox_runtime_ready": audit.valid,
+            "blocking_issue_count": blocking_issue_count,
+            "warning_count": warning_count,
+            "audit": audit,
+            "guarantees": [
+                "admission, capability, target, and resource decisions are returned as one deterministic trace",
+                "refused requests are not charged and stop later requests when stop_on_refusal is enabled",
+                "runtime readiness remains false unless admission and every requested step are valid",
+            ],
+            "limitations": [
+                "the route simulates decisions only; it does not start processes, execute code, mount paths, open sockets, or read secrets",
+                "the route does not enforce kernel, namespace, cgroup, credential, syscall, or network policy",
+                "an external runtime must consume and enforce this contract before any real effect is attempted",
+            ],
+        }))
+    }
+
     fn security_program_audit(&self, arguments: &Value) -> Result<Value, String> {
         let raw_manifest = arguments
             .get("manifest")
@@ -26699,7 +26751,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "security_program_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -28897,6 +28949,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "manifest": { "type": "object", "description": "Serialized bioprism-devplat SandboxManifest with artifacts, execution profiles, capabilities, outputs, and explicit fail-closed policies." }
+                },
+                "required": ["manifest"]
+            }
+        }),
+        json!({
+            "name": "sandbox_runtime_simulate",
+            "description": "Simulate a bounded sequence of requested sandbox effects against an admitted profile. It returns exact capability and target matches, per-step resource charges, cumulative usage, refusal preservation, stop-on-refusal behavior, and a content-addressed trace; it never starts a process or claims kernel/container enforcement.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifest": { "type": "object", "description": "Serialized bioprism-devplat SandboxRuntimeManifest containing the admission declaration, selected profile, bounded requests, and refusal policies." }
                 },
                 "required": ["manifest"]
             }
