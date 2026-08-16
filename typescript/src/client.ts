@@ -112,6 +112,8 @@ import type {
   DeliveriesResponse,
   DeveloperDeliveryAuditArgs,
   DeveloperDeliveryAuditResult,
+  DeveloperPlatformStatusArgs,
+  DeveloperPlatformStatusResult,
   DeveloperWorkbenchArgs,
   EventMetrics,
   EventPersistenceStatus,
@@ -354,6 +356,10 @@ export class ApiClient {
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {
     return this.callTool<DeveloperDeliveryAuditResult>("developer_delivery_audit", args, options);
+  }
+
+  async developerPlatformStatus(args: DeveloperPlatformStatusArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperPlatformStatusResult>> {
+    return this.callTool<DeveloperPlatformStatusResult>("developer_platform_status", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

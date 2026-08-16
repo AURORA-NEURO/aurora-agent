@@ -42,6 +42,11 @@ from .context_requests import (
     ProjectionBundleRequest,
 )
 from .delivery import DeveloperDeliveryAuditReport, developer_delivery_audit_report
+from .developer_platform import (
+    DeveloperPlatformStatusArgs,
+    DeveloperPlatformStatusReport,
+    developer_platform_status_report,
+)
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
 from .events import (
     MAX_EVENT_PAGE,
@@ -642,6 +647,29 @@ class ApiClient:
             },
         )
         return self.call_tool("developer_delivery_audit", arguments)
+
+    def developer_platform_status(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Run the bounded developer-platform contract through the HTTP gateway."""
+
+        request = DeveloperPlatformStatusArgs(include_details, max_items)
+        return self.call_tool("developer_platform_status", request.to_mcp_arguments())
+
+    def developer_platform_status_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> DeveloperPlatformStatusReport:
+        """Return typed HTTP walkthrough, cookbook, diagnostic, and impact evidence."""
+
+        return developer_platform_status_report(
+            self.developer_platform_status(include_details=include_details, max_items=max_items)
+        )
 
     def developer_delivery_audit_report(
         self,
@@ -2225,6 +2253,29 @@ class AsyncApiClient:
             },
         )
         return await self.call_tool("developer_delivery_audit", arguments)
+
+    async def developer_platform_status(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Async developer-platform contract through the HTTP gateway."""
+
+        request = DeveloperPlatformStatusArgs(include_details, max_items)
+        return await self.call_tool("developer_platform_status", request.to_mcp_arguments())
+
+    async def developer_platform_status_report(
+        self,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> DeveloperPlatformStatusReport:
+        """Return async typed HTTP platform evidence."""
+
+        return developer_platform_status_report(
+            await self.developer_platform_status(include_details=include_details, max_items=max_items)
+        )
 
     async def developer_delivery_audit_report(
         self,

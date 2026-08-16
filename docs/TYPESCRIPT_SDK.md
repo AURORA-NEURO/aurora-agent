@@ -152,6 +152,11 @@ omission accounting, optional subaudits, and explicit release posture; `develope
 returns typed `DeveloperDeliveryAuditResult` readiness gates, explicit target blockers, release
 request state, and foreign-surface posture; `bioAtlasPublicationAudit` returns typed
 `BioAtlasPublicationAuditResult` atlas aggregation, score/evidence gates, leaderboard state, and
+`developerPlatformStatus` returns typed `DeveloperPlatformStatusResult` evidence for walkthrough
+standing, module classification, cookbook verification, declared contract surfaces, diagnostic
+findings, exit-code divergences, foreign artifacts, and optional full details. Its bounded counts
+and standing fields remain explicit; a clean local projection does not claim foreign SDK, CI, gRPC,
+or live-debugger execution.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

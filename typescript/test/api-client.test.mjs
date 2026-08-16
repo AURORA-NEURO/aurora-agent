@@ -85,6 +85,29 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         limitations: ["no network publisher"],
       } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
+      if (path === "/v1/tools/developer_platform_status") return jsonResponse({ ok: true, tool: "developer_platform_status", request_id: "r16", mcp: { result: { structuredContent: {
+        ok: true,
+        root: "workspace",
+        detail_mode: "summary",
+        max_items: 3,
+        devplat: {
+          digest: "d".repeat(64),
+          verdict_counts: [1, 1, 1, 1],
+          modules_classified: 4,
+          implemented_count: 1,
+          not_implemented_count: 3,
+          foreign_subject_count: 1,
+          walkthrough_count: 0,
+          guarded_claims: 0,
+          unguarded_claims: 0,
+        },
+        walkthroughs: [],
+        cookbook: { recipes: 0, anti_recipes: 0, crates: [], enforcing_tests: 0, quotes: 0, verification: { clean: true, crates_checked: 0, entry_points_checked: 0, tests_checked: 0, quotes_checked: 0, defect_count: 0, defects_returned: [], omitted_defects: 0 } },
+        developer_contract: { surface_count: 0, surfaces_returned: [], omitted_surfaces: 0 },
+        diagnostic_catalogue: { clean: true, checked: 0, errors: 0, warnings: 0, finding_count: 0, findings_returned: [], omitted_findings: 0 },
+        exit_code_audit: { clean: true, retry_decision_recoverable_from_code_alone: true, divergence_count: 0, divergences_returned: [], omitted_divergences: 0 },
+        limitations: ["foreign artifacts remain explicit"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -504,6 +527,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(telemetry.mcp.result.structuredContent.trace, "trace-ts");
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
+  const platform = await client.developerPlatformStatus({ include_details: false, max_items: 3 });
+  assert.equal(platform.mcp.result.structuredContent.detail_mode, "summary");
+  assert.equal(platform.mcp.result.structuredContent.devplat.modules_classified, 4);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

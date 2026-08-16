@@ -38,7 +38,10 @@ from prism_sdk import (
     ConformanceSuiteReport,
     DeliveryReadinessReport,
     DeveloperDeliveryAuditReport,
+    DeveloperPlatformStatusArgs,
+    DeveloperPlatformStatusReport,
     developer_delivery_audit_report,
+    developer_platform_status_report,
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
     ClaimRequest,
@@ -311,6 +314,132 @@ def developer_delivery_audit_payload() -> dict:
         "guarantees": ["no implicit release"],
         "limitations": ["external execution remains outside the workflow"],
     }
+
+
+def developer_platform_status_payload(*, include_details: bool = False) -> dict:
+    walkthroughs = [
+        {
+            "id": "foreign",
+            "goal": "verify a foreign SDK",
+            "standing": {"standing": "entirely_outside", "claims": 2},
+            "standing_text": "entirely outside",
+            "steps": 2,
+            "claims": 2,
+            "guarded_claims": 0,
+            "unguarded_claims": 2,
+            "documents_absent_artifact": True,
+            "refuted_claims": 0,
+            "narration_permille": 0,
+        },
+        {
+            "id": "mixed",
+            "goal": "compare local and foreign evidence",
+            "standing": {"standing": "partly_outside", "here": 1, "outside": 1},
+            "standing_text": "partly outside",
+            "steps": 3,
+            "claims": 2,
+            "guarded_claims": 1,
+            "unguarded_claims": 1,
+            "documents_absent_artifact": False,
+            "refuted_claims": 0,
+            "narration_permille": 333,
+        },
+        {
+            "id": "local",
+            "goal": "check a local contract",
+            "standing": {"standing": "checkable_here", "claims": 1},
+            "standing_text": "checkable here",
+            "steps": 1,
+            "claims": 1,
+            "guarded_claims": 1,
+            "unguarded_claims": 0,
+            "documents_absent_artifact": False,
+            "refuted_claims": 0,
+            "narration_permille": 0,
+        },
+    ]
+    payload = {
+        "ok": True,
+        "root": "workspace",
+        "detail_mode": "full" if include_details else "summary",
+        "max_items": 100,
+        "devplat": {
+            "digest": "d" * 64,
+            "verdict_counts": [1, 1, 1, 1],
+            "modules_classified": 4,
+            "implemented_count": 1,
+            "not_implemented_count": 3,
+            "foreign_subject_count": 1,
+            "walkthrough_count": 3,
+            "guarded_claims": 2,
+            "unguarded_claims": 3,
+        },
+        "walkthroughs": walkthroughs,
+        "cookbook": {
+            "recipes": 2,
+            "anti_recipes": 1,
+            "crates": ["bioprism-cookbook"],
+            "enforcing_tests": 3,
+            "quotes": 1,
+            "verification": {
+                "clean": True,
+                "crates_checked": 1,
+                "entry_points_checked": 2,
+                "tests_checked": 3,
+                "quotes_checked": 1,
+                "defect_count": 1,
+                "defects_returned": [{"kind": "missing_test"}],
+                "omitted_defects": 0,
+            },
+        },
+        "developer_contract": {
+            "surface_count": 1,
+            "surfaces_returned": [
+                {
+                    "id": "canonical",
+                    "owns_count": 1,
+                    "invalidates_count": 2,
+                    "rationale": "digests depend on canonical bytes",
+                }
+            ],
+            "omitted_surfaces": 0,
+        },
+        "diagnostic_catalogue": {
+            "clean": False,
+            "checked": 2,
+            "errors": 1,
+            "warnings": 0,
+            "finding_count": 1,
+            "findings_returned": [{"code": "DEVX-0001"}],
+            "omitted_findings": 0,
+        },
+        "exit_code_audit": {
+            "clean": False,
+            "retry_decision_recoverable_from_code_alone": False,
+            "divergence_count": 1,
+            "divergences_returned": [{"kind": "class_collision"}],
+            "omitted_divergences": 0,
+        },
+        "limitations": ["foreign SDK and CI remain outside this check"],
+    }
+    if include_details:
+        payload["details"] = {
+            "devplat": {
+                "digest": "d" * 64,
+                "verdict_counts": [1, 1, 1, 1],
+                "implemented": ["local"],
+                "not_implemented": [["foreign", "foreign artifact"]],
+                "foreign_subjects": ["foreign SDK"],
+                "walkthroughs": [],
+                "guarded_claims": 2,
+                "unguarded_claims": 3,
+            },
+            "cookbook_verification": {},
+            "developer_contract": [{"id": "canonical"}],
+            "diagnostic_findings": [{"code": "DEVX-0001"}],
+            "exit_code_divergences": [{"kind": "class_collision"}],
+        }
+    return payload
 
 
 def biocapability_evidence_audit_payload() -> dict:
@@ -948,6 +1077,42 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             DeveloperDeliveryAuditReport.from_wire(payload)
 
+    def test_developer_platform_status_report_reconciles_nested_contracts(self) -> None:
+        report = DeveloperPlatformStatusReport.from_wire(developer_platform_status_payload())
+        self.assertTrue(report.platform_checks_clean is False)
+        self.assertFalse(report.claims_guarded)
+        self.assertTrue(report.foreign_artifacts_present)
+        self.assertTrue(report.complete_summary)
+        self.assertEqual(report.devplat.modules_classified, 4)
+        self.assertEqual(report.walkthroughs[1].standing, "partly_outside")
+        self.assertEqual(report.cookbook.verification.defect_count, 1)
+        self.assertEqual(report.diagnostic_catalogue.findings_returned[0]["code"], "DEVX-0001")
+
+    def test_developer_platform_status_report_preserves_full_details_and_http_envelope(self) -> None:
+        payload = developer_platform_status_payload(include_details=True)
+        report = developer_platform_status_report(
+            {"ok": True, "mcp": {"result": {"structuredContent": payload}}}
+        )
+        self.assertTrue(report.details_available)
+        self.assertEqual(report.details.devplat["digest"], "d" * 64)
+        self.assertEqual(len(report.details.developer_contract), 1)
+
+    def test_developer_platform_status_report_rejects_unreconciled_claims(self) -> None:
+        payload = developer_platform_status_payload()
+        payload["walkthroughs"][0]["unguarded_claims"] = 1
+        with self.assertRaises(ArgumentError):
+            DeveloperPlatformStatusReport.from_wire(payload)
+
+    def test_developer_platform_status_args_enforce_protocol_bounds(self) -> None:
+        self.assertEqual(
+            DeveloperPlatformStatusArgs.from_wire({"include_details": True, "max_items": 7}).to_mcp_arguments(),
+            {"include_details": True, "max_items": 7},
+        )
+        with self.assertRaises(ArgumentError):
+            DeveloperPlatformStatusArgs(max_items=0)
+        with self.assertRaises(ArgumentError):
+            DeveloperPlatformStatusArgs(max_items=1_001)
+
     def test_biocapability_evidence_audit_report_preserves_claim_blockers(self) -> None:
         report = BioCapabilityEvidenceAuditReport.from_wire(
             biocapability_evidence_audit_payload()
@@ -1105,6 +1270,17 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             governance=None,
             release=None,
         )
+
+    def test_sync_workspace_typed_developer_platform_report(self) -> None:
+        with patch.object(
+            Workspace,
+            "developer_platform_status",
+            return_value=developer_platform_status_payload(),
+        ) as status:
+            report = Workspace(None).developer_platform_status_report()  # type: ignore[arg-type]
+        self.assertIsInstance(report, DeveloperPlatformStatusReport)
+        self.assertTrue(report.foreign_artifacts_present)
+        status.assert_called_once_with(None, include_details=False, max_items=100)
 
     def test_sync_workspace_exposes_agent_mission(self) -> None:
         with Client(command(), timeout=2) as client:
@@ -1283,6 +1459,19 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             governance=None,
             release=None,
         )
+
+    async def test_async_workspace_typed_developer_platform_report(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "developer_platform_status",
+            new_callable=AsyncMock,
+            return_value=developer_platform_status_payload(include_details=True),
+        ) as status:
+            report = await AsyncWorkspace(None).developer_platform_status_report(
+                include_details=True
+            )  # type: ignore[arg-type]
+        self.assertTrue(report.details_available)
+        status.assert_awaited_once_with(None, include_details=True, max_items=100)
 
     async def test_async_workspace_exposes_agent_mission(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

@@ -40,6 +40,11 @@ from .context_requests import (
     ProjectionBundleRequest,
 )
 from .delivery import DeveloperDeliveryAuditReport, developer_delivery_audit_report
+from .developer_platform import (
+    DeveloperPlatformStatusArgs,
+    DeveloperPlatformStatusReport,
+    developer_platform_status_report,
+)
 from .errors import ArgumentError
 from .evidence import (
     BioCapabilityEvidenceAuditReport,
@@ -1512,6 +1517,38 @@ class Workspace:
         if release_request is not None:
             arguments["release_request"] = release_request
         return self.tool("developer_delivery_audit", arguments)
+
+    def developer_platform_status(
+        self,
+        request: DeveloperPlatformStatusArgs | Mapping[str, Any] | None = None,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Run the bounded developer-platform contract against the local MCP server."""
+
+        if request is not None:
+            if include_details is not False or max_items != 100:
+                raise ArgumentError("request cannot be combined with include_details or max_items")
+            normalized = request if isinstance(request, DeveloperPlatformStatusArgs) else DeveloperPlatformStatusArgs.from_wire(request)
+        else:
+            normalized = DeveloperPlatformStatusArgs(include_details, max_items)
+        return self.tool("developer_platform_status", normalized.to_mcp_arguments())
+
+    def developer_platform_status_report(
+        self,
+        request: DeveloperPlatformStatusArgs | Mapping[str, Any] | None = None,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> DeveloperPlatformStatusReport:
+        """Return typed walkthrough, cookbook, diagnostic, and change-impact evidence."""
+
+        return developer_platform_status_report(
+            self.developer_platform_status(
+                request, include_details=include_details, max_items=max_items
+            )
+        )
 
     def developer_delivery_audit_report(
         self,
@@ -3063,6 +3100,38 @@ class AsyncWorkspace:
             }
         )
         return (await self.client.call_tool("developer_delivery_audit", arguments)).require_ok()
+
+    async def developer_platform_status(
+        self,
+        request: DeveloperPlatformStatusArgs | Mapping[str, Any] | None = None,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> dict[str, Any]:
+        """Async bounded developer-platform contract projection."""
+
+        if request is not None:
+            if include_details is not False or max_items != 100:
+                raise ArgumentError("request cannot be combined with include_details or max_items")
+            normalized = request if isinstance(request, DeveloperPlatformStatusArgs) else DeveloperPlatformStatusArgs.from_wire(request)
+        else:
+            normalized = DeveloperPlatformStatusArgs(include_details, max_items)
+        return (await self.client.call_tool("developer_platform_status", normalized.to_mcp_arguments())).require_ok()
+
+    async def developer_platform_status_report(
+        self,
+        request: DeveloperPlatformStatusArgs | Mapping[str, Any] | None = None,
+        *,
+        include_details: bool = False,
+        max_items: int = 100,
+    ) -> DeveloperPlatformStatusReport:
+        """Async typed walkthrough, cookbook, diagnostics, and impact evidence."""
+
+        return developer_platform_status_report(
+            await self.developer_platform_status(
+                request, include_details=include_details, max_items=max_items
+            )
+        )
 
     async def developer_delivery_audit_report(
         self,

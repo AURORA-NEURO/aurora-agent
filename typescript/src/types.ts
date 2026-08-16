@@ -554,6 +554,116 @@ export interface DeveloperDeliveryAuditResult extends JsonObject {
   limitations: string[];
 }
 
+export interface DeveloperPlatformStatusArgs extends JsonObject {
+  include_details?: boolean;
+  max_items?: number;
+}
+
+export type DeveloperPlatformStandingResult =
+  | { standing: "checkable_here"; claims: number }
+  | { standing: "partly_outside"; here: number; outside: number }
+  | { standing: "entirely_outside"; claims: number };
+
+export interface DeveloperPlatformWalkthroughResult extends JsonObject {
+  id: string;
+  goal: string;
+  standing: DeveloperPlatformStandingResult;
+  standing_text: "checkable here" | "partly outside" | "entirely outside";
+  steps: number;
+  claims: number;
+  guarded_claims: number;
+  unguarded_claims: number;
+  documents_absent_artifact: boolean;
+  refuted_claims: number;
+  narration_permille: number;
+}
+
+export interface DeveloperPlatformSummaryResult extends JsonObject {
+  digest: string;
+  verdict_counts: [number, number, number, number];
+  modules_classified: number;
+  implemented_count: number;
+  not_implemented_count: number;
+  foreign_subject_count: number;
+  walkthrough_count: number;
+  guarded_claims: number;
+  unguarded_claims: number;
+}
+
+export interface DeveloperPlatformCookbookVerificationResult extends JsonObject {
+  clean: boolean;
+  crates_checked: number;
+  entry_points_checked: number;
+  tests_checked: number;
+  quotes_checked: number;
+  defect_count: number;
+  defects_returned: JsonObject[];
+  omitted_defects: number;
+}
+
+export interface DeveloperPlatformCookbookResult extends JsonObject {
+  recipes: number;
+  anti_recipes: number;
+  crates: string[];
+  enforcing_tests: number;
+  quotes: number;
+  verification: DeveloperPlatformCookbookVerificationResult;
+}
+
+export interface DeveloperPlatformContractSurfaceResult extends JsonObject {
+  id: string;
+  owns_count: number;
+  invalidates_count: number;
+  rationale: string;
+}
+
+export interface DeveloperPlatformContractResult extends JsonObject {
+  surface_count: number;
+  surfaces_returned: DeveloperPlatformContractSurfaceResult[];
+  omitted_surfaces: number;
+}
+
+export interface DeveloperPlatformDiagnosticCatalogueResult extends JsonObject {
+  clean: boolean;
+  checked: number;
+  errors: number;
+  warnings: number;
+  finding_count: number;
+  findings_returned: JsonObject[];
+  omitted_findings: number;
+}
+
+export interface DeveloperPlatformExitCodeAuditResult extends JsonObject {
+  clean: boolean;
+  retry_decision_recoverable_from_code_alone: boolean;
+  divergence_count: number;
+  divergences_returned: JsonObject[];
+  omitted_divergences: number;
+}
+
+export interface DeveloperPlatformDetailsResult extends JsonObject {
+  devplat: JsonObject;
+  cookbook_verification: JsonObject;
+  developer_contract: JsonObject[];
+  diagnostic_findings: JsonObject[];
+  exit_code_divergences: JsonObject[];
+}
+
+export interface DeveloperPlatformStatusResult extends JsonObject {
+  ok: boolean;
+  root: string;
+  detail_mode: "summary" | "full";
+  max_items: number;
+  devplat: DeveloperPlatformSummaryResult;
+  walkthroughs: DeveloperPlatformWalkthroughResult[];
+  cookbook: DeveloperPlatformCookbookResult;
+  developer_contract: DeveloperPlatformContractResult;
+  diagnostic_catalogue: DeveloperPlatformDiagnosticCatalogueResult;
+  exit_code_audit: DeveloperPlatformExitCodeAuditResult;
+  limitations: string[];
+  details?: DeveloperPlatformDetailsResult;
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

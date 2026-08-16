@@ -539,6 +539,10 @@ guarded worst-family comparison; defective or non-identifiable families remain e
 comparison rather than being ranked as if they were evidence.
 `developer_platform_status` verifies the cookbook, walkthrough standing, diagnostics, exit-code
 audit and declared change-impact surfaces while keeping foreign SDK/CI artifacts explicit.
+The Python and TypeScript SDKs expose that projection with reconciled walkthrough standings,
+module classification counts, cookbook omission accounting, diagnostic and exit-code rows,
+declared contract surfaces, foreign-artifact posture, and optional full-detail evidence; a clean
+local check never implies that foreign SDK, CI, gRPC, or live-debugger surfaces were executed.
 `sdk_registry_check` validates serialized plugin manifests, computes whole/core digests, reports
 attributed trust evidence, and attempts deterministic registry admission under an explicit host
 policy; invalid declarations and capability conflicts return no partial resolution.

@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, EventPage, EventPersistenceStatus, EvidenceItem, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -42,6 +42,32 @@ def adapter_plan_payload() -> dict:
         "execution": "not_started",
         "guarantees": ["format matching is explicit"],
         "limitations": ["does not execute adapters"],
+    }
+
+
+def developer_platform_status_payload() -> dict:
+    return {
+        "ok": True,
+        "root": "workspace",
+        "detail_mode": "summary",
+        "max_items": 100,
+        "devplat": {
+            "digest": "d" * 64,
+            "verdict_counts": [1, 1, 1, 1],
+            "modules_classified": 4,
+            "implemented_count": 1,
+            "not_implemented_count": 3,
+            "foreign_subject_count": 1,
+            "walkthrough_count": 0,
+            "guarded_claims": 0,
+            "unguarded_claims": 0,
+        },
+        "walkthroughs": [],
+        "cookbook": {"recipes": 0, "anti_recipes": 0, "crates": [], "enforcing_tests": 0, "quotes": 0, "verification": {"clean": True, "crates_checked": 0, "entry_points_checked": 0, "tests_checked": 0, "quotes_checked": 0, "defect_count": 0, "defects_returned": [], "omitted_defects": 0}},
+        "developer_contract": {"surface_count": 0, "surfaces_returned": [], "omitted_surfaces": 0},
+        "diagnostic_catalogue": {"clean": True, "checked": 0, "errors": 0, "warnings": 0, "finding_count": 0, "findings_returned": [], "omitted_findings": 0},
+        "exit_code_audit": {"clean": True, "retry_decision_recoverable_from_code_alone": True, "divergence_count": 0, "divergences_returned": [], "omitted_divergences": 0},
+        "limitations": ["foreign artifacts remain explicit"],
     }
 
 
@@ -292,7 +318,7 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/tools/echo":
             self._send(200, {"ok": True, "tool": "echo", "mcp": {"result": body}})
-        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/observed_world_declare", "/v1/tools/lineage_audit", "/v1/tools/preanalytic_apply", "/v1/tools/contradiction_review", "/v1/tools/onco_boundary_check", "/v1/tools/onco_response_assess", "/v1/tools/onco_worldline_view", "/v1/tools/onco_classification_check", "/v1/tools/oncoworlds_identity_join", "/v1/tools/oncoworlds_model_transport", "/v1/tools/oncoworlds_methylation_classify", "/v1/tools/oncoworlds_methylation_compare", "/v1/tools/oncoworlds_radiogenomic_check", "/v1/tools/oncoworlds_clonal_history_check", "/v1/tools/onco_outcome_analyze", "/v1/tools/oracle_combine", "/v1/tools/oracle_reference_panel", "/v1/tools/oracle_missingness", "/v1/tools/bioeval_reference_audit", "/v1/tools/evaluation_worldline_audit", "/v1/tools/evaluation_reproduction_check", "/v1/tools/evaluation_trajectory_check", "/v1/tools/runtime_effect_check", "/v1/tools/runtime_tape_verify", "/v1/tools/runtime_execution_simulate", "/v1/tools/bioethics_action_review", "/v1/tools/bioethics_human_subject_screen", "/v1/tools/bioethics_dual_use_review", "/v1/tools/bioethics_validation_check", "/v1/tools/bioethics_representation_audit", "/v1/tools/stress_profile", "/v1/tools/stress_report", "/v1/tools/influence_analyze", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/provider_capability_gate", "/v1/tools/sdk_registry_check", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run", "/v1/tools/release_audit", "/v1/tools/operations_catalog", "/v1/tools/ops_acceptance", "/v1/tools/safety_release_gate", "/v1/tools/medical_boundary_check", "/v1/tools/safety_posture", "/v1/tools/measurement_compare", "/v1/tools/hub_search", "/v1/tools/hub_resolve", "/v1/tools/hub_lock"}:
+        elif self.path.startswith("/v1/tools/capability_") or self.path in {"/v1/tools/developer_platform_status", "/v1/tools/developer_delivery_audit", "/v1/tools/biocapability_evidence_audit", "/v1/tools/bioatlas_publication_audit", "/v1/tools/bioql_compile", "/v1/tools/world_claim_check", "/v1/tools/observed_world_declare", "/v1/tools/lineage_audit", "/v1/tools/preanalytic_apply", "/v1/tools/contradiction_review", "/v1/tools/onco_boundary_check", "/v1/tools/onco_response_assess", "/v1/tools/onco_worldline_view", "/v1/tools/onco_classification_check", "/v1/tools/oncoworlds_identity_join", "/v1/tools/oncoworlds_model_transport", "/v1/tools/oncoworlds_methylation_classify", "/v1/tools/oncoworlds_methylation_compare", "/v1/tools/oncoworlds_radiogenomic_check", "/v1/tools/oncoworlds_clonal_history_check", "/v1/tools/onco_outcome_analyze", "/v1/tools/oracle_combine", "/v1/tools/oracle_reference_panel", "/v1/tools/oracle_missingness", "/v1/tools/bioeval_reference_audit", "/v1/tools/evaluation_worldline_audit", "/v1/tools/evaluation_reproduction_check", "/v1/tools/evaluation_trajectory_check", "/v1/tools/runtime_effect_check", "/v1/tools/runtime_tape_verify", "/v1/tools/runtime_execution_simulate", "/v1/tools/bioethics_action_review", "/v1/tools/bioethics_human_subject_screen", "/v1/tools/bioethics_dual_use_review", "/v1/tools/bioethics_validation_check", "/v1/tools/bioethics_representation_audit", "/v1/tools/stress_profile", "/v1/tools/stress_report", "/v1/tools/influence_analyze", "/v1/tools/lab_plan", "/v1/tools/routing_decide", "/v1/tools/provider_capability_gate", "/v1/tools/sdk_registry_check", "/v1/tools/fiber_compile", "/v1/tools/fiber_refine", "/v1/tools/fiber_explain", "/v1/tools/fiber_verify", "/v1/tools/projection_bundle", "/v1/tools/repository_catalog", "/v1/tools/repository_bundle", "/v1/tools/repository_impact", "/v1/tools/telemetry_project", "/v1/tools/tabular_ingest", "/v1/tools/conformance_run", "/v1/tools/release_audit", "/v1/tools/operations_catalog", "/v1/tools/ops_acceptance", "/v1/tools/safety_release_gate", "/v1/tools/medical_boundary_check", "/v1/tools/safety_posture", "/v1/tools/measurement_compare", "/v1/tools/hub_search", "/v1/tools/hub_resolve", "/v1/tools/hub_lock"}:
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
@@ -726,6 +752,24 @@ class HttpApiClientTests(unittest.TestCase):
             release=None,
         )
 
+    def test_http_developer_platform_status_round_trips_bounded_arguments(self) -> None:
+        result = ApiClient(self.base_url).developer_platform_status(
+            include_details=True, max_items=7
+        )
+        self.assertTrue(result["mcp"]["result"]["include_details"])
+        self.assertEqual(result["mcp"]["result"]["max_items"], 7)
+
+    def test_http_typed_developer_platform_status_report_delegates_to_raw_helper(self) -> None:
+        with patch.object(
+            ApiClient,
+            "developer_platform_status",
+            return_value=developer_platform_status_payload(),
+        ) as status:
+            report = ApiClient(self.base_url).developer_platform_status_report(max_items=7)
+        self.assertIsInstance(report, DeveloperPlatformStatusReport)
+        self.assertEqual(report.devplat.modules_classified, 4)
+        status.assert_called_once_with(include_details=False, max_items=7)
+
     def test_http_typed_biocapability_evidence_report_delegates_to_raw_helper(self) -> None:
         request = BioCapabilityEvidenceAuditRequest(
             evidence=[EvidenceItem("evidence-1", "evidence_grounding", "observed")],
@@ -1043,6 +1087,16 @@ class HttpApiClientTests(unittest.TestCase):
                 governance=None,
                 release=None,
             )
+            with patch.object(
+                AsyncApiClient,
+                "developer_platform_status",
+                new_callable=AsyncMock,
+                return_value=developer_platform_status_payload(),
+            ) as platform:
+                report = await client.developer_platform_status_report(max_items=7)
+            self.assertIsInstance(report, DeveloperPlatformStatusReport)
+            self.assertEqual(report.devplat.foreign_subject_count, 1)
+            platform.assert_awaited_once_with(include_details=False, max_items=7)
             request = BioCapabilityEvidenceAuditRequest(
                 evidence=[EvidenceItem("evidence-1", "evidence_grounding", "observed")],
                 claim_requests=[ClaimRequest("claim-1", "profile", ["evidence_grounding"])],

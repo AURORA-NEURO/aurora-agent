@@ -168,6 +168,14 @@ invent defaults:
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,
   evidence posture, release readiness, safe paths, and deterministic YAML.
+- `developer_platform_status(...)` exposes the in-repository developer-platform contract through
+  sync MCP, async MCP, and HTTP. `DeveloperPlatformStatusReport` types the module classification
+  ledger, every walkthrough's checkable/partly-outside/entirely-outside standing, cookbook
+  verification and omission counts, declared developer-contract surfaces, diagnostic findings,
+  exit-code divergences, foreign-artifact posture, and optional full-detail evidence. The report
+  reconciles all bounded counts and provides `platform_checks_clean`, `claims_guarded`,
+  `foreign_artifacts_present`, and `complete_summary` properties; it does not turn a clean local
+  check into proof that foreign SDK, CI, gRPC, or live-debugger surfaces were executed.
 - `developer_delivery_audit(...)` composes platform, repository, SDK, conformance, provider,
   governance, and release evidence without executing publication or CI. `DeveloperDeliveryAuditReport`
   plus `Workspace.developer_delivery_audit_report(...)`, `AsyncWorkspace.developer_delivery_audit_report(...)`,
