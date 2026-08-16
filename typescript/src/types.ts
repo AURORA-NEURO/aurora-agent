@@ -3976,19 +3976,62 @@ export interface OncoWorldlineViewArgs extends JsonObject {
   visible_at?: string;
 }
 
+export type OncoWorldlineClockAxis = "acquired" | "recorded" | "released" | "visible";
+
+export type OncoWorldlineVisibilityState = "visible" | "hidden_from_agent" | "not_filtered";
+
+export interface OncoWorldlineClocksResult extends JsonObject {
+  acquired: string;
+  recorded: string;
+  released: string;
+  visible: string;
+}
+
+export interface OncoWorldlineTimepointResult extends JsonObject {
+  label: string;
+  biological_index: number;
+  record_index: number;
+  clocks: OncoWorldlineClocksResult;
+  acquired?: string;
+  recorded?: string;
+  released?: string;
+  visible?: string;
+  days_from_baseline: number;
+  observation: JsonObject;
+  visibility_state: OncoWorldlineVisibilityState;
+  visible_at_cutoff: boolean | null;
+}
+
+export interface OncoWorldlineVisibilityPartitionResult extends JsonObject {
+  cutoff: string | null;
+  filter_applied: boolean;
+  visible: string[] | null;
+  hidden: string[] | null;
+  visible_count: number | null;
+  hidden_count: number | null;
+}
+
 export interface OncoWorldlineResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/onco-worldline-view/0.1";
   subject?: string;
   baseline?: string;
   timepoint_count?: number;
   biological_order?: string[];
   record_order?: string[];
   record_order_differs?: boolean;
+  clock_axes?: OncoWorldlineClockAxis[];
+  clock_order_guaranteed?: boolean;
+  baseline_biological_index?: number;
+  baseline_record_index?: number;
   visibility_cutoff?: string | null;
   visibility_filter_applied?: boolean;
   visible_timepoints?: string[] | null;
   hidden_from_agent?: string[] | null;
-  timepoints?: JsonObject[];
+  visibility_partition?: OncoWorldlineVisibilityPartitionResult;
+  visible_count?: number | null;
+  hidden_count?: number | null;
+  timepoints?: OncoWorldlineTimepointResult[];
   guarantees?: string[];
   limitations?: string[];
 }

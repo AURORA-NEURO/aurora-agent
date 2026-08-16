@@ -5716,11 +5716,42 @@ fn onco_worldline_view_separates_biological_record_and_visibility_orders() {
         }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/onco-worldline-view/0.1")
+    );
     assert_eq!(result["biological_order"], json!(["baseline", "future"]));
     assert_eq!(result["record_order"], json!(["future", "baseline"]));
     assert_eq!(result["record_order_differs"], json!(true));
+    assert_eq!(
+        result["clock_axes"],
+        json!(["acquired", "recorded", "released", "visible"])
+    );
+    assert_eq!(result["clock_order_guaranteed"], json!(true));
     assert_eq!(result["visible_timepoints"], json!(["future"]));
     assert_eq!(result["hidden_from_agent"], json!(["baseline"]));
+    assert_eq!(result["visible_count"], json!(1));
+    assert_eq!(result["hidden_count"], json!(1));
+    assert_eq!(result["timepoints"][0]["biological_index"], json!(0));
+    assert_eq!(result["timepoints"][0]["record_index"], json!(1));
+    assert_eq!(
+        result["timepoints"][0]["visibility_state"],
+        json!("hidden_from_agent")
+    );
+    assert_eq!(result["timepoints"][0]["visible_at_cutoff"], json!(false));
+    assert_eq!(result["timepoints"][1]["biological_index"], json!(1));
+    assert_eq!(result["timepoints"][1]["record_index"], json!(0));
+    assert_eq!(
+        result["timepoints"][1]["visibility_state"],
+        json!("visible")
+    );
+    assert_eq!(result["timepoints"][1]["visible_at_cutoff"], json!(true));
+    assert_eq!(result["visibility_partition"]["visible_count"], json!(1));
+    assert_eq!(result["visibility_partition"]["hidden_count"], json!(1));
+    assert_eq!(
+        result["timepoints"][0]["clocks"]["acquired"],
+        json!("2026-01-01T00:00:00Z")
+    );
     assert_eq!(result["timepoints"][1]["days_from_baseline"], json!(4));
 }
 

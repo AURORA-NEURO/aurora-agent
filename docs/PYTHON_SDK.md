@@ -182,9 +182,10 @@ invent defaults:
   as a fail-closed domain value, and the parser rejects a forged `withheld_progression` value that
   does not carry the kernel's `not evaluable` call label.
 - `OncoWorldlineViewArgs`/`onco_worldline_report(...)` reconcile biological acquisition order,
-  record order, timepoint rows, and an optional agent-visibility partition. The four-clock rows
-  remain nested authoritative records; a cutoff is never inferred from a record timestamp, and
-  visible/hidden partitions are required only when the caller explicitly requested filtering.
+  record order, indexed four-clock timepoint rows, and the optional agent-visibility partition.
+  `OncoWorldlineReport.timepoint_records` exposes typed clock and visibility projections; a cutoff
+  is never inferred from a record timestamp, and visible/hidden partitions are required only when
+  the caller explicitly requested filtering. See `docs/ONCO_WORLDLINE_VIEW.md`.
 - `OncoClassificationArgs`/`onco_classification_report(...)` preserve integrated versus
   unresolved molecular classification, panel states, and prioritized assay obligations. The
   client refuses contradictory reports where an unresolved result supplies an entity or an

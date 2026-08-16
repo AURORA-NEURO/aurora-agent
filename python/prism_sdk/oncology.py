@@ -31,6 +31,9 @@ ONCO_OUTPUT_USES = frozenset(
 )
 ONCO_DISPOSITIONS = frozenset({"release_in_full", "release_partial", "refuse_and_escalate"})
 ONCO_TERMINAL_ACTIONS = frozenset({"stop", "abstain", "escalate"})
+ONCO_WORLDLINE_SCHEMA = "bioprism-mcp/onco-worldline-view/0.1"
+ONCO_WORLDLINE_CLOCK_AXES = ("acquired", "recorded", "released", "visible")
+ONCO_WORLDLINE_VISIBILITY_STATES = frozenset({"visible", "hidden_from_agent", "not_filtered"})
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -288,6 +291,127 @@ class OncoWorldlineViewArgs:
 
 
 @dataclass(frozen=True)
+class OncoClockProjection:
+    """The four distinct clocks carried by one tumour-worldline timepoint."""
+
+    raw: dict[str, Any]
+    acquired: str
+    recorded: str
+    released: str
+    visible: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoClockProjection":
+        raw = _route_mapping("oncology timepoint clocks", value)
+        return cls(
+            raw,
+            _route_text("oncology acquired clock", raw.get("acquired")),
+            _route_text("oncology recorded clock", raw.get("recorded")),
+            _route_text("oncology released clock", raw.get("released")),
+            _route_text("oncology visible clock", raw.get("visible")),
+        )
+
+    @property
+    def axes(self) -> tuple[str, ...]:
+        """Clock names in dependency order, never as a single collapsed timestamp."""
+
+        return ONCO_WORLDLINE_CLOCK_AXES
+
+    @property
+    def values(self) -> tuple[str, ...]:
+        return self.acquired, self.recorded, self.released, self.visible
+
+
+def _signed_integer(name: str, value: Any) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ArgumentError(f"{name} must be an integer")
+    return value
+
+
+@dataclass(frozen=True)
+class OncoTimepointProjection:
+    """One worldline row with explicit order, clock, and visibility evidence."""
+
+    raw: dict[str, Any]
+    label: str
+    biological_index: int
+    record_index: int
+    days_from_baseline: int
+    clocks: OncoClockProjection
+    observation: dict[str, Any]
+    visibility_state: str
+    visible_at_cutoff: bool | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoTimepointProjection":
+        raw = _route_mapping("oncology timepoint", value)
+        clocks_value = raw.get("clocks")
+        clocks = OncoClockProjection.from_wire(clocks_value)
+        for axis in ONCO_WORLDLINE_CLOCK_AXES:
+            if axis in raw and raw[axis] != clocks.raw[axis]:
+                raise ArgumentError(f"oncology timepoint {axis} clock disagrees with nested clocks")
+        visible_at_cutoff_value = raw.get("visible_at_cutoff")
+        if visible_at_cutoff_value is not None and not isinstance(visible_at_cutoff_value, bool):
+            raise ArgumentError("oncology timepoint visible_at_cutoff must be a boolean or null")
+        visibility_state = _route_text("oncology timepoint visibility_state", raw.get("visibility_state"))
+        if visibility_state not in ONCO_WORLDLINE_VISIBILITY_STATES:
+            raise ArgumentError(f"unknown oncology timepoint visibility state: {visibility_state!r}")
+        if visibility_state == "not_filtered" and visible_at_cutoff_value is not None:
+            raise ArgumentError("unfiltered oncology timepoints cannot carry cutoff visibility")
+        if visibility_state == "visible" and visible_at_cutoff_value is not True:
+            raise ArgumentError("visible oncology timepoints must be visible at the cutoff")
+        if visibility_state == "hidden_from_agent" and visible_at_cutoff_value is not False:
+            raise ArgumentError("hidden oncology timepoints must be absent at the cutoff")
+        return cls(
+            raw,
+            _route_text("oncology timepoint label", raw.get("label")),
+            _route_count("oncology biological index", raw.get("biological_index")),
+            _route_count("oncology record index", raw.get("record_index")),
+            _signed_integer("oncology days_from_baseline", raw.get("days_from_baseline")),
+            clocks,
+            _route_mapping("oncology timepoint observation", raw.get("observation")),
+            visibility_state,
+            visible_at_cutoff_value,
+        )
+
+
+@dataclass(frozen=True)
+class OncoVisibilityPartitionProjection:
+    """The visibility firewall partition, including null evidence when no cutoff was requested."""
+
+    raw: dict[str, Any]
+    cutoff: str | None
+    filter_applied: bool
+    visible: tuple[str, ...] | None
+    hidden: tuple[str, ...] | None
+    visible_count: int | None
+    hidden_count: int | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OncoVisibilityPartitionProjection":
+        raw = _route_mapping("oncology visibility partition", value)
+        filter_applied = _bool("oncology visibility partition filter_applied", raw.get("filter_applied"))
+        cutoff = None if raw.get("cutoff") is None else _route_text("oncology visibility partition cutoff", raw.get("cutoff"))
+        visible_value = raw.get("visible")
+        hidden_value = raw.get("hidden")
+        if not filter_applied and (cutoff is not None or visible_value is not None or hidden_value is not None):
+            raise ArgumentError("unfiltered oncology visibility partitions must be empty")
+        visible = None if visible_value is None else _route_strings("oncology partition visible", visible_value)
+        hidden = None if hidden_value is None else _route_strings("oncology partition hidden", hidden_value)
+        if filter_applied and (cutoff is None or visible is None or hidden is None):
+            raise ArgumentError("filtered oncology visibility partitions require cutoff and both sides")
+        visible_count_value = raw.get("visible_count")
+        hidden_count_value = raw.get("hidden_count")
+        visible_count = None if visible_count_value is None else _route_count("oncology partition visible_count", visible_count_value)
+        hidden_count = None if hidden_count_value is None else _route_count("oncology partition hidden_count", hidden_count_value)
+        if filter_applied and (visible_count != len(visible) or hidden_count != len(hidden)):
+            raise ArgumentError("oncology visibility partition counts do not reconcile")
+        if not filter_applied and (visible_count is not None or hidden_count is not None):
+            raise ArgumentError("unfiltered oncology visibility partitions cannot carry counts")
+        return cls(raw, cutoff, filter_applied, visible, hidden, visible_count, hidden_count)
+
+
+@dataclass(frozen=True)
 class OncoWorldlineReport:
     raw: dict[str, Any]
     ok: bool
@@ -304,26 +428,58 @@ class OncoWorldlineReport:
     timepoints: tuple[dict[str, Any], ...]
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    clock_axes: tuple[str, ...] = ONCO_WORLDLINE_CLOCK_AXES
+    clock_order_guaranteed: bool = False
+    baseline_biological_index: int | None = None
+    baseline_record_index: int | None = None
+    visibility_partition: OncoVisibilityPartitionProjection | None = None
+    timepoint_records: tuple[OncoTimepointProjection, ...] = ()
+    visible_count: int | None = None
+    hidden_count: int | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "OncoWorldlineReport":
         raw = _projection_payload(value, description="oncology worldline", direct_keys=("timepoints", "worldline"))
         if not _bool("oncology worldline ok", raw.get("ok")):
             raise ArgumentError("oncology worldline view is not successful")
+        schema_value = raw.get("schema")
+        schema = None if schema_value is None else _route_text("oncology worldline schema", schema_value)
+        if schema is not None and schema != ONCO_WORLDLINE_SCHEMA:
+            raise ArgumentError(f"unknown oncology worldline schema: {schema!r}")
         biological = _route_strings("oncology biological_order", raw.get("biological_order"))
         record = _route_strings("oncology record_order", raw.get("record_order"))
         count = _route_count("oncology timepoint_count", raw.get("timepoint_count"))
         rows = tuple(_route_mapping("oncology timepoint", item) for item in _array("oncology timepoints", raw.get("timepoints")))
         if len(biological) != count or len(record) != count or len(rows) != count:
             raise ArgumentError("oncology worldline timepoint counts do not reconcile")
-        row_labels = tuple(_route_text("oncology timepoint label", row.get("label")) for row in rows)
+        records = tuple(OncoTimepointProjection.from_wire(row) for row in rows)
+        row_labels = tuple(record.label for record in records)
         if set(row_labels) != set(biological) or set(row_labels) != set(record):
             raise ArgumentError("oncology worldline order projections do not reconcile with timepoint rows")
+        if tuple(item.label for item in sorted(records, key=lambda item: item.biological_index)) != biological:
+            raise ArgumentError("oncology biological indices do not reconcile with biological order")
+        if tuple(item.label for item in sorted(records, key=lambda item: item.record_index)) != record:
+            raise ArgumentError("oncology record indices do not reconcile with record order")
+        if {item.biological_index for item in records} != set(range(count)) or {item.record_index for item in records} != set(range(count)):
+            raise ArgumentError("oncology timepoint indices must be complete permutations")
         if _route_text("oncology baseline", raw.get("baseline")) not in set(biological):
             raise ArgumentError("oncology worldline baseline is not present in biological order")
         differs = _bool("oncology record_order_differs", raw.get("record_order_differs"))
         if differs != (biological != record):
             raise ArgumentError("oncology record_order_differs does not reconcile with the order projections")
+        clock_axes_value = raw.get("clock_axes", ONCO_WORLDLINE_CLOCK_AXES)
+        clock_axes = _route_strings("oncology clock_axes", clock_axes_value)
+        if clock_axes != ONCO_WORLDLINE_CLOCK_AXES:
+            raise ArgumentError("oncology clock axes must remain in acquisition, recording, release, visibility order")
+        clock_order_guaranteed = _bool("oncology clock_order_guaranteed", raw.get("clock_order_guaranteed", False))
+        if not clock_order_guaranteed:
+            raise ArgumentError("oncology worldline must guarantee four-clock dependency order")
+        baseline = _route_text("oncology baseline", raw.get("baseline"))
+        baseline_biological_index = _route_count("oncology baseline_biological_index", raw.get("baseline_biological_index", biological.index(baseline)))
+        baseline_record_index = _route_count("oncology baseline_record_index", raw.get("baseline_record_index", record.index(baseline)))
+        if baseline_biological_index != biological.index(baseline) or baseline_record_index != record.index(baseline):
+            raise ArgumentError("oncology baseline indices do not reconcile with order projections")
         filtered = _bool("oncology visibility_filter_applied", raw.get("visibility_filter_applied"))
         cutoff = None if raw.get("visibility_cutoff") is None else _route_text("oncology visibility_cutoff", raw.get("visibility_cutoff"))
         visible_value = raw.get("visible_timepoints")
@@ -335,10 +491,25 @@ class OncoWorldlineReport:
             hidden = _route_strings("oncology hidden_from_agent", hidden_value)
             if set(visible).intersection(hidden) or set(visible).union(hidden) != set(row_labels):
                 raise ArgumentError("oncology visibility partitions do not cover disjoint timepoint rows")
+            if {item.label for item in records if item.visible_at_cutoff} != set(visible) or {item.label for item in records if item.visible_at_cutoff is False} != set(hidden):
+                raise ArgumentError("oncology row visibility does not reconcile with the visibility partition")
         elif visible_value is not None or hidden_value is not None:
             raise ArgumentError("unfiltered oncology worldline results cannot carry visibility partitions")
         else:
             visible = hidden = None
+        partition_value = raw.get("visibility_partition")
+        partition = None if partition_value is None else OncoVisibilityPartitionProjection.from_wire(partition_value)
+        if partition is not None:
+            if partition.filter_applied != filtered or partition.cutoff != cutoff or partition.visible != visible or partition.hidden != hidden:
+                raise ArgumentError("oncology visibility partition does not reconcile with flat visibility fields")
+        visible_count_value = raw.get("visible_count")
+        hidden_count_value = raw.get("hidden_count")
+        visible_count = None if visible_count_value is None else _route_count("oncology visible_count", visible_count_value)
+        hidden_count = None if hidden_count_value is None else _route_count("oncology hidden_count", hidden_count_value)
+        if filtered and (visible_count != len(visible) or hidden_count != len(hidden)):
+            raise ArgumentError("oncology worldline visibility counts do not reconcile")
+        if not filtered and (visible_count is not None or hidden_count is not None):
+            raise ArgumentError("unfiltered oncology worldline cannot carry visibility counts")
         return cls(
             raw,
             True,
@@ -355,6 +526,15 @@ class OncoWorldlineReport:
             rows,
             _route_strings("oncology worldline guarantees", raw.get("guarantees")),
             _route_strings("oncology worldline limitations", raw.get("limitations")),
+            schema=schema,
+            clock_axes=clock_axes,
+            clock_order_guaranteed=clock_order_guaranteed,
+            baseline_biological_index=baseline_biological_index,
+            baseline_record_index=baseline_record_index,
+            visibility_partition=partition,
+            timepoint_records=records,
+            visible_count=visible_count,
+            hidden_count=hidden_count,
         )
 
 
@@ -751,6 +931,9 @@ __all__ = [
     "ONCO_BIAS_FLAGS",
     "ONCO_OUTPUT_USES",
     "ONCO_TERMINAL_ACTIONS",
+    "ONCO_WORLDLINE_CLOCK_AXES",
+    "ONCO_WORLDLINE_SCHEMA",
+    "ONCO_WORLDLINE_VISIBILITY_STATES",
     "OncoBoundaryArgs",
     "OncoBoundaryDispositionReport",
     "OncoBoundaryReport",
@@ -763,6 +946,9 @@ __all__ = [
     "OncoOutcomeReport",
     "OncoResponseAssessArgs",
     "OncoResponseReport",
+    "OncoClockProjection",
+    "OncoTimepointProjection",
+    "OncoVisibilityPartitionProjection",
     "OncoWorldlineReport",
     "OncoWorldlineViewArgs",
     "onco_boundary_report",

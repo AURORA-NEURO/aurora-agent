@@ -579,8 +579,10 @@ preserves typed recording/replay, policy-journal, budget, and fork evidence; see
 keeps research output separate from individualized clinical use, and `onco_response_assess` keeps
 post-treatment progression, threshold sensitivity, and non-identifiable change states explicit.
 `onco_worldline_view` keeps acquisition, recording, release, and agent-visibility clocks distinct,
-reports biological order separately from record order, and exposes the visibility firewall at a
-caller-supplied cutoff. `onco_classification_check` runs the integrated molecular criteria table
+reports indexed biological and record orders, and exposes a versioned visibility partition at a
+caller-supplied cutoff. Its typed SDK projection rejects forged clock copies, order indices, and
+leakage partitions; see [`docs/ONCO_WORLDLINE_VIEW.md`](docs/ONCO_WORLDLINE_VIEW.md).
+`onco_classification_check` runs the integrated molecular criteria table
 without treating uncollected assays as negative. `oncoworlds_identity_join` checks participant,
 lesion, specimen, disease-epoch, relation, and permissible-use boundaries and returns typed join
 refusals rather than silently discarding cross-modal mismatches.

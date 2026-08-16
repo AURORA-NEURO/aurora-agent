@@ -292,23 +292,120 @@ class LabAndOncoReportTests(unittest.TestCase):
     def test_worldline_report_reconciles_orders_and_visibility_partitions(self) -> None:
         report = onco_worldline_report({
             "ok": True,
+            "schema": "bioprism-mcp/onco-worldline-view/0.1",
             "subject": "S-1",
             "baseline": "baseline",
             "timepoint_count": 2,
             "biological_order": ["baseline", "future"],
             "record_order": ["future", "baseline"],
             "record_order_differs": True,
+            "clock_axes": ["acquired", "recorded", "released", "visible"],
+            "clock_order_guaranteed": True,
+            "baseline_biological_index": 0,
+            "baseline_record_index": 1,
             "visibility_cutoff": "2026-01-10T12:00:00Z",
             "visibility_filter_applied": True,
             "visible_timepoints": ["future"],
             "hidden_from_agent": ["baseline"],
-            "timepoints": [{"label": "baseline"}, {"label": "future"}],
+            "visibility_partition": {
+                "cutoff": "2026-01-10T12:00:00Z",
+                "filter_applied": True,
+                "visible": ["future"],
+                "hidden": ["baseline"],
+                "visible_count": 1,
+                "hidden_count": 1,
+            },
+            "visible_count": 1,
+            "hidden_count": 1,
+            "timepoints": [
+                {
+                    "label": "baseline",
+                    "biological_index": 0,
+                    "record_index": 1,
+                    "clocks": {
+                        "acquired": "2026-01-01T00:00:00Z",
+                        "recorded": "2026-01-10T00:00:00Z",
+                        "released": "2026-01-11T00:00:00Z",
+                        "visible": "2026-01-11T00:00:00Z",
+                    },
+                    "acquired": "2026-01-01T00:00:00Z",
+                    "recorded": "2026-01-10T00:00:00Z",
+                    "released": "2026-01-11T00:00:00Z",
+                    "visible": "2026-01-11T00:00:00Z",
+                    "days_from_baseline": 0,
+                    "observation": {"kind": "molecular"},
+                    "visibility_state": "hidden_from_agent",
+                    "visible_at_cutoff": False,
+                },
+                {
+                    "label": "future",
+                    "biological_index": 1,
+                    "record_index": 0,
+                    "clocks": {
+                        "acquired": "2026-01-05T00:00:00Z",
+                        "recorded": "2026-01-06T00:00:00Z",
+                        "released": "2026-01-07T00:00:00Z",
+                        "visible": "2026-01-07T00:00:00Z",
+                    },
+                    "acquired": "2026-01-05T00:00:00Z",
+                    "recorded": "2026-01-06T00:00:00Z",
+                    "released": "2026-01-07T00:00:00Z",
+                    "visible": "2026-01-07T00:00:00Z",
+                    "days_from_baseline": 4,
+                    "observation": {"kind": "molecular"},
+                    "visibility_state": "visible",
+                    "visible_at_cutoff": True,
+                },
+            ],
             "guarantees": ["separate clocks"],
             "limitations": ["exact dates"],
         })
         self.assertTrue(report.record_order_differs)
         self.assertEqual(report.visible_timepoints, ("future",))
+        self.assertEqual(report.timepoint_records[1].clocks.acquired, "2026-01-05T00:00:00Z")
+        self.assertEqual(report.timepoint_records[1].record_index, 0)
+        self.assertEqual(report.visibility_partition.visible_count, 1)
         self.assertEqual(len(report.timepoints), 2)
+
+    def test_worldline_report_rejects_forged_clock_or_visibility_reconciliation(self) -> None:
+        with self.assertRaises(ArgumentError):
+            onco_worldline_report({
+                "ok": True,
+                "schema": "bioprism-mcp/onco-worldline-view/0.1",
+                "subject": "S-1",
+                "baseline": "baseline",
+                "timepoint_count": 1,
+                "biological_order": ["baseline"],
+                "record_order": ["baseline"],
+                "record_order_differs": False,
+                "clock_axes": ["acquired", "recorded", "released", "visible"],
+                "clock_order_guaranteed": True,
+                "baseline_biological_index": 0,
+                "baseline_record_index": 0,
+                "visibility_cutoff": "2026-01-01T00:00:00Z",
+                "visibility_filter_applied": True,
+                "visible_timepoints": ["baseline"],
+                "hidden_from_agent": [],
+                "visible_count": 1,
+                "hidden_count": 0,
+                "timepoints": [{
+                    "label": "baseline",
+                    "biological_index": 0,
+                    "record_index": 0,
+                    "clocks": {
+                        "acquired": "2026-01-01T00:00:00Z",
+                        "recorded": "2026-01-01T00:00:00Z",
+                        "released": "2026-01-01T00:00:00Z",
+                        "visible": "2026-01-01T00:00:00Z",
+                    },
+                    "days_from_baseline": 0,
+                    "observation": {},
+                    "visibility_state": "hidden_from_agent",
+                    "visible_at_cutoff": False,
+                }],
+                "guarantees": [],
+                "limitations": [],
+            })
 
     def test_classification_identity_and_outcome_reports_keep_negative_states_typed(self) -> None:
         classification = onco_classification_report({

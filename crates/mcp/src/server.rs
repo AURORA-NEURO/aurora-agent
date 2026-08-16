@@ -9960,35 +9960,72 @@ impl Server {
                 .map(Timepoint::label)
                 .collect::<Vec<_>>()
         });
+        let record_index = |label: &str| {
+            record_order
+                .iter()
+                .position(|record_label| *record_label == label)
+                .expect("every biological timepoint must have a record-order position")
+        };
         let rows: Vec<Value> = worldline
             .timepoints()
             .iter()
-            .map(|timepoint| {
+            .enumerate()
+            .map(|(biological_index, timepoint)| {
                 let clocks = timepoint.clocks();
+                let visible_at_cutoff = cutoff.map(|at| clocks.visible <= at);
+                let visibility_state = match visible_at_cutoff {
+                    Some(true) => "visible",
+                    Some(false) => "hidden_from_agent",
+                    None => "not_filtered",
+                };
                 json!({
                     "label": timepoint.label(),
+                    "biological_index": biological_index,
+                    "record_index": record_index(timepoint.label()),
+                    "clocks": clocks,
                     "acquired": clocks.acquired,
                     "recorded": clocks.recorded,
                     "released": clocks.released,
                     "visible": clocks.visible,
                     "days_from_baseline": worldline.time_from_baseline(timepoint).days(),
                     "observation": timepoint.observation(),
+                    "visibility_state": visibility_state,
+                    "visible_at_cutoff": visible_at_cutoff,
                 })
             })
             .collect();
 
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/onco-worldline-view/0.1",
             "subject": worldline.subject().as_str(),
             "baseline": worldline.baseline().label(),
             "timepoint_count": worldline.timepoints().len(),
             "biological_order": biological_order,
             "record_order": record_order,
             "record_order_differs": biological_order != record_order,
+            "clock_axes": ["acquired", "recorded", "released", "visible"],
+            "clock_order_guaranteed": true,
+            "baseline_biological_index": worldline
+                .timepoints()
+                .iter()
+                .position(|timepoint| timepoint.label() == worldline.baseline().label())
+                .expect("the worldline baseline must be present"),
+            "baseline_record_index": record_index(worldline.baseline().label()),
             "visibility_cutoff": cutoff.map(|at| at.timestamp().to_rfc3339()),
             "visibility_filter_applied": cutoff.is_some(),
             "visible_timepoints": visible_labels,
             "hidden_from_agent": hidden_labels,
+            "visibility_partition": {
+                "cutoff": cutoff.map(|at| at.timestamp().to_rfc3339()),
+                "filter_applied": cutoff.is_some(),
+                "visible": visible.as_ref().map(|timepoints| timepoints.iter().map(|timepoint| timepoint.label()).collect::<Vec<_>>()),
+                "hidden": cutoff.map(|at| worldline.timepoints().iter().filter(|timepoint| timepoint.visible() > at).map(Timepoint::label).collect::<Vec<_>>()),
+                "visible_count": visible.as_ref().map(Vec::len),
+                "hidden_count": hidden_labels.as_ref().map(Vec::len),
+            },
+            "visible_count": visible.as_ref().map(Vec::len),
+            "hidden_count": hidden_labels.as_ref().map(Vec::len),
             "timepoints": rows,
             "guarantees": [
                 "biological order is acquisition order and is reported separately from record order",

@@ -720,7 +720,30 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/lab_plan") return jsonResponse({ ok: true, tool: "lab_plan", request_id: "r30", mcp: { result: { structuredContent: { ok: true, goal: "safe assay", should_escalate: true } } } });
       if (path === "/v1/tools/onco_boundary_check") return jsonResponse({ ok: true, tool: "onco_boundary_check", request_id: "r31", mcp: { result: { structuredContent: { ok: true, released: ["cohort_analysis"], refused: ["treatment_recommendation"], terminal_action: "escalate" } } } });
       if (path === "/v1/tools/onco_response_assess") return jsonResponse({ ok: true, tool: "onco_response_assess", request_id: "r32", mcp: { result: { structuredContent: { ok: true, call_label: "not evaluable", withheld_progression: true, hypothesis_count: 2 } } } });
-      if (path === "/v1/tools/onco_worldline_view") return jsonResponse({ ok: true, tool: "onco_worldline_view", request_id: "r33", mcp: { result: { structuredContent: { ok: true, timepoint_count: 1, record_order_differs: false } } } });
+      if (path === "/v1/tools/onco_worldline_view") return jsonResponse({ ok: true, tool: "onco_worldline_view", request_id: "r33", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/onco-worldline-view/0.1",
+        subject: "S-1",
+        baseline: "baseline",
+        timepoint_count: 1,
+        biological_order: ["baseline"],
+        record_order: ["baseline"],
+        record_order_differs: false,
+        clock_axes: ["acquired", "recorded", "released", "visible"],
+        clock_order_guaranteed: true,
+        baseline_biological_index: 0,
+        baseline_record_index: 0,
+        visibility_cutoff: "2026-01-02T00:00:00Z",
+        visibility_filter_applied: true,
+        visible_timepoints: ["baseline"],
+        hidden_from_agent: [],
+        visibility_partition: { cutoff: "2026-01-02T00:00:00Z", filter_applied: true, visible: ["baseline"], hidden: [], visible_count: 1, hidden_count: 0 },
+        visible_count: 1,
+        hidden_count: 0,
+        timepoints: [{ label: "baseline", biological_index: 0, record_index: 0, clocks: { acquired: "2026-01-01T00:00:00Z", recorded: "2026-01-01T00:00:00Z", released: "2026-01-01T00:00:00Z", visible: "2026-01-01T00:00:00Z" }, days_from_baseline: 0, observation: {}, visibility_state: "visible", visible_at_cutoff: true }],
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/onco_classification_check") return jsonResponse({ ok: true, tool: "onco_classification_check", request_id: "r34", mcp: { result: { structuredContent: { ok: true, is_integrated: false, obligations: [{ marker: "idh_mutation" }] } } } });
       if (path === "/v1/tools/oncoworlds_identity_join") return jsonResponse({ ok: true, tool: "oncoworlds_identity_join", request_id: "r35", mcp: { result: { structuredContent: { ok: true, joinable: false, bridge_declared: false } } } });
       if (path === "/v1/tools/onco_outcome_analyze") return jsonResponse({ ok: true, tool: "onco_outcome_analyze", request_id: "r36", mcp: { result: { structuredContent: { ok: true, event: false, censoring_reason: "lost_to_follow_up", immortal_time_days: 4 } } } });
@@ -1213,6 +1236,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(responseAssessment.mcp.result.structuredContent.withheld_progression, true);
   assert.equal(responseAssessment.mcp.result.structuredContent.call_label, "not evaluable");
   assert.equal(worldline.mcp.result.structuredContent.record_order_differs, false);
+  assert.equal(worldline.mcp.result.structuredContent.schema, "bioprism-mcp/onco-worldline-view/0.1");
+  assert.equal(worldline.mcp.result.structuredContent.timepoints[0].clocks.visible, "2026-01-01T00:00:00Z");
+  assert.equal(worldline.mcp.result.structuredContent.visibility_partition.visible_count, 1);
   assert.equal(classification.mcp.result.structuredContent.is_integrated, false);
   assert.equal(identity.mcp.result.structuredContent.joinable, false);
   assert.equal(outcome.mcp.result.structuredContent.censoring_reason, "lost_to_follow_up");
