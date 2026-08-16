@@ -305,6 +305,7 @@ from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledge
 from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
 from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
 from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
+from .atlas_surface import AtlasSurfaceAuditArgs, AtlasSurfaceAuditReport, atlas_surface_audit_report
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2853,6 +2854,17 @@ class ApiClient:
         """Return typed atlas coverage, debt, and composite evidence through HTTP."""
 
         return atlas_report_parser(self.atlas_report(request))
+
+    def atlas_surface_audit(self, request: AtlasSurfaceAuditArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit atlasx coverage debt and failure surfaces through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AtlasSurfaceAuditArgs) else AtlasSurfaceAuditArgs.from_wire(request)
+        return self.call_tool("atlas_surface_audit", normalized.to_mcp_arguments())
+
+    def atlas_surface_audit_report(self, request: AtlasSurfaceAuditArgs | Mapping[str, Any]) -> AtlasSurfaceAuditReport:
+        """Return typed atlasx debt, visibility, rate, and surface evidence through HTTP."""
+
+        return atlas_surface_audit_report(self.atlas_surface_audit(request))
 
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive panel through the HTTP gateway."""
@@ -5455,6 +5467,17 @@ class AsyncApiClient:
         """Return async typed atlas coverage, debt, and composite evidence."""
 
         return atlas_report_parser(await self.atlas_report(request))
+
+    async def atlas_surface_audit(self, request: AtlasSurfaceAuditArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async atlasx coverage and failure-surface audit through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AtlasSurfaceAuditArgs) else AtlasSurfaceAuditArgs.from_wire(request)
+        return await self.call_tool("atlas_surface_audit", normalized.to_mcp_arguments())
+
+    async def atlas_surface_audit_report(self, request: AtlasSurfaceAuditArgs | Mapping[str, Any]) -> AtlasSurfaceAuditReport:
+        """Return async typed atlasx surface evidence."""
+
+        return atlas_surface_audit_report(await self.atlas_surface_audit(request))
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async adaptive panel audit through the HTTP gateway."""

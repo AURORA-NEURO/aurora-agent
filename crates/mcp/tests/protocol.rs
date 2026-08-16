@@ -4,7 +4,9 @@ use bioprism_adapter::{TabularProfile, ValueType, VariableMapping};
 use bioprism_adaptive::{AdaptivePanel, PanelConfig};
 use bioprism_atlas::{
     Atlas, CapabilityDimension, CapabilityFamily, CapabilityId, CapabilityNode, CapabilityOntology,
-    EvidenceRecord, EvidenceTier, OracleTier, TrialOutcome, WeightingPolicy,
+    CausalChain, Detectability, EvidenceRecord, EvidenceStatus, EvidenceTier, FailureAxes,
+    FailureLabel, FailureMechanism, FailureRecord, Inducement, LabelDistribution, Reversibility,
+    OracleTier, Severity, TrialOutcome, UnmeasuredReason, WeightingPolicy,
 };
 use bioprism_bioethics::action::{ActionKind, ActionPlan, Authorisation, PlannedStep};
 use bioprism_bioethics::dualuse::{CapabilityRelease, MisuseSurface, SurfaceAssessment};
@@ -54,6 +56,10 @@ use bioprism_ledger::{
 use bioprism_mcp::{
     serve, tool_definitions, Lifecycle, Request, Server, CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI,
     PROTOCOL_VERSION,
+};
+use bioprism_metrics::{
+    CapabilityGrid, GridCell, MeasurementConditions, NoIntervalReason, ScoringRule,
+    Subject as MetricsSubject,
 };
 use bioprism_modalities::{
     ClaimKind as ModalityClaimKind, EvidenceTier as LiteratureEvidenceTier,
@@ -314,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 159);
+    assert_eq!(tools.len(), 160);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4151,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(159));
-    assert_eq!(result["advertised_tool_count"], json!(159));
+    assert_eq!(result["unique_catalog_tools"], json!(160));
+    assert_eq!(result["advertised_tool_count"], json!(160));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(159));
-    assert_eq!(result["schema_quality"]["valid"], json!(159));
+    assert_eq!(result["schema_quality"]["checked"], json!(160));
+    assert_eq!(result["schema_quality"]["valid"], json!(160));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -4653,7 +4659,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 18000
+                "budget": 20000
             },
             "policy": "normative",
             "include_markdown": true,
@@ -5868,6 +5874,150 @@ fn atlas_report_preserves_holes_and_gates_composites() {
         .as_str()
         .unwrap()
         .contains("unmeasured"));
+}
+
+#[test]
+fn atlas_surface_audit_preserves_debt_browse_visibility_and_rate_denominators() {
+    fn cap(id: &str) -> CapabilityId {
+        CapabilityId::parse(id).unwrap()
+    }
+    fn conditions(label: &str) -> MeasurementConditions {
+        MeasurementConditions::new(MetricsSubject::grid(label), ScoringRule::atlas_pass_rate())
+    }
+    fn measured(value: f64, effective_size: usize) -> GridCell {
+        GridCell::point(value, NoIntervalReason::EstimatorNotAvailable, effective_size).unwrap()
+    }
+    fn record(id: &str, inducement: Inducement) -> FailureRecord {
+        let chain = CausalChain::new(
+            id,
+            FailureLabel::new(FailureMechanism::RelevantEvidenceNotAcquired, 1),
+            FailureLabel::new(FailureMechanism::StaleEvidenceTrusted, 2),
+            vec![FailureLabel::new(
+                FailureMechanism::UncertaintyMisreportedToCaller,
+                3,
+            )],
+            FailureLabel::new(FailureMechanism::SuccessfulCommandMistakenForTaskSuccess, 4),
+        )
+        .unwrap();
+        FailureRecord::new(
+            id,
+            RunId::parse(format!("run-{id}")).unwrap(),
+            cap("identity.lineage"),
+            "atlasx-test/1",
+            chain,
+            FailureAxes::new(
+                EvidenceStatus::Preserved,
+                Reversibility::Reversible,
+                Detectability::DetectedByReview,
+                Severity::Degraded,
+                inducement,
+            ),
+            LabelDistribution::certain(
+                FailureMechanism::StaleEvidenceTrusted,
+                "protocol fixture diagnosis",
+            ),
+        )
+    }
+
+    let grid = CapabilityGrid::new("surface-system", conditions("surface-system"))
+        .with_cell(cap("identity.lineage"), measured(0.8, 4))
+        .with_cell(
+            cap("causal.interpretation"),
+            GridCell::unmeasured(UnmeasuredReason::NotAttempted),
+        )
+        .with_cell(
+            cap("cohort.statistics"),
+            GridCell::unmeasured(UnmeasuredReason::NotAttempted),
+        );
+    let later_grid = CapabilityGrid::new("surface-system", conditions("surface-system"))
+        .with_cell(cap("identity.lineage"), measured(0.9, 5))
+        .with_cell(
+            cap("causal.interpretation"),
+            GridCell::unmeasured(UnmeasuredReason::OutOfScopeByDeclaredUse),
+        )
+        .with_cell(cap("cohort.statistics"), measured(0.7, 6));
+    let result = call(
+        &mut server(),
+        "atlas_surface_audit",
+        json!({
+            "grid": serde_json::to_value(grid).unwrap(),
+            "later_grid": serde_json::to_value(later_grid).unwrap(),
+            "failures": [
+                serde_json::to_value(record("f-visible", Inducement::ModelInduced)).unwrap(),
+                serde_json::to_value(record("f-withheld", Inducement::EvaluatorInduced)).unwrap()
+            ],
+            "facet": "mechanism",
+            "visibility": [{ "failure_id": "f-withheld", "state": "under-review" }],
+            "rate_capabilities": ["identity.lineage"],
+            "max_items": 10
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/atlas-surface-audit/0.1"));
+    assert_eq!(result["coverage"]["measured"], json!(1));
+    assert_eq!(result["coverage"]["unmeasured"], json!(2));
+    assert_eq!(
+        result["debt_discharge"]["measured"]["rows"],
+        json!(["cohort.statistics"])
+    );
+    assert_eq!(
+        result["debt_discharge"]["declared_away"]["rows"],
+        json!(["causal.interpretation"])
+    );
+    assert_eq!(result["failure_browse"]["records_browsed"], json!(2));
+    assert_eq!(result["failure_browse"]["visible"], json!(1));
+    assert_eq!(result["failure_browse"]["withheld"], json!(1));
+    assert_eq!(result["surface_audits"]["sound"], json!(true));
+    assert_eq!(
+        result["rate_checks"]["rows"][0]["answer"]["outcome"],
+        json!("answered")
+    );
+    assert_eq!(
+        result["rate_checks"]["rows"][0]["answer"]["cell"]["kind"],
+        json!("score")
+    );
+    assert!((result["rate_checks"]["rows"][0]["answer"]["cell"]["value"].as_f64().unwrap()
+        - 0.25)
+        .abs()
+        < 1e-9);
+
+    let no_holes = call(
+        &mut server(),
+        "atlas_surface_audit",
+        json!({
+            "grid": serde_json::to_value(CapabilityGrid::new(
+                "surface-policy",
+                conditions("surface-policy")
+            ).with_cell(
+                cap("causal.interpretation"),
+                GridCell::unmeasured(UnmeasuredReason::NotAttempted)
+            )).unwrap(),
+            "require_no_holes": true
+        }),
+    );
+    assert_eq!(no_holes["__isError"], json!(false));
+    assert_eq!(no_holes["ok"], json!(false));
+    assert_eq!(no_holes["stage"], json!("coverage_policy"));
+    assert_eq!(no_holes["fail_closed"], json!(true));
+
+    let mismatched = call(
+        &mut server(),
+        "atlas_surface_audit",
+        json!({
+            "grid": serde_json::to_value(CapabilityGrid::new(
+                "surface-left",
+                conditions("surface-left")
+            )).unwrap(),
+            "later_grid": serde_json::to_value(CapabilityGrid::new(
+                "surface-right",
+                conditions("surface-right")
+            )).unwrap()
+        }),
+    );
+    assert_eq!(mismatched["__isError"], json!(false));
+    assert_eq!(mismatched["ok"], json!(false));
+    assert_eq!(mismatched["stage"], json!("debt_discharge"));
 }
 
 #[test]

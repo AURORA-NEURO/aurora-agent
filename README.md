@@ -542,6 +542,10 @@ distinct without choosing a correct modality.
 failure inconsistencies, measured-versus-unmeasured holes, and optional gated composites; the
 Python and TypeScript SDKs keep hole omission, evidence depth, family darkness, and composite
 refusals visible without rendering unmeasured capabilities as zero.
+`atlas_surface_audit` adds the atlasx publication surface: denominator-carrying CapabilityGrid
+coverage, named debt discharge, withheld failure browsing, explicit rate denominators, and
+declaration soundness. The SDKs preserve the same layers and fail-closed policy stages; see
+[`docs/ATLAS_SURFACE_AUDIT.md`](docs/ATLAS_SURFACE_AUDIT.md).
 `ops_acceptance` reports typed operational acceptance findings without turning unverifiable criteria
 into passes. `ops_capacity` projects qualified work and demand, refusing unbounded work or silent
 degradation. `bundle_verify` recomputes carried result-bundle content and keeps referenced,

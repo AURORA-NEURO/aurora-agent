@@ -85,6 +85,9 @@ Convenience methods currently cover:
 - `atlasReport`: typed capability coverage, measured-entry depth, hole/influence records, family
   and divergence histograms, coverage debt, internal inconsistencies, and eligible-versus-refused
   composite results with omission counts kept in the REST/MCP envelope;
+- `atlasSurfaceAudit`: typed atlasx publication-surface coverage, named debt discharge,
+  withheld failure buckets, denominator-safe rate checks, and surface soundness with fail-closed
+  policy/refusal fields. See [ATLAS_SURFACE_AUDIT.md](ATLAS_SURFACE_AUDIT.md).
 - `adaptivePanel`: typed panel audit totals, parent-aware coverage shortfalls, stopping verdicts,
   reportable estimates with naive/clustered intervals, deterministic selection records, optional
   capability/comparison projections, and explicit refusal/finished states;

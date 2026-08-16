@@ -77,6 +77,11 @@ from .ledger import LedgerIngestArgs, LedgerIngestReport, ledger_ingest as ledge
 from .trace_otel import TraceOtelIngestArgs, TraceOtelIngestReport, trace_otel_ingest as trace_otel_ingest_report
 from .quality_gate import QualityGateRunArgs, QualityGateRunReport, quality_gate_run as quality_gate_run_report
 from .atlas_report import AtlasReport, AtlasReportArgs, atlas_report as atlas_report_parser
+from .atlas_surface import (
+    AtlasSurfaceAuditArgs,
+    AtlasSurfaceAuditReport,
+    atlas_surface_audit_report,
+)
 from .adaptive_panel import AdaptivePanelReport, AdaptivePanelRunArgs, adaptive_panel_report
 from .posterior_gate import PosteriorGateArgs, PosteriorGateReport, posterior_gate_report
 from .tooling import ToolCallPlan, ToolCatalogue
@@ -2959,6 +2964,18 @@ class Workspace:
         normalized = request if isinstance(request, AtlasReportArgs) else AtlasReportArgs.from_wire(request)
         return atlas_report_parser(self.tool("atlas_report", normalized.to_mcp_arguments()))
 
+    def atlas_surface_audit(self, request: AtlasSurfaceAuditArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Audit atlasx coverage debt, failure browsing, and denominator-safe rates through MCP."""
+
+        normalized = request if isinstance(request, AtlasSurfaceAuditArgs) else AtlasSurfaceAuditArgs.from_wire(request)
+        return self.tool("atlas_surface_audit", normalized.to_mcp_arguments())
+
+    def atlas_surface_audit_report(self, request: AtlasSurfaceAuditArgs | Mapping[str, Any]) -> AtlasSurfaceAuditReport:
+        """Return typed atlasx debt discharge, visibility, rate, and surface-soundness evidence."""
+
+        normalized = request if isinstance(request, AtlasSurfaceAuditArgs) else AtlasSurfaceAuditArgs.from_wire(request)
+        return atlas_surface_audit_report(self.tool("atlas_surface_audit", normalized.to_mcp_arguments()))
+
     def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Audit and query a serialized adaptive evaluation panel through MCP."""
 
@@ -5601,6 +5618,18 @@ class AsyncWorkspace:
 
         normalized = request if isinstance(request, AtlasReportArgs) else AtlasReportArgs.from_wire(request)
         return atlas_report_parser((await self.client.call_tool("atlas_report", normalized.to_mcp_arguments())).require_ok())
+
+    async def atlas_surface_audit(self, request: AtlasSurfaceAuditArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to Workspace.atlas_surface_audit."""
+
+        normalized = request if isinstance(request, AtlasSurfaceAuditArgs) else AtlasSurfaceAuditArgs.from_wire(request)
+        return (await self.client.call_tool("atlas_surface_audit", normalized.to_mcp_arguments())).require_ok()
+
+    async def atlas_surface_audit_report(self, request: AtlasSurfaceAuditArgs | Mapping[str, Any]) -> AtlasSurfaceAuditReport:
+        """Async counterpart to Workspace.atlas_surface_audit_report."""
+
+        normalized = request if isinstance(request, AtlasSurfaceAuditArgs) else AtlasSurfaceAuditArgs.from_wire(request)
+        return atlas_surface_audit_report((await self.client.call_tool("atlas_surface_audit", normalized.to_mcp_arguments())).require_ok())
 
     async def adaptive_panel(self, request: AdaptivePanelRunArgs | Mapping[str, Any]) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.adaptive_panel`."""

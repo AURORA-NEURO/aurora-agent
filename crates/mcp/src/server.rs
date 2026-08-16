@@ -23,9 +23,17 @@ use bioprism_adapter::{
 use bioprism_adaptive::{
     AdaptivePanel, Candidate as AdaptiveCandidate, CapabilityId as AdaptiveCapabilityId,
 };
-use bioprism_atlas::{composite as atlas_composite, Atlas, CoverageReport, WeightingPolicy};
+use bioprism_atlas::{
+    composite as atlas_composite, Atlas, CapabilityId, CoverageReport, FailureRecord,
+    WeightingPolicy,
+};
 use bioprism_atlashub::{CiReport, ResultUnderReview};
-use bioprism_atlasx::{named_in_scope, ATLASX_SCHEMA_VERSION, DEFINED_HERE, NAMED_NEVER_DEFINED};
+use bioprism_atlasx::{
+    audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility,
+    DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet,
+    Surface as AtlasxSurface, Visibility as AtlasxVisibility, ATLASX_SCHEMA_VERSION,
+    DEFINED_HERE, NAMED_NEVER_DEFINED, named_in_scope,
+};
 use bioprism_backends::{Budget as InfluenceBudget, QueryRegion, RegionFactor};
 use bioprism_benchcompiler::{
     analyse as analyse_benchmark, boundaries as benchmark_boundaries,
@@ -200,7 +208,7 @@ use bioprism_megafactory::{
 use bioprism_metrics::{
     analyse_analytics, breakdown as metrics_breakdown, AnalyticsInput, CapabilityVector,
     ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting, PartialRanking,
-    RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
+    CapabilityGrid, RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
 };
 use bioprism_modalities::{
     analysis_unit as modality_analysis_unit, catalog::all as all_modalities,
@@ -1378,6 +1386,7 @@ impl Server {
                 }))
             }
             "atlas_report" => self.atlas_report(&arguments),
+            "atlas_surface_audit" => self.atlas_surface_audit(&arguments),
             "adaptive_panel" => self.adaptive_panel(&arguments),
             "posterior_gate" => self.posterior_gate(&arguments),
             "oracle_combine" => self.oracle_combine(&arguments),
@@ -13083,6 +13092,388 @@ impl Server {
                 "the atlas indexes caller-supplied evidence; it does not run trials or estimate metrics",
                 "confidence intervals, stratification beyond the atlas record, and public visual panels are outside this contract",
             ]
+        }))
+    }
+
+    fn atlas_surface_audit(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/atlas-surface-audit/0.1";
+        const MAX_INPUT_BYTES: usize = 20_000_000;
+        const MAX_FAILURES: usize = 8_192;
+        const MAX_VISIBILITY: usize = 8_192;
+        const MAX_RATE_CAPABILITIES: usize = 4_096;
+
+        let refusal = |stage: &str, detail: String| {
+            json!({
+                "ok": false,
+                "schema": SCHEMA,
+                "workflow": "atlas_surface_audit",
+                "stage": stage,
+                "refusal": detail,
+                "fail_closed": true,
+                "guarantees": [
+                    "coverage debt is derived from a serialized CapabilityGrid rather than caller-supplied counts",
+                    "declared-away holes remain distinct from measured holes during discharge",
+                    "failure buckets retain record identifiers, withheld publication states, and denominator limitations",
+                    "a failure browse never becomes a rate without a CapabilityGrid denominator",
+                    "surface soundness is checked against the atlasx declaration and undeclared-question probes",
+                ],
+                "limitations": [
+                    "the route does not execute assays, infer ontology coverage, or dereference failure evidence",
+                    "rates are failure-count over effective-size projections, not trial-level incidence unless the grid defines that denominator",
+                    "publication visibility is a caller-supplied declaration and is not an access-control enforcement point",
+                ],
+            })
+        };
+
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure atlas surface input: {error}"))?;
+        if encoded.len() > MAX_INPUT_BYTES {
+            return Err(format!(
+                "atlas surface input exceeds the {MAX_INPUT_BYTES}-byte safety bound"
+            ));
+        }
+        let max_items = arguments
+            .get("max_items")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if !(1..=1_000).contains(&max_items) {
+            return Err("max_items must be between 1 and 1000".into());
+        }
+        let max_items = max_items as usize;
+        let policy = |name: &str| -> Result<bool, String> {
+            match arguments.get(name) {
+                None => Ok(false),
+                Some(value) => value
+                    .as_bool()
+                    .ok_or_else(|| format!("{name} must be a boolean")),
+            }
+        };
+        let require_no_holes = policy("require_no_holes")?;
+        let require_no_blocking_debt = policy("require_no_blocking_debt")?;
+        let require_no_withheld = policy("require_no_withheld")?;
+        let require_sound_surfaces = policy("require_sound_surfaces")?;
+
+        let raw_grid = arguments
+            .get("grid")
+            .cloned()
+            .ok_or("grid is required and must be a serialized CapabilityGrid")?;
+        let grid: CapabilityGrid = match serde_json::from_value(raw_grid) {
+            Ok(grid) => grid,
+            Err(error) => {
+                return Ok(refusal(
+                    "grid_deserialization",
+                    format!("grid is not a valid CapabilityGrid: {error}"),
+                ))
+            }
+        };
+        let debt = AtlasxDebtStatement::of(&grid);
+        let debt_audit = atlasx_audit(&debt);
+        let debt_audit_value =
+            serde_json::to_value(&debt_audit).map_err(|error| error.to_string())?;
+
+        let discharge = match arguments.get("later_grid") {
+            None | Some(Value::Null) => Value::Null,
+            Some(raw_later) => {
+                let later: CapabilityGrid = match serde_json::from_value(raw_later.clone()) {
+                    Ok(later) => later,
+                    Err(error) => {
+                        return Ok(refusal(
+                            "later_grid_deserialization",
+                            format!("later_grid is not a valid CapabilityGrid: {error}"),
+                        ))
+                    }
+                };
+                let later_debt = AtlasxDebtStatement::of(&later);
+                let discharge = match debt.discharged_by(&later_debt) {
+                    Ok(discharge) => discharge,
+                    Err(error) => {
+                        return Ok(refusal(
+                            "debt_discharge",
+                            format!("cannot compare grid coverage: {error}"),
+                        ))
+                    }
+                };
+                let bounded = |values: &[String]| {
+                    json!({
+                        "rows": values.iter().take(max_items).collect::<Vec<_>>(),
+                        "total": values.len(),
+                        "omitted": values.len().saturating_sub(max_items),
+                    })
+                };
+                json!({
+                    "subject": discharge.subject,
+                    "measured": bounded(&discharge.measured),
+                    "declared_away": bounded(&discharge.declared_away),
+                    "persisting": bounded(&discharge.persisting),
+                    "newly_unmeasured": bounded(&discharge.newly_unmeasured),
+                    "any_evidence": discharge.any_evidence(),
+                })
+            }
+        };
+        if require_no_holes && debt.unmeasured() > 0 {
+            return Ok(refusal(
+                "coverage_policy",
+                format!(
+                    "require_no_holes was true but {} capability hole(s) remain",
+                    debt.unmeasured()
+                ),
+            ));
+        }
+        if require_no_blocking_debt && !debt.blocking().is_empty() {
+            return Ok(refusal(
+                "blocking_debt_policy",
+                format!(
+                    "require_no_blocking_debt was true but {} hole(s) still block claims",
+                    debt.blocking().len()
+                ),
+            ));
+        }
+
+        let raw_failures = match arguments.get("failures") {
+            None => Vec::new(),
+            Some(value) => value
+                .as_array()
+                .cloned()
+                .ok_or("failures must be an array of serialized FailureRecord values")?,
+        };
+        if raw_failures.len() > MAX_FAILURES {
+            return Err("failures are bounded at 8192 records".into());
+        }
+        let mut failures = Vec::with_capacity(raw_failures.len());
+        for (index, raw) in raw_failures.into_iter().enumerate() {
+            match serde_json::from_value::<FailureRecord>(raw) {
+                Ok(record) => failures.push(record),
+                Err(error) => {
+                    return Ok(refusal(
+                        "failure_deserialization",
+                        format!("failures[{index}] is not a valid FailureRecord: {error}"),
+                    ))
+                }
+            }
+        }
+        let facet = match arguments.get("facet") {
+            None => AtlasxFacet::Mechanism,
+            Some(raw) => match serde_json::from_value::<AtlasxFacet>(raw.clone()) {
+                Ok(facet) => facet,
+                Err(error) => {
+                    return Ok(refusal(
+                        "facet_deserialization",
+                        format!("facet is not a valid atlasx Facet: {error}"),
+                    ))
+                }
+            },
+        };
+        let raw_visibility = match arguments.get("visibility") {
+            None => Vec::new(),
+            Some(value) => value
+                .as_array()
+                .cloned()
+                .ok_or("visibility must be an array of {failure_id,state} values")?,
+        };
+        if raw_visibility.len() > MAX_VISIBILITY {
+            return Err("visibility is bounded at 8192 declarations".into());
+        }
+        let mut visibility = Vec::with_capacity(raw_visibility.len());
+        for (index, raw) in raw_visibility.into_iter().enumerate() {
+            match serde_json::from_value::<AtlasxVisibility>(raw) {
+                Ok(declaration) => visibility.push(declaration),
+                Err(error) => {
+                    return Ok(refusal(
+                        "visibility_deserialization",
+                        format!("visibility[{index}] is not valid: {error}"),
+                    ))
+                }
+            }
+        }
+        let browse_subject = arguments
+            .get("failure_subject")
+            .and_then(Value::as_str)
+            .unwrap_or(grid.label.as_str());
+        if browse_subject.trim().is_empty() || browse_subject.len() > 4_096 {
+            return Err("failure_subject must be a non-empty string of at most 4096 bytes".into());
+        }
+        let browse = match atlasx_browse_with_visibility(
+            browse_subject,
+            &failures,
+            facet,
+            &visibility,
+        ) {
+            Ok(browse) => browse,
+            Err(error) => {
+                return Ok(refusal(
+                    "failure_browse",
+                    format!("cannot construct failure browse: {error}"),
+                ))
+            }
+        };
+        if require_no_withheld && browse.withheld() > 0 {
+            return Ok(refusal(
+                "visibility_policy",
+                format!(
+                    "require_no_withheld was true but {} failure record(s) are withheld",
+                    browse.withheld()
+                ),
+            ));
+        }
+        let browse_audit = atlasx_audit(&browse);
+        if require_sound_surfaces && (!debt_audit.sound() || !browse_audit.sound()) {
+            return Ok(refusal(
+                "surface_soundness",
+                "require_sound_surfaces was true but an atlasx surface answered an undeclared question"
+                    .to_string(),
+            ));
+        }
+
+        let raw_rate_capabilities = match arguments.get("rate_capabilities") {
+            None => Vec::new(),
+            Some(value) => value
+                .as_array()
+                .cloned()
+                .ok_or("rate_capabilities must be an array of capability identifiers")?,
+        };
+        if raw_rate_capabilities.len() > MAX_RATE_CAPABILITIES {
+            return Err("rate_capabilities are bounded at 4096 identifiers".into());
+        }
+        let mut rate_rows = Vec::with_capacity(raw_rate_capabilities.len());
+        for (index, raw) in raw_rate_capabilities.into_iter().enumerate() {
+            let name = raw.as_str().ok_or_else(|| {
+                format!("rate_capabilities[{index}] must be a capability identifier string")
+            })?;
+            let capability: CapabilityId = match serde_json::from_value(json!(name)) {
+                Ok(capability) => capability,
+                Err(error) => {
+                    return Ok(refusal(
+                        "rate_capability_deserialization",
+                        format!("rate_capabilities[{index}] is not valid: {error}"),
+                    ))
+                }
+            };
+            let answer = browse.rate_against(&grid, &capability);
+            rate_rows.push(json!({
+                "capability": name,
+                "answer": &answer,
+                "answered": answer.is_answered(),
+            }));
+        }
+
+        let debt_holes = debt
+            .holes()
+            .iter()
+            .take(max_items)
+            .map(|hole| {
+                json!({
+                    "capability": &hole.capability,
+                    "reason": &hole.reason,
+                    "blocks_claim": hole.blocks_claim(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let blocking_capabilities = debt
+            .blocking()
+            .into_iter()
+            .map(|hole| hole.capability.as_str().to_string())
+            .collect::<Vec<_>>();
+        let browse_buckets = browse
+            .buckets()
+            .iter()
+            .take(max_items)
+            .map(|bucket| {
+                json!({
+                    "key": &bucket.key,
+                    "label": bucket.key.label(),
+                    "members": bucket.members.iter().take(max_items).collect::<Vec<_>>(),
+                    "member_count": bucket.members.len(),
+                    "omitted_members": bucket.members.len().saturating_sub(max_items),
+                    "cell": bucket.cell(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let coverage_profile = serde_json::to_value(debt.profile_coverage())
+            .map_err(|error| format!("cannot serialize coverage profile: {error}"))?;
+        let debt_audit_summary = json!({
+            "sound": debt_audit.sound(),
+            "declared_but_refused": debt_audit.declared_but_refused.len(),
+            "undeclared_but_answered": debt_audit.undeclared_but_answered.len(),
+            "non_numeric_cells": debt_audit.non_numeric_cells.len(),
+        });
+        let browse_audit_summary = json!({
+            "sound": browse_audit.sound(),
+            "declared_but_refused": browse_audit.declared_but_refused.len(),
+            "undeclared_but_answered": browse_audit.undeclared_but_answered.len(),
+            "non_numeric_cells": browse_audit.non_numeric_cells.len(),
+        });
+        let rate_total = rate_rows.len();
+        let browse_bucket_total = browse.buckets().len();
+        let browse_audit_value =
+            serde_json::to_value(&browse_audit).map_err(|error| error.to_string())?;
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "workflow": "atlas_surface_audit",
+            "coverage": {
+                "subject": debt.subject(),
+                "total_capabilities": debt.total_capabilities(),
+                "measured": debt.measured(),
+                "unmeasured": debt.unmeasured(),
+                "blocking": blocking_capabilities.len(),
+                "closed_by_declaration": debt.closed_by_declaration(),
+                "vacuous": debt.is_vacuous(),
+                "holes": debt_holes,
+                "omitted_holes": debt.unmeasured().saturating_sub(max_items),
+                "blocking_capabilities": blocking_capabilities.iter().take(max_items).collect::<Vec<_>>(),
+                "omitted_blocking_capabilities": blocking_capabilities.len().saturating_sub(max_items),
+                "profile_coverage": coverage_profile,
+            },
+            "debt_discharge": discharge,
+            "failure_browse": {
+                "subject": browse.subject(),
+                "facet": browse.facet(),
+                "taxonomy_version": browse.taxonomy_version(),
+                "records_browsed": browse.records_browsed(),
+                "visible": browse.visible(),
+                "withheld": browse.withheld(),
+                "contested": browse.contested(),
+                "undiagnosed": browse.undiagnosed(),
+                "evaluator_induced": browse.evaluator_induced(),
+                "distinct_families": browse.distinct_families(),
+                "shares_sum_to_one": browse.shares_sum_to_one(),
+                "buckets": browse_buckets,
+                "omitted_buckets": browse_bucket_total.saturating_sub(max_items),
+            },
+            "rate_checks": {
+                "rows": rate_rows,
+                "total": rate_total,
+            },
+            "surface_audits": {
+                "debt": debt_audit_value,
+                "browse": browse_audit_value,
+                "summary": {
+                    "debt": debt_audit_summary,
+                    "browse": browse_audit_summary,
+                },
+                "sound": debt_audit.sound() && browse_audit.sound(),
+            },
+            "policies": {
+                "require_no_holes": require_no_holes,
+                "require_no_blocking_debt": require_no_blocking_debt,
+                "require_no_withheld": require_no_withheld,
+                "require_sound_surfaces": require_sound_surfaces,
+            },
+            "guarantees": [
+                "coverage percentage carries its grid denominator and refuses the vacuous zero-over-zero case",
+                "every returned hole carries its atlas UnmeasuredReason and claim-blocking interpretation",
+                "discharge separates measured evidence from declared-away scope changes and newly unmeasured capabilities",
+                "withheld failures remain state-bearing buckets and are not emitted as diagnosis counts",
+                "browsed failure records remain identifiers that can be reproduced locally rather than anonymous histogram mass",
+                "rate checks use the same browse's charged failure counts and the supplied grid's effective-size denominator",
+                "surface audits retain declared refusals and non-numeric cells instead of coercing them to zero",
+            ],
+            "limitations": [
+                "the route does not build a second ontology or recalculate atlas measurements",
+                "failure taxonomy version is checked within the browse but is not automatically matched to the grid conditions",
+                "a rate is a projection over the grid cell's effective size; it is not a causal, clinical, or prevalence estimate",
+                "visibility declarations describe the intended publication surface and do not remove source records from memory",
+            ],
         }))
     }
 
@@ -25942,9 +26333,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "atlas_metrics_and_research_ci",
-            "domains": ["capability metrics", "partial rankings", "weight sensitivity", "research CI", "claim publication checks"],
+            "domains": ["capability metrics", "coverage debt", "failure atlas browsing", "partial rankings", "weight sensitivity", "research CI", "claim publication checks"],
             "crates": ["bioprism-atlas", "bioprism-metrics", "bioprism-atlasx", "bioprism-atlashub"],
-            "mcp_tools": ["atlas_report", "capability_rank", "metrics_profile_audit", "metrics_analytics_audit", "biocapability_evidence_audit", "research_ci_check"],
+            "mcp_tools": ["atlas_report", "atlas_surface_audit", "capability_rank", "metrics_profile_audit", "metrics_analytics_audit", "biocapability_evidence_audit", "research_ci_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -27028,6 +27419,28 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows returned in each report list; defaults to 100." }
                 },
                 "required": ["atlas"]
+            }
+        }),
+        json!({
+            "name": "atlas_surface_audit",
+            "description": "Audit the atlasx publication surfaces around a serialized CapabilityGrid and bounded FailureRecord set. Returns denominator-carrying coverage debt, named holes, measured-versus-declared discharge, facet-bucketed failure records with visibility states, denominator-safe rate checks, and the surface declaration audit. It never turns missing or withheld evidence into numeric zeroes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "grid": { "type": "object", "description": "Serialized bioprism-metrics CapabilityGrid; required and used as the sole coverage and rate denominator." },
+                    "later_grid": { "type": "object", "description": "Optional later CapabilityGrid with the same label. Produces a bounded discharge separating measured evidence, declared-away scope, persistence, and newly unmeasured capabilities." },
+                    "failures": { "type": "array", "maxItems": 8192, "description": "Optional serialized bioprism-atlas FailureRecord values to browse; omission means an empty browse." },
+                    "failure_subject": { "type": "string", "description": "Optional browse subject; defaults to grid.label." },
+                    "facet": { "type": "string", "enum": ["mechanism", "first_divergence_stage", "severity", "inducement", "architecture_component"], "default": "mechanism", "description": "Closed atlasx facet used to partition failure records." },
+                    "visibility": { "type": "array", "maxItems": 8192, "description": "Optional {failure_id,state} publication declarations. Withheld records remain state-bearing buckets." },
+                    "rate_capabilities": { "type": "array", "maxItems": 4096, "items": { "type": "string" }, "description": "Optional capability identifiers for explicit browse.rate_against checks against the same grid." },
+                    "require_no_holes": { "type": "boolean", "default": false, "description": "Fail closed when any capability is unmeasured." },
+                    "require_no_blocking_debt": { "type": "boolean", "default": false, "description": "Fail closed when any hole still blocks a claim." },
+                    "require_no_withheld": { "type": "boolean", "default": false, "description": "Fail closed when any browsed failure has a non-Available publication state." },
+                    "require_sound_surfaces": { "type": "boolean", "default": false, "description": "Fail closed if either atlasx surface answers a question outside its declaration." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum holes, discharge identifiers, buckets, bucket members, and other projection rows returned." }
+                },
+                "required": ["grid"]
             }
         }),
         json!({

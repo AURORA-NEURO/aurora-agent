@@ -429,5 +429,8 @@ publication rather than treating a partial reveal as a complete score;
 the contextual-integrity kernel is also exposed through bioeval_boundary_audit, preserving
 authorized flow, respected denial, violation, irreversible veto, bypass, channel exposure, and
 Pareto-separated utility/safety rather than manufacturing a combined privacy score;
-the remaining item is the atlas module itself, not a missing grounding, acquisition, estimand,
-evaluator-health, scoring-plane, metamorphic, waiver, design, mesh, burden, reveal, or boundary wrapper.
+the atlasx publication-surface kernel is now also exposed through atlas_surface_audit, preserving
+CapabilityGrid denominator coverage, named debt discharge, withheld failure browsing,
+denominator-safe rate checks, and surface soundness. The remaining item is the blueprint citation
+itself, not a missing grounding, acquisition, estimand, evaluator-health, scoring-plane,
+metamorphic, waiver, design, mesh, burden, reveal, boundary, or atlasx transport wrapper.

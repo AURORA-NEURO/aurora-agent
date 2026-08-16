@@ -592,6 +592,27 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["unmeasured capabilities remain holes and are never rendered as zero"],
         limitations: ["the atlas indexes caller-supplied evidence; it does not run trials"],
       } } } });
+      if (path === "/v1/tools/atlas_surface_audit") return jsonResponse({ ok: true, tool: "atlas_surface_audit", request_id: "r15surface", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/atlas-surface-audit/0.1",
+        workflow: "atlas_surface_audit",
+        coverage: {
+          subject: "surface-system", total_capabilities: 3, measured: 1, unmeasured: 2,
+          blocking: 2, closed_by_declaration: 0, vacuous: false,
+          holes: [{ capability: "causal.interpretation", reason: "not_attempted", blocks_claim: true }],
+          omitted_holes: 1, profile_coverage: { outcome: "answered", cell: { kind: "share", value: { numerator: 1, denominator: 3 } } },
+        },
+        debt_discharge: { any_evidence: true, measured: { rows: ["cohort.statistics"], total: 1, omitted: 0 } },
+        failure_browse: {
+          subject: "surface-system", facet: "mechanism", taxonomy_version: "atlasx-test/1",
+          records_browsed: 2, visible: 1, withheld: 1, contested: 0, undiagnosed: 0,
+          evaluator_induced: 0, distinct_families: 1, shares_sum_to_one: true,
+          buckets: [{ label: "mechanism:stale_evidence_trusted", member_count: 1 }], omitted_buckets: 0,
+        },
+        rate_checks: { rows: [{ capability: "identity.lineage", answered: true }], total: 1 },
+        surface_audits: { sound: true }, policies: { require_sound_surfaces: true },
+        guarantees: ["holes are not zeroes"], limitations: ["caller-supplied records"],
+      } } } });
       if (path === "/v1/tools/adaptive_panel") return jsonResponse({ ok: true, tool: "adaptive_panel", request_id: "r15d", mcp: { result: { structuredContent: {
         ok: true,
         schema: "bioprism-mcp/adaptive-panel/0.1",
@@ -1200,6 +1221,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     gate: { name: "release-gate", checks: { age_range: { InRange: { column: "age", min: 0, max: 120 } } } },
   });
   const atlas = await client.atlasReport({ atlas: { ontology: {}, cells: {}, failures: [] }, max_items: 10 });
+  const atlasSurface = await client.atlasSurfaceAudit({ grid: { label: "surface-system", conditions: {}, cells: {} }, facet: "mechanism", max_items: 10 });
   const adaptive = await client.adaptivePanel({ panel: { config: {}, ledger: {} }, candidates: [{ instance: "inst-1", capability: "capability-a", parent: "parent-1", cost: 1 }], capability: "capability-a" });
   const posterior = await client.posteriorGate({ observations: [{ capability: "capability-a", parent: "parent-1", result: { conclusion: "pass" } }], other_observations: [], tolerance: 0.01, min_effective: 2 });
   const otel = await client.traceOtelIngest({ trace_id: "otel-ts", otlp_json: '{"resourceSpans":[]}', include_events: true });
@@ -1218,6 +1240,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(atlas.mcp.result.structuredContent.schema, "bioprism-mcp/atlas-report/0.1");
   assert.equal(atlas.mcp.result.structuredContent.holes[0].reason, "not_attempted");
   assert.equal(atlas.mcp.result.structuredContent.composite.fail_closed, true);
+  assert.equal(atlasSurface.mcp.result.structuredContent.schema, "bioprism-mcp/atlas-surface-audit/0.1");
+  assert.equal(atlasSurface.mcp.result.structuredContent.failure_browse.withheld, 1);
+  assert.equal(atlasSurface.mcp.result.structuredContent.surface_audits.sound, true);
   assert.equal(adaptive.mcp.result.structuredContent.schema, "bioprism-mcp/adaptive-panel/0.1");
   assert.equal(adaptive.mcp.result.structuredContent.selection.value.record.chosen.instance, "inst-1");
   assert.equal(adaptive.mcp.result.structuredContent.capability.estimate, null);

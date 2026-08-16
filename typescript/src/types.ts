@@ -760,6 +760,74 @@ export interface AtlasReportResult extends JsonObject {
   limitations: string[];
 }
 
+export type AtlasSurfaceFacet =
+  | "mechanism"
+  | "first_divergence_stage"
+  | "severity"
+  | "inducement"
+  | "architecture_component";
+
+export interface AtlasSurfaceAuditArgs extends JsonObject {
+  grid: JsonObject;
+  later_grid?: JsonObject;
+  failures?: JsonObject[];
+  failure_subject?: string;
+  facet?: AtlasSurfaceFacet;
+  visibility?: JsonObject[];
+  rate_capabilities?: string[];
+  require_no_holes?: boolean;
+  require_no_blocking_debt?: boolean;
+  require_no_withheld?: boolean;
+  require_sound_surfaces?: boolean;
+  max_items?: number;
+}
+
+export interface AtlasSurfaceCoverageResult extends JsonObject {
+  subject: string;
+  total_capabilities: number;
+  measured: number;
+  unmeasured: number;
+  blocking: number;
+  closed_by_declaration: number;
+  vacuous: boolean;
+  holes: JsonObject[];
+  omitted_holes: number;
+  profile_coverage: JsonObject;
+}
+
+export interface AtlasSurfaceBrowseResult extends JsonObject {
+  subject: string;
+  facet: AtlasSurfaceFacet;
+  taxonomy_version: string;
+  records_browsed: number;
+  visible: number;
+  withheld: number;
+  contested: number;
+  undiagnosed: number;
+  evaluator_induced: number;
+  distinct_families: number;
+  shares_sum_to_one: boolean;
+  buckets: JsonObject[];
+  omitted_buckets: number;
+}
+
+export interface AtlasSurfaceAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/atlas-surface-audit/0.1";
+  workflow?: "atlas_surface_audit";
+  coverage?: AtlasSurfaceCoverageResult;
+  debt_discharge?: JsonObject | null;
+  failure_browse?: AtlasSurfaceBrowseResult;
+  rate_checks?: JsonObject;
+  surface_audits?: JsonObject;
+  policies?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface AdaptivePanelRunArgs extends JsonObject {
   panel: JsonObject;
   candidates?: JsonObject[];

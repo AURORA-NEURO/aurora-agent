@@ -275,6 +275,8 @@ import type {
   QualityGateRunResult,
   AtlasReportArgs,
   AtlasReportResult,
+  AtlasSurfaceAuditArgs,
+  AtlasSurfaceAuditResult,
   AdaptivePanelRunArgs,
   AdaptivePanelResult,
   PosteriorGateArgs,
@@ -484,6 +486,10 @@ export class ApiClient {
 
   async atlasReport(args: AtlasReportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AtlasReportResult>> {
     return this.callTool<AtlasReportResult>("atlas_report", args, options);
+  }
+
+  async atlasSurfaceAudit(args: AtlasSurfaceAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AtlasSurfaceAuditResult>> {
+    return this.callTool<AtlasSurfaceAuditResult>("atlas_surface_audit", args, options);
   }
 
   async adaptivePanel(args: AdaptivePanelRunArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptivePanelResult>> {

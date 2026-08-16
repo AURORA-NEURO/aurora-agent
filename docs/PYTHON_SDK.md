@@ -370,6 +370,12 @@ invent defaults:
   measured-versus-unmeasured holes, claim-blocking influence, dark families, coverage debt,
   failure inconsistencies, bounded histograms, and eligible-versus-refused composites. Omitted
   rows reconcile to authoritative totals, and no hole is converted into a numeric zero.
+- `AtlasSurfaceAuditArgs` and `atlas_surface_audit_report(...)` expose the atlasx publication
+  surface across sync/async MCP and HTTP. The typed projection keeps CapabilityGrid denominators,
+  named holes, measured-versus-declared debt discharge, withheld FailureRecord buckets, explicit
+  denominator-safe rate checks, and surface soundness separate. It preserves canonical
+  hyphenated publication states and fail-closed coverage/visibility/soundness policies. See
+  [ATLAS_SURFACE_AUDIT.md](ATLAS_SURFACE_AUDIT.md).
 - `AdaptivePanelRunArgs` and `adaptive_panel_report(...)` expose the serialized adaptive panel
   across sync/async MCP and HTTP. The report keeps raw/scored/abstained audit totals, parent-aware
   coverage shortfalls, stopping reasons, naive and clustered intervals, inflation, optional
