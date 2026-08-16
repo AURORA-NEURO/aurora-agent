@@ -1415,6 +1415,49 @@ test("client exposes typed literature binding and citation refusal evidence", as
   assert.equal(result.mcp.result.structuredContent.evidence.citation_refusal_kind, "unsupported");
 });
 
+test("client exposes typed modality support and pseudoreplication evidence", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async () => jsonResponse({
+      ok: true,
+      tool: "modality_support_check",
+      request_id: "modality-1",
+      mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/modality-support-check/0.1",
+        outcome_kind: "refused",
+        modality: "bulk_transcriptomics",
+        claim: "cell_intrinsic_change",
+        supported: false,
+        claim_requirements: { axes: ["cell"] },
+        support: {
+          supported: false,
+          refusal: { unsupported: "missing_resolution" },
+          refusal_kind: "named_failure_mode",
+          root_refusal_kind: "missing_resolution",
+        },
+        analysis_unit: {
+          requested: true,
+          counted: "population",
+          independent: "subject",
+          admissible: false,
+          refusal: { unsupported: "named_failure_mode" },
+          refusal_kind: "named_failure_mode",
+        },
+        descriptor: { complete: true, supported_catalogue_claims: ["population_average"] },
+      } } },
+    }),
+  });
+  const result = await client.modalitySupportCheck({
+    modality: "bulk_transcriptomics",
+    claim: "cell_intrinsic_change",
+    counted_unit: "population",
+  });
+  assert.equal(result.mcp.result.structuredContent.outcome_kind, "refused");
+  assert.equal(result.mcp.result.structuredContent.support.root_refusal_kind, "missing_resolution");
+  assert.equal(result.mcp.result.structuredContent.analysis_unit.admissible, false);
+});
+
 test("client parses cursor SSE and validates webhook mutations", async () => {
   const client = new ApiClient({
     baseUrl: "https://example.test",

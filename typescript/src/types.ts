@@ -3743,6 +3743,30 @@ export interface LiteratureBindCheckResult extends JsonObject {
   limitations?: string[];
 }
 
+export type ModalitySupportOutcomeKind = "supported" | "refused";
+
+export interface ModalitySupportCheckArgs extends JsonObject {
+  modality: string;
+  claim: string;
+  descriptor?: JsonObject | null;
+  counted_unit?: string | null;
+}
+
+export interface ModalitySupportCheckResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/modality-support-check/0.1";
+  outcome_kind: ModalitySupportOutcomeKind;
+  modality: string;
+  claim: string;
+  supported: boolean;
+  claim_requirements: JsonObject;
+  support: JsonObject;
+  analysis_unit: JsonObject;
+  descriptor: JsonObject;
+  guarantees?: string[];
+  limitations?: string[];
+}
+
 export interface LineageAuditArgs extends JsonObject {
   registry: JsonObject;
   max_items?: number;

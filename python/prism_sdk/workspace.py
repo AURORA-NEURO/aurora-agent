@@ -219,6 +219,7 @@ from .oncoworlds import (
     oncoworlds_radiogenomic_check_report,
 )
 from .literature import LiteratureBindCheckArgs, LiteratureBindCheckReport, literature_bind_check_report
+from .modality import ModalitySupportCheckArgs, ModalitySupportCheckReport, modality_support_check_report
 from .stress import (
     StressProfileArgs,
     StressProfileReport,
@@ -1525,6 +1526,19 @@ class Workspace:
         request: LiteratureBindCheckArgs | Mapping[str, Any],
     ) -> LiteratureBindCheckReport:
         return literature_bind_check_report(self.literature_bind_check(request))
+
+    def modality_support_check(
+        self,
+        request: ModalitySupportCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ModalitySupportCheckArgs) else ModalitySupportCheckArgs.from_wire(request)
+        return self.tool("modality_support_check", normalized.to_mcp_arguments())
+
+    def modality_support_check_report(
+        self,
+        request: ModalitySupportCheckArgs | Mapping[str, Any],
+    ) -> ModalitySupportCheckReport:
+        return modality_support_check_report(self.modality_support_check(request))
 
     def hub_search(
         self,
@@ -3606,6 +3620,19 @@ class AsyncWorkspace:
         request: LiteratureBindCheckArgs | Mapping[str, Any],
     ) -> LiteratureBindCheckReport:
         return literature_bind_check_report(await self.literature_bind_check(request))
+
+    async def modality_support_check(
+        self,
+        request: ModalitySupportCheckArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, ModalitySupportCheckArgs) else ModalitySupportCheckArgs.from_wire(request)
+        return await self.tool("modality_support_check", normalized.to_mcp_arguments())
+
+    async def modality_support_check_report(
+        self,
+        request: ModalitySupportCheckArgs | Mapping[str, Any],
+    ) -> ModalitySupportCheckReport:
+        return modality_support_check_report(await self.modality_support_check(request))
 
     async def hub_search(
         self,

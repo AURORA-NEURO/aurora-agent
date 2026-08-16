@@ -986,6 +986,16 @@ from .literature import (
     LiteratureBindCheckReport,
     literature_bind_check_report,
 )
+from .modality import (
+    MODALITIES,
+    MODALITY_CLAIMS,
+    MODALITY_RESOLUTIONS,
+    MODALITY_SUPPORT_OUTCOME_KINDS,
+    MODALITY_SUPPORT_SCHEMA,
+    ModalitySupportCheckArgs,
+    ModalitySupportCheckReport,
+    modality_support_check_report,
+)
 from .preanalytic import (
     PREANALYTIC_RESPONSES,
     PREANALYTIC_STAGES,
@@ -2285,5 +2295,13 @@ __all__ = [
     "LiteratureBindCheckArgs",
     "LiteratureBindCheckReport",
     "literature_bind_check_report",
+    "MODALITIES",
+    "MODALITY_CLAIMS",
+    "MODALITY_RESOLUTIONS",
+    "MODALITY_SUPPORT_OUTCOME_KINDS",
+    "MODALITY_SUPPORT_SCHEMA",
+    "ModalitySupportCheckArgs",
+    "ModalitySupportCheckReport",
+    "modality_support_check_report",
     "__version__",
 ]

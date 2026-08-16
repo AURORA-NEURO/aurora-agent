@@ -315,6 +315,11 @@ population scope, retraction warrants, and citation refusals for unsupported bio
 kinds. The TypeScript boundary does not turn a literature statement into a measurement; the
 literature modality admits only `published_claim_support`. See
 [`docs/LITERATURE_BIND_CHECK.md`](LITERATURE_BIND_CHECK.md).
+`modalitySupportCheck` returns `ModalitySupportCheckResult` for the authoritative assay support
+relation. It keeps modality/claim eligibility, first refusal, root refusal, and independent-unit
+pseudoreplication evidence distinct while preserving custom descriptor and claim-requirement
+metadata; a supported result is not a claim of truth or statistical validity. See
+[`docs/MODALITY_SUPPORT_CHECK.md`](MODALITY_SUPPORT_CHECK.md).
 `hubSearch` returns `HubSearchResult` with typed exact-facet matches, required `why` evidence,
 near-miss exclusions, trust tier, authority provenance, freshness variants, and explicit bounded
 truncation. Federation and catalog values remain JSON inputs because the Rust hubapi owns their

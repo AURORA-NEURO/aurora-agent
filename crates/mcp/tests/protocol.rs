@@ -306,7 +306,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 127);
+    assert_eq!(tools.len(), 128);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1268,6 +1268,41 @@ fn modality_catalog_exposes_resolution_and_failure_mode_boundaries() {
     assert!(payload["modalities"][0]["resolutions"].is_array());
     assert!(payload["modalities"][0]["failure_modes"].is_array());
     assert!(payload["unmechanised_failure_modes"].is_number());
+}
+
+#[test]
+fn modality_support_check_separates_claim_eligibility_from_analysis_unit() {
+    let refused = call(
+        &mut server(),
+        "modality_support_check",
+        json!({
+            "modality": "bulk_transcriptomics",
+            "claim": "cell_intrinsic_change",
+            "counted_unit": "population"
+        }),
+    );
+    assert_eq!(refused["ok"], json!(true));
+    assert_eq!(refused["outcome_kind"], json!("refused"));
+    assert_eq!(refused["supported"], json!(false));
+    assert_eq!(refused["support"]["root_refusal_kind"], json!("missing_resolution"));
+    assert_eq!(refused["descriptor"]["complete"], json!(true));
+    assert_eq!(refused["analysis_unit"]["admissible"], json!(false));
+    assert_eq!(refused["analysis_unit"]["refusal_kind"], json!("named_failure_mode"));
+
+    let admitted = call(
+        &mut server(),
+        "modality_support_check",
+        json!({
+            "modality": "single_cell",
+            "claim": "cell_composition",
+            "counted_unit": "subject"
+        }),
+    );
+    assert_eq!(admitted["outcome_kind"], json!("supported"));
+    assert_eq!(admitted["supported"], json!(true));
+    assert_eq!(admitted["analysis_unit"]["admissible"], json!(true));
+    assert!(admitted["claim_requirements"]["axes"].is_array());
+    assert!(admitted["descriptor"]["supported_catalogue_claims"].is_array());
 }
 
 #[test]
@@ -4003,12 +4038,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(127));
-    assert_eq!(result["advertised_tool_count"], json!(127));
+    assert_eq!(result["unique_catalog_tools"], json!(128));
+    assert_eq!(result["advertised_tool_count"], json!(128));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(127));
-    assert_eq!(result["schema_quality"]["valid"], json!(127));
+    assert_eq!(result["schema_quality"]["checked"], json!(128));
+    assert_eq!(result["schema_quality"]["valid"], json!(128));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

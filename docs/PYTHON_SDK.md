@@ -543,6 +543,12 @@ invent defaults:
   kinds. A bound literature claim is not parsed as a measurement; only `published_claim_support`
   can be cited through the literature modality. See
   [`docs/LITERATURE_BIND_CHECK.md`](LITERATURE_BIND_CHECK.md).
+- `ModalitySupportCheckArgs` and `modality_support_check(...)` expose the modalities support
+  relation for all assay families. `ModalitySupportCheckReport` keeps claim eligibility separate
+  from analysis-unit independence, preserves wrapper and root refusal kinds, returns claim
+  requirements and resolution states, and accepts a bounded study-specific descriptor. A
+  supported modality is not parsed as statistical or biological truth. See
+  [`docs/MODALITY_SUPPORT_CHECK.md`](MODALITY_SUPPORT_CHECK.md).
 - `HubSearchArgs` and `hub_search(...)` preserve caller-supplied federation, catalog, and exact
   facet query declarations under the server's catalog/release/result bounds. `HubSearchReport`
   types every match, non-empty facet explanation, near miss, trust tier, namespace authority,

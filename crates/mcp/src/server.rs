@@ -121,8 +121,11 @@ use bioprism_metrics::{
     RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
 };
 use bioprism_modalities::{
-    catalog::all as all_modalities, cites as modality_cites, ClaimKind, EvaluationHorizon,
-    EvidenceTier, LiteratureClaim, Modality, Resolution,
+    analysis_unit as modality_analysis_unit, catalog::all as all_modalities,
+    cites as modality_cites, independent_unit as modality_independent_unit,
+    supported_claims as modality_supported_claims, supports_descriptor as modality_supports_descriptor,
+    ClaimKind, EvaluationHorizon, EvidenceTier, LiteratureClaim, Modality, ModalityDescriptor,
+    Resolution,
 };
 use bioprism_mutation::{
     generate as generate_mutations, measure as measure_diversity, standard_suite,
@@ -1202,6 +1205,7 @@ impl Server {
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
+            "modality_support_check" => self.modality_support_check(&arguments),
             "literature_bind_check" => self.literature_bind_check(&arguments),
             "mutation_family" => self.mutation_family(&arguments),
             "prism_minimize" => self.prism_minimize(&arguments),
@@ -2188,6 +2192,157 @@ impl Server {
             "unmechanised_failure_modes": unmechanised,
             "failure_modes_are_not_claims_of_detection": true,
             "modalities": modalities,
+        }))
+    }
+
+    fn modality_support_check(&self, arguments: &Value) -> Result<Value, String> {
+        let modality: Modality = serde_json::from_value(
+            arguments
+                .get("modality")
+                .cloned()
+                .ok_or("modality is required and must be a serialized Modality")?,
+        )
+        .map_err(|error| format!("invalid modality: {error}"))?;
+        let claim: ClaimKind = serde_json::from_value(
+            arguments
+                .get("claim")
+                .cloned()
+                .ok_or("claim is required and must be a serialized ClaimKind")?,
+        )
+        .map_err(|error| format!("invalid modality claim kind: {error}"))?;
+        let descriptor: ModalityDescriptor = match arguments.get("descriptor") {
+            None | Some(Value::Null) => bioprism_modalities::catalog::descriptor(modality),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("invalid modality descriptor: {error}"))?,
+        };
+        if descriptor.modality != modality {
+            return Err(format!(
+                "descriptor modality {:?} does not match requested modality {:?}",
+                descriptor.modality, modality
+            ));
+        }
+        if descriptor.purpose.len() > 100_000 {
+            return Err("modality descriptor purpose exceeds the 100000-byte safety bound".into());
+        }
+        if descriptor.failure_modes().len() > 100 {
+            return Err("modality descriptor exceeds the 100-failure-mode safety bound".into());
+        }
+        if descriptor.caller_supplied_constants().len() > 100 {
+            return Err("modality descriptor exceeds the 100 caller-constant safety bound".into());
+        }
+        let counted_unit: Option<Resolution> = arguments
+            .get("counted_unit")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid counted analysis unit: {error}"))?;
+        let support = modality_supports_descriptor(&descriptor, claim);
+        let support_projection = match &support {
+            Ok(()) => json!({
+                "supported": true,
+                "refusal": Value::Null,
+                "refusal_kind": Value::Null,
+                "root_refusal_kind": Value::Null,
+                "refusal_text": Value::Null,
+            }),
+            Err(refusal) => {
+                let refusal_value = serde_json::to_value(refusal)
+                    .map_err(|error| format!("cannot serialize modality refusal: {error}"))?;
+                let root_value = serde_json::to_value(refusal.root())
+                    .map_err(|error| format!("cannot serialize root modality refusal: {error}"))?;
+                json!({
+                    "supported": false,
+                    "refusal": refusal_value.clone(),
+                    "refusal_kind": refusal_value.get("unsupported").cloned(),
+                    "root_refusal_kind": root_value.get("unsupported").cloned(),
+                    "refusal_text": refusal.to_string(),
+                })
+            }
+        };
+        let analysis_projection = match counted_unit {
+            None => json!({
+                "requested": false,
+                "counted": Value::Null,
+                "independent": modality_independent_unit(&descriptor),
+                "admissible": Value::Null,
+                "refusal": Value::Null,
+                "refusal_kind": Value::Null,
+                "refusal_text": Value::Null,
+            }),
+            Some(counted) => match modality_analysis_unit(&descriptor, counted) {
+                Ok(()) => json!({
+                    "requested": true,
+                    "counted": counted,
+                    "independent": modality_independent_unit(&descriptor),
+                    "admissible": true,
+                    "refusal": Value::Null,
+                    "refusal_kind": Value::Null,
+                    "refusal_text": Value::Null,
+                }),
+                Err(refusal) => {
+                    let refusal_value = serde_json::to_value(&refusal)
+                        .map_err(|error| format!("cannot serialize analysis-unit refusal: {error}"))?;
+                    json!({
+                        "requested": true,
+                        "counted": counted,
+                        "independent": modality_independent_unit(&descriptor),
+                        "admissible": false,
+                        "refusal": refusal_value.clone(),
+                        "refusal_kind": refusal_value.get("unsupported").cloned(),
+                        "refusal_text": refusal.to_string(),
+                    })
+                }
+            },
+        };
+        let requirements = claim.requirements();
+        let resolutions = Resolution::ALL
+            .into_iter()
+            .map(|axis| {
+                json!({
+                    "axis": axis,
+                    "status": descriptor.resolution(axis),
+                })
+            })
+            .collect::<Vec<_>>();
+        let supported_claims = modality_supported_claims(modality)
+            .into_iter()
+            .map(|supported| supported.as_str())
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/modality-support-check/0.1",
+            "outcome_kind": if support.is_ok() { "supported" } else { "refused" },
+            "modality": modality,
+            "claim": claim,
+            "supported": support.is_ok(),
+            "claim_requirements": requirements,
+            "support": support_projection,
+            "analysis_unit": analysis_projection,
+            "descriptor": {
+                "modality": descriptor.modality,
+                "measurand": descriptor.measurand,
+                "design": descriptor.design,
+                "purpose": descriptor.purpose,
+                "complete": descriptor.is_complete(),
+                "resolutions": resolutions,
+                "resolved_axes": descriptor.resolved_axes(),
+                "unresolved_axes": descriptor.unresolved_axes(),
+                "undeclared_axes": descriptor.undeclared_axes(),
+                "caller_supplied_constants": descriptor.caller_supplied_constants(),
+                "failure_modes": descriptor.failure_modes(),
+                "supported_catalogue_claims": supported_claims,
+            },
+            "guarantees": [
+                "measurand, resolution, imputation, and evidence-design checks retain their first typed refusal",
+                "undeclared resolution is not silently treated as unresolved or resolved",
+                "pseudoreplication is audited separately from whether the modality can support the claim",
+                "custom descriptors remain bound to the requested modality and are never merged silently",
+            ],
+            "limitations": [
+                "support means the modality descriptor is structurally eligible; it does not establish truth, power, effect size, or statistical validity",
+                "the catalogue describes general modality contracts; study-specific evidence must be supplied through a custom descriptor",
+                "failure modes marked not mechanised remain visible but are not detected by this check",
+            ],
         }))
     }
 
@@ -17444,7 +17599,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "biological_domains",
             "domains": ["BioIR", "oncology", "modalities", "specimen lineage", "reference worlds"],
             "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
-            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
+            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "modality_support_check", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -17778,6 +17933,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_failure_modes": { "type": "boolean", "description": "Include full blueprint failure-mode statements; defaults to false." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "modality_support_check",
+            "description": "Evaluate whether a biological modality descriptor can support a typed claim, preserving the first measurand, resolution, imputation, or evidence-design refusal. It also audits a caller-supplied analysis unit for pseudoreplication, exposes claim requirements and independent-unit evidence, and accepts a bounded custom descriptor without treating structural eligibility as truth or statistical validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "modality": { "type": "string", "enum": ["epigenomics", "bulk_transcriptomics", "single_cell", "spatial", "proteomics", "metabolomics", "functional_screen", "protein_structure", "pharmacology", "microbiome", "microscopy", "digital_pathology", "clinical_ehr", "trials_and_rwe", "literature", "model_organism", "neuro_oncology_connector"], "description": "Requested Modality enum value." },
+                    "claim": { "type": "string", "enum": ["population_average", "absolute_abundance_change", "cell_identity", "cell_composition", "cell_intrinsic_change", "spatial_localization", "cell_communication", "protein_activity", "flux_rate", "gene_dependency", "causal_effect_of_perturbation", "binding_affinity", "exposure_at_site", "host_mechanism", "subject_level_outcome", "treatment_effect", "temporal_order", "cross_species_equivalence", "published_claim_support", "dataset_content"], "description": "Typed ClaimKind whose modality eligibility is being checked." },
+                    "descriptor": { "type": ["object", "null"], "description": "Optional serialized ModalityDescriptor for a study-specific contract; its modality must match the requested modality. Omit to use the catalogue descriptor." },
+                    "counted_unit": { "type": ["string", "null"], "enum": ["population", "cell", "location", "molecule", "subject", "timepoint", "perturbation", null], "description": "Optional Resolution used as the analysis unit for the independent-unit/pseudoreplication audit." }
+                },
+                "required": ["modality", "claim"]
             }
         }),
         json!({
