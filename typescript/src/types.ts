@@ -1651,6 +1651,126 @@ export interface RegistryLifecycleResult extends JsonObject {
   limitations: string[];
 }
 
+export type CacheReuseRule = "SameBuildOnly" | "AcrossBuilds";
+export type CacheMissName = "no-entry" | "schema-changed" | "cross-build" | "unproven";
+
+export interface CacheInvalidationSimulateArgs extends JsonObject {
+  schema: JsonObject;
+  entries?: JsonValue[];
+  graph?: JsonObject;
+  changed?: string;
+  lookups?: JsonValue[];
+  apply?: boolean;
+  apply_at?: number;
+  reprove?: JsonValue[];
+  max_items?: number;
+}
+
+export interface CacheKeySchemaResult extends JsonObject {
+  name: string;
+  components: string[];
+  reuse: CacheReuseRule;
+}
+
+export interface CacheEntryRowResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  digest?: string;
+  dependencies?: JsonValue;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface CacheEntriesResult extends JsonObject {
+  accepted: number;
+  submitted: number;
+  rows: CacheEntryRowResult[];
+  omitted_rows: number;
+}
+
+export interface CacheGraphResult extends JsonObject {
+  known_resources: string[];
+  known_resource_count: number;
+  opaque_resources: string[];
+  cycle?: string[] | null;
+  cycle_is_a_scheduler_defect_not_an_invalidation_hang: boolean;
+}
+
+export interface CacheUnknownRegionResult extends JsonObject {
+  opaque_resources: string[];
+  unknown_resources: string[];
+  entries_without_declared_dependencies: string[];
+  entries_depending_on_opaque_resources: string[];
+}
+
+export type CacheCompletenessResult = "Complete" | { Partial: CacheUnknownRegionResult };
+
+export interface CacheInvalidationPlanResult extends JsonObject {
+  changed: string;
+  affected_resources: string[];
+  invalid_entries: string[];
+  proved_unaffected: string[];
+  completeness: CacheCompletenessResult;
+  population: number;
+}
+
+export interface CacheApplyResult extends JsonObject {
+  removed: string[];
+  marked_unproven: string[];
+  left_proven: string[];
+  invalidation_was_complete: boolean;
+}
+
+export interface CacheLookupResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  hit?: boolean;
+  value?: JsonValue;
+  proof?: JsonObject;
+  miss_reason?: JsonObject;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface CacheReproveResult extends JsonObject {
+  index: number;
+  ok: boolean;
+  digest?: string;
+  reproved_by?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface CacheSnapshotResult extends JsonObject {
+  entry_count: number;
+  unproven: string[];
+  hits: number;
+  misses_by_reason: { reason: CacheMissName; count: number }[];
+  hit_rate: number;
+  entries: JsonObject[];
+  omitted_entries: number;
+}
+
+export interface CacheInvalidationResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/cache-invalidation/0.1";
+  max_items: number;
+  key_schema: CacheKeySchemaResult;
+  entries: CacheEntriesResult;
+  graph: CacheGraphResult;
+  invalidation: {
+    changed?: string | null;
+    plan?: CacheInvalidationPlanResult | null;
+    apply_requested: boolean;
+    apply_report?: CacheApplyResult | null;
+  };
+  lookups: { pre_apply?: CacheLookupResult[] | null; post_apply: CacheLookupResult[]; omitted_post_apply: number };
+  reprove: CacheReproveResult[];
+  cache: CacheSnapshotResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

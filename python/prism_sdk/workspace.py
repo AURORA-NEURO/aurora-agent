@@ -227,6 +227,7 @@ from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_gene
 from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateArgs, factory_lifecycle_report
 from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateArgs, storage_lifecycle_report
 from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimulateArgs, registry_lifecycle_report
+from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimulateArgs, cache_invalidation_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -420,6 +421,25 @@ class Workspace:
         normalized = RegistryLifecycleSimulateArgs() if request is None else request if isinstance(request, RegistryLifecycleSimulateArgs) else RegistryLifecycleSimulateArgs.from_wire(request)
         result = self.client.call_tool("registry_lifecycle_simulate", normalized.to_mcp_arguments())
         return registry_lifecycle_report(result.require_object())
+
+    def cache_invalidation_simulate(
+        self,
+        request: CacheInvalidationSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan and optionally apply cache invalidation through the MCP authority."""
+
+        normalized = request if isinstance(request, CacheInvalidationSimulateArgs) else CacheInvalidationSimulateArgs.from_wire(request)
+        return self.tool("cache_invalidation_simulate", normalized.to_mcp_arguments())
+
+    def cache_invalidation_simulate_report(
+        self,
+        request: CacheInvalidationSimulateArgs | Mapping[str, Any],
+    ) -> CacheInvalidationReport:
+        """Return typed cache keys, completeness, lookup misses, application, and reproof evidence."""
+
+        normalized = request if isinstance(request, CacheInvalidationSimulateArgs) else CacheInvalidationSimulateArgs.from_wire(request)
+        result = self.client.call_tool("cache_invalidation_simulate", normalized.to_mcp_arguments())
+        return cache_invalidation_report(result.require_object())
 
     def pack_catalogue_report(
         self,
@@ -2244,6 +2264,25 @@ class AsyncWorkspace:
         normalized = RegistryLifecycleSimulateArgs() if request is None else request if isinstance(request, RegistryLifecycleSimulateArgs) else RegistryLifecycleSimulateArgs.from_wire(request)
         result = await self.client.call_tool("registry_lifecycle_simulate", normalized.to_mcp_arguments())
         return registry_lifecycle_report(result.require_object())
+
+    async def cache_invalidation_simulate(
+        self,
+        request: CacheInvalidationSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.cache_invalidation_simulate`."""
+
+        normalized = request if isinstance(request, CacheInvalidationSimulateArgs) else CacheInvalidationSimulateArgs.from_wire(request)
+        return await self.tool("cache_invalidation_simulate", normalized.to_mcp_arguments())
+
+    async def cache_invalidation_simulate_report(
+        self,
+        request: CacheInvalidationSimulateArgs | Mapping[str, Any],
+    ) -> CacheInvalidationReport:
+        """Async typed cache invalidation evidence."""
+
+        normalized = request if isinstance(request, CacheInvalidationSimulateArgs) else CacheInvalidationSimulateArgs.from_wire(request)
+        result = await self.client.call_tool("cache_invalidation_simulate", normalized.to_mcp_arguments())
+        return cache_invalidation_report(result.require_object())
 
     async def pack_catalogue_report(
         self,

@@ -190,6 +190,7 @@ from .world_generation import WorldGenerateArgs, WorldGenerateReport, world_gene
 from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateArgs, factory_lifecycle_report
 from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateArgs, storage_lifecycle_report
 from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimulateArgs, registry_lifecycle_report
+from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimulateArgs, cache_invalidation_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -902,6 +903,23 @@ class ApiClient:
         """Return typed registry lifecycle evidence through the HTTP gateway."""
 
         return registry_lifecycle_report(self.registry_lifecycle_simulate(request))
+
+    def cache_invalidation_simulate(
+        self,
+        request: CacheInvalidationSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan and optionally apply cache invalidation through the HTTP gateway."""
+
+        normalized = request if isinstance(request, CacheInvalidationSimulateArgs) else CacheInvalidationSimulateArgs.from_wire(request)
+        return self.call_tool("cache_invalidation_simulate", normalized.to_mcp_arguments())
+
+    def cache_invalidation_simulate_report(
+        self,
+        request: CacheInvalidationSimulateArgs | Mapping[str, Any],
+    ) -> CacheInvalidationReport:
+        """Return typed cache invalidation evidence through the HTTP gateway."""
+
+        return cache_invalidation_report(self.cache_invalidation_simulate(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2728,6 +2746,23 @@ class AsyncApiClient:
         """Return async typed registry lifecycle evidence."""
 
         return registry_lifecycle_report(await self.registry_lifecycle_simulate(request))
+
+    async def cache_invalidation_simulate(
+        self,
+        request: CacheInvalidationSimulateArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async cache invalidation planning through the HTTP gateway."""
+
+        normalized = request if isinstance(request, CacheInvalidationSimulateArgs) else CacheInvalidationSimulateArgs.from_wire(request)
+        return await self.call_tool("cache_invalidation_simulate", normalized.to_mcp_arguments())
+
+    async def cache_invalidation_simulate_report(
+        self,
+        request: CacheInvalidationSimulateArgs | Mapping[str, Any],
+    ) -> CacheInvalidationReport:
+        """Return async typed cache invalidation evidence."""
+
+        return cache_invalidation_report(await self.cache_invalidation_simulate(request))
 
     async def developer_delivery_audit_report(
         self,

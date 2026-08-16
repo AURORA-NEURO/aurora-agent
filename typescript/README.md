@@ -39,7 +39,7 @@ if (result.mcp.result?.isError) {
   `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
   `runtimeExecutionSimulate`, `packCatalogue`, `packHealthAssess`, `securityRedteamSimulate`, and
   `worldGenerate`, `factoryLifecycleSimulate`, `storageLifecycleSimulate`, and
-  `registryLifecycleSimulate`
+  `registryLifecycleSimulate`, and `cacheInvalidationSimulate`
   cover the highest-value
   cross-domain workflows without pretending
   to type every domain payload twice. Repository helpers keep catalog, route traversal, and
@@ -65,6 +65,9 @@ if (result.mcp.result?.isError) {
 - `registryLifecycleSimulate` keeps pack preflight, serialized-index integrity, append-only action
   rows, final verification, and continuation state typed without pretending the Fetch client is a
   signed or networked package registry.
+- `cacheInvalidationSimulate` keeps component-complete keys, dependency opacity, partial plans,
+  explicit apply state, hit proofs, reasoned misses, unproven entries, and attributed reproofs typed
+  without pretending the Fetch client is a cache scheduler.
 - `toolCatalogue()` snapshots the live `/v1/tools` definitions into a bounded SHA-256 catalogue;
   `planTool()` performs conservative JSON-shape preflight without a POST; and `toolChecked()`
   executes the reviewed call while preserving the raw refusal envelope. This covers every current

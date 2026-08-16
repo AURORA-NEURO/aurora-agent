@@ -481,6 +481,10 @@ class attribution remain inspectable without moving bytes or creating a schedule
 attested pack preflight, serialized-index integrity, publish/promote/reassess/supersede/withdraw,
 lookup/history/revision/verification actions, append-only log state, and continuation indexes are
 typed while invalid packs and failed operations remain independent fail-closed rows.
+`cache_invalidation_simulate` adds the corresponding reproducibility boundary: component-complete
+key schemas, cross-build policy, declared versus opaque dependency graphs, complete versus partial
+invalidation, explicit dry-run/application state, reasoned pre/post misses, unproven entries, and
+attributed reproofs are typed without serving an entry whose currentness cannot be proved.
 `runtime_execution_simulate` runs bounded serialized effect programs against the deterministic
 in-process world, returns policy and budget evidence, proves complete replay, and can open a forked
 suffix with observable state and divergence comparison. The Python and TypeScript SDKs expose typed

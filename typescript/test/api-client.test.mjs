@@ -291,6 +291,25 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["failed actions are typed refusals and do not abort independent later actions"],
         limitations: ["this is a local deterministic registry projection; it does not provide network transport, signatures, federation, moderation, quarantine, or authentication"],
       } } } });
+      if (path === "/v1/tools/cache_invalidation_simulate") return jsonResponse({ ok: true, tool: "cache_invalidation_simulate", request_id: "r28", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/cache-invalidation/0.1",
+        max_items: 100,
+        key_schema: { name: "decision-cache", components: ["code", "input"], reuse: "SameBuildOnly" },
+        entries: { accepted: 1, submitted: 1, rows: [{ index: 0, ok: true, digest: "d-unproven", dependencies: "Undeclared" }], omitted_rows: 0 },
+        graph: { known_resources: ["input"], known_resource_count: 1, opaque_resources: ["input"], cycle: null, cycle_is_a_scheduler_defect_not_an_invalidation_hang: false },
+        invalidation: {
+          changed: "input",
+          plan: { changed: "input", affected_resources: ["input"], invalid_entries: [], proved_unaffected: [], completeness: { Partial: { opaque_resources: [], unknown_resources: [], entries_without_declared_dependencies: ["d-unproven"], entries_depending_on_opaque_resources: [] } }, population: 1 },
+          apply_requested: true,
+          apply_report: { removed: [], marked_unproven: ["d-unproven"], left_proven: [], invalidation_was_complete: false },
+        },
+        lookups: { pre_apply: [{ index: 0, ok: true, hit: true, value: { answer: "legacy" } }], post_apply: [{ index: 0, ok: true, hit: false, miss_reason: { UnprovenAfterPartialInvalidation: { since: 2, cause: "partial" } } }], omitted_post_apply: 0 },
+        reprove: [],
+        cache: { entry_count: 1, unproven: ["d-unproven"], hits: 1, misses_by_reason: [{ reason: "unproven", count: 1 }], hit_rate: 0.5, entries: [], omitted_entries: 1 },
+        guarantees: ["cache keys are rebuilt from every declared component and never from a bare digest", "partial invalidation marks unknown entries unproven rather than serving them optimistically", "re-proving names the digest and build that re-established currentness"],
+        limitations: ["the cache and dependency graph are in-memory projections; no durable index, tenant isolation, eviction worker, or external invalidation feed is created"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -793,6 +812,17 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(registry.mcp.result.structuredContent.actions[0].fail_closed, true);
   assert.equal(registry.mcp.result.structuredContent.actions[2].result.clean, true);
   assert.equal(Object.hasOwn(registry.mcp.result.structuredContent, "registry"), true);
+  const cache = await client.cacheInvalidationSimulate({
+    schema: { name: "decision-cache", components: ["input", "code"], reuse: "same_build_only" },
+    entries: [{ components: { input: "world@2", code: "build-a" }, produced_by: "build-a", written_at: 1, dependencies: "undeclared" }],
+    graph: { opaque: ["input"] },
+    changed: "input",
+    apply: true,
+    apply_at: 2,
+  });
+  assert.equal(cache.mcp.result.structuredContent.invalidation.plan.completeness.Partial.entries_without_declared_dependencies[0], "d-unproven");
+  assert.equal(cache.mcp.result.structuredContent.invalidation.apply_report.invalidation_was_complete, false);
+  assert.equal(cache.mcp.result.structuredContent.lookups.post_apply[0].miss_reason.UnprovenAfterPartialInvalidation.since, 2);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

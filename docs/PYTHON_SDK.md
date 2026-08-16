@@ -427,6 +427,14 @@ invent defaults:
   returned serialized index remains explicit continuation state rather than an implicit durable
   registry, and the report preserves the nonclaims about signatures, identity, federation,
   moderation, authentication, and network transport.
+- `CacheInvalidationSimulateArgs` and `cache_invalidation_report(...)` type the deterministic cache
+  invalidation workflow across sync MCP, async MCP, and HTTP. `CacheKeySchemaReport` preserves the
+  declared component set and reuse rule; `CacheGraphReport` and `CacheCompletenessReport` retain
+  opaque/unknown regions; `CacheInvalidationPlanReport` distinguishes invalid, proved-unaffected,
+  and unproven entries; `CacheLookupReport` keeps hits, cross-build/schema/unproven/cold misses,
+  proofs, and fail-closed lookup refusals separate; and `CacheApplyReport`/`CacheReproveReport`
+  preserve explicit mutation and attributed restoration. The request envelope mirrors the Rust
+  bounds and never turns a partial invalidation into a clean result or a missing value into zero.
 - `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
   across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit

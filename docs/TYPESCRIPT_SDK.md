@@ -220,6 +220,12 @@ interfaces keep pack preflight validity, initial/final integrity, action-level r
 verification results, append-only log events, and the optional continuation index separate. It is
 an in-memory local registry projection; typed transport evidence does not imply signatures,
 publisher identity, federation, moderation, authentication, or network publication.
+`cacheInvalidationSimulate` accepts a key schema, cache entries, a dependency graph, an optional
+changed resource, lookups, explicit apply epoch, and reproof rows, returning
+`CacheInvalidationResult`. The types keep complete versus partial invalidation, unknown regions,
+removed versus marked-unproven entries, miss-reason variants, hit proofs, and post-reproof state
+visible. The client does not infer dependencies, run a scheduler, or silently serve an unproven
+cache entry.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

@@ -134,6 +134,8 @@ import type {
   StorageLifecycleResult,
   RegistryLifecycleSimulateArgs,
   RegistryLifecycleResult,
+  CacheInvalidationSimulateArgs,
+  CacheInvalidationResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -432,6 +434,10 @@ export class ApiClient {
 
   async registryLifecycleSimulate(args: RegistryLifecycleSimulateArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<RegistryLifecycleResult>> {
     return this.callTool<RegistryLifecycleResult>("registry_lifecycle_simulate", args, options);
+  }
+
+  async cacheInvalidationSimulate(args: CacheInvalidationSimulateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CacheInvalidationResult>> {
+    return this.callTool<CacheInvalidationResult>("cache_invalidation_simulate", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {
