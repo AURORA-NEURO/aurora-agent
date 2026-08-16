@@ -9108,6 +9108,7 @@ impl Server {
             .map(ReferenceDistribution::modal_confidence);
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/bioeval-reference-audit/0.1",
             "reference": reference,
             "reference_kind": reference_kind,
             "can_certify_clean_pass": can_certify_clean_pass,

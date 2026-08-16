@@ -5163,6 +5163,7 @@ fn bioeval_reference_audit_validates_mass_and_preserves_distributed_truth() {
         }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-reference-audit/0.1"));
     assert_eq!(result["reference_kind"], json!("distribution"));
     assert_eq!(result["can_certify_clean_pass"], json!(false));
     assert_eq!(result["modal_state"], json!("progression"));

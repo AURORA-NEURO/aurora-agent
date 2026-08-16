@@ -379,8 +379,11 @@ admissibility, suppressed overrides, disagreement source/settlement/resolution, 
 withheld ledgers, and nullable deciding/confidence evidence. See
 [`docs/ORACLE_COMBINE.md`](../docs/ORACLE_COMBINE.md). `oracleReferencePanel` and
 `oracleMissingness` preserve reader splits, blinding posture, complete-case admissibility, and
-aggregate egress boundaries. `bioevalReferenceAudit` keeps distributed reference mass separate
-from modal summaries; `evaluationWorldlineAudit` reconciles leakage and dangling references;
+aggregate egress boundaries. `bioevalReferenceAudit` keeps the typed
+distribution/unresolved/not-evaluable reference union, mass, resolution, dispersion attribution,
+and modal summaries separate; see
+[`docs/BIOEVAL_REFERENCE_AUDIT.md`](../docs/BIOEVAL_REFERENCE_AUDIT.md).
+`evaluationWorldlineAudit` reconciles leakage and dangling references;
 `evaluationReproductionCheck` keeps reproducibility separate from biological validity; and
 `evaluationTrajectoryCheck` exposes non-vacuous property outcomes and bounded suffix completeness.
 The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and

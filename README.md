@@ -555,7 +555,9 @@ identities, admissibility, settlement routes, and resolution state. See
 [`docs/ORACLE_COMBINE.md`](docs/ORACLE_COMBINE.md).
 `bioeval_reference_audit` validates reference mass normalization and reports distributed truth,
 modal confidence, entropy, dispersion attribution, unresolved scope, and not-evaluable scope
-without treating an omitted state as zero or collapsing the reference to a label.
+without treating an omitted state as zero or collapsing the reference to a label; the SDKs preserve
+the typed reference, resolution, and dispersion layers. See
+[`docs/BIOEVAL_REFERENCE_AUDIT.md`](docs/BIOEVAL_REFERENCE_AUDIT.md).
 `evaluation_worldline_audit` separates future leakage from dangling context references,
 `evaluation_reproduction_check` certifies rerun outputs without promoting reproducibility to
 biological validity, and `evaluation_trajectory_check` evaluates declared path properties with

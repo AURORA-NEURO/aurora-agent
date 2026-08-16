@@ -483,6 +483,83 @@ class OracleMissingnessReport:
 
 
 @dataclass(frozen=True)
+class BioevalReferenceProjection:
+    """Reference shape: a distribution, unresolved scope, or not-evaluable scope."""
+
+    raw: dict[str, Any]
+    standard: str
+    mass: dict[str, float]
+    dispersion: dict[str, Any] | str | None
+    reason: str | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "BioevalReferenceProjection":
+        raw = _route_mapping("bioeval reference projection", value)
+        standard = _route_text("bioeval reference standard", raw.get("standard"))
+        if standard not in {"distribution", "unresolved", "not_evaluable"}:
+            raise ArgumentError(f"unknown bioeval reference standard: {standard!r}")
+        mass: dict[str, float] = {}
+        mass_raw = raw.get("mass", {})
+        if standard == "distribution":
+            for state, value_item in _route_mapping("bioeval reference mass", mass_raw).items():
+                mass[_route_text("bioeval reference state", state)] = _finite("bioeval reference mass", value_item)
+        elif mass_raw not in ({}, None):
+            raise ArgumentError("non-distribution references must not carry a mass map")
+        reason = _optional_text("bioeval reference reason", raw.get("reason"))
+        if standard != "distribution" and reason is None:
+            raise ArgumentError("unresolved and not-evaluable references require a reason")
+        dispersion = raw.get("dispersion")
+        if dispersion is not None and not isinstance(dispersion, (str, Mapping)):
+            raise ArgumentError("bioeval reference dispersion must be a string or object")
+        return cls(raw, standard, mass, None if dispersion is None else (dict(dispersion) if isinstance(dispersion, Mapping) else dispersion), reason)
+
+
+@dataclass(frozen=True)
+class BioevalResolutionProjection:
+    raw: dict[str, Any]
+    kind: str
+    modal_mass: float | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "BioevalResolutionProjection":
+        raw = _route_mapping("bioeval reference resolution", value)
+        kind = _route_text("bioeval reference resolution kind", raw.get("resolution"))
+        if kind not in {"categorical", "distributed"}:
+            raise ArgumentError(f"unknown bioeval reference resolution: {kind!r}")
+        modal_mass = _optional_finite("bioeval resolution modal mass", raw.get("modal_mass"))
+        if kind == "categorical" and modal_mass is not None and not math.isclose(modal_mass, 1.0):
+            raise ArgumentError("categorical bioeval resolution must have modal_mass 1 when present")
+        return cls(raw, kind, modal_mass)
+
+
+@dataclass(frozen=True)
+class BioevalDispersionProjection:
+    raw: Any
+    kind: str
+    aleatoric_fraction: float | None
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "BioevalDispersionProjection":
+        if isinstance(value, str):
+            raw = value
+            kind = value
+            fraction = None
+        else:
+            raw = _route_mapping("bioeval dispersion", value)
+            kind = _route_text("bioeval dispersion kind", raw.get("kind"))
+            fraction = _optional_finite("bioeval aleatoric fraction", raw.get("aleatoric_fraction"))
+        if kind not in {"aleatoric", "annotation_error", "mixed", "unattributed"}:
+            raise ArgumentError(f"unknown bioeval dispersion: {kind!r}")
+        if kind == "mixed" and fraction is not None and not 0.0 <= fraction <= 1.0:
+            raise ArgumentError("mixed bioeval dispersion fraction must be in [0,1]")
+        return cls(raw, kind, fraction)
+
+    @property
+    def attributed(self) -> bool:
+        return self.kind != "unattributed"
+
+
+@dataclass(frozen=True)
 class BioevalReferenceAuditReport:
     raw: dict[str, Any]
     ok: bool
@@ -499,29 +576,50 @@ class BioevalReferenceAuditReport:
     queried_state_mass: float | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    reference_record: BioevalReferenceProjection | None = None
+    resolution_record: BioevalResolutionProjection | None = None
+    dispersion_record: BioevalDispersionProjection | None = None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "BioevalReferenceAuditReport":
         raw = _projection_payload(value, description="bioeval reference audit", direct_keys=("reference_kind", "reference"))
         if not _bool("bioeval reference ok", raw.get("ok")):
             raise ArgumentError("bioeval reference audit is not successful")
+        reference = _route_mapping("bioeval reference", raw.get("reference"))
+        resolution = _optional_mapping("bioeval resolution", raw.get("resolution"))
+        dispersion = raw.get("dispersion")
         return cls(
             raw,
             True,
-            _route_mapping("bioeval reference", raw.get("reference")),
+            reference,
             _route_text("bioeval reference_kind", raw.get("reference_kind")),
             _bool("bioeval can_certify_clean_pass", raw.get("can_certify_clean_pass")),
-            _optional_mapping("bioeval resolution", raw.get("resolution")),
+            resolution,
             None if raw.get("modal_state") is None else _route_text("bioeval modal_state", raw.get("modal_state")),
             _optional_finite("bioeval modal_mass", raw.get("modal_mass")),
             _optional_finite("bioeval modal_confidence", raw.get("modal_confidence")),
             _optional_finite("bioeval entropy_bits", raw.get("entropy_bits")),
-            None if raw.get("dispersion") is None else _route_text("bioeval dispersion", raw.get("dispersion")),
+            None if dispersion is None else (_route_text("bioeval dispersion", dispersion) if isinstance(dispersion, str) else None),
             None if raw.get("queried_state") is None else _route_text("bioeval queried_state", raw.get("queried_state")),
             _optional_finite("bioeval queried_state_mass", raw.get("queried_state_mass")),
             _route_strings("bioeval reference guarantees", raw.get("guarantees")),
             _route_strings("bioeval reference limitations", raw.get("limitations")),
+            BioevalReferenceProjection.from_wire(reference),
+            None if resolution is None else BioevalResolutionProjection.from_wire(resolution),
+            None if dispersion is None else BioevalDispersionProjection.from_wire(dispersion),
         )
+
+    @property
+    def is_distributed(self) -> bool:
+        return self.reference_record is not None and self.reference_record.standard == "distribution" and self.resolution_record is not None and self.resolution_record.kind == "distributed"
+
+    @property
+    def reference_is_actionable(self) -> bool:
+        return self.ok and self.can_certify_clean_pass
+
+    @property
+    def has_unattributed_dispersion(self) -> bool:
+        return self.dispersion_record is not None and not self.dispersion_record.attributed
 
 
 @dataclass(frozen=True)

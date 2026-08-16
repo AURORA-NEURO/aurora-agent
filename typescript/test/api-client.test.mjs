@@ -750,7 +750,17 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       } } } });
       if (path === "/v1/tools/oracle_reference_panel") return jsonResponse({ ok: true, tool: "oracle_reference_panel", request_id: "r38", mcp: { result: { structuredContent: { ok: true, rule_label: "majority", readers: 2, omitted_reads: 0 } } } });
       if (path === "/v1/tools/oracle_missingness") return jsonResponse({ ok: true, tool: "oracle_missingness", request_id: "r39", mcp: { result: { structuredContent: { ok: true, small_cell_floor: 5 } } } });
-      if (path === "/v1/tools/bioeval_reference_audit") return jsonResponse({ ok: true, tool: "bioeval_reference_audit", request_id: "r40", mcp: { result: { structuredContent: { ok: true, reference_kind: "distribution", can_certify_clean_pass: false } } } });
+      if (path === "/v1/tools/bioeval_reference_audit") return jsonResponse({ ok: true, tool: "bioeval_reference_audit", request_id: "r40", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/bioeval-reference-audit/0.1",
+        reference: { standard: "distribution", mass: { progression: 0.6, stable: 0.4 }, dispersion: { kind: "mixed", aleatoric_fraction: 0.5 } },
+        reference_kind: "distribution",
+        can_certify_clean_pass: false,
+        resolution: { resolution: "distributed", modal_mass: 0.6 },
+        modal_state: "progression", modal_mass: 0.6, modal_confidence: 0.6, entropy_bits: 0.97,
+        dispersion: "mixed", queried_state: "progression", queried_state_mass: 0.6,
+        guarantees: ["mass normalized"], limitations: ["not a scorer"],
+      } } } });
       if (path === "/v1/tools/evaluation_worldline_audit") return jsonResponse({ ok: true, tool: "evaluation_worldline_audit", request_id: "r41", mcp: { result: { structuredContent: { ok: true, leak_count: 1, dangling_count: 0 } } } });
       if (path === "/v1/tools/evaluation_reproduction_check") return jsonResponse({ ok: true, tool: "evaluation_reproduction_check", request_id: "r42", mcp: { result: { structuredContent: { ok: true, reproduced: false, portability_demonstrated: false } } } });
       if (path === "/v1/tools/evaluation_trajectory_check") return jsonResponse({ ok: true, tool: "evaluation_trajectory_check", request_id: "r43", mcp: { result: { structuredContent: { ok: true, steps: 1 } } } });
@@ -1176,6 +1186,9 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(oraclePanel.mcp.result.structuredContent.rule_label, "majority");
   assert.equal(oracleMissingness.mcp.result.structuredContent.small_cell_floor, 5);
   assert.equal(referenceAudit.mcp.result.structuredContent.reference_kind, "distribution");
+  assert.equal(referenceAudit.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-reference-audit/0.1");
+  assert.equal(referenceAudit.mcp.result.structuredContent.reference.mass.progression, 0.6);
+  assert.equal(referenceAudit.mcp.result.structuredContent.resolution.resolution, "distributed");
   assert.equal(evaluationWorldline.mcp.result.structuredContent.leak_count, 1);
   assert.equal(reproduction.mcp.result.structuredContent.reproduced, false);
   assert.equal(trajectory.mcp.result.structuredContent.steps, 1);

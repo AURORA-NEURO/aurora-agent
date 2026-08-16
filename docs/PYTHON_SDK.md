@@ -789,7 +789,10 @@ bounded trajectory properties. `OracleCombineReport` additionally types returned
 identities, effective/declarative tiers, positions, admissibility, findings, suppressed override
 rules, disagreement sources/settlement routes/resolution, and the confidence envelope; its raw
 rows remain available. The same projections are available on `Workspace`, `AsyncWorkspace`,
-`ApiClient`, and `AsyncApiClient`. See [`docs/ORACLE_COMBINE.md`](ORACLE_COMBINE.md).
+`ApiClient`, and `AsyncApiClient`. `BioevalReferenceAuditReport` additionally types distributed
+mass, resolution, dispersion attribution, and unresolved/not-evaluable reference states. See
+[`docs/ORACLE_COMBINE.md`](ORACLE_COMBINE.md) and
+[`docs/BIOEVAL_REFERENCE_AUDIT.md`](BIOEVAL_REFERENCE_AUDIT.md).
 
 ## Biological stress profiling
 

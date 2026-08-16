@@ -4205,17 +4205,29 @@ export interface BioevalReferenceAuditArgs extends JsonObject {
   state?: string;
 }
 
+export interface BioevalReferenceResult extends JsonObject {
+  standard: "distribution" | "unresolved" | "not_evaluable";
+  mass?: Record<string, number>;
+  dispersion?: JsonObject;
+  reason?: string;
+}
+
+export type BioevalResolutionResult =
+  | { resolution: "categorical" }
+  | { resolution: "distributed"; modal_mass: number };
+
 export interface BioevalReferenceAuditResult extends JsonObject {
   ok: boolean;
-  reference?: JsonObject;
+  schema?: "bioprism-mcp/bioeval-reference-audit/0.1";
+  reference?: BioevalReferenceResult;
   reference_kind?: string;
   can_certify_clean_pass?: boolean;
-  resolution?: JsonObject | null;
+  resolution?: BioevalResolutionResult | null;
   modal_state?: string | null;
   modal_mass?: number | null;
   modal_confidence?: number | null;
   entropy_bits?: number | null;
-  dispersion?: string | null;
+  dispersion?: "aleatoric" | "annotation_error" | "mixed" | "unattributed" | null;
   queried_state?: string | null;
   queried_state_mass?: number | null;
   guarantees?: string[];

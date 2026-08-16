@@ -103,6 +103,10 @@ class EvaluationReportTests(unittest.TestCase):
         self.assertIsInstance(report, BioevalReferenceAuditReport)
         self.assertEqual(report.modal_state, "progression")
         self.assertAlmostEqual(report.queried_state_mass, 0.6)
+        self.assertTrue(report.is_distributed)
+        self.assertEqual(report.reference_record.mass["progression"], 0.6)
+        self.assertEqual(report.dispersion_record.kind, "mixed")
+        self.assertFalse(report.reference_is_actionable)
 
     def test_evaluation_reports_reconcile_leakage_reproduction_and_trajectory(self) -> None:
         worldline = evaluation_worldline_audit_report({
