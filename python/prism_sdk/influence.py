@@ -391,4 +391,3 @@ class InfluenceAnalysisReport:
 
 def influence_analysis_report(value: Mapping[str, Any]) -> InfluenceAnalysisReport:
     return InfluenceAnalysisReport.from_wire(value)
-
