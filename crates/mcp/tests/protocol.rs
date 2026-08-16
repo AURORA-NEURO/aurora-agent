@@ -314,7 +314,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 144);
+    assert_eq!(tools.len(), 145);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4145,12 +4145,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(144));
-    assert_eq!(result["advertised_tool_count"], json!(144));
+    assert_eq!(result["unique_catalog_tools"], json!(145));
+    assert_eq!(result["advertised_tool_count"], json!(145));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(144));
-    assert_eq!(result["schema_quality"]["valid"], json!(144));
+    assert_eq!(result["schema_quality"]["checked"], json!(145));
+    assert_eq!(result["schema_quality"]["valid"], json!(145));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5544,6 +5544,70 @@ fn lab_holdout_audit_never_mints_clean_scores_after_selection_and_rollback() {
     assert_eq!(result["operations"][5]["result"], json!("measurement_refused"));
     assert!(result["holdouts"][0]["exposure"].as_array().unwrap().len() >= 3);
     assert_eq!(result["holdouts"][0]["retired"], json!(false));
+}
+
+#[test]
+fn lab_space_audit_preserves_lineage_diffs_and_fail_closed_candidate_validation() {
+    let v1 = CandidateArchitecture::new("v1")
+        .with_component(ComponentSpec::new("select", ComponentKind::ContextSelector))
+        .with_component(ComponentSpec::new("run", ComponentKind::Executor))
+        .with_component(ComponentSpec::new("stop", ComponentKind::Terminator));
+    let v2 = CandidateArchitecture::new("v2")
+        .derived_from("v1")
+        .costing(2)
+        .with_component(ComponentSpec::new("select", ComponentKind::ContextSelector))
+        .with_component(ComponentSpec::new("run", ComponentKind::Executor))
+        .with_component(ComponentSpec::new("stop", ComponentKind::Terminator));
+    let result = call(
+        &mut server(),
+        "lab_space_audit",
+        json!({
+            "cost_ceiling": 10,
+            "candidates": [serde_json::to_value(&v1).unwrap(), serde_json::to_value(&v2).unwrap()],
+            "inspect": ["v2"],
+            "comparisons": [{"before": "v1", "after": "v2"}],
+            "include_components": true,
+            "max_rows": 1
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/lab-space-audit/0.1"));
+    assert_eq!(result["registered_count"], json!(2));
+    assert_eq!(result["candidate_rows_omitted"], json!(1));
+    assert_eq!(result["inspection_rows"][0]["lineage"], json!(["v2", "v1"]));
+    assert_eq!(result["inspection_rows"][0]["root"], json!("v1"));
+    assert_eq!(result["comparison_rows"][0]["derived_relation"], json!(true));
+    assert!(result["comparison_rows"][0]["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|change| change.as_str().unwrap().contains("cost_units 0 -> 2")));
+    assert_eq!(result["comparison_rows"][0]["change_count"], json!(1));
+
+    let invalid = call(
+        &mut server(),
+        "lab_space_audit",
+        json!({
+            "cost_ceiling": 10,
+            "candidates": [{
+                "id": "unsafe",
+                "components": [
+                    {"id": "select", "kind": "context_selector"},
+                    {"id": "run", "kind": "executor"},
+                    {"id": "stop", "kind": "terminator"}
+                ],
+                "cost_units": 0,
+                "touches_protected": ["benchmark_splits"]
+            }]
+        }),
+    );
+    assert_eq!(invalid["__isError"], json!(false));
+    assert_eq!(invalid["ok"], json!(false));
+    assert_eq!(invalid["stage"], json!("candidate_validation"));
+    assert_eq!(invalid["fail_closed"], json!(true));
+    assert_eq!(invalid["space_committed"], json!(false));
+    assert_eq!(invalid["candidate_rows"][0]["registration"], json!("not_attempted"));
 }
 
 #[test]

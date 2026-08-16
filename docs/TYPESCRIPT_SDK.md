@@ -469,6 +469,11 @@ kernel-minted clean before/after evidence, contaminated cards, clean non-improve
 fail-closed architecture/completeness/card refusals while retaining bounded measurement rows,
 claim obligations, direction, rollback, and defeater context. See
 [`docs/LAB_EVOLUTION_AUDIT.md`](../docs/LAB_EVOLUTION_AUDIT.md).
+`labSpaceAudit` validates the immutable architecture registry before experiments: required kinds,
+acyclic graph and dangling-edge checks, protected surfaces, parent lineage, deterministic bundle
+diffs, and separately bounded inspection/comparison rows remain explicit. A valid space is
+structural admissibility, not execution or performance evidence. See
+[`docs/LAB_SPACE_AUDIT.md`](../docs/LAB_SPACE_AUDIT.md).
 `providerCapabilityGate` preserves untested/failed/passed provider states, conjunctive gate
 outcomes, measurement counts, reproducible run evidence, and indeterminate cross-provider drift;
 performance observations remain measurements rather than invented pass/fail claims.

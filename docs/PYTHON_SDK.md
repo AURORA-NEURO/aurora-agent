@@ -241,6 +241,11 @@ invent defaults:
   cards, non-improvements remain `claim_refused`, and architecture/completeness/card failures
   remain fail-closed with stages and omission-aware measurement rows. See
   [`docs/LAB_EVOLUTION_AUDIT.md`](LAB_EVOLUTION_AUDIT.md).
+- `LabSpaceAuditArgs` / `lab_space_audit_report(...)` validate immutable architecture bundles,
+  parent lineage, required component kinds, graph integrity, protected surfaces, and cost before
+  holdout work begins. The typed report separately reconciles candidate, inspection, and component
+  diff rows; failed registration never becomes a usable partial space. See
+  [`docs/LAB_SPACE_AUDIT.md`](LAB_SPACE_AUDIT.md).
 - `OncoBoundaryArgs` and `onco_boundary_report(...)` preserve oncology's partial-release contract:
   aggregate research uses can remain released while individual clinical uses are refused and
   escalated, and direct-identifier refusals remain fail-closed without echoing request data. The

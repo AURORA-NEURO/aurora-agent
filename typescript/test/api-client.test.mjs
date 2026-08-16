@@ -2456,6 +2456,47 @@ test("client exposes evolution claim gating and retained measurement rows", asyn
   assert.equal(result.mcp.result.structuredContent.measurement_rows_omitted, 1);
 });
 
+test("client exposes immutable architecture lineage and component diffs", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/lab_space_audit");
+      return jsonResponse({ ok: true, tool: "lab_space_audit", request_id: "space-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/lab-space-audit/0.1",
+        cost_ceiling: 10,
+        candidate_count: 2,
+        registered_count: 2,
+        space_committed: true,
+        space: { registered_ids: ["v1", "v2"], root_ids: ["v1"], lineage_depth_max: 2 },
+        candidate_rows: [{ index: 0, registration: "registered" }],
+        candidate_rows_omitted: 1,
+        inspection_count: 1,
+        inspection_rows: [{ configuration: "v2", lineage: ["v2", "v1"] }],
+        inspection_rows_omitted: 0,
+        comparison_count: 1,
+        comparison_rows: [{ before: "v1", after: "v2", changes: ["cost_units 0 -> 2"] }],
+        comparison_rows_omitted: 0,
+        max_rows: 1,
+        guarantees: ["immutable registry"],
+        limitations: ["no execution"],
+      } } } });
+    },
+  });
+  const result = await client.labSpaceAudit({
+    cost_ceiling: 10,
+    candidates: [{ id: "v1" }, { id: "v2", derived_from: "v1" }],
+    inspect: ["v2"],
+    comparisons: [{ before: "v1", after: "v2" }],
+    include_components: true,
+    max_rows: 1,
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/lab-space-audit/0.1");
+  assert.equal(result.mcp.result.structuredContent.space_committed, true);
+  assert.deepEqual(result.mcp.result.structuredContent.inspection_rows[0].lineage, ["v2", "v1"]);
+  assert.equal(result.mcp.result.structuredContent.comparison_rows[0].after, "v2");
+});
+
 test("client exposes provider gate states and differential indeterminacy", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

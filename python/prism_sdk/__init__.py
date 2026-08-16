@@ -408,6 +408,17 @@ from .lab_evolution import (
     LabEvolutionAuditReport,
     lab_evolution_audit_report,
 )
+from .lab_space import (
+    LAB_SPACE_SCHEMA,
+    MAX_LAB_SPACE_CANDIDATES,
+    MAX_LAB_SPACE_COMPARISONS,
+    MAX_LAB_SPACE_INPUT_BYTES,
+    MAX_LAB_SPACE_INSPECT,
+    MAX_LAB_SPACE_ROWS,
+    LabSpaceAuditArgs,
+    LabSpaceAuditReport,
+    lab_space_audit_report,
+)
 from .provider import (
     CHECK_NAMES,
     PASS_FAIL_CHECKS,
@@ -1571,6 +1582,15 @@ __all__ = [
     "LabEvolutionAuditArgs",
     "LabEvolutionAuditReport",
     "lab_evolution_audit_report",
+    "LAB_SPACE_SCHEMA",
+    "MAX_LAB_SPACE_CANDIDATES",
+    "MAX_LAB_SPACE_INSPECT",
+    "MAX_LAB_SPACE_COMPARISONS",
+    "MAX_LAB_SPACE_ROWS",
+    "MAX_LAB_SPACE_INPUT_BYTES",
+    "LabSpaceAuditArgs",
+    "LabSpaceAuditReport",
+    "lab_space_audit_report",
     "WorldClaimCheckRequest",
     "MAX_DOMAIN_REQUEST_BYTES",
     "MAX_LAB_ACTIONS",

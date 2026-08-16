@@ -110,6 +110,8 @@ import type {
   LabHoldoutAuditResult,
   LabEvolutionAuditArgs,
   LabEvolutionAuditResult,
+  LabSpaceAuditArgs,
+  LabSpaceAuditResult,
   ProviderCapabilityGateArgs,
   ProviderCapabilityGateResult,
   SdkRegistryCheckArgs,
@@ -782,6 +784,10 @@ export class ApiClient {
 
   async labEvolutionAudit(args: LabEvolutionAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LabEvolutionAuditResult>> {
     return this.callTool<LabEvolutionAuditResult>("lab_evolution_audit", args, options);
+  }
+
+  async labSpaceAudit(args: LabSpaceAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<LabSpaceAuditResult>> {
+    return this.callTool<LabSpaceAuditResult>("lab_space_audit", args, options);
   }
 
   async providerCapabilityGate(args: ProviderCapabilityGateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ProviderCapabilityGateResult>> {

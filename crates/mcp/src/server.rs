@@ -1280,6 +1280,7 @@ impl Server {
             "lab_branch_audit" => self.lab_branch_audit(&arguments),
             "lab_holdout_audit" => self.lab_holdout_audit(&arguments),
             "lab_evolution_audit" => self.lab_evolution_audit(&arguments),
+            "lab_space_audit" => self.lab_space_audit(&arguments),
             "obligation_gate_check" => self.obligation_gate_check(&arguments),
             "lens_catalogue" => Ok(json!({
                 "ok": true,
@@ -6917,6 +6918,325 @@ impl Server {
                 "hypothesis generation, posterior probabilities, confidence intervals, and execution scheduling are outside the crate",
             ]
         }))
+    }
+
+    fn lab_space_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure architecture-space input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("architecture-space input exceeds the 20000000-byte safety bound".into());
+        }
+        let cost_ceiling = arguments
+            .get("cost_ceiling")
+            .and_then(Value::as_u64)
+            .ok_or("cost_ceiling is required and must be a non-negative integer")?;
+        if cost_ceiling > 1_000_000_000 {
+            return Err("cost_ceiling must be at most 1000000000".into());
+        }
+        let raw_candidates = arguments
+            .get("candidates")
+            .and_then(Value::as_array)
+            .ok_or("candidates is required and must be an array")?;
+        if raw_candidates.is_empty() || raw_candidates.len() > 512 {
+            return Err("candidates must contain between 1 and 512 architecture bundles".into());
+        }
+        let max_rows = arguments
+            .get("max_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(100);
+        if max_rows == 0 || max_rows > 1_000 {
+            return Err("max_rows must be between 1 and 1000".into());
+        }
+        let max_rows = max_rows as usize;
+        let include_components = arguments
+            .get("include_components")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mut space = ArchitectureSpace::new();
+        let mut candidate_rows = Vec::with_capacity(raw_candidates.len());
+        for (index, raw_candidate) in raw_candidates.iter().enumerate() {
+            let candidate: CandidateArchitecture = match serde_json::from_value(raw_candidate.clone()) {
+                Ok(candidate) => candidate,
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": "bioprism-mcp/lab-space-audit/0.1",
+                        "stage": "candidate_decode",
+                        "candidate_index": index,
+                        "refusal": format!("candidates[{index}] is not a valid CandidateArchitecture: {error}"),
+                        "fail_closed": true,
+                        "candidate_rows": candidate_rows.iter().take(max_rows).collect::<Vec<_>>(),
+                        "candidate_rows_omitted": candidate_rows.len().saturating_sub(max_rows),
+                        "candidate_count": raw_candidates.len(),
+                        "registered_count": 0,
+                        "space_committed": false,
+                        "max_rows": max_rows,
+                        "guarantees": [
+                            "a malformed bundle cannot enter the immutable architecture registry",
+                            "a failed audit never advertises a usable partial space"
+                        ]
+                    }));
+                }
+            };
+            let component_kinds = candidate
+                .kinds()
+                .into_iter()
+                .map(|kind| kind.as_str())
+                .collect::<Vec<_>>();
+            let edge_count = candidate
+                .components
+                .iter()
+                .map(|component| component.feeds.len())
+                .sum::<usize>();
+            let parameter_count = candidate
+                .components
+                .iter()
+                .map(|component| component.parameters.len())
+                .sum::<usize>();
+            if let Err(error) = candidate.validate(cost_ceiling) {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "space_error_serialization_failed"
+                }));
+                candidate_rows.push(json!({
+                    "index": index,
+                    "id": candidate.id,
+                    "derived_from": candidate.derived_from,
+                    "cost_units": candidate.cost_units,
+                    "component_count": candidate.components.len(),
+                    "edge_count": edge_count,
+                    "parameter_count": parameter_count,
+                    "component_kinds": component_kinds,
+                    "protected_surfaces": candidate.touches_protected,
+                    "validation": "refused",
+                    "registration": "not_attempted",
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-space-audit/0.1",
+                    "stage": "candidate_validation",
+                    "candidate_index": index,
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "candidate_rows": candidate_rows.iter().take(max_rows).collect::<Vec<_>>(),
+                    "candidate_rows_omitted": candidate_rows.len().saturating_sub(max_rows),
+                    "candidate_count": raw_candidates.len(),
+                    "registered_count": 0,
+                    "space_committed": false,
+                    "max_rows": max_rows,
+                    "guarantees": [
+                        "required components, graph acyclicity, dangling edges, protected surfaces, and cost are kernel-validated",
+                        "a failed audit never advertises a usable partial space"
+                    ],
+                    "limitations": [
+                        "component implementations and provider availability are declarations outside this crate"
+                    ]
+                }));
+            }
+            if let Err(error) = space.register(candidate.clone()) {
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
+                    "error": "space_error_serialization_failed"
+                }));
+                candidate_rows.push(json!({
+                    "index": index,
+                    "id": candidate.id,
+                    "derived_from": candidate.derived_from,
+                    "cost_units": candidate.cost_units,
+                    "component_count": candidate.components.len(),
+                    "edge_count": edge_count,
+                    "parameter_count": parameter_count,
+                    "component_kinds": component_kinds,
+                    "protected_surfaces": candidate.touches_protected,
+                    "validation": "valid",
+                    "registration": "refused",
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                }));
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/lab-space-audit/0.1",
+                    "stage": "candidate_registration",
+                    "candidate_index": index,
+                    "refusal": error.to_string(),
+                    "error": detail,
+                    "fail_closed": true,
+                    "candidate_rows": candidate_rows.iter().take(max_rows).collect::<Vec<_>>(),
+                    "candidate_rows_omitted": candidate_rows.len().saturating_sub(max_rows),
+                    "candidate_count": raw_candidates.len(),
+                    "registered_count": 0,
+                    "space_committed": false,
+                    "max_rows": max_rows,
+                    "guarantees": [
+                        "duplicate ids and unregistered parents are refused before a space is committed",
+                        "a failed audit never advertises a usable partial space"
+                    ]
+                }));
+            }
+            let mut row = json!({
+                "index": index,
+                "id": candidate.id,
+                "derived_from": candidate.derived_from,
+                "cost_units": candidate.cost_units,
+                "component_count": candidate.components.len(),
+                "edge_count": edge_count,
+                "parameter_count": parameter_count,
+                "component_kinds": component_kinds,
+                "protected_surfaces": candidate.touches_protected,
+                "validation": "valid",
+                "registration": "registered",
+            });
+            if include_components {
+                row["components"] = serde_json::to_value(candidate.components)
+                    .map_err(|error| format!("cannot serialize architecture components: {error}"))?;
+            }
+            candidate_rows.push(row);
+        }
+
+        let raw_inspect = arguments
+            .get("inspect")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_else(|| {
+                space
+                    .iter()
+                    .map(|candidate| json!(candidate.id))
+                    .collect::<Vec<_>>()
+            });
+        if raw_inspect.len() > 512 {
+            return Err("inspect must contain at most 512 configuration ids".into());
+        }
+        let mut inspection_rows = Vec::with_capacity(raw_inspect.len());
+        for (index, raw_id) in raw_inspect.iter().enumerate() {
+            let id = raw_id
+                .as_str()
+                .ok_or_else(|| format!("inspect[{index}] must be a string"))?;
+            if id.is_empty() {
+                return Err(format!("inspect[{index}] must not be empty"));
+            }
+            let configuration = ConfigurationId::new(id);
+            let candidate = space.get(&configuration).ok_or_else(|| {
+                format!("inspect[{index}] names unknown configuration `{configuration}`")
+            })?;
+            let lineage = space
+                .lineage(&configuration)
+                .map_err(|error| format!("cannot resolve lineage for `{configuration}`: {error}"))?;
+            let root = lineage.last().cloned();
+            let mut row = json!({
+                "index": index,
+                "configuration": configuration,
+                "lineage": lineage,
+                "lineage_depth": lineage.len(),
+                "root": root,
+                "derived_from": candidate.derived_from,
+                "component_ids": candidate.components.iter().map(|component| component.id.clone()).collect::<Vec<_>>(),
+                "cost_units": candidate.cost_units,
+            });
+            if include_components {
+                row["components"] = serde_json::to_value(&candidate.components)
+                    .map_err(|error| format!("cannot serialize inspected components: {error}"))?;
+            }
+            inspection_rows.push(row);
+        }
+
+        let raw_comparisons = arguments
+            .get("comparisons")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if raw_comparisons.len() > 512 {
+            return Err("comparisons must contain at most 512 pairs".into());
+        }
+        let mut comparison_rows = Vec::with_capacity(raw_comparisons.len());
+        for (index, raw_comparison) in raw_comparisons.iter().enumerate() {
+            let object = raw_comparison
+                .as_object()
+                .ok_or_else(|| format!("comparisons[{index}] must be an object"))?;
+            let before = object
+                .get("before")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("comparisons[{index}].before must be a string"))?;
+            let after = object
+                .get("after")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("comparisons[{index}].after must be a string"))?;
+            let before_id = ConfigurationId::new(before);
+            let after_id = ConfigurationId::new(after);
+            let before_candidate = space.get(&before_id).ok_or_else(|| {
+                format!("comparisons[{index}] names unknown before configuration `{before_id}`")
+            })?;
+            let after_candidate = space.get(&after_id).ok_or_else(|| {
+                format!("comparisons[{index}] names unknown after configuration `{after_id}`")
+            })?;
+            comparison_rows.push(json!({
+                "index": index,
+                "before": before_id,
+                "after": after_id,
+                "derived_relation": after_candidate.derived_from.as_ref() == Some(&before_id),
+                "before_lineage": space.lineage(&before_id).map_err(|error| error.to_string())?,
+                "after_lineage": space.lineage(&after_id).map_err(|error| error.to_string())?,
+                "changes": before_candidate.diff(after_candidate),
+                "change_count": before_candidate.diff(after_candidate).len(),
+            }));
+        }
+        let mut roots = BTreeSet::new();
+        let mut lineage_depth_max = 0usize;
+        for candidate in space.iter() {
+            let lineage = space
+                .lineage(&candidate.id)
+                .map_err(|error| format!("cannot resolve registered lineage: {error}"))?;
+            lineage_depth_max = lineage_depth_max.max(lineage.len());
+            if let Some(root) = lineage.last() {
+                roots.insert(root.clone());
+            }
+        }
+        let output = json!({
+            "ok": true,
+            "schema": "bioprism-mcp/lab-space-audit/0.1",
+            "cost_ceiling": cost_ceiling,
+            "candidate_count": raw_candidates.len(),
+            "registered_count": space.len(),
+            "space_committed": true,
+            "space": {
+                "registered_ids": space.iter().map(|candidate| candidate.id.clone()).collect::<Vec<_>>(),
+                "root_ids": roots,
+                "root_count": roots.len(),
+                "lineage_depth_max": lineage_depth_max,
+                "required_component_kinds": bioprism_lab::space::ComponentKind::REQUIRED.iter().map(|kind| kind.as_str()).collect::<Vec<_>>(),
+                "protected_surfaces": bioprism_lab::space::ProtectedSurface::ALL.iter().map(|surface| json!({
+                    "surface": surface.as_str(),
+                    "rationale": surface.rationale(),
+                })).collect::<Vec<_>>(),
+            },
+            "candidate_rows": candidate_rows.iter().take(max_rows).collect::<Vec<_>>(),
+            "candidate_rows_omitted": candidate_rows.len().saturating_sub(max_rows),
+            "inspection_rows": inspection_rows.iter().take(max_rows).collect::<Vec<_>>(),
+            "inspection_count": inspection_rows.len(),
+            "inspection_rows_omitted": inspection_rows.len().saturating_sub(max_rows),
+            "comparison_rows": comparison_rows.iter().take(max_rows).collect::<Vec<_>>(),
+            "comparison_count": comparison_rows.len(),
+            "comparison_rows_omitted": comparison_rows.len().saturating_sub(max_rows),
+            "max_rows": max_rows,
+            "guarantees": [
+                "every registered bundle passed the kernel's graph, required-kind, protected-surface, and cost checks",
+                "parent registration and lineage are resolved from the immutable architecture space",
+                "component changes are computed by CandidateArchitecture::diff rather than inferred from ids"
+            ],
+            "limitations": [
+                "component implementations, provider availability, runtime behavior, and declared cost calibration are outside this audit",
+                "a valid architecture space is admissible structure, not evidence that any candidate performs well",
+                "protected-surface declarations are caller-supplied and require an independent review gate"
+            ]
+        });
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure architecture-space result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err("architecture-space result exceeds the 20000000-byte safety bound".into());
+        }
+        Ok(output)
     }
 
     fn lab_pareto_audit(&self, arguments: &Value) -> Result<Value, String> {
@@ -20982,7 +21302,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "inference_lab",
             "domains": ["hypothesis separation", "evidence acquisition", "holdout-aware improvement", "risk-triggered research"],
             "crates": ["bioprism-lab", "bioprism-obligation", "bioprism-routing", "bioprism-evalengine"],
-            "mcp_tools": ["lab_plan", "lab_pareto_audit", "lab_branch_audit", "lab_holdout_audit", "lab_evolution_audit", "routing_decide", "routing_lab_run"],
+            "mcp_tools": ["lab_plan", "lab_space_audit", "lab_pareto_audit", "lab_branch_audit", "lab_holdout_audit", "lab_evolution_audit", "routing_decide", "routing_lab_run"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -21867,6 +22187,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum measurement rows returned; omission counts remain explicit. Defaults to 100." }
                 },
                 "required": ["cost_ceiling", "candidates", "baseline", "candidate", "holdout", "measurements", "card_id", "proposal", "rollback_handle", "direction", "would_have_to_be_true"]
+            }
+        }),
+        json!({
+            "name": "lab_space_audit",
+            "description": "Validate and inspect an immutable inference-lab architecture space through the real bioprism-lab ArchitectureSpace. It preserves typed candidate refusals, graph and protected-surface checks, parent lineage, deterministic component diffs, and bounded inspection/comparison rows without executing any component or treating admissible structure as performance evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cost_ceiling": { "type": "integer", "minimum": 0, "maximum": 1000000000, "description": "Maximum declared architecture cost accepted during candidate validation." },
+                    "candidates": { "type": "array", "minItems": 1, "maxItems": 512, "description": "Ordered serialized CandidateArchitecture bundles. Parent bundles must appear before derived children." },
+                    "inspect": { "type": "array", "maxItems": 512, "description": "Optional configuration ids whose complete lineage and component ids should be projected; omitted means every registered id." },
+                    "comparisons": { "type": "array", "maxItems": 512, "description": "Optional before/after pairs {before, after}; the kernel computes component/parameter changes and lineage relation." },
+                    "include_components": { "type": "boolean", "description": "Include serialized component declarations in candidate and inspection rows; defaults false." },
+                    "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows per bounded projection; omission counts remain explicit. Defaults to 100." }
+                },
+                "required": ["cost_ceiling", "candidates"]
             }
         }),
         json!({

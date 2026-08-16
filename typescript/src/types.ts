@@ -6369,6 +6369,41 @@ export interface LabEvolutionAuditResult extends JsonObject {
   limitations?: string[];
 }
 
+export interface LabSpaceAuditArgs extends JsonObject {
+  cost_ceiling: number;
+  candidates: JsonObject[];
+  inspect?: string[];
+  comparisons?: JsonObject[];
+  include_components?: boolean;
+  max_rows?: number;
+}
+
+export interface LabSpaceAuditResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/lab-space-audit/0.1";
+  cost_ceiling?: number;
+  candidate_count?: number;
+  registered_count?: number;
+  space_committed?: boolean;
+  space?: JsonObject;
+  candidate_rows?: JsonObject[];
+  candidate_rows_omitted?: number;
+  inspection_count?: number;
+  inspection_rows?: JsonObject[];
+  inspection_rows_omitted?: number;
+  comparison_count?: number;
+  comparison_rows?: JsonObject[];
+  comparison_rows_omitted?: number;
+  max_rows?: number;
+  stage?: string;
+  candidate_index?: number;
+  refusal?: string;
+  error?: JsonObject;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
 export interface ProviderCapabilityGateArgs extends JsonObject {
   card: JsonObject;
   required: string[];
