@@ -226,6 +226,12 @@ changed resource, lookups, explicit apply epoch, and reproof rows, returning
 removed versus marked-unproven entries, miss-reason variants, hit proofs, and post-reproof state
 visible. The client does not infer dependencies, run a scheduler, or silently serve an unproven
 cache entry.
+`hubDisclosureReview` accepts an optional serialized continuation ledger and ordered disclosure
+actions, returning `HubDisclosureReviewResult`. The interfaces preserve immutable digest binding,
+the monotonic unknown/held-out/disclosed/contaminated state, contamination witnesses, split-
+integrity action results, headline labels and caveats, score-withholding refusals, and the
+fail-closed action trace. The Fetch client records supplied findings only; it does not discover
+leaks, turn a valid split into a secrecy certificate, or publish a network artifact.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

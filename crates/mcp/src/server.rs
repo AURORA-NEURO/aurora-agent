@@ -7755,6 +7755,7 @@ impl Server {
             .collect::<Vec<_>>();
         Ok(json!({
             "ok": failures == 0,
+            "schema": "bioprism-mcp/hub-disclosure/0.1",
             "action_count": raw_actions.len(),
             "action_failures": failures,
             "trace": trace,

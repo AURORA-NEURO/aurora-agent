@@ -228,6 +228,7 @@ from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateA
 from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateArgs, storage_lifecycle_report
 from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimulateArgs, registry_lifecycle_report
 from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimulateArgs, cache_invalidation_report
+from .hub_disclosure import HubDisclosureReviewArgs, HubDisclosureReviewReport, hub_disclosure_review
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -440,6 +441,25 @@ class Workspace:
         normalized = request if isinstance(request, CacheInvalidationSimulateArgs) else CacheInvalidationSimulateArgs.from_wire(request)
         result = self.client.call_tool("cache_invalidation_simulate", normalized.to_mcp_arguments())
         return cache_invalidation_report(result.require_object())
+
+    def hub_disclosure_review(
+        self,
+        request: HubDisclosureReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Replay digest-bound disclosure and headline-eligibility actions."""
+
+        normalized = request if isinstance(request, HubDisclosureReviewArgs) else HubDisclosureReviewArgs.from_wire(request)
+        return self.tool("hub_disclosure_review", normalized.to_mcp_arguments())
+
+    def hub_disclosure_review_report(
+        self,
+        request: HubDisclosureReviewArgs | Mapping[str, Any],
+    ) -> HubDisclosureReviewReport:
+        """Return typed ratchets, contamination witnesses, caveats, and withheld headlines."""
+
+        normalized = request if isinstance(request, HubDisclosureReviewArgs) else HubDisclosureReviewArgs.from_wire(request)
+        result = self.client.call_tool("hub_disclosure_review", normalized.to_mcp_arguments())
+        return hub_disclosure_review(result.require_object())
 
     def pack_catalogue_report(
         self,
@@ -2283,6 +2303,25 @@ class AsyncWorkspace:
         normalized = request if isinstance(request, CacheInvalidationSimulateArgs) else CacheInvalidationSimulateArgs.from_wire(request)
         result = await self.client.call_tool("cache_invalidation_simulate", normalized.to_mcp_arguments())
         return cache_invalidation_report(result.require_object())
+
+    async def hub_disclosure_review(
+        self,
+        request: HubDisclosureReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async disclosure review replay."""
+
+        normalized = request if isinstance(request, HubDisclosureReviewArgs) else HubDisclosureReviewArgs.from_wire(request)
+        return await self.tool("hub_disclosure_review", normalized.to_mcp_arguments())
+
+    async def hub_disclosure_review_report(
+        self,
+        request: HubDisclosureReviewArgs | Mapping[str, Any],
+    ) -> HubDisclosureReviewReport:
+        """Return async typed disclosure and headline evidence."""
+
+        normalized = request if isinstance(request, HubDisclosureReviewArgs) else HubDisclosureReviewArgs.from_wire(request)
+        result = await self.client.call_tool("hub_disclosure_review", normalized.to_mcp_arguments())
+        return hub_disclosure_review(result.require_object())
 
     async def pack_catalogue_report(
         self,

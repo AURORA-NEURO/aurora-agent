@@ -643,6 +643,7 @@ fn hub_disclosure_replay_preserves_ratchet_and_refuses_unacknowledged_scores() {
         }),
     );
     assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["schema"], json!("bioprism-mcp/hub-disclosure/0.1"));
     assert_eq!(payload["action_failures"], json!(0));
     assert_eq!(payload["trace"][2]["result"]["eligible"], json!(false));
     assert_eq!(payload["trace"][2]["result"]["fail_closed"], json!(true));

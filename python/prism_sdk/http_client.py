@@ -191,6 +191,7 @@ from .factory_lifecycle import FactoryLifecycleReport, FactoryLifecycleSimulateA
 from .storage_lifecycle import StorageLifecycleReport, StorageLifecycleSimulateArgs, storage_lifecycle_report
 from .registry_lifecycle import RegistryLifecycleReport, RegistryLifecycleSimulateArgs, registry_lifecycle_report
 from .cache_invalidation import CacheInvalidationReport, CacheInvalidationSimulateArgs, cache_invalidation_report
+from .hub_disclosure import HubDisclosureReviewArgs, HubDisclosureReviewReport, hub_disclosure_review
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -920,6 +921,23 @@ class ApiClient:
         """Return typed cache invalidation evidence through the HTTP gateway."""
 
         return cache_invalidation_report(self.cache_invalidation_simulate(request))
+
+    def hub_disclosure_review(
+        self,
+        request: HubDisclosureReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Replay public-hub disclosure actions through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubDisclosureReviewArgs) else HubDisclosureReviewArgs.from_wire(request)
+        return self.call_tool("hub_disclosure_review", normalized.to_mcp_arguments())
+
+    def hub_disclosure_review_report(
+        self,
+        request: HubDisclosureReviewArgs | Mapping[str, Any],
+    ) -> HubDisclosureReviewReport:
+        """Return typed disclosure evidence through the HTTP gateway."""
+
+        return hub_disclosure_review(self.hub_disclosure_review(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2763,6 +2781,23 @@ class AsyncApiClient:
         """Return async typed cache invalidation evidence."""
 
         return cache_invalidation_report(await self.cache_invalidation_simulate(request))
+
+    async def hub_disclosure_review(
+        self,
+        request: HubDisclosureReviewArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async public-hub disclosure replay through the HTTP gateway."""
+
+        normalized = request if isinstance(request, HubDisclosureReviewArgs) else HubDisclosureReviewArgs.from_wire(request)
+        return await self.call_tool("hub_disclosure_review", normalized.to_mcp_arguments())
+
+    async def hub_disclosure_review_report(
+        self,
+        request: HubDisclosureReviewArgs | Mapping[str, Any],
+    ) -> HubDisclosureReviewReport:
+        """Return async typed disclosure evidence through the HTTP gateway."""
+
+        return hub_disclosure_review(await self.hub_disclosure_review(request))
 
     async def developer_delivery_audit_report(
         self,

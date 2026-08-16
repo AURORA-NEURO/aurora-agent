@@ -136,6 +136,8 @@ import type {
   RegistryLifecycleResult,
   CacheInvalidationSimulateArgs,
   CacheInvalidationResult,
+  HubDisclosureReviewArgs,
+  HubDisclosureReviewResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -438,6 +440,10 @@ export class ApiClient {
 
   async cacheInvalidationSimulate(args: CacheInvalidationSimulateArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CacheInvalidationResult>> {
     return this.callTool<CacheInvalidationResult>("cache_invalidation_simulate", args, options);
+  }
+
+  async hubDisclosureReview(args: HubDisclosureReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<HubDisclosureReviewResult>> {
+    return this.callTool<HubDisclosureReviewResult>("hub_disclosure_review", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

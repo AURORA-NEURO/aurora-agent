@@ -310,6 +310,21 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["cache keys are rebuilt from every declared component and never from a bare digest", "partial invalidation marks unknown entries unproven rather than serving them optimistically", "re-proving names the digest and build that re-established currentness"],
         limitations: ["the cache and dependency graph are in-memory projections; no durable index, tenant isolation, eviction worker, or external invalidation feed is created"],
       } } } });
+      if (path === "/v1/tools/hub_disclosure_review") return jsonResponse({ ok: true, tool: "hub_disclosure_review", request_id: "r29", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/hub-disclosure/0.1",
+        action_count: 4,
+        action_failures: 0,
+        trace: [
+          { index: 0, kind: "declare_held_out", ok: true, result: { pack: "pack-1", state: { disclosure: "held_out" } } },
+          { index: 1, kind: "disclose", ok: true, result: { pack: "pack-1", state: { disclosure: "disclosed", since: 5 } } },
+          { index: 2, kind: "headline_eligibility", ok: true, result: { pack: "pack-1", eligible: false, refusal: "disclosure is not acknowledged", fail_closed: true } },
+          { index: 3, kind: "headline_eligibility", ok: true, result: { pack: "pack-1", eligible: true, label: { label: "disclosed_pack", disclosed_at: 5, caveat: "visible benchmark" } } },
+        ],
+        entries: [{ pack: "pack-1", state: { disclosure: "disclosed", since: 5 } }],
+        ledger: { packs: { "pack-1": { disclosure: "disclosed", since: 5 } } },
+        guarantees: ["disclosure is keyed by immutable pack digest rather than a mutable name", "disclosure is a ratchet and contamination cannot be walked back", "headline eligibility returns a caveat or a typed refusal instead of a bare score", "the review does not detect leaks"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -823,6 +838,17 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(cache.mcp.result.structuredContent.invalidation.plan.completeness.Partial.entries_without_declared_dependencies[0], "d-unproven");
   assert.equal(cache.mcp.result.structuredContent.invalidation.apply_report.invalidation_was_complete, false);
   assert.equal(cache.mcp.result.structuredContent.lookups.post_apply[0].miss_reason.UnprovenAfterPartialInvalidation.since, 2);
+  const disclosure = await client.hubDisclosureReview({
+    actions: [
+      { kind: "declare_held_out", pack: "pack-1" },
+      { kind: "disclose", pack: "pack-1", at: 5 },
+      { kind: "headline_eligibility", pack: "pack-1", computed_at: 6 },
+    ],
+  });
+  assert.equal(disclosure.mcp.result.structuredContent.schema, "bioprism-mcp/hub-disclosure/0.1");
+  assert.equal(disclosure.mcp.result.structuredContent.trace[2].result.eligible, false);
+  assert.equal(disclosure.mcp.result.structuredContent.trace[2].result.fail_closed, true);
+  assert.equal(disclosure.mcp.result.structuredContent.trace[3].result.label.label, "disclosed_pack");
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

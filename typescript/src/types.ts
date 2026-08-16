@@ -1771,6 +1771,64 @@ export interface CacheInvalidationResult extends JsonObject {
   limitations: string[];
 }
 
+export type HubDisclosureActionKind = "declare_held_out" | "disclose" | "contaminate" | "split_integrity" | "headline_eligibility";
+export type HubDisclosureState = "unknown" | "held_out" | "disclosed" | "contaminated";
+export type HubHeadlineLabel = "held_out" | "computed_before_disclosure" | "disclosed_pack";
+export type HubContaminationKind = "instances_published" | "solutions_published" | "training_corpus_overlap" | "submitter_authored_pack" | "grader_leak" | "split_integrity_failure";
+
+export interface HubDisclosureReviewArgs extends JsonObject {
+  ledger?: JsonObject;
+  actions: (JsonObject & { kind?: HubDisclosureActionKind | string; pack?: string })[];
+}
+
+export interface HubContaminationWitnessResult extends JsonObject {
+  kind: HubContaminationKind;
+  detail: string;
+  observed_at: number;
+  reported_by: string;
+}
+
+export interface HubDisclosureStateResult extends JsonObject {
+  disclosure: HubDisclosureState;
+  since?: number;
+  witness?: HubContaminationWitnessResult;
+}
+
+export interface HubHeadlineLabelResult extends JsonObject {
+  label: HubHeadlineLabel;
+  disclosed_at?: number;
+  caveat: string;
+}
+
+export interface HubDisclosureActionResult extends JsonObject {
+  index: number;
+  kind: HubDisclosureActionKind | string;
+  ok: boolean;
+  result?: JsonValue;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface HubDisclosureEntryResult extends JsonObject {
+  pack: string;
+  state: HubDisclosureStateResult;
+}
+
+export interface HubDisclosureLedgerResult extends JsonObject {
+  packs: Record<string, HubDisclosureStateResult>;
+}
+
+export interface HubDisclosureReviewResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/hub-disclosure/0.1";
+  action_count: number;
+  action_failures: number;
+  trace: HubDisclosureActionResult[];
+  entries: HubDisclosureEntryResult[];
+  ledger: HubDisclosureLedgerResult;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

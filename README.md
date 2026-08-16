@@ -485,6 +485,10 @@ typed while invalid packs and failed operations remain independent fail-closed r
 key schemas, cross-build policy, declared versus opaque dependency graphs, complete versus partial
 invalidation, explicit dry-run/application state, reasoned pre/post misses, unproven entries, and
 attributed reproofs are typed without serving an entry whose currentness cannot be proved.
+`hub_disclosure_review` adds the public-hub disclosure boundary: immutable digest-keyed ratchets,
+contamination witnesses, split-integrity verdict folding, headline caveats, and score-withholding
+refusals remain distinct and replayable. A clean split verdict does not become a secrecy claim,
+and a visible benchmark cannot become a bare headline number without explicit acknowledgement.
 `runtime_execution_simulate` runs bounded serialized effect programs against the deterministic
 in-process world, returns policy and budget evidence, proves complete replay, and can open a forked
 suffix with observable state and divergence comparison. The Python and TypeScript SDKs expose typed

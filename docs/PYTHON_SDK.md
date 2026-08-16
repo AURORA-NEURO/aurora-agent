@@ -435,6 +435,13 @@ invent defaults:
   proofs, and fail-closed lookup refusals separate; and `CacheApplyReport`/`CacheReproveReport`
   preserve explicit mutation and attributed restoration. The request envelope mirrors the Rust
   bounds and never turns a partial invalidation into a clean result or a missing value into zero.
+- `HubDisclosureReviewArgs` and `hub_disclosure_review(...)` type the public-hub disclosure review
+  across sync MCP, async MCP, and HTTP. `HubDisclosureStateReport` preserves the digest-keyed
+  unknown/held-out/disclosed/contaminated ratchet and its contamination witness; headline action
+  rows retain caveated labels separately from withheld, unacknowledged, or contaminated outcomes;
+  the serialized ledger is available as explicit continuation state. The parser reconciles action
+  counts and requires every failed action to carry a refusal plus `fail_closed=True`. It does not
+  claim to detect leaks, certify secrecy from a clean split oracle, or publish a score/network page.
 - `MeasurementCompareArgs` and `measurement_compare(...)` preserve standards-aware comparability
   across scalar, spatial, genomic, unit, frame, reference-build, and ontology declarations.
   `MeasurementCompareReport` reconciles the boolean with the tagged verdict, records every unit
