@@ -9460,9 +9460,20 @@ impl Server {
             .checkpoints()
             .iter()
             .map(|checkpoint| match tape.verify_checkpoint(checkpoint) {
-                Ok(()) => json!({ "id": checkpoint.id, "ok": true }),
+                Ok(()) => json!({
+                    "id": checkpoint.id,
+                    "step": checkpoint.step,
+                    "tape_head": checkpoint.tape_head,
+                    "provider": checkpoint.provider,
+                    "restoration": checkpoint.restoration,
+                    "ok": true
+                }),
                 Err(error) => json!({
                     "id": checkpoint.id,
+                    "step": checkpoint.step,
+                    "tape_head": checkpoint.tape_head,
+                    "provider": checkpoint.provider,
+                    "restoration": checkpoint.restoration,
                     "ok": false,
                     "refusal": error.to_string(),
                     "fail_closed": true
@@ -9472,16 +9483,30 @@ impl Server {
         let divergence = other
             .as_ref()
             .and_then(|candidate| tape.first_divergence(candidate));
+        let artifacts = tape.artifacts();
+        let checkpoint_pass_count = checkpoint_results
+            .iter()
+            .filter(|checkpoint| checkpoint["ok"] == json!(true))
+            .count();
+        let checkpoint_failure_count = checkpoint_results.len().saturating_sub(checkpoint_pass_count);
+        let simulated_steps = tape.simulated_steps();
         Ok(json!({
             "ok": true,
+            "schema": "bioprism-mcp/runtime-tape-verify/0.1",
             "run": tape.run(),
             "lineage": tape.lineage(),
             "entries": tape.len(),
             "head": tape.head(),
             "chain_verified": true,
             "checkpoint_results": checkpoint_results,
-            "artifacts": tape.artifacts(),
-            "simulated_steps": tape.simulated_steps(),
+            "checkpoint_count": tape.checkpoints().len(),
+            "checkpoint_pass_count": checkpoint_pass_count,
+            "checkpoint_failure_count": checkpoint_failure_count,
+            "artifacts": artifacts,
+            "artifact_consumed_count": artifacts.consumed.len(),
+            "artifact_created_count": artifacts.created.len(),
+            "simulated_steps": simulated_steps,
+            "simulated_step_count": simulated_steps.len(),
             "first_divergence": divergence,
             "comparison_supplied": other.is_some(),
             "guarantees": [

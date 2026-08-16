@@ -396,7 +396,9 @@ The runtime safety facade adds `runtimeEffectCheck`, `runtimeTapeVerify`, and
 `runtimeExecutionSimulate`. Their argument/result types preserve effect declaration and
 reversibility class, perform-versus-simulate authorization, fail-closed path/network refusals,
 hash-chain and checkpoint verification, simulated provenance, budget exhaustion, partial recording,
-complete replay, and counterfactual fork evidence. The runtime inspection and simulation surfaces
+complete replay, and counterfactual fork evidence. `runtimeTapeVerify` additionally types the
+checkpoint restoration rows, artifact ledger, and reconciled verification counts; see
+[`docs/RUNTIME_TAPE_VERIFY.md`](../docs/RUNTIME_TAPE_VERIFY.md). The runtime inspection and simulation surfaces
 never reach a host filesystem, network, process, model, message, or payment endpoint.
 
 The bioethics facade adds `bioethicsActionReview`, `humanSubjectScreen`, `bioethicsDualUseReview`,

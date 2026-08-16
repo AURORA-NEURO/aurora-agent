@@ -858,8 +858,9 @@ the exact safety boundary without accidentally turning an inspection result into
   structured fail-closed refusals. `RuntimeEffectReport.executed` is always `False`; a successful
   authorization is not evidence that a provider exists or that any host effect occurred.
 - `RuntimeTapeVerifyArgs` and `runtime_tape_verify_report(...)` verify serialized world tapes before
-  trusting them, retain lineage, checkpoint results, artifact reads/writes, simulated steps, and
-  earliest digest divergence, and keep malformed-tape failures distinct from valid tape reports.
+  trusting them, retain lineage, typed checkpoint restoration rows, artifact reads/writes,
+  simulated steps, reconciled counts, and earliest digest divergence, and keep malformed-tape
+  failures distinct from valid tape reports; see [`docs/RUNTIME_TAPE_VERIFY.md`](RUNTIME_TAPE_VERIFY.md).
 - `RuntimeExecutionSimulateArgs` and `runtime_execution_simulate_report(...)` run bounded request
   programs only through the deterministic in-process world. The report separates complete versus
   partial recording, execution errors, budget exhaustion, replay verification/matching, and optional

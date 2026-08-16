@@ -1381,7 +1381,7 @@ test("client exposes runtime and bioethics safety workflows with their exact too
       calls.push({ tool, body: JSON.parse(init.body) });
       const projections = {
         runtime_effect_check: { ok: true, request: { kind: "clock_now" }, kind: "clock_now", class: "pure", class_label: "pure", authorization: "perform", simulated_outcome: null, guarantees: [], limitations: [] },
-        runtime_tape_verify: { ok: true, run: "run-1", lineage: null, entries: 0, head: "", chain_verified: true, checkpoint_results: [], artifacts: { consumed: [], created: {} }, simulated_steps: [], first_divergence: null, comparison_supplied: false, guarantees: [], limitations: [] },
+        runtime_tape_verify: { ok: true, schema: "bioprism-mcp/runtime-tape-verify/0.1", run: "run-1", lineage: null, entries: 0, head: "", chain_verified: true, checkpoint_results: [], checkpoint_count: 0, checkpoint_pass_count: 0, checkpoint_failure_count: 0, artifacts: { consumed: [], created: {} }, artifact_consumed_count: 0, artifact_created_count: 0, simulated_steps: [], simulated_step_count: 0, first_divergence: null, comparison_supplied: false, guarantees: [], limitations: [] },
         runtime_execution_simulate: { ok: true, run: "run-1", request_count: 1, recorded_requests: 1, live_outcomes: [], execution_error: null, tape: {}, world: {}, policy_journal: [], budget: null, replay: { verified: true, matched: true }, fork: null, guarantees: [], limitations: [] },
         bioethics_action_review: { ok: true, subject: "study", declared_use: "cohort_analysis", permitted_uses: ["cohort_analysis"], disposition: {}, physical_step_count: 0, in_silico_step_count: 0, requires_external_authorisation: false, referral: { executes_physical_action: false }, guarantees: [] },
         bioethics_human_subject_screen: { ok: true, subject: "study", determination: { determination: "undetermined" }, requires_institutional_review: false, triggers: [], consent: { status: "not_run" }, return_of_results: { status: "admitted" }, clearance_issued: false, guarantees: [] },
@@ -1402,6 +1402,7 @@ test("client exposes runtime and bioethics safety workflows with their exact too
   const validation = await client.bioethicsValidationCheck({ dossier: {} });
   const representation = await client.bioethicsRepresentationAudit({ subject: "study", observations: [] });
   assert.equal(effect.mcp.result.structuredContent.authorization, "perform");
+  assert.equal(tape.mcp.result.structuredContent.schema, "bioprism-mcp/runtime-tape-verify/0.1");
   assert.equal(tape.mcp.result.structuredContent.chain_verified, true);
   assert.equal(simulation.mcp.result.structuredContent.replay.verified, true);
   assert.equal(action.mcp.result.structuredContent.referral.executes_physical_action, false);

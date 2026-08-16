@@ -570,7 +570,9 @@ suffix completeness; see
 [`docs/EVALUATION_TRAJECTORY_CHECK.md`](docs/EVALUATION_TRAJECTORY_CHECK.md).
 `runtime_effect_check` authorizes effects under an explicit
 deny-by-default policy without executing them, while `runtime_tape_verify` verifies hash-chained
-world tapes, checkpoints, artifacts, simulated provenance, and first divergence. `onco_boundary_check`
+world tapes, typed checkpoint restoration and artifact ledgers, simulated provenance, and first
+divergence. See [`docs/RUNTIME_TAPE_VERIFY.md`](docs/RUNTIME_TAPE_VERIFY.md).
+`onco_boundary_check`
 keeps research output separate from individualized clinical use, and `onco_response_assess` keeps
 post-treatment progression, threshold sensitivity, and non-identifiable change states explicit.
 `onco_worldline_view` keeps acquisition, recording, release, and agent-visibility clocks distinct,

@@ -48,6 +48,7 @@ RUNTIME_RESOURCES = frozenset(
         "cost_micros",
     }
 )
+RUNTIME_TAPE_VERIFY_SCHEMA = "bioprism-mcp/runtime-tape-verify/0.1"
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -300,6 +301,63 @@ class RuntimeEffectReport:
 
 
 @dataclass(frozen=True)
+class RuntimeCheckpointProjection:
+    raw: dict[str, Any]
+    id: str
+    step: int
+    tape_head: str
+    provider: str
+    restoration: dict[str, Any]
+    ok: bool
+    refusal: str | None
+    fail_closed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RuntimeCheckpointProjection":
+        raw = _route_mapping("runtime checkpoint", value)
+        ok = _bool("runtime checkpoint ok", raw.get("ok"))
+        fail_closed_value = raw.get("fail_closed", False)
+        fail_closed = _bool("runtime checkpoint fail_closed", fail_closed_value)
+        refusal = _optional_text("runtime checkpoint refusal", raw.get("refusal"))
+        if ok and (refusal is not None or fail_closed):
+            raise ArgumentError("successful runtime checkpoints cannot carry refusal evidence")
+        if not ok and (refusal is None or not fail_closed):
+            raise ArgumentError("refused runtime checkpoints must be fail-closed and explain the refusal")
+        restoration = _route_mapping("runtime checkpoint restoration", raw.get("restoration"))
+        _bool("runtime checkpoint restoration portable", restoration.get("portable"))
+        _optional_text("runtime checkpoint restoration provider", restoration.get("requires_provider"))
+        _route_text("runtime checkpoint restoration notes", restoration.get("notes"))
+        return cls(
+            raw,
+            _route_text("runtime checkpoint id", raw.get("id")),
+            _route_count("runtime checkpoint step", raw.get("step")),
+            _route_text("runtime checkpoint tape_head", raw.get("tape_head")),
+            _route_text("runtime checkpoint provider", raw.get("provider")),
+            restoration,
+            ok,
+            refusal,
+            fail_closed,
+        )
+
+
+@dataclass(frozen=True)
+class RuntimeArtifactsProjection:
+    raw: dict[str, Any]
+    consumed: tuple[str, ...]
+    created: dict[str, str]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "RuntimeArtifactsProjection":
+        raw = _route_mapping("runtime tape artifacts", value)
+        consumed = tuple(_route_text("runtime consumed artifact", item) for item in _array("runtime artifact consumed", raw.get("consumed")))
+        created_raw = _route_mapping("runtime artifact created", raw.get("created"))
+        created = {key: _route_text(f"runtime created artifact {key}", item) for key, item in created_raw.items()}
+        if len(consumed) != len(set(consumed)):
+            raise ArgumentError("runtime consumed artifacts must be unique")
+        return cls(raw, consumed, created)
+
+
+@dataclass(frozen=True)
 class RuntimeTapeVerifyReport:
     raw: dict[str, Any]
     ok: bool
@@ -319,18 +377,41 @@ class RuntimeTapeVerifyReport:
     guarantee: str | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
+    schema: str | None = None
+    checkpoint_records: tuple[RuntimeCheckpointProjection, ...] = ()
+    artifacts_record: RuntimeArtifactsProjection | None = None
+    checkpoint_count: int = 0
+    checkpoint_pass_count: int = 0
+    checkpoint_failure_count: int = 0
+    simulated_step_count: int = 0
+    artifact_consumed_count: int = 0
+    artifact_created_count: int = 0
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "RuntimeTapeVerifyReport":
         raw = _payload(value, label="runtime tape verification", direct_keys=("chain_verified", "checkpoint_results"))
         ok = _bool("runtime tape verification ok", raw.get("ok"))
         fail_closed = _bool("runtime tape verification fail_closed", raw.get("fail_closed", False))
+        schema = _optional_text("runtime tape verification schema", raw.get("schema"))
+        if schema is not None and schema != RUNTIME_TAPE_VERIFY_SCHEMA:
+            raise ArgumentError(f"unknown runtime tape verification schema: {schema!r}")
         if not ok:
             stage, refusal, guarantee = _refusal(raw, "runtime tape verification")
-            return cls(raw, False, None, None, None, None, False, (), None, (), None, False, stage, refusal, True, guarantee, (), ())
+            return cls(raw, False, None, None, None, None, False, (), None, (), None, False, stage, refusal, True, guarantee, (), (), schema=schema)
         if fail_closed or raw.get("refusal") is not None or raw.get("stage") is not None:
             raise ArgumentError("successful runtime tape verification cannot carry refusal evidence")
         checkpoints = tuple(_route_mapping(f"runtime checkpoint_results[{index}]", item) for index, item in enumerate(_array("runtime checkpoint_results", raw.get("checkpoint_results"))))
+        checkpoint_records = tuple(RuntimeCheckpointProjection.from_wire(item) for item in checkpoints)
+        checkpoint_count = _route_count("runtime checkpoint_count", raw.get("checkpoint_count"))
+        checkpoint_pass_count = _route_count("runtime checkpoint_pass_count", raw.get("checkpoint_pass_count"))
+        checkpoint_failure_count = _route_count("runtime checkpoint_failure_count", raw.get("checkpoint_failure_count"))
+        if checkpoint_count != len(checkpoint_records) or checkpoint_pass_count + checkpoint_failure_count != checkpoint_count:
+            raise ArgumentError("runtime checkpoint counts do not reconcile")
+        if (checkpoint_pass_count, checkpoint_failure_count) != (
+            sum(checkpoint.ok for checkpoint in checkpoint_records),
+            sum(not checkpoint.ok for checkpoint in checkpoint_records),
+        ):
+            raise ArgumentError("runtime checkpoint counts do not match checkpoint rows")
         simulated = _array("runtime simulated_steps", raw.get("simulated_steps"))
         simulated_steps: list[int] = []
         for index, item in enumerate(simulated):
@@ -338,8 +419,16 @@ class RuntimeTapeVerifyReport:
                 raise ArgumentError(f"runtime simulated_steps[{index}] must be a non-negative integer")
             simulated_steps.append(item)
         first = raw.get("first_divergence")
-        if first is not None and (isinstance(first, bool) or not isinstance(first, int) or first < 0):
-            raise ArgumentError("runtime first_divergence must be null or a non-negative integer")
+        if first is not None:
+            first = _route_count("runtime first_divergence", first)
+        artifacts_record = RuntimeArtifactsProjection.from_wire(raw.get("artifacts"))
+        artifact_consumed_count = _route_count("runtime artifact_consumed_count", raw.get("artifact_consumed_count"))
+        artifact_created_count = _route_count("runtime artifact_created_count", raw.get("artifact_created_count"))
+        if (artifact_consumed_count, artifact_created_count) != (len(artifacts_record.consumed), len(artifacts_record.created)):
+            raise ArgumentError("runtime artifact counts do not reconcile")
+        simulated_step_count = _route_count("runtime simulated_step_count", raw.get("simulated_step_count"))
+        if simulated_step_count != len(simulated_steps):
+            raise ArgumentError("runtime simulated step count does not reconcile")
         return cls(
             raw,
             True,
@@ -359,6 +448,15 @@ class RuntimeTapeVerifyReport:
             None,
             _route_strings("runtime tape guarantees", raw.get("guarantees")),
             _route_strings("runtime tape limitations", raw.get("limitations")),
+            schema=schema,
+            checkpoint_records=checkpoint_records,
+            artifacts_record=artifacts_record,
+            checkpoint_count=checkpoint_count,
+            checkpoint_pass_count=checkpoint_pass_count,
+            checkpoint_failure_count=checkpoint_failure_count,
+            simulated_step_count=simulated_step_count,
+            artifact_consumed_count=artifact_consumed_count,
+            artifact_created_count=artifact_created_count,
         )
 
     @property
@@ -472,10 +570,13 @@ __all__ = [
     "EFFECT_CLASSES",
     "EFFECT_KINDS",
     "RUNTIME_RESOURCES",
+    "RUNTIME_TAPE_VERIFY_SCHEMA",
     "RuntimeEffectCheckArgs",
     "RuntimeEffectReport",
     "RuntimeExecutionSimulateArgs",
     "RuntimeExecutionSimulateReport",
+    "RuntimeArtifactsProjection",
+    "RuntimeCheckpointProjection",
     "RuntimeTapeVerifyArgs",
     "RuntimeTapeVerifyReport",
     "runtime_effect_check_report",

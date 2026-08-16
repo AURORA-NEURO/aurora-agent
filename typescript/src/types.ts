@@ -4731,16 +4731,43 @@ export interface RuntimeTapeVerifyArgs extends JsonObject {
   other_tape?: JsonObject;
 }
 
+export interface RuntimeCheckpointResult extends JsonObject {
+  id: string;
+  step: number;
+  tape_head: string;
+  provider: string;
+  restoration: {
+    portable: boolean;
+    requires_provider: string | null;
+    notes: string;
+  };
+  ok: boolean;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface RuntimeArtifactsResult extends JsonObject {
+  consumed: string[];
+  created: Record<string, string>;
+}
+
 export interface RuntimeTapeVerifyResult extends JsonObject {
   ok: boolean;
+  schema?: "bioprism-mcp/runtime-tape-verify/0.1";
   run?: string;
   lineage?: JsonObject | null;
   entries?: number;
   head?: string;
   chain_verified?: boolean;
-  checkpoint_results?: JsonObject[];
-  artifacts?: JsonObject;
+  checkpoint_results?: RuntimeCheckpointResult[];
+  checkpoint_count?: number;
+  checkpoint_pass_count?: number;
+  checkpoint_failure_count?: number;
+  artifacts?: RuntimeArtifactsResult;
+  artifact_consumed_count?: number;
+  artifact_created_count?: number;
   simulated_steps?: number[];
+  simulated_step_count?: number;
   first_divergence?: number | null;
   comparison_supplied?: boolean;
   stage?: string;

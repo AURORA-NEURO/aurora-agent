@@ -5370,9 +5370,14 @@ fn runtime_tape_verify_accepts_only_verified_chain_state() {
         json!({ "tape": serde_json::to_value(tape).unwrap() }),
     );
     assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["schema"], json!("bioprism-mcp/runtime-tape-verify/0.1"));
     assert_eq!(result["chain_verified"], json!(true));
     assert_eq!(result["entries"], json!(0));
+    assert_eq!(result["checkpoint_count"], json!(0));
+    assert_eq!(result["artifact_consumed_count"], json!(0));
+    assert_eq!(result["artifact_created_count"], json!(0));
     assert_eq!(result["simulated_steps"].as_array().unwrap().len(), 0);
+    assert_eq!(result["simulated_step_count"], json!(0));
 }
 
 #[test]

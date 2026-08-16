@@ -69,14 +69,21 @@ class RuntimeBioethicsReportTests(unittest.TestCase):
     def test_runtime_tape_and_simulation_preserve_divergence_partial_runs_and_budget(self) -> None:
         tape = runtime_tape_verify_report({
             "ok": True,
+            "schema": "bioprism-mcp/runtime-tape-verify/0.1",
             "run": "run-1",
             "lineage": None,
             "entries": 2,
             "head": "digest-2",
             "chain_verified": True,
-            "checkpoint_results": [{"id": "ckpt", "ok": True}],
+            "checkpoint_results": [{
+                "id": "ckpt", "step": 2, "tape_head": "digest-2", "provider": "runtime",
+                "restoration": {"portable": True, "requires_provider": None, "notes": "tape"}, "ok": True,
+            }],
+            "checkpoint_count": 1, "checkpoint_pass_count": 1, "checkpoint_failure_count": 0,
             "artifacts": {"consumed": ["/work/in.txt"], "created": {}},
+            "artifact_consumed_count": 1, "artifact_created_count": 0,
             "simulated_steps": [1],
+            "simulated_step_count": 1,
             "first_divergence": 1,
             "comparison_supplied": True,
             "guarantees": ["hash chain"],
@@ -86,6 +93,20 @@ class RuntimeBioethicsReportTests(unittest.TestCase):
         self.assertTrue(tape.diverged)
         self.assertTrue(tape.has_simulated_steps)
         self.assertEqual(len(tape.checkpoint_failures), 0)
+        with self.assertRaises(ArgumentError):
+            runtime_tape_verify_report({
+                "ok": True,
+                "schema": "bioprism-mcp/runtime-tape-verify/0.1",
+                "run": "run-1", "lineage": None, "entries": 2, "head": "digest-2", "chain_verified": True,
+                "checkpoint_results": [{
+                    "id": "ckpt", "step": 2, "tape_head": "digest-2", "provider": "runtime",
+                    "restoration": {"portable": True, "requires_provider": None, "notes": "tape"}, "ok": True,
+                }],
+                "checkpoint_count": 1, "checkpoint_pass_count": 2, "checkpoint_failure_count": 0,
+                "artifacts": {"consumed": [], "created": {}}, "artifact_consumed_count": 0, "artifact_created_count": 0,
+                "simulated_steps": [], "simulated_step_count": 0, "first_divergence": None,
+                "comparison_supplied": False, "guarantees": [], "limitations": [],
+            })
         args = RuntimeExecutionSimulateArgs(
             {"declared": ["clock_now"]},
             [{"kind": "clock_now"}],
