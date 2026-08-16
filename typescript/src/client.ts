@@ -122,6 +122,8 @@ import type {
   FoundationContractCheckResult,
   PackCatalogueArgs,
   PackCatalogueResult,
+  PackHealthAssessArgs,
+  PackHealthAssessmentResult,
   TokenContextPlanArgs,
   TokenContextPlanningResult,
   WeaveLangCompileArgs,
@@ -396,6 +398,10 @@ export class ApiClient {
 
   async packCatalogue(args: PackCatalogueArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<PackCatalogueResult>> {
     return this.callTool<PackCatalogueResult>("pack_catalogue", args, options);
+  }
+
+  async packHealthAssess(args: PackHealthAssessArgs, options?: ClientRequestOptions): Promise<RestToolResponse<PackHealthAssessmentResult>> {
+    return this.callTool<PackHealthAssessmentResult>("pack_health_assess", args, options);
   }
 
   async developerWorkbench(args: DeveloperWorkbenchArgs, options?: ClientRequestOptions) {

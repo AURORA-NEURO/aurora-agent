@@ -36,12 +36,17 @@ if (result.mcp.result?.isError) {
   helpers `traceOtelIngest`, `metricsProfileAudit`, `metricsAnalyticsAudit`, `bioCapabilityEvidenceAudit`,
   `bioAtlasPublicationAudit`, `repositoryCatalog`, `repositoryBundle`, `repositoryImpact`,
   `telemetryProject`, `developerDeliveryAudit`, `developerWorkbench`, `agentMission`,
-  `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`, and
-  `runtimeExecutionSimulate` cover the highest-value cross-domain workflows without pretending
+  `capabilityDiscover`, `capabilityAudit`, `capabilityRoute`, `adapterPlan`,
+  `runtimeExecutionSimulate`, `packCatalogue`, and `packHealthAssess` cover the highest-value
+  cross-domain workflows without pretending
   to type every domain payload twice. Repository helpers keep catalog, route traversal, and
   changed-module impact requests explicit; `telemetryProject` preserves the event, treatment
   policy, trace, and optional observed-metric boundary without silently treating projected
   telemetry as a claim.
+- `packHealthAssess` keeps observed calibration counts, discrimination, health findings, digest
+  binding, and score withholding in one raw REST/MCP envelope. A saturated, contaminated, or
+  otherwise unreportable pack remains inspectable, but its numeric score is explicitly absent;
+  `reportable: false` is not a zero.
 - `toolCatalogue()` snapshots the live `/v1/tools` definitions into a bounded SHA-256 catalogue;
   `planTool()` performs conservative JSON-shape preflight without a POST; and `toolChecked()`
   executes the reviewed call while preserving the raw refusal envelope. This covers every current

@@ -191,6 +191,19 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         duplicate_signature_groups: [{ signature: "Domain|B5|biomedical research", pack_ids: ["a", "b"] }],
         guarantees: ["catalogue rows are declarations"],
       } } } });
+      if (path === "/v1/tools/pack_health_assess") return jsonResponse({ ok: true, tool: "pack_health_assess", request_id: "r23", mcp: { result: { structuredContent: {
+        ok: true,
+        pack: "demo.pack",
+        pack_digest: "a".repeat(64),
+        verdict: "unreportable",
+        finding_count: 1,
+        blocking_findings: 1,
+        advisory_findings: 0,
+        health: { pack: "demo.pack", pack_digest: "a".repeat(64), findings: [{ finding: "saturated", pooled_pass_rate: 0.99, systems: 3 }] },
+        calibration: { observations: [{ system: "system-a", trials: 100, passes: 99 }] },
+        score_gate: { reportable: false, refusal: "pack is saturated", fail_closed: true, score: null },
+        guarantees: ["declarations, observed outcomes, oracle posture, and reportability remain separate"],
+      } } } });
       if (path === "/v1/tools/developer_delivery_audit") return jsonResponse({ ok: true, tool: "developer_delivery_audit", request_id: "r15", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "developer_delivery_audit",
@@ -659,6 +672,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const packCatalogue = await client.packCatalogue({ section: "15", max_items: 1 });
   assert.equal(packCatalogue.mcp.result.structuredContent.returned[0].blueprint_module, "15.01");
   assert.equal(packCatalogue.mcp.result.structuredContent.returned[0].release_wave.wave, 1);
+  const packHealth = await client.packHealthAssess({ pack: { manifest: {}, content: {} }, observations: { calibration: { observations: [] }, trivial_baselines: [], contamination: [] } });
+  assert.equal(packHealth.mcp.result.structuredContent.verdict, "unreportable");
+  assert.equal(packHealth.mcp.result.structuredContent.score_gate.reportable, false);
+  assert.equal(packHealth.mcp.result.structuredContent.health.pack_digest.length, 64);
   const delivery = await client.developerDeliveryAudit({ release_request: { id: "delivery-1", targets: ["local_delivery"] } });
   assert.equal(delivery.mcp.result.structuredContent.workflow, "developer_delivery_audit");
   assert.equal(delivery.mcp.result.structuredContent.readiness.local_delivery_ready, true);

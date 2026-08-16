@@ -185,6 +185,13 @@ than being flattened into a generic invalid-contract error.
 including section counts, capability/domain signatures, oracle ceilings, execution-grounded
 flags, release-wave declarations, omitted counts, and duplicate-signature review candidates. It
 is a declaration inventory; it does not claim measured performance or a reportable health score.
+`packHealthAssess` accepts a serialized pack, observed calibration, optional baselines and
+contamination signals, and an optional health policy, returning `PackHealthAssessmentResult` with
+the digest-bound health report, calibration denominators, tagged findings, and an explicit score
+gate. A `reportable: false` gate carries a refusal and `fail_closed: true` with `score: null`; it is
+not a zero and it must not be ranked. The TypeScript interfaces keep saturation, floors,
+underdetermination, degeneracy, contamination, grounded-oracle tiers, and materialization
+findings visible while leaving Rust as the authority for validation and threshold semantics.
 explicit publication-target blockers; `capabilityRoute`
 batches named needs into a non-executing, digest-bound route proposal; `missionFromRoute` turns a
 fully resolved route into a provenance-preserving explicit mission only after caller-selected

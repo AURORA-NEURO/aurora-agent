@@ -184,6 +184,7 @@ from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_repor
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
+from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .evaluation import (
     BioevalReferenceAuditReport,
     EvaluationReproductionReport,
@@ -794,6 +795,23 @@ class ApiClient:
         """Return typed HTTP pack portfolio declarations."""
 
         return pack_catalogue_report(self.pack_catalogue(request, section=section, max_items=max_items))
+
+    def pack_health_assess(
+        self,
+        request: PackHealthAssessArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run the observed pack-health gate through the HTTP gateway."""
+
+        normalized = request if isinstance(request, PackHealthAssessArgs) else PackHealthAssessArgs.from_wire(request)
+        return self.call_tool("pack_health_assess", normalized.to_mcp_arguments())
+
+    def pack_health_assess_report(
+        self,
+        request: PackHealthAssessArgs | Mapping[str, Any],
+    ) -> PackHealthAssessmentReport:
+        """Return typed health findings and a score only when the server reportability gate clears."""
+
+        return pack_health_assessment_report(self.pack_health_assess(request))
 
     def developer_delivery_audit_report(
         self,
@@ -2518,6 +2536,23 @@ class AsyncApiClient:
         """Return async typed HTTP pack portfolio declarations."""
 
         return pack_catalogue_report(await self.pack_catalogue(request, section=section, max_items=max_items))
+
+    async def pack_health_assess(
+        self,
+        request: PackHealthAssessArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async observed pack-health gate through the HTTP gateway."""
+
+        normalized = request if isinstance(request, PackHealthAssessArgs) else PackHealthAssessArgs.from_wire(request)
+        return await self.call_tool("pack_health_assess", normalized.to_mcp_arguments())
+
+    async def pack_health_assess_report(
+        self,
+        request: PackHealthAssessArgs | Mapping[str, Any],
+    ) -> PackHealthAssessmentReport:
+        """Return async typed pack-health evidence."""
+
+        return pack_health_assessment_report(await self.pack_health_assess(request))
 
     async def developer_delivery_audit_report(
         self,

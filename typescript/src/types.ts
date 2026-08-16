@@ -1094,6 +1094,103 @@ export interface PackCatalogueResult extends JsonObject {
   guarantees: string[];
 }
 
+export type PackHealthVerdict = "healthy" | "degraded" | "unreportable";
+export type PackDiscriminationVerdict = "undetermined" | "saturated" | "floored" | "discriminating";
+export type PackHealthFindingKind = "saturated" | "floored" | "not_yet_characterised" | "degenerate" | "contaminated" | "no_grounded_oracle" | "counts_not_materialized";
+export type PackContaminationSignalKind = "public_answer_key" | "corpus_membership" | "released_before_cutoff" | "memorization_gap";
+export type PackOracleTier = "deterministic" | "executable" | "policy_veto" | "statistical" | "expert_review" | "rubric";
+
+export interface PackHealthAssessArgs extends JsonObject {
+  pack: JsonObject;
+  observations: JsonObject;
+  policy?: JsonObject;
+}
+
+export interface PackSystemObservationResult extends JsonObject {
+  system: string;
+  trials: number;
+  passes: number;
+}
+
+export interface PackCalibrationResult extends JsonObject {
+  observations: PackSystemObservationResult[];
+}
+
+export interface PackDiscriminationResult extends JsonObject {
+  verdict: PackDiscriminationVerdict;
+  reason?: string;
+  pooled_pass_rate?: number;
+  systems?: number;
+  lowest?: number;
+  highest?: number;
+  separated?: boolean;
+}
+
+export interface PackContaminationSignalResult extends JsonObject {
+  signal: PackContaminationSignalKind;
+  location?: string;
+  corpus?: string;
+  matched_instances?: number;
+  pack_release?: string;
+  model_cutoff?: string;
+  public?: PackSystemObservationResult;
+  held_out?: PackSystemObservationResult;
+}
+
+export interface PackHealthFindingResult extends JsonObject {
+  finding: PackHealthFindingKind;
+  pooled_pass_rate?: number;
+  systems?: number;
+  reason?: string;
+  baseline?: string;
+  baseline_pass_rate?: number;
+  best_system_pass_rate?: number;
+  signal?: PackContaminationSignalResult;
+  tiers?: PackOracleTier[];
+  declared?: number;
+  validated?: number;
+  materialized_fraction?: number;
+}
+
+export interface PackHealthResult extends JsonObject {
+  pack: string;
+  pack_digest: string;
+  findings: PackHealthFindingResult[];
+}
+
+export interface PackScoreResult extends JsonObject {
+  pack: string;
+  pack_digest: string;
+  pooled_pass_rate: number;
+  discrimination: PackDiscriminationResult;
+  advisories: PackHealthFindingResult[];
+}
+
+export interface PackScoreGateResult extends JsonObject {
+  reportable: boolean;
+  score?: PackScoreResult | null;
+  refusal?: string;
+  fail_closed?: boolean;
+}
+
+export interface PackHealthAssessmentResult extends JsonObject {
+  ok: boolean;
+  pack?: string;
+  pack_digest?: string;
+  verdict?: PackHealthVerdict;
+  finding_count?: number;
+  blocking_findings?: number;
+  advisory_findings?: number;
+  health?: PackHealthResult;
+  calibration?: PackCalibrationResult;
+  score_gate?: PackScoreGateResult;
+  stage?: "pack_validation" | "pack_health_assessment";
+  score?: null;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+}
+
 export interface DeveloperWorkbenchArgs extends JsonObject {
   session: JsonObject;
   dashboard?: JsonObject;

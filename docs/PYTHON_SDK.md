@@ -119,6 +119,15 @@ invent defaults:
   posture, release-wave sequencing, and capability signatures visible; duplicate signatures are
   returned as review candidates. The report is explicitly declaration-only and never substitutes
   for observed pack calibration or the separate health/reportability gate.
+- `PackHealthAssessArgs` and `pack_health_assessment_report(...)` expose the observed pack-health
+  gate across sync MCP, async MCP, and HTTP. `PackCalibrationReport` retains system-level pass and
+  trial denominators; `PackDiscriminationReport` distinguishes undetermined, saturated, floored,
+  and genuinely discriminating observations; and `PackHealthFindingReport` types degeneracy,
+  contamination signals, grounded-oracle absence, and instance materialization separately. The
+  report carries the immutable pack digest through `PackHealthReport` and `PackScoreReport`, while
+  `PackScoreGateReport` withholds numeric evidence on blocking findings. Rust validation refusals
+  remain structured, fail-closed `PackHealthAssessmentReport` values rather than becoming a
+  fabricated zero or an uninspectable generic exception.
 - `WorldClaimCheckRequest`, `LabPlanRequest`, and `RoutingDecisionRequest` expose typed envelope
   helpers for world support checks, no-execution acquisition planning, and unseen-task routing over
   sync MCP, async MCP, and HTTP. They bound serialized maps, action/evidence counts, budgets, and

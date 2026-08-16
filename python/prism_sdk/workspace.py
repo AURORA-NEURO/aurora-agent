@@ -221,6 +221,7 @@ from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_repor
 from .benchmark_trace import BenchmarkTraceAnalyzeArgs, BenchmarkTraceAnalysisReport, benchmark_trace_analysis_report
 from .foundation import FoundationContractCheckArgs, FoundationContractCheckReport, foundation_contract_check_report
 from .pack_catalogue import PackCatalogueArgs, PackCatalogueReport, pack_catalogue_report
+from .pack_health import PackHealthAssessArgs, PackHealthAssessmentReport, pack_health_assessment_report
 from .standards import MeasurementCompareArgs, MeasurementCompareReport, measurement_compare_report
 from .workbench import WorkbenchRequest
 from .world import (
@@ -297,6 +298,20 @@ class Workspace:
 
         artifact = pack if isinstance(pack, PackArtifact) else PackArtifact.from_document(pack)
         return self.tool("pack_health_assess", artifact.to_mcp_arguments(observations, policy))
+
+    def pack_health_assess_report(
+        self,
+        pack: PackArtifact | Mapping[str, Any],
+        observations: Mapping[str, Any],
+        *,
+        policy: Mapping[str, Any] | None = None,
+    ) -> PackHealthAssessmentReport:
+        """Return typed calibration, health findings, digest binding, and score-gate evidence."""
+
+        artifact = pack if isinstance(pack, PackArtifact) else PackArtifact.from_document(pack)
+        request = PackHealthAssessArgs(artifact.document, observations, policy)
+        result = self.client.call_tool("pack_health_assess", request.to_mcp_arguments())
+        return pack_health_assessment_report(result.require_object())
 
     def pack_catalogue(self, *, section: str | None = None, max_items: int | None = None) -> dict[str, Any]:
         arguments: dict[str, Any] = {}
@@ -2012,6 +2027,20 @@ class AsyncWorkspace:
 
         artifact = pack if isinstance(pack, PackArtifact) else PackArtifact.from_document(pack)
         return await self.tool("pack_health_assess", artifact.to_mcp_arguments(observations, policy))
+
+    async def pack_health_assess_report(
+        self,
+        pack: PackArtifact | Mapping[str, Any],
+        observations: Mapping[str, Any],
+        *,
+        policy: Mapping[str, Any] | None = None,
+    ) -> PackHealthAssessmentReport:
+        """Async typed counterpart to :meth:`Workspace.pack_health_assess_report`."""
+
+        artifact = pack if isinstance(pack, PackArtifact) else PackArtifact.from_document(pack)
+        request = PackHealthAssessArgs(artifact.document, observations, policy)
+        result = await self.client.call_tool("pack_health_assess", request.to_mcp_arguments())
+        return pack_health_assessment_report(result.require_object())
 
     async def pack_catalogue(self, *, section: str | None = None, max_items: int | None = None) -> dict[str, Any]:
         arguments: dict[str, Any] = {}
