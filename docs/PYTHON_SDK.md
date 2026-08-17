@@ -1108,6 +1108,13 @@ helpers convert every member before the first call, retain remote refused report
 retention outcomes, and optionally continue after bounded transport exceptions while exposing the
 failed source member and error kind. `execute_and_submit_projection(...)` provides the same local
 runtime-to-retention handoff for one request.
+`AdapterConformanceProfile`, `adapter_conformance_profiles()`, and
+`evaluate_adapter_conformance(...)` make the required checks explicit for all concrete route
+families, including clinical FHIR, imaging, single-cell, sequencing, alignment, chemistry,
+mass-spectrometry, and multiscale imaging. Missing or failed checks remain `partial`, unavailable
+routes remain `unsupported`, and blocked/rejected runtime outcomes remain `refused`; a verified
+profile is structural evidence only and never a readiness or clinical-validity claim. Its report
+digest can be attached as a parent when constructing adapter execution evidence.
 - `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
   installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full

@@ -65,6 +65,15 @@ from .adapter_evidence_submission import (
     execute_and_submit_projection_async,
     execute_and_submit_projection_batch_async,
 )
+from .adapter_conformance import (
+    ADAPTER_CONFORMANCE_SCHEMA,
+    ADAPTER_CONFORMANCE_STATUSES,
+    AdapterConformanceProfile,
+    AdapterConformanceReport,
+    adapter_conformance_profile,
+    adapter_conformance_profiles,
+    evaluate_adapter_conformance,
+)
 from .domain_evidence_pipeline import (
     DOMAIN_EVIDENCE_PIPELINE_SCHEMA,
     DOMAIN_EVIDENCE_PIPELINE_WORKFLOW,
@@ -3883,6 +3892,13 @@ __all__ = [
     "submit_projection_batch_evidence_async",
     "execute_and_submit_projection_async",
     "execute_and_submit_projection_batch_async",
+    "ADAPTER_CONFORMANCE_SCHEMA",
+    "ADAPTER_CONFORMANCE_STATUSES",
+    "AdapterConformanceProfile",
+    "AdapterConformanceReport",
+    "adapter_conformance_profile",
+    "adapter_conformance_profiles",
+    "evaluate_adapter_conformance",
     "ProjectionBatchRequest",
     "ProjectionBatchResult",
     "ProjectionRequest",

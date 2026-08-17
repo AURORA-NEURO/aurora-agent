@@ -166,6 +166,10 @@ is required for those pre-parser refusals; no source locator is reopened.
 counterparts then hand these requests to `ApiClient`/`Workspace`-compatible sinks. Batch conversion
 happens before network calls; `continue_on_error=True` preserves per-source transport failures,
 while a returned remote refusal remains a retained, typed report rather than a transport error.
+`AdapterConformanceProfile` covers every concrete runtime route with family-specific required
+checks. `evaluate_adapter_conformance(...)` reports `verified`, `partial`, `unsupported`, or
+`refused` without promoting structural parsing into clinical, biological, or release readiness;
+its stable report digest can be carried as an explicit evidence parent.
 When installed, `read_nifti_header()` and `read_anndata_projection()` provide verified raw-file
 bindings for nibabel and anndata-backed H5AD/Zarr metadata. They feed the same auditors without
 loading image arrays or matrix values; missing optional packages remain typed refusals.

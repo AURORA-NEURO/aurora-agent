@@ -318,6 +318,10 @@ The sync and async submission helpers now compose local runtime results with the
 facades. They validate and materialize the complete batch before submission, keep remote refusal
 reports distinct from transport exceptions, and can retain per-source transport errors when a
 caller explicitly opts into continuing a heterogeneous batch.
+Family-specific adapter conformance profiles now cover all concrete runtime routes and their
+required structural checks. They distinguish a verified bounded parser surface from semantic-loss,
+missing-check, unsupported-dependency, and blocking clinical/provider outcomes; profile report
+digests can be attached as explicit lineage parents without becoming a composite readiness score.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.
