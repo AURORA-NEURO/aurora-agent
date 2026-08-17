@@ -139,7 +139,8 @@ use bioprism_devplat::{
     DeliveryReceiptVerificationRequest,
     DevPlatReport, ExecutionProvenanceRequest, MissionReport, mission_claim_lineage,
     MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
-    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MISSION_EVALUATOR_SCHEMA_VERSION,
+    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReviewRequest,
+    MISSION_EVALUATOR_SCHEMA_VERSION,
     WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
@@ -1503,6 +1504,7 @@ impl Server {
             "capability_dashboard" => self.capability_dashboard(&arguments),
             "capability_discover" => self.capability_discover(&arguments),
             "mission_evaluator_discover" => self.mission_evaluator_discover(&arguments),
+            "mission_evaluator_review" => self.mission_evaluator_review(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
@@ -22303,6 +22305,29 @@ impl Server {
         Ok(output)
     }
 
+    /// Review caller-selected evaluator candidates and produce a non-executing claim-binding
+    /// scaffold. The normal agent_mission validator remains the authority for final step and
+    /// claim validation.
+    fn mission_evaluator_review(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode mission evaluator review input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("mission evaluator review input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: MissionEvaluatorReviewRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid mission evaluator review input: {error}"))?;
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let output = catalogue
+            .review(&request)
+            .map_err(|error| format!("mission evaluator review refused: {error}"))?;
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure mission evaluator review result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err("mission evaluator review result exceeds the 20000000-byte safety bound".into());
+        }
+        Ok(output)
+    }
+
     /// Verify that the explicit cross-domain catalogue and authoritative MCP tool definitions
     /// describe the same callable surface.
     ///
@@ -27276,7 +27301,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29666,6 +29691,36 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 32 }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "mission_evaluator_review",
+            "description": "Review caller-selected evaluator candidates from one mission_evaluator_discover result and produce a deterministic, non-executing claim-binding scaffold. Checks catalogue freshness, candidate membership, domain-label coverage, unique binding IDs, per-claim evaluator limits, and RFC 6901 output pointers; a ready review still requires agent_mission validation and never executes an evaluator.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "discovery": { "type": "object", "description": "The complete JSON result returned by mission_evaluator_discover, including workflow, catalog_digest, selection_posture, and matches." },
+                    "selections": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "description": "Proposed claim bindings. Each row supplies id, claim_id, adapter_id, domain, step_id, output_pointer, and optional required (default true).",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "maxLength": 128 },
+                                "claim_id": { "type": "string", "maxLength": 128 },
+                                "adapter_id": { "type": "string", "maxLength": 256 },
+                                "domain": { "type": "string", "maxLength": 256 },
+                                "step_id": { "type": "string", "maxLength": 128 },
+                                "output_pointer": { "type": "string", "description": "RFC 6901 pointer into the retained step output; empty selects the complete output." },
+                                "required": { "type": "boolean", "default": true }
+                            },
+                            "required": ["id", "claim_id", "adapter_id", "domain", "step_id", "output_pointer"]
+                        }
+                    }
+                },
+                "required": ["discovery", "selections"]
             }
         }),
         json!({

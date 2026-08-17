@@ -9,9 +9,9 @@
 
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use serde_json::to_value;
+use serde_json::{json, to_value, Value};
 use std::cmp::Reverse;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 /// Wire version for mission evaluator discovery.
@@ -19,6 +19,8 @@ pub const MISSION_EVALUATOR_SCHEMA_VERSION: &str = "bioprism-devplat-mission-eva
 const MAX_ITEMS: usize = 256;
 const DEFAULT_MAX_ITEMS: usize = 32;
 const MAX_FILTER_BYTES: usize = 512;
+const MAX_REVIEW_SELECTIONS: usize = 64;
+const MAX_BINDINGS_PER_CLAIM: usize = 16;
 
 fn default_max_items() -> usize {
     DEFAULT_MAX_ITEMS
@@ -56,6 +58,40 @@ fn tokens(value: &str) -> Vec<String> {
 
 fn normalized(value: &str) -> String {
     value.to_ascii_lowercase()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn valid_json_pointer(pointer: &str) -> bool {
+    if pointer.is_empty() {
+        return true;
+    }
+    let bytes = pointer.as_bytes();
+    if bytes.first() != Some(&b'/') {
+        return false;
+    }
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'~' {
+            if index + 1 >= bytes.len() || !matches!(bytes[index + 1], b'0' | b'1') {
+                return false;
+            }
+            index += 2;
+        } else {
+            index += 1;
+        }
+    }
+    true
+}
+
+fn visible_text(value: &str, maximum: usize) -> bool {
+    !value.trim().is_empty()
+        && value.len() <= maximum
+        && !value
+            .chars()
+            .any(|character| character == '\0' || character == '\n' || character == '\r')
 }
 
 /// One explicit evaluator candidate. The candidate is descriptive and non-executable.
@@ -142,6 +178,26 @@ pub struct MissionEvaluatorSearch {
     pub query: MissionEvaluatorQuery,
     pub result_count: usize,
     pub matches: Vec<MissionEvaluatorMatch>,
+}
+
+/// One caller-proposed binding reviewed against a discovery response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissionEvaluatorSelection {
+    pub id: String,
+    pub claim_id: String,
+    pub adapter_id: String,
+    pub domain: String,
+    pub step_id: String,
+    pub output_pointer: String,
+    #[serde(default = "default_true")]
+    pub required: bool,
+}
+
+/// Input to the non-executing discovery-to-claim binding review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissionEvaluatorReviewRequest {
+    pub discovery: Value,
+    pub selections: Vec<MissionEvaluatorSelection>,
 }
 
 /// Validated evaluator catalogue with a content digest.
@@ -292,6 +348,213 @@ impl MissionEvaluatorCatalogue {
             matches,
         })
     }
+
+    /// Review caller-selected candidates and emit a mission-claim binding scaffold.
+    ///
+    /// The discovery response is checked against this catalogue's current digest before any
+    /// selection is considered. Selection findings are returned as a blocked review rather than
+    /// becoming a transport error, so an agent can repair a proposed handoff in one round trip.
+    /// The returned scaffold still requires normal `agent_mission` validation, including known
+    /// step IDs and the final claim statement. No evaluator or domain tool is executed here.
+    pub fn review(&self, request: &MissionEvaluatorReviewRequest) -> Result<Value, EvaluatorError> {
+        let discovery = request
+            .discovery
+            .as_object()
+            .ok_or_else(|| EvaluatorError::InvalidReview {
+                reason: "discovery must be an object".into(),
+            })?;
+        if discovery.get("workflow").and_then(Value::as_str)
+            != Some("mission_evaluator_discover")
+        {
+            return Err(EvaluatorError::InvalidReview {
+                reason: "discovery.workflow must be mission_evaluator_discover".into(),
+            });
+        }
+        if discovery.get("selection_posture").and_then(Value::as_str)
+            != Some("candidate_only")
+        {
+            return Err(EvaluatorError::InvalidReview {
+                reason: "discovery.selection_posture must be candidate_only".into(),
+            });
+        }
+        let catalog_digest = discovery
+            .get("catalog_digest")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| EvaluatorError::InvalidReview {
+                reason: "discovery.catalog_digest must be a non-empty string".into(),
+            })?;
+        if catalog_digest != self.digest.to_string() {
+            return Err(EvaluatorError::StaleDiscovery {
+                expected: self.digest.to_string(),
+                received: catalog_digest.into(),
+            });
+        }
+        let matches = discovery
+            .get("matches")
+            .and_then(Value::as_array)
+            .ok_or_else(|| EvaluatorError::InvalidReview {
+                reason: "discovery.matches must be an array".into(),
+            })?;
+        let mut candidates = BTreeMap::<String, MissionEvaluatorAdapter>::new();
+        for matched in matches {
+            let Some(adapter) = matched.get("adapter") else {
+                continue;
+            };
+            let parsed: MissionEvaluatorAdapter = serde_json::from_value(adapter.clone())
+                .map_err(|error| EvaluatorError::InvalidReview {
+                    reason: format!("discovery adapter is invalid: {error}"),
+                })?;
+            candidates.insert(parsed.id.clone(), parsed);
+        }
+        if request.selections.is_empty() || request.selections.len() > MAX_REVIEW_SELECTIONS {
+            return Err(EvaluatorError::InvalidReview {
+                reason: format!(
+                    "selections must contain between 1 and {MAX_REVIEW_SELECTIONS} entries"
+                ),
+            });
+        }
+
+        let discovery_digest = ContentHash::of_value(&request.discovery)
+            .map_err(|error| EvaluatorError::Canonicalisation(error.to_string()))?
+            .to_string();
+        let mut ids = BTreeSet::new();
+        let mut claim_counts = BTreeMap::<String, usize>::new();
+        let mut findings = Vec::new();
+        let mut bindings = Vec::new();
+        for selection in &request.selections {
+            let mut row = json!({
+                "id": selection.id,
+                "claim_id": selection.claim_id,
+                "adapter_id": selection.adapter_id,
+                "domain": selection.domain,
+                "step_id": selection.step_id,
+                "output_pointer": selection.output_pointer,
+                "required": selection.required,
+                "binding_posture": "blocked",
+            });
+            let mut row_errors = Vec::new();
+            if !visible_text(&selection.id, 128) {
+                row_errors.push("selection.id must be a visible string of at most 128 bytes");
+            }
+            if !visible_text(&selection.claim_id, 128) {
+                row_errors.push("selection.claim_id must be a visible string of at most 128 bytes");
+            }
+            if !visible_text(&selection.adapter_id, 256) {
+                row_errors.push("selection.adapter_id must be a visible string of at most 256 bytes");
+            }
+            if !visible_text(&selection.domain, 256) {
+                row_errors.push("selection.domain must be a visible string of at most 256 bytes");
+            }
+            if !visible_text(&selection.step_id, 128) {
+                row_errors.push("selection.step_id must be a visible string of at most 128 bytes");
+            }
+            if selection.output_pointer.contains('\0')
+                || selection.output_pointer.contains('\n')
+                || selection.output_pointer.contains('\r')
+                || !valid_json_pointer(&selection.output_pointer)
+            {
+                row_errors.push("selection.output_pointer must be a valid RFC 6901 pointer");
+            }
+            if !ids.insert(selection.id.clone()) {
+                row_errors.push("selection.id must be unique within the review");
+            }
+            let claim_count = claim_counts
+                .entry(selection.claim_id.clone())
+                .and_modify(|count| *count += 1)
+                .or_insert(1);
+            if *claim_count > MAX_BINDINGS_PER_CLAIM {
+                row_errors.push("a claim may have at most 16 evaluator bindings");
+            }
+
+            let candidate = candidates.get(&selection.adapter_id);
+            let domain_supported = candidate.is_some_and(|adapter| {
+                let requested = normalized(&selection.domain);
+                adapter
+                    .domains
+                    .iter()
+                    .any(|domain| normalized(domain).contains(&requested))
+            });
+            row["candidate_found"] = json!(candidate.is_some());
+            row["domain_supported"] = json!(domain_supported);
+            if candidate.is_none() {
+                row_errors.push("selection.adapter_id is not present in the supplied discovery matches");
+            }
+            if candidate.is_some() && !domain_supported {
+                row_errors.push("selection.domain is not covered by the selected adapter's catalogue domains");
+            }
+            if let Some(candidate) = candidate {
+                row["candidate_tools"] = json!(candidate.candidate_tools);
+                row["output_pointer_examples"] = json!(candidate.output_pointer_examples);
+                row["adapter_status"] = json!(candidate.status);
+            }
+            if row_errors.is_empty() {
+                row["binding_posture"] = json!("ready");
+                row["proposed_binding"] = json!({
+                    "id": selection.id,
+                    "adapter_id": selection.adapter_id,
+                    "domain": selection.domain,
+                    "step_id": selection.step_id,
+                    "output_pointer": selection.output_pointer,
+                    "required": selection.required,
+                });
+            } else {
+                for message in row_errors {
+                    findings.push(json!({
+                        "selection_id": selection.id,
+                        "claim_id": selection.claim_id,
+                        "severity": "error",
+                        "code": "invalid_evaluator_binding",
+                        "message": message,
+                    }));
+                }
+            }
+            bindings.push(row);
+        }
+        let review_document = json!({
+            "catalog_digest": catalog_digest,
+            "discovery_digest": discovery_digest,
+            "selections": request.selections,
+        });
+        let review_id = ContentHash::of_value(&review_document)
+            .map_err(|error| EvaluatorError::Canonicalisation(error.to_string()))?
+            .to_string();
+        let ready = findings.is_empty();
+        Ok(json!({
+            "schema": MISSION_EVALUATOR_SCHEMA_VERSION,
+            "workflow": "mission_evaluator_review",
+            "ok": true,
+            "review_id": review_id,
+            "catalog_digest": catalog_digest,
+            "discovery_digest": discovery_digest,
+            "selection_count": request.selections.len(),
+            "claim_count": claim_counts.len(),
+            "claim_binding_limits": {
+                "max_selections": MAX_REVIEW_SELECTIONS,
+                "max_bindings_per_claim": MAX_BINDINGS_PER_CLAIM,
+            },
+            "bindings": bindings,
+            "findings": findings,
+            "review_status": if ready { "ready" } else { "blocked" },
+            "binding_posture": if ready {
+                "ready_for_mission_claim_bindings"
+            } else {
+                "requires_caller_correction"
+            },
+            "execution": "not_started",
+            "guarantees": [
+                "the discovery catalogue digest is checked before selections are reviewed",
+                "selected adapters must be present in the caller-supplied discovery matches",
+                "the output is a proposed claim-binding scaffold and still requires agent_mission validation",
+                "no evaluator or domain tool was executed",
+            ],
+            "limitations": [
+                "step existence and claim statement validity are checked only by the later agent_mission request",
+                "domain compatibility is label coverage evidence, not semantic validation",
+                "a ready review does not make a claim true, calibrated, causal, clinical, or release-ready",
+            ],
+        }))
+    }
 }
 
 /// Fail-closed evaluator query errors.
@@ -309,6 +572,12 @@ pub enum EvaluatorError {
     },
     #[error("max_items must be between 1 and {MAX_ITEMS}, got {value}")]
     InvalidLimit { value: usize },
+    #[error("invalid evaluator review: {reason}")]
+    InvalidReview { reason: String },
+    #[error("evaluator discovery is stale: expected catalogue {expected}, received {received}")]
+    StaleDiscovery { expected: String, received: String },
+    #[error("cannot canonicalise evaluator review: {0}")]
+    Canonicalisation(String),
 }
 
 fn adapter(

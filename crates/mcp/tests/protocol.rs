@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 176);
+    assert_eq!(tools.len(), 177);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1260,6 +1260,79 @@ fn mission_evaluator_discovery_covers_domains_without_executing_tools() {
         oncology["matches"][0]["adapter"]["group_id"],
         json!("oncoworlds_models_and_assays")
     );
+}
+
+#[test]
+fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() {
+    let mut server = server();
+    let discovery = call(
+        &mut server,
+        "mission_evaluator_discover",
+        json!({"query": "oncology fidelity", "level": "evaluation", "max_items": 4}),
+    );
+    let ready = call(
+        &mut server,
+        "mission_evaluator_review",
+        json!({
+            "discovery": discovery,
+            "selections": [{
+                "id": "assay-evaluator",
+                "claim_id": "fidelity-claim",
+                "adapter_id": "oncoworlds.assay_fidelity",
+                "domain": "oncology",
+                "step_id": "assay",
+                "output_pointer": "/fidelity",
+                "required": true
+            }]
+        }),
+    );
+    assert_eq!(ready["ok"], json!(true));
+    assert_eq!(ready["workflow"], json!("mission_evaluator_review"));
+    assert_eq!(ready["review_status"], json!("ready"));
+    assert_eq!(ready["binding_posture"], json!("ready_for_mission_claim_bindings"));
+    assert_eq!(ready["bindings"][0]["binding_posture"], json!("ready"));
+    assert_eq!(ready["bindings"][0]["proposed_binding"]["step_id"], json!("assay"));
+    assert_eq!(ready["execution"], json!("not_started"));
+
+    let discovery_for_blocked = call(
+        &mut server,
+        "mission_evaluator_discover",
+        json!({"query": "oncology fidelity", "max_items": 4}),
+    );
+    let blocked = call(
+        &mut server,
+        "mission_evaluator_review",
+        json!({
+            "discovery": discovery_for_blocked,
+            "selections": [
+                {
+                    "id": "duplicate",
+                    "claim_id": "fidelity-claim",
+                    "adapter_id": "oncoworlds.assay_fidelity",
+                    "domain": "unrelated-domain",
+                    "step_id": "assay",
+                    "output_pointer": "/bad~2pointer"
+                },
+                {
+                    "id": "duplicate",
+                    "claim_id": "fidelity-claim",
+                    "adapter_id": "not-in-discovery",
+                    "domain": "oncology",
+                    "step_id": "assay-2",
+                    "output_pointer": ""
+                }
+            ]
+        }),
+    );
+    assert_eq!(blocked["review_status"], json!("blocked"));
+    assert_eq!(blocked["binding_posture"], json!("requires_caller_correction"));
+    assert!(blocked["findings"].as_array().unwrap().len() >= 4);
+    assert!(blocked["findings"].as_array().unwrap().iter().any(|finding| {
+        finding["message"] == json!("selection.id must be unique within the review")
+    }));
+    assert!(blocked["findings"].as_array().unwrap().iter().any(|finding| {
+        finding["message"] == json!("selection.output_pointer must be a valid RFC 6901 pointer")
+    }));
 }
 
 #[test]
@@ -5122,12 +5195,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(176));
-    assert_eq!(result["advertised_tool_count"], json!(176));
+    assert_eq!(result["unique_catalog_tools"], json!(177));
+    assert_eq!(result["advertised_tool_count"], json!(177));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(176));
-    assert_eq!(result["schema_quality"]["valid"], json!(176));
+    assert_eq!(result["schema_quality"]["checked"], json!(177));
+    assert_eq!(result["schema_quality"]["valid"], json!(177));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

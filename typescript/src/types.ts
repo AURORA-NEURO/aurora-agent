@@ -4286,6 +4286,63 @@ export interface MissionEvaluatorDiscoverResult extends JsonObject {
   limitations: string[];
 }
 
+export interface MissionEvaluatorSelectionArgs extends JsonObject {
+  id: string;
+  claim_id: string;
+  adapter_id: string;
+  domain: string;
+  step_id: string;
+  output_pointer: string;
+  required?: boolean;
+}
+
+export interface MissionEvaluatorReviewArgs extends JsonObject {
+  discovery: JsonObject;
+  selections: MissionEvaluatorSelectionArgs[];
+}
+
+export interface MissionEvaluatorBindingReviewResult extends JsonObject {
+  id: string;
+  claim_id: string;
+  adapter_id: string;
+  domain: string;
+  step_id: string;
+  output_pointer: string;
+  required: boolean;
+  candidate_found: boolean;
+  domain_supported: boolean;
+  binding_posture: "ready" | "blocked" | string;
+  candidate_tools?: string[];
+  output_pointer_examples?: string[];
+  proposed_binding?: JsonObject;
+}
+
+export interface MissionEvaluatorReviewFinding extends JsonObject {
+  selection_id?: string;
+  claim_id?: string;
+  severity: "error" | string;
+  code: string;
+  message: string;
+}
+
+export interface MissionEvaluatorReviewResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evaluator_review";
+  review_id: string;
+  catalog_digest: string;
+  discovery_digest: string;
+  selection_count: number;
+  claim_count: number;
+  bindings: MissionEvaluatorBindingReviewResult[];
+  findings: MissionEvaluatorReviewFinding[];
+  review_status: "ready" | "blocked";
+  binding_posture: "ready_for_mission_claim_bindings" | "requires_caller_correction" | string;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CapabilityAuditGroupResult extends JsonObject {
   id: string;
   domains: string[];

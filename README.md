@@ -758,6 +758,11 @@ examples. Every row is marked `candidate_only`: discovery never runs an evaluato
 domain semantics, or adjudicates a claim. The Python and TypeScript SDKs expose the same typed
 projection so callers can choose an adapter before adding an explicit `evaluator_bindings` row to
 `agent_mission`.
+`mission_evaluator_review` is the non-executing checkpoint after discovery: it binds caller-selected
+claim IDs to digest-fresh candidate adapters, validates candidate membership, domain support, unique
+selection IDs, per-claim limits, and RFC 6901 output pointers, then returns either a ready binding
+scaffold or bounded correction findings. A ready review still requires `agent_mission` validation;
+the checkpoint never executes an evaluator or a domain tool.
 `capability_dashboard` provides the bounded operator view beneath those routes: it binds the live
 catalogue to authoritative MCP schemas, reports callable/partial/declared-only groups, keeps
 crate/CLI/Python/MCP surface counts separate, and labels missing transports without pretending a

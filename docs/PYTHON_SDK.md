@@ -479,6 +479,11 @@ invent defaults:
   and sync/async Workspace and HTTP clients expose the same typed helper. Discovery is routing
   evidence only: it does not execute an adapter or make a claim semantic, calibrated, clinical, or
   release-ready.
+- `mission_evaluator_review(...)` validates a caller's discovery-bound selection rows without
+  executing tools. `MissionEvaluatorReviewRequest` normalizes bounded claim, adapter, domain, step,
+  and RFC 6901 pointer fields; `MissionEvaluatorReviewReport` exposes ready/blocked status, findings,
+  candidate membership, domain support, proposed binding rows, catalog/discovery digests, and the
+  explicit `execution: "not_started"` posture across sync and async Workspace/HTTP clients.
 - `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
   `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
   ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool

@@ -25,8 +25,11 @@ from prism_sdk import (
     CapabilityQuery,
     CapabilitySearchReport,
     MissionEvaluatorAdapterReport,
+    MissionEvaluatorBindingReport,
     MissionEvaluatorCoverageReport,
     MissionEvaluatorQuery,
+    MissionEvaluatorReviewReport,
+    MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
     CapabilityRouteReport,
     CapabilityRouteNeed,
@@ -283,6 +286,40 @@ def mission_evaluator_discover_payload() -> dict:
         ],
         "guarantees": ["candidate tools are suggestions and were not executed"],
         "limitations": ["the catalogue does not execute adapters or validate domain semantics"],
+    }
+
+
+def mission_evaluator_review_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-mission-evaluator/0.1",
+        "workflow": "mission_evaluator_review",
+        "review_id": "r" * 64,
+        "catalog_digest": "e" * 64,
+        "discovery_digest": "d" * 64,
+        "selection_count": 1,
+        "claim_count": 1,
+        "bindings": [{
+            "id": "assay-evaluator",
+            "claim_id": "fidelity-claim",
+            "adapter_id": "oncoworlds.assay_fidelity",
+            "domain": "oncology",
+            "step_id": "assay",
+            "output_pointer": "/fidelity",
+            "required": True,
+            "candidate_found": True,
+            "domain_supported": True,
+            "binding_posture": "ready",
+            "candidate_tools": ["oncoworlds_model_transport"],
+            "output_pointer_examples": ["/fidelity"],
+            "proposed_binding": {"id": "assay-evaluator", "adapter_id": "oncoworlds.assay_fidelity", "domain": "oncology", "step_id": "assay", "output_pointer": "/fidelity", "required": True},
+        }],
+        "findings": [],
+        "review_status": "ready",
+        "binding_posture": "ready_for_mission_claim_bindings",
+        "execution": "not_started",
+        "guarantees": ["no evaluator or domain tool was executed"],
+        "limitations": ["step existence and claim statement validity are checked only by the later agent_mission request"],
     }
 
 
@@ -1334,6 +1371,23 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             MissionEvaluatorQuery(max_items=257)
 
+    def test_mission_evaluator_review_report_exposes_ready_binding_scaffold(self) -> None:
+        report = MissionEvaluatorReviewReport.from_wire(mission_evaluator_review_payload())
+        self.assertIsInstance(report.bindings[0], MissionEvaluatorBindingReport)
+        self.assertTrue(report.ready)
+        self.assertEqual(report.proposed_bindings[0]["step_id"], "assay")
+        self.assertEqual(report.binding_posture, "ready_for_mission_claim_bindings")
+
+    def test_mission_evaluator_review_request_rejects_duplicate_ids(self) -> None:
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReviewRequest(
+                mission_evaluator_discover_payload(),
+                [
+                    {"id": "same", "claim_id": "c", "adapter_id": "a", "domain": "d", "step_id": "s", "output_pointer": ""},
+                    {"id": "same", "claim_id": "c", "adapter_id": "a", "domain": "d", "step_id": "s2", "output_pointer": ""},
+                ],
+            )
+
     def test_capability_audit_report_reconciles_parity_and_quality(self) -> None:
         report = CapabilityAuditReport.from_wire(capability_audit_payload())
         self.assertTrue(report.healthy)
@@ -1905,6 +1959,18 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(report.adapters[0].id, "oncoworlds.assay_fidelity")
         discover.assert_called_once()
 
+    def test_sync_workspace_typed_mission_evaluator_review(self) -> None:
+        with patch.object(
+            Workspace,
+            "mission_evaluator_review",
+            return_value=mission_evaluator_review_payload(),
+        ) as review:
+            report = Workspace(None).mission_evaluator_review_report(  # type: ignore[arg-type]
+                MissionEvaluatorReviewRequest(mission_evaluator_discover_payload(), [{"id": "assay-evaluator", "claim_id": "fidelity-claim", "adapter_id": "oncoworlds.assay_fidelity", "domain": "oncology", "step_id": "assay", "output_pointer": "/fidelity"}])
+            )
+        self.assertTrue(report.ready)
+        review.assert_called_once()
+
     def test_sync_workspace_exposes_capability_audit(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).capability_audit(include_groups=False)
@@ -2166,6 +2232,19 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(report.all_candidates_only)
         self.assertEqual(report.adapters[0].id, "oncoworlds.assay_fidelity")
         discover.assert_awaited_once()
+
+    async def test_async_workspace_typed_mission_evaluator_review(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "mission_evaluator_review",
+            new_callable=AsyncMock,
+            return_value=mission_evaluator_review_payload(),
+        ) as review:
+            report = await AsyncWorkspace(None).mission_evaluator_review_report(  # type: ignore[arg-type]
+                {"discovery": mission_evaluator_discover_payload(), "selections": [{"id": "assay-evaluator", "claim_id": "fidelity-claim", "adapter_id": "oncoworlds.assay_fidelity", "domain": "oncology", "step_id": "assay", "output_pointer": "/fidelity"}]}
+            )
+        self.assertTrue(report.ready)
+        review.assert_awaited_once()
 
     async def test_async_workspace_exposes_capability_audit(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

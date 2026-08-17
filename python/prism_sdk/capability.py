@@ -871,6 +871,174 @@ class MissionEvaluatorQuery:
         }
 
 
+def _evaluator_selection(value: Mapping[str, Any]) -> dict[str, Any]:
+    raw = _route_mapping("mission evaluator selection", value)
+    for name, maximum in (
+        ("id", 128),
+        ("claim_id", 128),
+        ("adapter_id", 256),
+        ("domain", 256),
+        ("step_id", 128),
+    ):
+        text = raw.get(name)
+        if not isinstance(text, str) or not text.strip() or len(text) > maximum:
+            raise ArgumentError(f"mission evaluator selection.{name} must be a visible string of at most {maximum} characters")
+    pointer = raw.get("output_pointer")
+    if not isinstance(pointer, str) or "\x00" in pointer or "\n" in pointer or "\r" in pointer:
+        raise ArgumentError("mission evaluator selection.output_pointer must be an RFC 6901 pointer string")
+    required = raw.get("required", True)
+    if not isinstance(required, bool):
+        raise ArgumentError("mission evaluator selection.required must be a boolean")
+    return {
+        "id": raw["id"],
+        "claim_id": raw["claim_id"],
+        "adapter_id": raw["adapter_id"],
+        "domain": raw["domain"],
+        "step_id": raw["step_id"],
+        "output_pointer": pointer,
+        "required": required,
+    }
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReviewRequest:
+    """Explicit selections to review before adding evaluator bindings to a mission claim."""
+
+    discovery: Mapping[str, Any]
+    selections: Sequence[Mapping[str, Any]]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.discovery, Mapping):
+            raise ArgumentError("mission evaluator discovery must be an object")
+        if not isinstance(self.selections, Sequence) or isinstance(self.selections, (str, bytes)):
+            raise ArgumentError("mission evaluator selections must be an array")
+        if not 1 <= len(self.selections) <= 64:
+            raise ArgumentError("mission evaluator selections must contain between 1 and 64 rows")
+        normalized = tuple(_evaluator_selection(value) for value in self.selections)
+        ids = [value["id"] for value in normalized]
+        if len(ids) != len(set(ids)):
+            raise ArgumentError("mission evaluator selection ids must be unique")
+        object.__setattr__(self, "discovery", dict(self.discovery))
+        object.__setattr__(self, "selections", normalized)
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"discovery": dict(self.discovery), "selections": [dict(value) for value in self.selections]}
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorBindingReport:
+    """One candidate-to-claim binding row from the non-executing review."""
+
+    id: str
+    claim_id: str
+    adapter_id: str
+    domain: str
+    step_id: str
+    output_pointer: str
+    required: bool
+    candidate_found: bool
+    domain_supported: bool
+    binding_posture: str
+    candidate_tools: tuple[str, ...]
+    output_pointer_examples: tuple[str, ...]
+    proposed_binding: dict[str, Any] | None
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorBindingReport":
+        raw = _route_mapping("mission evaluator binding review", value)
+        candidate_found = raw.get("candidate_found")
+        domain_supported = raw.get("domain_supported")
+        required = raw.get("required")
+        if not isinstance(candidate_found, bool) or not isinstance(domain_supported, bool) or not isinstance(required, bool):
+            raise ArgumentError("mission evaluator binding review booleans are invalid")
+        proposed = raw.get("proposed_binding")
+        return cls(
+            id=_route_text("review binding id", raw.get("id")),
+            claim_id=_route_text("review binding claim_id", raw.get("claim_id")),
+            adapter_id=_route_text("review binding adapter_id", raw.get("adapter_id")),
+            domain=_route_text("review binding domain", raw.get("domain")),
+            step_id=_route_text("review binding step_id", raw.get("step_id")),
+            output_pointer=raw.get("output_pointer") if isinstance(raw.get("output_pointer"), str) else "",
+            required=required,
+            candidate_found=candidate_found,
+            domain_supported=domain_supported,
+            binding_posture=_route_text("review binding posture", raw.get("binding_posture")),
+            candidate_tools=_route_strings("review candidate tools", raw.get("candidate_tools", [])),
+            output_pointer_examples=_route_strings(
+                "review output pointer examples", raw.get("output_pointer_examples", [])
+            ),
+            proposed_binding=dict(proposed) if isinstance(proposed, Mapping) else None,
+        )
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReviewReport:
+    """Typed, non-executing evaluator-to-claim binding review."""
+
+    raw: dict[str, Any]
+    review_id: str
+    catalog_digest: str
+    discovery_digest: str
+    selection_count: int
+    claim_count: int
+    bindings: tuple[MissionEvaluatorBindingReport, ...]
+    findings: tuple[dict[str, Any], ...]
+    review_status: str
+    binding_posture: str
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorReviewReport":
+        raw = _tool_payload(value, "mission_evaluator_review")
+        findings_value = raw.get("findings", [])
+        if not isinstance(findings_value, Sequence) or isinstance(findings_value, (str, bytes)):
+            raise ArgumentError("mission evaluator review findings must be an array")
+        bindings_value = raw.get("bindings", [])
+        if not isinstance(bindings_value, Sequence) or isinstance(bindings_value, (str, bytes)):
+            raise ArgumentError("mission evaluator review bindings must be an array")
+        review_status = _route_text("mission evaluator review status", raw.get("review_status"))
+        if review_status not in {"ready", "blocked"}:
+            raise ArgumentError(f"unknown mission evaluator review status: {review_status}")
+        return cls(
+            raw=raw,
+            review_id=_route_text("mission evaluator review id", raw.get("review_id")),
+            catalog_digest=_route_text("mission evaluator review catalog digest", raw.get("catalog_digest")),
+            discovery_digest=_route_text("mission evaluator discovery digest", raw.get("discovery_digest")),
+            selection_count=_route_count("mission evaluator selection count", raw.get("selection_count")),
+            claim_count=_route_count("mission evaluator claim count", raw.get("claim_count")),
+            bindings=tuple(MissionEvaluatorBindingReport.from_wire(item) for item in bindings_value),
+            findings=tuple(_route_mapping("mission evaluator review finding", item) for item in findings_value),
+            review_status=review_status,
+            binding_posture=_route_text("mission evaluator binding posture", raw.get("binding_posture")),
+            execution=_route_text("mission evaluator review execution", raw.get("execution")),
+            guarantees=_route_strings("mission evaluator review guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("mission evaluator review limitations", raw.get("limitations", [])),
+        )
+
+    @property
+    def ready(self) -> bool:
+        return self.review_status == "ready" and not self.findings
+
+    @property
+    def proposed_bindings(self) -> tuple[dict[str, Any], ...]:
+        return tuple(
+            binding.proposed_binding
+            for binding in self.bindings
+            if binding.proposed_binding is not None
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evaluator_review_report(value: Mapping[str, Any]) -> MissionEvaluatorReviewReport:
+    """Parse a direct MCP result or HTTP envelope from mission evaluator review."""
+
+    return MissionEvaluatorReviewReport.from_wire(value)
+
+
 @dataclass(frozen=True)
 class MissionEvaluatorAdapterReport:
     """One typed candidate row from mission evaluator discovery."""
@@ -1025,6 +1193,9 @@ __all__ = [
     "CapabilityRouteReviewRequest",
     "CapabilityRouteReviewReport",
     "MissionEvaluatorQuery",
+    "MissionEvaluatorReviewRequest",
+    "MissionEvaluatorBindingReport",
+    "MissionEvaluatorReviewReport",
     "MissionEvaluatorAdapterReport",
     "MissionEvaluatorMatchReport",
     "MissionEvaluatorCoverageReport",
@@ -1034,4 +1205,5 @@ __all__ = [
     "capability_discover_report",
     "capability_audit_report",
     "mission_evaluator_discover_report",
+    "mission_evaluator_review_report",
 ]

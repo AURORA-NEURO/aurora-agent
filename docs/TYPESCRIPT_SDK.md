@@ -170,7 +170,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 176-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 177-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
@@ -695,6 +695,11 @@ mission level, adapter ID, and bounded result count; `MissionEvaluatorDiscoverRe
 candidate purpose, related tools, pointer examples, and explicit `selection_posture: "candidate_only"`.
 It is a discovery aid for choosing an `evaluator_bindings.adapter_id`, not an evaluator execution or
 semantic adjudication route.
+`missionEvaluatorReview(...)` is the next non-executing checkpoint. It accepts the discovery payload
+and bounded claim-selection rows, then returns typed ready/blocked findings for stale discovery,
+unknown candidates, unsupported domains, duplicate IDs, per-claim overflow, and invalid RFC 6901
+pointers. Ready rows include proposed evaluator-binding scaffolds, but `execution: "not_started"`
+is preserved because `agentMission(...)` remains the execution and refusal authority.
 
 ```typescript
 const page = await api.events(0, 100);
