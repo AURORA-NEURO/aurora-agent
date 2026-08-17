@@ -215,6 +215,7 @@ pub mod cross_domain_audit;
 pub mod delivery_receipt;
 pub mod domain_evidence;
 pub mod domain_evidence_intake;
+pub mod domain_evidence_source;
 pub mod domain_report;
 pub mod engineering;
 pub mod engineering_plan;
@@ -300,6 +301,14 @@ pub use domain_evidence_intake::{
     DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
     MAX_DOMAIN_EVIDENCE_INTAKE_BYTES, MAX_DOMAIN_EVIDENCE_INTAKE_DOMAINS,
     MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS, MAX_DOMAIN_EVIDENCE_INTAKE_TEXT_BYTES,
+};
+pub use domain_evidence_source::{
+    plan_domain_evidence_source, validate_domain_evidence_source_plan,
+    DomainEvidenceSourcePlanError, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW, MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_BYTES,
+    MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_BYTES_LIMIT, MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_DOMAINS,
+    MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_NON_CLAIMS, MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_PARENTS,
+    MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TEXT_BYTES,
 };
 pub use domain_report::{
     project_domain_report, validate_domain_report, DomainReportError,

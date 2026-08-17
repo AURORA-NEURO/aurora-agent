@@ -78,6 +78,46 @@ const coverage = {
   does_not_claim: [],
 };
 
+const sourcePlan = {
+  ok: true,
+  schema: "bioprism-devplat-domain-evidence-source-plan/0.1",
+  workflow: "domain_evidence_source_plan",
+  plan_digest: "g".repeat(64),
+  group_id: "biological_domains",
+  domains: ["modalities"],
+  subject_id: "subject-ts",
+  source_tool: "modality_catalog",
+  connector_kind: "literature",
+  locator_kind: "uri",
+  locator: "https://example.org/article/1",
+  retrieval_mode: "metadata_only",
+  expected_content_digest: "a".repeat(64),
+  parent_digests: [],
+  retrieval_policy: { network: "caller_managed", max_bytes: 4096, cache: "content_addressed", credentials: "caller_managed_not_supplied" },
+  plan: { retrieval_status: "not_started" },
+  artifact_registry: { indexed: true, kind: "domain_evidence_source_plan", content_digest: "h".repeat(64) },
+  catalogue_digest: "i".repeat(64),
+  readiness_claimed: false,
+  execution: "not_started",
+  retrieval_status: "not_started",
+  guarantees: [],
+  does_not_claim: ["retrieval occurred"],
+};
+
+const sourceArgs = {
+  group_id: "biological_domains",
+  domains: ["modalities"],
+  subject_id: "subject-ts",
+  source_tool: "modality_catalog",
+  connector_kind: "literature",
+  locator_kind: "uri",
+  locator: "https://example.org/article/1",
+  retrieval_mode: "metadata_only",
+  expected_content_digest: "a".repeat(64),
+  retrieval_policy: { network: "caller_managed", max_bytes: 4096, cache: "content_addressed" },
+  does_not_claim: ["retrieval occurred"],
+};
+
 test("domain evidence intake REST and tool clients preserve exact envelope metadata", async () => {
   const seen = [];
   const client = new ApiClient({
@@ -89,6 +129,8 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
       if (url.pathname === "/v1/tools/domain_evidence_intake") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_intake", mcp: { result: { structuredContent: intake } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/domain-evidence/coverage") return new Response(JSON.stringify(coverage), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_coverage") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_coverage", mcp: { result: { structuredContent: coverage } } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/domain-evidence/sources") return new Response(JSON.stringify(sourcePlan), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/tools/domain_evidence_source_plan") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_source_plan", mcp: { result: { structuredContent: sourcePlan } } }), { status: 200, headers: { "content-type": "application/json" } });
       throw new Error(`unexpected path ${url.pathname}`);
     },
   });
@@ -96,8 +138,11 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   assert.equal((await client.domainEvidenceIntakeTool(args)).mcp.result.structuredContent.intake_digest, "c".repeat(64));
   assert.equal((await client.domainEvidenceCoverage({ include_intake_digests: true })).coverage_digest, "f".repeat(64));
   assert.equal((await client.domainEvidenceCoverageTool({ group_id: "biological_domains" })).mcp.result.structuredContent.complete, true);
+  assert.equal((await client.domainEvidenceSourcePlan(sourceArgs)).retrieval_status, "not_started");
+  assert.equal((await client.domainEvidenceSourcePlanTool(sourceArgs)).mcp.result.structuredContent.plan_digest, "g".repeat(64));
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");
   assert.equal(seen[2].url.searchParams.get("include_intake_digests"), "true");
+  assert.equal(seen[4].url.pathname, "/v1/domain-evidence/sources");
   await assert.rejects(
     client.domainEvidenceIntake({ ...args, outcome: "success" }),
     ArgumentError,

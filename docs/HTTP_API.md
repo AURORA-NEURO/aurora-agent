@@ -35,6 +35,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/domain-reports/coverage?group_id=&domain=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
 | `POST /v1/domain-evidence/harmonize` | Join exact same-subject domain reports into an explicit, digest-addressed traceability artifact |
 | `POST /v1/domain-evidence/intake` | Normalize and index one supplied raw request/response envelope from any declared capability-group tool |
+| `POST /v1/domain-evidence/sources` | Build and index a non-fetching, digest-addressed external evidence source plan |
 | `GET /v1/domain-evidence/coverage?group_id=&domain=&max_groups=&include_intake_digests=` | Count retained raw-intake envelopes by authoritative group, outcome, source tool, subject, domain, and exact digest |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
 | `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows |
@@ -208,6 +209,11 @@ The existing `complete` flag means only that an intake artifact was retained for
 group; `tool_coverage_complete` and `domain_coverage_complete` separately report whether every
 declared source tool and domain has an intake row. None of these flags means a tool ran or that a
 response is true, complete, safe, reproducible, or release-ready.
+`POST /v1/domain-evidence/sources` builds the external-source planning boundary. It binds a
+connector family, locator class, retrieval mode, bounded network/cache policy, optional expected
+content digest, and domain scope into an exact plan artifact. Credentials remain caller-managed;
+the route does not fetch a URI/path, follow redirects, resolve a provider, or claim that a later
+retrieval will be authentic, complete, or scientifically valid.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

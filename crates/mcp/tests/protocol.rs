@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 196);
+    assert_eq!(tools.len(), 197);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1117,6 +1117,55 @@ fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() 
     assert_eq!(filtered["complete"], json!(true));
     assert_eq!(filtered["tool_coverage_complete"], json!(false));
     assert_eq!(filtered["domain_coverage_complete"], json!(false));
+}
+
+#[test]
+fn domain_evidence_source_plan_is_catalogue_bound_digest_addressed_and_non_executing() {
+    let mut server = server();
+    let arguments = json!({
+        "group_id": "biological_domains",
+        "domains": ["modalities"],
+        "subject_id": "source-plan-subject",
+        "source_tool": "modality_catalog",
+        "connector_kind": "literature",
+        "locator_kind": "uri",
+        "locator": "https://example.org/article/1",
+        "retrieval_mode": "metadata_only",
+        "expected_content_digest": "a".repeat(64),
+        "retrieval_policy": {"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed"},
+        "does_not_claim": ["retrieval occurred", "source is true"]
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        arguments.clone(),
+    );
+    assert_eq!(first["workflow"], json!("domain_evidence_source_plan"));
+    assert_eq!(first["retrieval_status"], json!("not_started"));
+    assert_eq!(first["readiness_claimed"], json!(false));
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        first["artifact_registry"]["verification"]["method"],
+        json!("domain_evidence_source_plan")
+    );
+    assert_eq!(first["plan_digest"].as_str().unwrap().len(), 64);
+    let second = call(&mut server, "domain_evidence_source_plan", arguments);
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+    let credential_refused = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-plan-refused",
+            "connector_kind": "generic_http",
+            "locator_kind": "uri",
+            "locator": "https://user:secret@example.org/evidence",
+            "retrieval_mode": "content",
+            "does_not_claim": ["retrieval occurred"]
+        }),
+    );
+    assert_eq!(credential_refused["__isError"], json!(true));
 }
 
 #[test]
@@ -6511,12 +6560,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(196));
-    assert_eq!(result["advertised_tool_count"], json!(196));
+    assert_eq!(result["unique_catalog_tools"], json!(197));
+    assert_eq!(result["advertised_tool_count"], json!(197));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(196));
-    assert_eq!(result["schema_quality"]["valid"], json!(196));
+    assert_eq!(result["schema_quality"]["checked"], json!(197));
+    assert_eq!(result["schema_quality"]["valid"], json!(197));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

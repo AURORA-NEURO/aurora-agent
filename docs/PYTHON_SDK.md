@@ -55,6 +55,10 @@ catalogue-wide intake audit through REST, the REST/MCP dispatcher, `Workspace`, 
 outcomes, source tools, subjects, reported domains, declared-tool/domain gaps, optional intake
 digests, and domain-level counts explicit; group, tool, and domain completeness remain separate,
 and a reported envelope is not treated as executed capability or valid evidence.
+`DomainEvidenceSourcePlanRequest` and `DomainEvidenceSourcePlanReport` expose the matching
+external-source boundary through sync/async HTTP and workspace helpers. They retain connector and
+locator classes, retrieval mode, expected content digest, parent links, and bounded policy while
+keeping credentials caller-managed and retrieval `not_started`; a source plan is not provenance.
 
 ## Lifecycle
 

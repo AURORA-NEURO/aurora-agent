@@ -12,6 +12,8 @@ from prism_sdk import (
     DomainEvidenceIntakeCoverageRequest,
     DomainEvidenceIntakeReport,
     DomainEvidenceIntakeRequest,
+    DomainEvidenceSourcePlanReport,
+    DomainEvidenceSourcePlanRequest,
     Workspace,
 )
 
@@ -103,6 +105,50 @@ def coverage_payload() -> dict:
     }
 
 
+def source_plan_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-evidence-source-plan/0.1",
+        "workflow": "domain_evidence_source_plan",
+        "plan_digest": "b" * 64,
+        "group_id": "biological_domains",
+        "domains": ["modalities"],
+        "subject_id": "source-python",
+        "source_tool": "modality_catalog",
+        "connector_kind": "literature",
+        "locator_kind": "uri",
+        "locator": "https://example.org/article/1",
+        "retrieval_mode": "metadata_only",
+        "expected_content_digest": "a" * 64,
+        "parent_digests": [],
+        "retrieval_policy": {"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed", "credentials": "caller_managed_not_supplied"},
+        "plan": {"retrieval_status": "not_started"},
+        "artifact_registry": {"indexed": True, "kind": "domain_evidence_source_plan", "content_digest": "h" * 64},
+        "catalogue_digest": "c" * 64,
+        "readiness_claimed": False,
+        "execution": "not_started",
+        "retrieval_status": "not_started",
+        "guarantees": [],
+        "does_not_claim": ["retrieval occurred"],
+    }
+
+
+def source_request() -> DomainEvidenceSourcePlanRequest:
+    return DomainEvidenceSourcePlanRequest(
+        group_id="biological_domains",
+        domains=("modalities",),
+        subject_id="source-python",
+        source_tool="modality_catalog",
+        connector_kind="literature",
+        locator_kind="uri",
+        locator="https://example.org/article/1",
+        retrieval_mode="metadata_only",
+        expected_content_digest="a" * 64,
+        retrieval_policy={"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed"},
+        does_not_claim=("retrieval occurred",),
+    )
+
+
 class DomainEvidenceIntakeModelTests(unittest.TestCase):
     def test_request_and_response_keep_request_presence_and_outcome(self) -> None:
         normalized = request()
@@ -174,6 +220,29 @@ class DomainEvidenceIntakeModelTests(unittest.TestCase):
         with patch.object(Workspace, "tool", return_value=coverage_payload()):
             report = Workspace(None).domain_evidence_coverage_report(coverage_request)
         self.assertEqual(report.coverage_digest, "f" * 64)
+
+    def test_source_plan_preserves_non_fetching_posture_across_clients(self) -> None:
+        report = DomainEvidenceSourcePlanReport.from_wire(source_plan_payload())
+        self.assertEqual(report.plan_digest, "b" * 64)
+        self.assertEqual(report.retrieval_status, "not_started")
+        with self.assertRaises(ArgumentError):
+            DomainEvidenceSourcePlanRequest(
+                **{**source_request().__dict__, "locator": "https://user:secret@example.org/source"}
+            )
+        with patch.object(ApiClient, "request", return_value=source_plan_payload()) as rest:
+            report = ApiClient("http://127.0.0.1:8787").domain_evidence_source_plan(source_request())
+        self.assertEqual(rest.call_args.args[:2], ("POST", "/v1/domain-evidence/sources"))
+        with patch.object(ApiClient, "call_tool", return_value=source_plan_payload()) as tool:
+            report = ApiClient("http://127.0.0.1:8787").domain_evidence_source_plan_tool(source_request())
+        self.assertEqual(tool.call_args.args[0], "domain_evidence_source_plan")
+        with patch.object(ApiClient, "request", return_value=source_plan_payload()):
+            report = asyncio.run(
+                AsyncApiClient(ApiClient("http://127.0.0.1:8787")).domain_evidence_source_plan(source_request())
+            )
+        self.assertEqual(report.connector_kind, "literature")
+        with patch.object(Workspace, "tool", return_value=source_plan_payload()):
+            report = Workspace(None).domain_evidence_source_plan_report(source_request())
+        self.assertEqual(report.artifact_registry["kind"], "domain_evidence_source_plan")
 
 
 if __name__ == "__main__":

@@ -5063,6 +5063,51 @@ export interface DomainEvidenceIntakeCoverageResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export type DomainEvidenceSourceConnectorKind = "literature" | "clinical_trial" | "fhir" | "object_store" | "file" | "provider_api" | "generic_http";
+export type DomainEvidenceSourceLocatorKind = "uri" | "path" | "opaque";
+export type DomainEvidenceSourceRetrievalMode = "reference_only" | "metadata_only" | "content";
+
+export interface DomainEvidenceSourcePlanArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool?: string | null;
+  connector_kind: DomainEvidenceSourceConnectorKind;
+  locator_kind: DomainEvidenceSourceLocatorKind;
+  locator: string;
+  retrieval_mode: DomainEvidenceSourceRetrievalMode;
+  expected_content_digest?: string | null;
+  parent_digests?: string[];
+  retrieval_policy?: JsonObject;
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceSourcePlanResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-source-plan/0.1";
+  workflow: "domain_evidence_source_plan";
+  plan_digest: string;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string | null;
+  connector_kind: DomainEvidenceSourceConnectorKind;
+  locator_kind: DomainEvidenceSourceLocatorKind;
+  locator: string;
+  retrieval_mode: DomainEvidenceSourceRetrievalMode;
+  expected_content_digest: string | null;
+  parent_digests: string[];
+  retrieval_policy: JsonObject;
+  plan: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  retrieval_status: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;

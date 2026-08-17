@@ -40,6 +40,8 @@ import type {
   DomainEvidenceIntakeResult,
   DomainEvidenceIntakeCoverageOptions,
   DomainEvidenceIntakeCoverageResult,
+  DomainEvidenceSourcePlanArgs,
+  DomainEvidenceSourcePlanResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -692,6 +694,35 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceIntakeCoverageResult>> {
     return this.callTool<DomainEvidenceIntakeCoverageResult>("domain_evidence_coverage", args, options);
+  }
+
+  /** Plan and index a non-fetching external evidence connector boundary. */
+  async domainEvidenceSourcePlan(
+    args: DomainEvidenceSourcePlanArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceSourcePlanResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence source plan arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["locator", args.locator]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!("literature" === args.connector_kind || "clinical_trial" === args.connector_kind || "fhir" === args.connector_kind || "object_store" === args.connector_kind || "file" === args.connector_kind || "provider_api" === args.connector_kind || "generic_http" === args.connector_kind)) throw new ArgumentError("connector_kind is invalid");
+    if (!("uri" === args.locator_kind || "path" === args.locator_kind || "opaque" === args.locator_kind)) throw new ArgumentError("locator_kind is invalid");
+    if (!("reference_only" === args.retrieval_mode || "metadata_only" === args.retrieval_mode || "content" === args.retrieval_mode)) throw new ArgumentError("retrieval_mode is invalid");
+    if (args.source_tool !== undefined && args.source_tool !== null && (typeof args.source_tool !== "string" || args.source_tool.trim().length === 0)) throw new ArgumentError("source_tool must be a non-empty string or null");
+    if (args.expected_content_digest !== undefined && args.expected_content_digest !== null && (typeof args.expected_content_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.expected_content_digest))) throw new ArgumentError("expected_content_digest must be a lowercase SHA-256 digest or null");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (!Array.isArray(args.does_not_claim) || args.does_not_claim.length < 1 || args.does_not_claim.length > 64 || args.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("does_not_claim must contain 1..=64 non-empty strings");
+    if (args.retrieval_policy !== undefined && !isObject(args.retrieval_policy)) throw new ArgumentError("retrieval_policy must be an object");
+    return this.request<DomainEvidenceSourcePlanResult>("POST", "/v1/domain-evidence/sources", args, options);
+  }
+
+  /** Invoke external source planning through the REST tool dispatcher. */
+  async domainEvidenceSourcePlanTool(
+    args: DomainEvidenceSourcePlanArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceSourcePlanResult>> {
+    return this.callTool<DomainEvidenceSourcePlanResult>("domain_evidence_source_plan", args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

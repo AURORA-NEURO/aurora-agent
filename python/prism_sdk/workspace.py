@@ -39,6 +39,7 @@ from .domain_evidence_intake import (
     DomainEvidenceIntakeReport,
     DomainEvidenceIntakeRequest,
 )
+from .domain_evidence_source import DomainEvidenceSourcePlanReport, DomainEvidenceSourcePlanRequest
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
 from .bioql import BioQlCompileRequest
 from .client import Client
@@ -2083,6 +2084,23 @@ class Workspace:
         request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
     ) -> DomainEvidenceIntakeCoverageReport:
         return DomainEvidenceIntakeCoverageReport.from_wire(self.domain_evidence_coverage(request))
+
+    def domain_evidence_source_plan(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceSourcePlanRequest)
+            else DomainEvidenceSourcePlanRequest(**dict(request))
+        )
+        return self.tool("domain_evidence_source_plan", normalized.to_arguments())
+
+    def domain_evidence_source_plan_report(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        return DomainEvidenceSourcePlanReport.from_wire(self.domain_evidence_source_plan(request))
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         """Audit exact identity agreement across the bounded artifact stores."""
@@ -5436,6 +5454,23 @@ class AsyncWorkspace:
         request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
     ) -> DomainEvidenceIntakeCoverageReport:
         return DomainEvidenceIntakeCoverageReport.from_wire(await self.domain_evidence_coverage(request))
+
+    async def domain_evidence_source_plan(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceSourcePlanRequest)
+            else DomainEvidenceSourcePlanRequest(**dict(request))
+        )
+        return await self.tool("domain_evidence_source_plan", normalized.to_arguments())
+
+    async def domain_evidence_source_plan_report(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        return DomainEvidenceSourcePlanReport.from_wire(await self.domain_evidence_source_plan(request))
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         return ArtifactCrossStoreAuditReport.from_wire(

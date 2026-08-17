@@ -127,28 +127,30 @@ use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
     audit_execution_provenance, build_dashboard, build_delivery_receipt,
     build_domain_workflow_catalogue, instantiate_domain_workflow,
-    mission_claim_lineage_with_review, normalize_ci_provider_payload, plan_mission,
-    reconcile_domain_workflow, run_workbench, scaffold_domain_workflow, standard_walkthroughs,
-    verify_delivery_receipt, verify_mission_evidence_bundle, ArtifactRegistry, CapabilityCatalogue,
-    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
-    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
-    DeliveryReceiptVerificationRequest, DevPlatReport, DomainWorkflowReconciliationRegistry,
-    EngineeringManifest, EngineeringPlanRequest, EvidenceBundleRegistry,
-    ExecutionProvenanceRequest, MissionEvaluatorCatalogue, MissionEvaluatorQuery,
-    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
-    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
-    MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
-    SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
-    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
-    DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
-    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
-    ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
-    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
-    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
-    SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
+    mission_claim_lineage_with_review, normalize_ci_provider_payload, plan_domain_evidence_source,
+    plan_mission, reconcile_domain_workflow, run_workbench, scaffold_domain_workflow,
+    standard_walkthroughs, verify_delivery_receipt, verify_mission_evidence_bundle,
+    ArtifactRegistry, CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery,
+    CapabilityRouteRequest, CiExecutionEvidenceRequest, CiProviderEvidenceRequest,
+    CiProviderNormalizationRequest, DeliveryReceiptRequest, DeliveryReceiptVerificationRequest,
+    DevPlatReport, DomainWorkflowReconciliationRegistry, EngineeringManifest,
+    EngineeringPlanRequest, EvidenceBundleRegistry, ExecutionProvenanceRequest,
+    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayRequest, MissionEvaluatorReviewRequest, MissionReport, MissionRequest,
+    MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
+    OperationalReadinessManifest, ReleasePipelineManifest, SandboxManifest, SandboxRuntimeManifest,
+    SecurityPrivacyManifest, SecurityProgramManifest, WorkbenchRequest, CAPABILITY_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW,
+    DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION, DOMAIN_REPORT_COVERAGE_WORKFLOW,
+    DOMAIN_REPORT_PROJECT_SCHEMA_VERSION, DOMAIN_REPORT_PROJECT_WORKFLOW,
+    DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA,
+    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS, MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION,
+    OPERATIONAL_READINESS_AUDIT_SCHEMA, RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA,
+    SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
+    WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1371,6 +1373,7 @@ impl Server {
             "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
             "domain_evidence_intake" => self.domain_evidence_intake(&arguments),
             "domain_evidence_coverage" => self.domain_evidence_coverage(&arguments),
+            "domain_evidence_source_plan" => self.domain_evidence_source_plan(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -3130,6 +3133,113 @@ impl Server {
                 "traceability proves any claim or chooses between contradictory reports",
                 "harmonization proves scientific, clinical, regulatory, publication, or release validity",
                 "artifact indexing proves provenance completeness or external effect completion"
+            ]
+        }))
+    }
+
+    /// Plan a caller-managed external evidence connector without fetching or executing it.
+    fn domain_evidence_source_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let plan = plan_domain_evidence_source(arguments)
+            .map_err(|error| format!("domain evidence source plan refused: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group_id = plan
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence source plan omitted group_id")?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+        if let Some(source_tool) = plan.get("source_tool").and_then(Value::as_str) {
+            if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+                return Err(format!(
+                    "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let domains = plan
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("domain evidence source plan omitted domains")?;
+        for domain in domains.iter().filter_map(Value::as_str) {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "domain label {domain:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let subject_id = plan
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence source plan omitted subject_id")?;
+        let parent_digests = plan
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let projection = self.index_artifact_projection(
+            "domain_evidence_source_plan",
+            subject_id,
+            domains
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            parent_digests,
+            plan.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain evidence source plan could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW,
+            "plan_digest": plan.get("plan_digest"),
+            "group_id": plan.get("group_id"),
+            "domains": plan.get("domains"),
+            "subject_id": plan.get("subject_id"),
+            "source_tool": plan.get("source_tool"),
+            "connector_kind": plan.get("connector_kind"),
+            "locator_kind": plan.get("locator_kind"),
+            "locator": plan.get("locator"),
+            "retrieval_mode": plan.get("retrieval_mode"),
+            "expected_content_digest": plan.get("expected_content_digest"),
+            "parent_digests": plan.get("parent_digests"),
+            "retrieval_policy": plan.get("retrieval_policy"),
+            "plan": plan,
+            "artifact_registry": projection,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "retrieval_status": "not_started",
+            "guarantees": [
+                "connector kind, locator shape, policy, group, and domain membership were structurally checked",
+                "the exact source plan is indexed and its plan digest can parent later caller-controlled intake",
+                "credentials remain caller-managed and no external connector is invoked"
+            ],
+            "does_not_claim": [
+                "the locator exists, was reachable, or identifies an authentic source",
+                "a planned retrieval occurred or that future bytes will match the expected digest",
+                "planning establishes scientific, clinical, causal, provenance, regulatory, or release validity"
             ]
         }))
     }
@@ -29405,7 +29515,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_intake", "domain_evidence_coverage", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29738,6 +29848,28 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_intake_digests": { "type": "boolean", "description": "Include exact indexed intake artifact digests in each group row." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "domain_evidence_source_plan",
+            "description": "Build and index a deterministic, domain-scoped plan for a caller-managed external evidence connector. It validates connector and locator classes, rejects embedded credentials and invalid digests, normalizes bounded retrieval policy, and preserves a plan digest that can parent later raw intake; it never fetches files, contacts networks, resolves credentials, follows redirects, or treats a locator as provenance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning this source plan." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Domain labels declared by group_id." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, study, run, or report identity." },
+                    "source_tool": { "type": ["string", "null"], "description": "Optional exact MCP tool declared under group_id that will later consume the source." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "file", "provider_api", "generic_http"], "description": "Declared future connector family; it is not invoked by this plan." },
+                    "locator_kind": { "type": "string", "enum": ["uri", "path", "opaque"], "description": "How the caller represents locator without exposing credentials." },
+                    "locator": { "type": "string", "description": "Bounded source locator or opaque reference. Embedded credentials and control line breaks are refused." },
+                    "retrieval_mode": { "type": "string", "enum": ["reference_only", "metadata_only", "content"], "description": "Requested future retrieval depth; all modes remain not_started here." },
+                    "expected_content_digest": { "type": ["string", "null"], "description": "Optional lowercase SHA-256 digest expected from a later connector." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional artifact parents for this source declaration." },
+                    "retrieval_policy": { "type": "object", "description": "Optional bounded policy: network disabled/caller_managed/enabled, max_bytes 1..67108864, cache no_cache/content_addressed. Credentials are never accepted." },
+                    "does_not_claim": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Caller-owned non-claims that remain attached to the plan." }
+                },
+                "required": ["group_id", "domains", "subject_id", "connector_kind", "locator_kind", "locator", "retrieval_mode", "does_not_claim"]
             }
         }),
         json!({

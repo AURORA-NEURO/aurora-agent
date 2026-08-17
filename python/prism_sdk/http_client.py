@@ -44,6 +44,7 @@ from .domain_evidence_intake import (
     DomainEvidenceIntakeReport,
     DomainEvidenceIntakeRequest,
 )
+from .domain_evidence_source import DomainEvidenceSourcePlanReport, DomainEvidenceSourcePlanRequest
 from .capability import (
     CapabilityAuditReport,
     CapabilitySearchReport,
@@ -900,6 +901,34 @@ class ApiClient:
         )
         return DomainEvidenceIntakeCoverageReport.from_wire(
             self.call_tool("domain_evidence_coverage", normalized.to_arguments())
+        )
+
+    def domain_evidence_source_plan(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        """Plan and index a non-fetching external evidence source over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceSourcePlanRequest)
+            else DomainEvidenceSourcePlanRequest(**dict(request))
+        )
+        return DomainEvidenceSourcePlanReport.from_wire(
+            self.request("POST", "/v1/domain-evidence/sources", normalized.to_arguments())
+        )
+
+    def domain_evidence_source_plan_tool(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceSourcePlanRequest)
+            else DomainEvidenceSourcePlanRequest(**dict(request))
+        )
+        return DomainEvidenceSourcePlanReport.from_wire(
+            self.call_tool("domain_evidence_source_plan", normalized.to_arguments())
         )
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
@@ -4685,6 +4714,18 @@ class AsyncApiClient:
         request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
     ) -> DomainEvidenceIntakeCoverageReport:
         return await asyncio.to_thread(self.client.domain_evidence_coverage_tool, request)
+
+    async def domain_evidence_source_plan(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        return await asyncio.to_thread(self.client.domain_evidence_source_plan, request)
+
+    async def domain_evidence_source_plan_tool(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        return await asyncio.to_thread(self.client.domain_evidence_source_plan_tool, request)
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

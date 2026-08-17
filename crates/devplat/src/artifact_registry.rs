@@ -17,6 +17,9 @@ use crate::domain_evidence::{
 use crate::domain_evidence_intake::{
     validate_domain_evidence_intake, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
 };
+use crate::domain_evidence_source::{
+    validate_domain_evidence_source_plan, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+};
 use crate::domain_report::{validate_domain_report, DOMAIN_REPORT_SCHEMA_VERSION};
 use crate::evidence_bundle::verify_mission_evidence_bundle;
 use bioprism_ids::ContentHash;
@@ -47,6 +50,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_report",
     "domain_evidence_harmonization",
     "domain_evidence_intake",
+    "domain_evidence_source_plan",
     "external_reference",
 ];
 
@@ -657,6 +661,28 @@ fn verify_known_artifact(
                     "state": "verified_integrity",
                     "method": "domain_evidence_intake",
                     "schema": DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION
+                }),
+            ))
+        }
+        "domain_evidence_source_plan"
+            if artifact.get("schema").and_then(Value::as_str)
+                == Some(DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION) =>
+        {
+            validate_domain_evidence_source_plan(artifact).map_err(|error| {
+                ArtifactRegistryError::InvalidInput(format!(
+                    "domain evidence source plan verification failed: {error}"
+                ))
+            })?;
+            let digest = artifact
+                .get("plan_digest")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            Ok((
+                digest,
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_evidence_source_plan",
+                    "schema": DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION
                 }),
             ))
         }
