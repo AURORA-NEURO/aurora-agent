@@ -650,8 +650,12 @@ invent defaults:
   it is activity evidence rather than a readiness claim.
   `operations_domain_gates(after=..., limit=...)` returns typed per-domain evidence gates for
   catalogue, activity, transport completion, pooled evaluation, domain-evaluator, safety, and
-  release channels. Domain-evaluator rows retain the exact evaluator tool/event binding without
-  asserting scientific validity. Gate rows retain refusal/completion evidence and remain `insufficient_evidence` or `review_required`
+  release channels. Each `OperationsDomainGateGroup` also exposes typed
+  `reconciliation_evidence`, joined by exact capability-group `workflow_id` to the bounded
+  digest-valid registry. Its `missing`, `incomplete`, `invalid`, and `structurally_ready` states
+  remain evidence posture only: incomplete or invalid retained posture blocks review, while a
+  structurally-ready row still requires authority review. Domain-evaluator rows retain the exact
+  evaluator tool/event binding without asserting scientific validity. Gate rows retain refusal/completion evidence and remain `insufficient_evidence` or `review_required`
   until a separate authority reviews them; the typed response enforces `readiness_claimed: false`.
   `OperationsGateReviewRequest` plus `create_operations_gate_review(...)` persists a current
   operator decision. `operations_gate_reviews(...)` replays the durable record by cursor or

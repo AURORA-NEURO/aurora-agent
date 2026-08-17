@@ -201,6 +201,83 @@ impl DomainWorkflowReconciliationRegistry {
         })
     }
 
+    /// Return the bounded reconciliation posture for one capability-group workflow.
+    ///
+    /// A missing record is reported as `missing`, while an explicitly incomplete or invalid
+    /// retained report is surfaced as a blocking audit posture. A structurally ready record is
+    /// still only evidence for review; it never becomes a gate pass by itself.
+    pub fn workflow_posture(&self, workflow_id: &str) -> Value {
+        let mut completion_status_counts = BTreeMap::<String, usize>::new();
+        let mut record_count = 0usize;
+        let mut ready_count = 0usize;
+        let mut review_required_count = 0usize;
+        let mut integrity_invalid_count = 0usize;
+        let mut evidence_invalid_count = 0usize;
+        for record in self
+            .records
+            .values()
+            .filter(|record| record.get("workflow_id").and_then(Value::as_str) == Some(workflow_id))
+        {
+            record_count += 1;
+            let status = record
+                .pointer("/completion/status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            *completion_status_counts.entry(status).or_default() += 1;
+            if record.pointer("/completion/ready").and_then(Value::as_bool) == Some(true) {
+                ready_count += 1;
+            }
+            if record
+                .pointer("/completion/review_required")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                review_required_count += 1;
+            }
+            if record.pointer("/integrity/valid").and_then(Value::as_bool) != Some(true) {
+                integrity_invalid_count += 1;
+            }
+            if record
+                .pointer("/evidence/evidence_valid")
+                .and_then(Value::as_bool)
+                != Some(true)
+            {
+                evidence_invalid_count += 1;
+            }
+        }
+        let state = if record_count == 0 {
+            "missing"
+        } else if integrity_invalid_count > 0 || evidence_invalid_count > 0 {
+            "invalid"
+        } else if ready_count > 0 {
+            "structurally_ready"
+        } else {
+            "incomplete"
+        };
+        json!({
+            "workflow_id": workflow_id,
+            "state": state,
+            "record_count": record_count,
+            "completion_status_counts": completion_status_counts,
+            "ready_count": ready_count,
+            "review_required_count": review_required_count,
+            "integrity_invalid_count": integrity_invalid_count,
+            "evidence_invalid_count": evidence_invalid_count,
+            "readiness_claimed": false,
+            "scope": "bounded_digest_valid_reconciliation_registry",
+            "guarantees": [
+                "only records whose reconciliation_digest passed import verification are counted",
+                "structurally_ready is evidence posture and still requires human or domain authority review",
+                "posture lookup never executes, retries, resumes, or re-evaluates a mission"
+            ],
+            "limitations": [
+                "missing means no matching retained record, not that the workflow never ran",
+                "the registry is bounded and process-local"
+            ]
+        })
+    }
+
     /// Query deterministic digest-ordered index rows without returning full reports by default.
     pub fn query(
         &self,
@@ -614,6 +691,11 @@ mod tests {
         assert_eq!(summary["completion_status_counts"]["complete"], 1);
         assert_eq!(summary["workflow_count"], 1);
         assert_eq!(summary["workflow_status_counts"]["oncology"]["complete"], 1);
+        assert_eq!(
+            registry.workflow_posture("oncology")["state"],
+            "structurally_ready"
+        );
+        assert_eq!(registry.workflow_posture("missing")["state"], "missing");
     }
 
     #[test]
@@ -664,5 +746,6 @@ mod tests {
             summary["workflow_status_counts"]["workspace"]["complete"],
             1
         );
+        assert_eq!(registry.workflow_posture("oncology")["state"], "invalid");
     }
 }

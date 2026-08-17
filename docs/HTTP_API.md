@@ -259,9 +259,18 @@ requested bounded event page and then shown on each matched domain group; catalo
 activity, and transport completion remain group-specific. This is an evidence-shaping rule, not
 proof that a domain-specific scientific or safety claim has been established.
 
-The gate response includes a `gate_digest` over the normalized tool-evidence projection without the
-digest field; non-tool review events do not change that digest, while retention changes remain
-visible. `POST /v1/operations/gate-reviews` records a current acceptance as a content-addressed
+Each group also includes `gates.reconciliation_evidence`, a bounded posture lookup joined by exact
+`workflow_id` to a digest-valid retained reconciliation report. Its state is `missing`, `incomplete`,
+`invalid`, or `structurally_ready`: missing is explicit and never inferred as a pass; incomplete or
+invalid retained posture forces `insufficient_evidence`; and structurally-ready is still only evidence
+for review. `groups_reconciliation_blocked` counts groups blocked by the latter two states. This
+adjunct does not add reconciliation to the seven accepted gate names and cannot authorize release,
+safety, clinical, scientific, or deployment claims; it prevents retained contradictory or incomplete
+workflow evidence from disappearing behind otherwise-observed control-plane events.
+
+The gate response includes a `gate_digest` over the normalized operations-evidence and
+reconciliation projection without the digest field; non-tool review events do not change that
+digest, while retained event or reconciliation changes remain visible. `POST /v1/operations/gate-reviews` records a current acceptance as a content-addressed
 retained event, and `GET /v1/operations/gate-reviews?review_id=...` replays it with its event
 cursor. It is durable across restart only when `event_state_path` is configured; the response
 exposes that boundary explicitly.

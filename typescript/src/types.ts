@@ -7997,8 +7997,30 @@ export interface OperationsDomainGateGroup extends OperationsDomainGroup {
   gate_state: "catalogue_blocked" | "insufficient_evidence" | "review_required";
   readiness_claimed: false;
   gates: Record<string, JsonObject>;
+  reconciliation_evidence: OperationsReconciliationPosture;
   last_event_id: number | null;
   evidence_scope: "requested_event_page_only";
+}
+
+export type OperationsReconciliationPostureState =
+  | "missing"
+  | "invalid"
+  | "incomplete"
+  | "structurally_ready";
+
+export interface OperationsReconciliationPosture extends JsonObject {
+  workflow_id: string;
+  state: OperationsReconciliationPostureState;
+  record_count: number;
+  completion_status_counts: Record<string, number>;
+  ready_count: number;
+  review_required_count: number;
+  integrity_invalid_count: number;
+  evidence_invalid_count: number;
+  readiness_claimed: false;
+  scope: "bounded_digest_valid_reconciliation_registry";
+  guarantees: string[];
+  limitations: string[];
 }
 
 export interface OperationsDomainGates extends JsonObject {
@@ -8006,7 +8028,7 @@ export interface OperationsDomainGates extends JsonObject {
   workflow: "operations_domain_gates";
   schema: "bioprism-operations-domain-gates/0.1";
   gate_digest: string;
-  gate_digest_scope: "tool_evidence_projection_without_gate_digest";
+  gate_digest_scope: "operations_evidence_and_reconciliation_projection_without_gate_digest";
   event_cursor: {
     after: number;
     next_after: number;
@@ -8032,6 +8054,7 @@ export interface OperationsDomainGates extends JsonObject {
     groups_blocked_catalogue: number;
     groups_insufficient_evidence: number;
     groups_review_required: number;
+    groups_reconciliation_blocked: number;
     readiness_claimed: false;
   };
   gate_policy: JsonObject;

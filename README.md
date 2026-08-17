@@ -380,6 +380,13 @@ gates for every capability group. Domain-evaluator evidence is bound to a comple
 tool by exact name or the workspace catalogue; it does not assert scientific validity, evaluator
 calibration, or independence. A completed local call is never promoted into a readiness verdict: groups remain
 `catalogue_blocked`, `insufficient_evidence`, or `review_required`, with `readiness_claimed: false`.
+Each group also carries `gates.reconciliation_evidence`, joined only by the exact capability-group
+`workflow_id` against the bounded digest-valid reconciliation registry. `missing` means no retained
+matching report and never passes by inference; `incomplete` or `invalid` retained posture forces
+`insufficient_evidence`; `structurally_ready` remains review-required evidence and is never a release,
+safety, clinical, or scientific authorization. The summary exposes `groups_reconciliation_blocked`,
+and the same posture is typed by the Python and TypeScript SDKs, so all currently advertised workspace
+groups receive the same fail-closed join contract.
 Handoffs now carry an `operations_gate_acceptance` execution prerequisite; preflight binds the
 mission’s exact tools to matching capability groups and the current `gate_digest`, while executable
 HTTP missions are refused until an operator acceptance covers every required gate for every group.

@@ -828,6 +828,73 @@ class OperationsDomainActivity:
 
 
 @dataclass(frozen=True)
+class OperationsReconciliationPosture:
+    """Retained reconciliation posture joined to one exact capability-group workflow ID."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    state: str
+    record_count: int
+    completion_status_counts: dict[str, int]
+    ready_count: int
+    review_required_count: int
+    integrity_invalid_count: int
+    evidence_invalid_count: int
+    readiness_claimed: bool
+    scope: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsReconciliationPosture":
+        raw = _mapping("operations reconciliation posture", value)
+        workflow_id = _text("operations reconciliation posture workflow_id", raw.get("workflow_id"))
+        state = _text("operations reconciliation posture state", raw.get("state"))
+        if state not in {"missing", "invalid", "incomplete", "structurally_ready"}:
+            raise ArgumentError("operations reconciliation posture state is invalid")
+        counts_raw = _mapping(
+            "operations reconciliation posture completion_status_counts",
+            raw.get("completion_status_counts"),
+        )
+        completion_status_counts = {
+            _text("operations reconciliation posture completion status", name): _non_negative(
+                "operations reconciliation posture completion status count", count
+            )
+            for name, count in counts_raw.items()
+        }
+        numeric = {
+            name: _non_negative(f"operations reconciliation posture {name}", raw.get(name, 0))
+            for name in (
+                "record_count",
+                "ready_count",
+                "review_required_count",
+                "integrity_invalid_count",
+                "evidence_invalid_count",
+            )
+        }
+        if raw.get("readiness_claimed") is not False:
+            raise ArgumentError("operations reconciliation posture must not claim readiness")
+        return cls(
+            raw=raw,
+            workflow_id=workflow_id,
+            state=state,
+            record_count=numeric["record_count"],
+            completion_status_counts=completion_status_counts,
+            ready_count=numeric["ready_count"],
+            review_required_count=numeric["review_required_count"],
+            integrity_invalid_count=numeric["integrity_invalid_count"],
+            evidence_invalid_count=numeric["evidence_invalid_count"],
+            readiness_claimed=False,
+            scope=_text("operations reconciliation posture scope", raw.get("scope")),
+            guarantees=_texts("operations reconciliation posture guarantees", raw.get("guarantees")),
+            limitations=_texts("operations reconciliation posture limitations", raw.get("limitations")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class OperationsDomainGateGroup:
     """One capability group with pooled and domain-bound evidence-channel gate states."""
 
@@ -836,6 +903,7 @@ class OperationsDomainGateGroup:
     gate_state: str
     readiness_claimed: bool
     gates: dict[str, dict[str, Any]]
+    reconciliation_evidence: OperationsReconciliationPosture
     last_event_id: int | None
     evidence_scope: str
 
@@ -866,7 +934,29 @@ class OperationsDomainGateGroup:
             required.add("domain_evaluator_evidence")
             if not required.issubset(gates_raw):
                 raise ArgumentError("operations domain gate group is missing a required gate")
+        if "reconciliation_evidence" not in gates_raw:
+            # Older API deployments predate the reconciliation join. Preserve their explicit
+            # absence as a fail-closed posture rather than dropping the typed field or inferring
+            # that the workflow passed.
+            gates_raw = dict(gates_raw)
+            gates_raw["reconciliation_evidence"] = {
+                "workflow_id": _text("operations domain gate group id", raw.get("id")),
+                "state": "missing",
+                "record_count": 0,
+                "completion_status_counts": {},
+                "ready_count": 0,
+                "review_required_count": 0,
+                "integrity_invalid_count": 0,
+                "evidence_invalid_count": 0,
+                "readiness_claimed": False,
+                "scope": "bounded_digest_valid_reconciliation_registry",
+                "guarantees": ["legacy response omitted the retained reconciliation lookup"],
+                "limitations": ["the server predates the reconciliation gate join"],
+            }
         gates = {name: _mapping(f"operations domain gate {name}", gates_raw[name]) for name in gates_raw}
+        reconciliation_evidence = OperationsReconciliationPosture.from_wire(
+            gates["reconciliation_evidence"]
+        )
         last_event_id = raw.get("last_event_id")
         if last_event_id is not None:
             last_event_id = _non_negative("operations domain gate last_event_id", last_event_id)
@@ -876,6 +966,7 @@ class OperationsDomainGateGroup:
             gate_state=gate_state,
             readiness_claimed=False,
             gates=gates,
+            reconciliation_evidence=reconciliation_evidence,
             last_event_id=last_event_id,
             evidence_scope=_text("operations domain gate evidence_scope", raw.get("evidence_scope")),
         )
@@ -914,7 +1005,10 @@ class OperationsDomainGates:
         gate_digest_scope = _text(
             "operations domain gates gate_digest_scope", raw.get("gate_digest_scope")
         )
-        if gate_digest_scope != "tool_evidence_projection_without_gate_digest":
+        if gate_digest_scope not in {
+            "tool_evidence_projection_without_gate_digest",
+            "operations_evidence_and_reconciliation_projection_without_gate_digest",
+        }:
             raise ArgumentError("operations domain gates digest scope is invalid")
         event_cursor = _mapping("operations domain gates event_cursor", raw.get("event_cursor"))
         for name in ("after", "next_after", "returned_events", "dropped_events"):
@@ -945,6 +1039,7 @@ class OperationsDomainGates:
             "groups_blocked_catalogue",
             "groups_insufficient_evidence",
             "groups_review_required",
+            "groups_reconciliation_blocked",
         ):
             value = summary_raw.get(name, 0)
             summary[name] = _non_negative(f"operations domain gates summary {name}", value)

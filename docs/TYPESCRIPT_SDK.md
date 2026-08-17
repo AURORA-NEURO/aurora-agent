@@ -694,7 +694,12 @@ transport completion, pooled evaluation, domain-evaluator, safety, and release c
 domain-evaluator row preserves the exact evaluator tool/event binding without asserting scientific
 validity, calibration, or independence. Its group state is explicitly
 `catalogue_blocked`, `insufficient_evidence`, or `review_required`; the type contract preserves
-`readiness_claimed: false` even when all locally observed channels are present.
+`readiness_claimed: false` even when all locally observed channels are present. Each group also
+exposes a typed `reconciliation_evidence` posture joined by exact `workflow_id` to the bounded
+digest-valid registry. `missing` is explicit and never inferred as a pass; `incomplete` or `invalid`
+retained posture blocks review; and `structurally_ready` remains review-required evidence. The
+summary's `groups_reconciliation_blocked` counter makes the cross-domain impact visible without
+turning reconciliation into a release or safety authorization.
 `createOperationsGateReview()` persists a current review and `operationsGateReviews()` replays it
 by cursor or content-addressed `review_id`. `AgentMissionArgs.operations_gate_acceptance` then
 carries that retained `review_id`, matching `gate_digest`, reviewer, rationale, exact group IDs,

@@ -1689,6 +1689,17 @@ impl ApiRouter {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        let reconciliation_registry = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
         let capability_groups = bioprism_mcp::workspace_capabilities();
         let mut tools_by_group = BTreeMap::<String, BTreeSet<String>>::new();
         if let Some(capability_groups) = capability_groups.as_array() {
@@ -1776,9 +1787,19 @@ impl ApiRouter {
         let mut groups_blocked_catalogue = 0usize;
         let mut groups_insufficient_evidence = 0usize;
         let mut groups_review_required = 0usize;
+        let mut groups_reconciliation_blocked = 0usize;
         let mut rows = Vec::new();
         for group in groups {
             let id = group.get("id").and_then(Value::as_str).unwrap_or("unknown");
+            let reconciliation_posture = reconciliation_registry.workflow_posture(id);
+            let reconciliation_state = reconciliation_posture
+                .get("state")
+                .and_then(Value::as_str)
+                .unwrap_or("missing");
+            let reconciliation_blocks = matches!(reconciliation_state, "incomplete" | "invalid");
+            if reconciliation_blocks {
+                groups_reconciliation_blocked += 1;
+            }
             let declared_tools = tools_by_group.get(id).cloned().unwrap_or_default();
             let missing_tool_count = group
                 .get("missing_tool_count")
@@ -1864,6 +1885,7 @@ impl ApiRouter {
                 || evaluator_bindings.is_empty()
                 || channel_events.get("safety").copied().unwrap_or(0) == 0
                 || channel_events.get("release").copied().unwrap_or(0) == 0
+                || reconciliation_blocks
             {
                 groups_insufficient_evidence += 1;
                 "insufficient_evidence"
@@ -1896,7 +1918,8 @@ impl ApiRouter {
                         "readiness_claimed": false
                     },
                     "safety_evidence": channel_gate("safety"),
-                    "release_evidence": channel_gate("release")
+                    "release_evidence": channel_gate("release"),
+                    "reconciliation_evidence": reconciliation_posture
                 },
                 "last_event_id": last_event_id,
                 "evidence_scope": "requested_event_page_only"
@@ -1932,6 +1955,7 @@ impl ApiRouter {
                 "groups_blocked_catalogue": groups_blocked_catalogue,
                 "groups_insufficient_evidence": groups_insufficient_evidence,
                 "groups_review_required": groups_review_required,
+                "groups_reconciliation_blocked": groups_reconciliation_blocked,
                 "readiness_claimed": false
             },
             "gate_policy": {
@@ -1941,11 +1965,14 @@ impl ApiRouter {
                 "scope": "only the bounded event page requested by the caller",
                 "control_plane_evidence_scope": "completed evaluation, safety, and release tools are pooled across the page and applied to each matched domain group",
                 "domain_evaluator_binding_scope": "only completed evaluation-channel tools with an exact or catalogue-declared capability-group binding",
+                "reconciliation_evidence_scope": "matching workflow_id rows from the bounded digest-valid reconciliation registry",
+                "reconciliation_evidence_policy": "missing is explicit and does not pass; incomplete or invalid retained posture blocks review; structurally_ready remains review-required evidence",
                 "cross_group_membership": "one tool event may contribute to multiple groups",
                 "readiness_claimed": false
             },
             "guarantees": [
                 "catalogue, activity, transport, pooled evaluation, domain evaluator, safety, and release evidence remain separate",
+                "reconciliation evidence is joined by exact capability-group workflow_id and cannot be inferred from a different domain",
                 "domain evaluator evidence is a bounded catalogue binding and does not assert scientific validity or evaluator adequacy",
                 "missing evidence is represented as a gate state instead of inferred readiness",
                 "no tool is invoked by this projection"
@@ -1997,7 +2024,8 @@ impl ApiRouter {
             .map(|bytes| hex_digest(&Sha256::digest(&bytes)))
             .unwrap_or_default();
         body["gate_digest"] = json!(gate_digest);
-        body["gate_digest_scope"] = json!("tool_evidence_projection_without_gate_digest");
+        body["gate_digest_scope"] =
+            json!("operations_evidence_and_reconciliation_projection_without_gate_digest");
         HttpResponse::json(200, &body)
     }
 
@@ -2362,7 +2390,7 @@ impl ApiRouter {
         json!({
             "schema": "bioprism-operations-preflight-evidence/0.1",
             "gate_digest": gate_digest,
-            "gate_digest_scope": "tool_evidence_projection_without_gate_digest",
+            "gate_digest_scope": "operations_evidence_and_reconciliation_projection_without_gate_digest",
             "group_ids": group_ids,
             "groups": rows,
             "unresolved_steps": unresolved_steps,
@@ -7851,6 +7879,7 @@ mod tests {
         let gates: Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(gates["workflow"], "operations_domain_gates");
         assert_eq!(gates["schema"], "bioprism-operations-domain-gates/0.1");
+        let initial_gate_digest = gates["gate_digest"].as_str().unwrap().to_owned();
         assert_eq!(gates["summary"]["tool_events_scanned"], 3);
         assert_eq!(gates["summary"]["completed_tool_events"], 3);
         assert_eq!(gates["summary"]["readiness_claimed"], false);
@@ -7858,7 +7887,7 @@ mod tests {
         assert_eq!(gates["gate_digest"].as_str().unwrap().len(), 64);
         assert_eq!(
             gates["gate_digest_scope"],
-            "tool_evidence_projection_without_gate_digest"
+            "operations_evidence_and_reconciliation_projection_without_gate_digest"
         );
         let biological = gates["groups"]
             .as_array()
@@ -7880,6 +7909,10 @@ mod tests {
         );
         assert_eq!(biological["gates"]["safety_evidence"]["state"], "observed");
         assert_eq!(biological["gates"]["release_evidence"]["state"], "observed");
+        assert_eq!(
+            biological["gates"]["reconciliation_evidence"]["state"],
+            "missing"
+        );
         assert_eq!(biological["gate_state"], "review_required");
         assert_eq!(
             biological["gates"]["evaluation_evidence"]["scope"],
@@ -7894,8 +7927,124 @@ mod tests {
             "completed_evaluator_tool_exact_or_catalogue_group_binding"
         );
 
+        let mut incomplete_reconciliation = json!({
+            "ok": true,
+            "schema": "bioprism-devplat-domain-workflow-reconcile/0.1",
+            "workflow": "domain_workflow_reconcile",
+            "workflow_id": "biological_domains",
+            "workflow_digest": "a".repeat(64),
+            "catalog_digest": "b".repeat(64),
+            "domain_contract_digest": "c".repeat(64),
+            "mission_id": "gate-reconciliation-mission",
+            "mission_plan_digest": "d".repeat(64),
+            "source": "mission_report",
+            "completion": {"status": "partial", "ready": false, "review_required": true},
+            "evidence": {"evidence_valid": true},
+            "integrity": {"valid": true, "finding_count": 1},
+            "execution": "not_started"
+        });
+        incomplete_reconciliation["reconciliation_digest"] =
+            json!(ContentHash::of_value(&incomplete_reconciliation).unwrap().to_string());
+        let imported = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/reconciliations",
+            json!({"record": incomplete_reconciliation}),
+        ));
+        assert_eq!(imported.status, 201);
+        let blocked = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=10",
+            json!({}),
+        ));
+        assert_eq!(blocked.status, 200);
+        let blocked: Value = serde_json::from_slice(&blocked.body).unwrap();
+        let biological = blocked["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap();
+        assert_eq!(
+            biological["gates"]["reconciliation_evidence"]["state"],
+            "incomplete"
+        );
+        assert_eq!(biological["gate_state"], "insufficient_evidence");
+        assert_eq!(blocked["summary"]["groups_reconciliation_blocked"], 1);
+        assert_ne!(blocked["gate_digest"].as_str(), Some(initial_gate_digest.as_str()));
+
         let invalid = router.handle(request("GET", "/v1/operations/gates?limit=257", json!({})));
         assert_eq!(invalid.status, 422);
+    }
+
+    #[test]
+    fn operations_gate_reconciliation_matrix_binds_every_workspace_group() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let group_ids = operations_domain_coverage()["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|group| group["id"].as_str())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        assert!(!group_ids.is_empty());
+
+        for group_id in &group_ids {
+            let mut record = json!({
+                "ok": true,
+                "schema": "bioprism-devplat-domain-workflow-reconcile/0.1",
+                "workflow": "domain_workflow_reconcile",
+                "workflow_id": group_id,
+                "workflow_digest": "a".repeat(64),
+                "catalog_digest": "b".repeat(64),
+                "domain_contract_digest": "c".repeat(64),
+                "mission_id": format!("gate-reconciliation-matrix-{group_id}"),
+                "mission_plan_digest": "d".repeat(64),
+                "source": "mission_report",
+                "completion": {"status": "partial", "ready": false, "review_required": true},
+                "evidence": {"evidence_valid": true},
+                "integrity": {"valid": true, "finding_count": 1},
+                "execution": "not_started"
+            });
+            record["reconciliation_digest"] =
+                json!(ContentHash::of_value(&record).unwrap().to_string());
+            let imported = router.handle(request(
+                "POST",
+                "/v1/domain-workflows/reconciliations",
+                json!({"record": record}),
+            ));
+            assert_eq!(imported.status, 201, "failed to import {group_id}");
+        }
+
+        let response = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=256",
+            json!({}),
+        ));
+        assert_eq!(response.status, 200);
+        let gates: Value = serde_json::from_slice(&response.body).unwrap();
+        let rows = gates["groups"].as_array().unwrap();
+        assert_eq!(rows.len(), group_ids.len());
+        assert_eq!(
+            gates["summary"]["groups_reconciliation_blocked"],
+            group_ids.len()
+        );
+        for group_id in &group_ids {
+            let group = rows
+                .iter()
+                .find(|group| group["id"] == *group_id)
+                .unwrap_or_else(|| panic!("missing gate row for {group_id}"));
+            assert_eq!(
+                group["gates"]["reconciliation_evidence"]["workflow_id"],
+                *group_id
+            );
+            assert_eq!(
+                group["gates"]["reconciliation_evidence"]["state"],
+                "incomplete"
+            );
+            assert_eq!(group["gates"]["reconciliation_evidence"]["readiness_claimed"], false);
+            assert_eq!(group["gate_state"], "insufficient_evidence");
+        }
     }
 
     #[test]
