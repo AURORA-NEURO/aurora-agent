@@ -599,6 +599,7 @@ class OperationsHandoff:
     coverage: dict[str, Any]
     groups: tuple[OperationsHandoffGroup, ...]
     route_request: dict[str, Any]
+    execution_prerequisites: dict[str, Any]
     handoff_status: str
     execution: str
     next_steps: tuple[str, ...]
@@ -622,6 +623,9 @@ class OperationsHandoff:
         selection = _mapping("operations handoff selection", raw.get("selection"))
         coverage = _mapping("operations handoff coverage", raw.get("coverage"))
         route_request = _mapping("operations handoff route_request", raw.get("route_request"))
+        execution_prerequisites = _mapping(
+            "operations handoff execution_prerequisites", raw.get("execution_prerequisites")
+        )
         links_raw = _mapping("operations handoff links", raw.get("links"))
         links = {
             _text("operations handoff link name", name): _text(
@@ -654,6 +658,7 @@ class OperationsHandoff:
             coverage=coverage,
             groups=groups,
             route_request=route_request,
+            execution_prerequisites=execution_prerequisites,
             handoff_status=handoff_status,
             execution=execution,
             next_steps=_texts("operations handoff next_steps", raw.get("next_steps")),
@@ -878,6 +883,8 @@ class OperationsDomainGates:
     raw: dict[str, Any]
     workflow: str
     schema: str
+    gate_digest: str
+    gate_digest_scope: str
     event_cursor: dict[str, Any]
     groups: tuple[OperationsDomainGateGroup, ...]
     summary: dict[str, Any]
@@ -895,6 +902,12 @@ class OperationsDomainGates:
             raise ArgumentError("operations domain gates workflow is invalid")
         if raw.get("schema") != "bioprism-operations-domain-gates/0.1":
             raise ArgumentError("operations domain gates schema is invalid")
+        gate_digest = _review_id("operations domain gates gate_digest", raw.get("gate_digest"))
+        gate_digest_scope = _text(
+            "operations domain gates gate_digest_scope", raw.get("gate_digest_scope")
+        )
+        if gate_digest_scope != "response_without_gate_digest":
+            raise ArgumentError("operations domain gates digest scope is invalid")
         event_cursor = _mapping("operations domain gates event_cursor", raw.get("event_cursor"))
         for name in ("after", "next_after", "returned_events", "dropped_events"):
             _non_negative(f"operations domain gates event_cursor {name}", event_cursor.get(name))
@@ -942,6 +955,8 @@ class OperationsDomainGates:
             raw=raw,
             workflow="operations_domain_gates",
             schema="bioprism-operations-domain-gates/0.1",
+            gate_digest=gate_digest,
+            gate_digest_scope=gate_digest_scope,
             event_cursor=event_cursor,
             groups=groups,
             summary=summary,

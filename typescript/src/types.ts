@@ -6960,11 +6960,20 @@ export interface AgentMissionPolicy extends JsonObject {
   allowed_tools?: string[];
 }
 
+export interface OperationsGateAcceptance extends JsonObject {
+  gate_digest: string;
+  reviewer: string;
+  rationale: string;
+  group_ids: string[];
+  accepted_gates: Record<string, string[]>;
+}
+
 export interface AgentMissionArgs extends JsonObject {
   mission_id: string;
   goal: string;
   steps: AgentMissionStep[];
   policy?: AgentMissionPolicy;
+  operations_gate_acceptance?: OperationsGateAcceptance;
 }
 
 export type MissionTraceEventName =
@@ -7267,6 +7276,7 @@ export interface OperationsHandoff extends JsonObject {
   coverage: OperationsHandoffCoverage;
   groups: OperationsHandoffGroup[];
   route_request: CapabilityRouteArgs;
+  execution_prerequisites: JsonObject;
   handoff_status: "unresolved_domain" | "no_actionable_gaps" | "requires_catalogue_review" | "ready_for_capability_route";
   execution: "not_started";
   next_steps: string[];
@@ -7327,6 +7337,8 @@ export interface OperationsDomainGates extends JsonObject {
   ok: boolean;
   workflow: "operations_domain_gates";
   schema: "bioprism-operations-domain-gates/0.1";
+  gate_digest: string;
+  gate_digest_scope: "response_without_gate_digest";
   event_cursor: {
     after: number;
     next_after: number;

@@ -24,6 +24,14 @@ MAX_MISSION_LIST_LIMIT = 256
 MAX_MISSION_TRACE_PAGE = 1000
 MAX_MISSION_WAIT_SECONDS = 86_400.0
 MAX_MISSION_POLL_INTERVAL_SECONDS = 60.0
+OPERATIONS_REQUIRED_GATES = (
+    "catalogue",
+    "observed_activity",
+    "transport_completion",
+    "evaluation_evidence",
+    "safety_evidence",
+    "release_evidence",
+)
 MISSION_ASSEMBLY_SCHEMA = "bioprism-python-mission-assembly/0.1"
 MISSION_TRACE_SCHEMA_VERSION = "bioprism-devplat-mission-trace/0.1"
 MISSION_TRACE_EVENTS = frozenset(
@@ -252,6 +260,64 @@ def _step(value: MissionStep | Mapping[str, Any]) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class OperationsGateAcceptance:
+    """Operator attestation binding an executable mission to observed gate evidence."""
+
+    gate_digest: str
+    reviewer: str
+    rationale: str
+    group_ids: Sequence[str]
+    accepted_gates: Mapping[str, Sequence[str]]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.gate_digest, str)
+            or len(self.gate_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.gate_digest)
+        ):
+            raise ArgumentError("gate_digest must be 64 lowercase hexadecimal characters")
+        for name, value, maximum in (
+            ("reviewer", self.reviewer, 256),
+            ("rationale", self.rationale, 2048),
+        ):
+            _text(name, value)
+            if len(value) > maximum or any(ord(character) < 32 for character in value):
+                raise ArgumentError(f"{name} must be at most {maximum} visible characters")
+        if not isinstance(self.group_ids, Sequence) or isinstance(self.group_ids, (str, bytes)):
+            raise ArgumentError("group_ids must be a sequence")
+        if not self.group_ids or len(self.group_ids) > 64:
+            raise ArgumentError("group_ids must contain between 1 and 64 entries")
+        normalized_groups = set()
+        for group_id in self.group_ids:
+            _text("group_id", group_id)
+            if len(group_id) > 128 or group_id in normalized_groups:
+                raise ArgumentError("group_ids must contain unique entries of at most 128 characters")
+            normalized_groups.add(group_id)
+        if not isinstance(self.accepted_gates, Mapping):
+            raise ArgumentError("accepted_gates must be a mapping")
+        for group_id, gates in self.accepted_gates.items():
+            _text("accepted_gates group id", group_id)
+            if not isinstance(gates, Sequence) or isinstance(gates, (str, bytes)):
+                raise ArgumentError("accepted_gates values must be sequences")
+            if any(not isinstance(gate, str) for gate in gates):
+                raise ArgumentError("accepted_gates values must contain strings")
+            normalized_gates = set(gates)
+            if len(normalized_gates) != len(gates) or not normalized_gates.issubset(OPERATIONS_REQUIRED_GATES):
+                raise ArgumentError("accepted_gates contains an unknown or duplicate gate")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gate_digest": self.gate_digest,
+            "reviewer": self.reviewer,
+            "rationale": self.rationale,
+            "group_ids": list(self.group_ids),
+            "accepted_gates": {
+                group_id: list(gates) for group_id, gates in self.accepted_gates.items()
+            },
+        }
+
+
+@dataclass(frozen=True)
 class MissionRequest:
     """Build a previewable or explicitly executable cross-domain mission."""
 
@@ -259,6 +325,7 @@ class MissionRequest:
     goal: str
     steps: Sequence[MissionStep | Mapping[str, Any]]
     policy: MissionPolicy | Mapping[str, Any] | None = None
+    operations_gate_acceptance: OperationsGateAcceptance | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _text("mission_id", self.mission_id)
@@ -269,6 +336,9 @@ class MissionRequest:
             _step(value)
         if self.policy is not None and not isinstance(self.policy, (MissionPolicy, Mapping)):
             raise ArgumentError("policy must be a MissionPolicy or mapping")
+        if self.operations_gate_acceptance is not None:
+            if not isinstance(self.operations_gate_acceptance, (OperationsGateAcceptance, Mapping)):
+                raise ArgumentError("operations_gate_acceptance must be an OperationsGateAcceptance or mapping")
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         arguments: dict[str, Any] = {
@@ -281,6 +351,12 @@ class MissionRequest:
                 self.policy.to_dict()
                 if isinstance(self.policy, MissionPolicy)
                 else _mapping("policy", self.policy)
+            )
+        if self.operations_gate_acceptance is not None:
+            arguments["operations_gate_acceptance"] = (
+                self.operations_gate_acceptance.to_dict()
+                if isinstance(self.operations_gate_acceptance, OperationsGateAcceptance)
+                else _mapping("operations_gate_acceptance", self.operations_gate_acceptance)
             )
         return arguments
 
@@ -1402,6 +1478,7 @@ __all__ = [
     "MAX_MISSION_POLL_INTERVAL_SECONDS",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
+    "OPERATIONS_REQUIRED_GATES",
     "MAX_PARALLEL_WAVE_WIDTH",
     "MISSION_ASSEMBLY_SCHEMA",
     "MISSION_TRACE_SCHEMA_VERSION",
@@ -1409,6 +1486,7 @@ __all__ = [
     "MissionBinding",
     "MissionAssembly",
     "MissionPolicy",
+    "OperationsGateAcceptance",
     "MissionPreflight",
     "MissionExecutionReport",
     "MissionJob",

@@ -9,6 +9,7 @@ from prism_sdk import (
     MissionProgress,
     MissionRouteSelection,
     MissionRequest,
+    OperationsGateAcceptance,
     MissionStep,
     MissionTraceEvent,
     MissionTracePage,
@@ -119,6 +120,33 @@ class MissionPreflightTests(unittest.TestCase):
         self.assertEqual(len(report.request_digest), 64)
         self.assertEqual(len(report.catalogue_digest), 64)
         self.assertEqual(report.to_dict()["limitations"][-1], "no step is executed by this report")
+
+    def test_operations_gate_acceptance_is_preserved_on_executable_missions(self) -> None:
+        gates = (
+            "catalogue",
+            "observed_activity",
+            "transport_completion",
+            "evaluation_evidence",
+            "safety_evidence",
+            "release_evidence",
+        )
+        acceptance = OperationsGateAcceptance(
+            "d" * 64,
+            "operator@example.invalid",
+            "reviewed the current bounded gate projection",
+            ("biological_domains",),
+            {"biological_domains": gates},
+        )
+        request = MissionRequest(
+            "mission-gated",
+            "run after evidence review",
+            [MissionStep("one", "oncology", "catalogue", "catalogue", "echo")],
+            {"execute": True, "allowed_tools": ["echo"]},
+            acceptance,
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["operations_gate_acceptance"]["gate_digest"], "d" * 64)
+        self.assertEqual(arguments["operations_gate_acceptance"]["accepted_gates"]["biological_domains"], list(gates))
 
     def test_execution_report_validates_clock_free_trace_order_and_refuses_gaps(self) -> None:
         report = MissionExecutionReport.from_wire(

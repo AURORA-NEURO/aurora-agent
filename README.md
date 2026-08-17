@@ -355,6 +355,9 @@ runtime, scientific, safety, or release readiness.
 activity, transport-completion, evaluation, safety, and release evidence gates for every capability
 group. A completed local call is never promoted into a readiness verdict: groups remain
 `catalogue_blocked`, `insufficient_evidence`, or `review_required`, with `readiness_claimed: false`.
+Handoffs now carry an `operations_gate_acceptance` execution prerequisite; preflight binds the
+mission’s exact tools to matching capability groups and the current `gate_digest`, while executable
+HTTP missions are refused until an operator acceptance covers every required gate for every group.
 `GET /v1/webhooks/subscriptions/{id}/attempts` route and matching SDK helpers expose the
 provenance cursor with explicit retention gaps and dropped-row accounting. Receipt-bearing rows
 are also available through `/v1/delivery-receipts/{receipt_id}/attempts`, which joins the same

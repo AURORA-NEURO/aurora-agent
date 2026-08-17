@@ -167,6 +167,18 @@ state is `catalogue_blocked`, `insufficient_evidence`, or `review_required`; eve
 local evidence set requires domain-authority review and is returned with `readiness_claimed: false`.
 The channel classifier is an exact, documented tool-name projection; it does not execute tools or
 infer scientific validity, clinical safety, or deployment authorization.
+Evaluation, safety, and release channels are pooled from completed control-plane tools across the
+requested bounded event page and then shown on each matched domain group; catalogue, observed
+activity, and transport completion remain group-specific. This is an evidence-shaping rule, not
+proof that a domain-specific scientific or safety claim has been established.
+
+The gate response includes a `gate_digest` over the response without the digest field. A handoff
+copies the required gate names and the `operations_gate_acceptance` field into each execution
+prerequisite. `/v1/missions/preflight` returns `operations_evidence` for the mission’s exact tool
+and domain groups. A real HTTP mission with `policy.execute: true` must supply a visible `reviewer`,
+`rationale`, matching `gate_digest`, exact group IDs, and all six accepted gates per group; otherwise
+the API refuses it before queueing or dispatching any tool. This is an operator attestation boundary,
+not scientific, clinical, regulatory, or deployment approval.
 
 ## Asynchronous missions
 

@@ -574,6 +574,10 @@ invent defaults:
   catalogue, activity, transport completion, evaluation, safety, and release channels. Gate rows
   retain refusal/completion evidence and remain `insufficient_evidence` or `review_required`
   until a separate authority reviews them; the typed response enforces `readiness_claimed: false`.
+  `OperationsGateAcceptance` binds an executable `MissionRequest` to the current gate digest,
+  reviewed group IDs, reviewer, rationale, and all six accepted gate names. The HTTP boundary
+  rechecks that acceptance against the current retained evidence before queueing execution;
+  `MissionRequest.to_mcp_arguments()` preserves the acceptance document for that boundary.
   `rebind_subscription(...)` supplies a secret in memory,
   re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the
