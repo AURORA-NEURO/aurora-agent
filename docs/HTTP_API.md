@@ -144,6 +144,14 @@ Event IDs and delivery IDs are monotonically increasing process-local cursors. I
 discarded entries between a consumer's `after` cursor and the oldest retained entry, the response
 sets `gap: true` and reports `dropped_events`; it never presents a partial history as complete.
 
+Event pages and SSE snapshots accept either `review_id` or `receipt_id` as an exact, mutually
+exclusive filter. Delivery receipts also expose
+`GET /v1/delivery-receipts/{receipt_id}/events?after=...&limit=...`, which returns a typed
+`developer_delivery_receipt_events` page with the same cursor and retention-gap semantics. Receipt
+events retain a bounded projection (`receipt_id`, digest, readiness, and verification dimensions)
+even when the complete tool response exceeds the event payload bound; the projection is a join key,
+not proof of receipt validity.
+
 Webhook records are signed HMAC-SHA256 envelopes. The secret is accepted at registration but is
 never returned. A delivery worker should send the envelope, retain the `delivery_id`, retry only
 when its own transport policy permits, and acknowledge exactly the IDs it has durably accepted.

@@ -468,6 +468,26 @@ impl EventLog {
         })
     }
 
+    /// Return retained delivery-receipt tool events for one caller-supplied receipt identifier.
+    ///
+    /// The event log deliberately keeps this as a projection query rather than a second mutable
+    /// index. A receipt event may retain the complete response or only its bounded projection when
+    /// the response is large; both forms carry the same exact identifier and remain cursor-bound.
+    pub fn events_for_receipt(
+        &self,
+        after: u64,
+        limit: usize,
+        receipt_id: &str,
+    ) -> Result<EventPage, String> {
+        validate_receipt_id(receipt_id)?;
+        self.events_matching(after, limit, |event| {
+            matches!(
+                event.subject.as_str(),
+                "developer_delivery_receipt" | "developer_delivery_receipt_verify"
+            ) && event_matches_receipt_id(&event.payload, receipt_id)
+        })
+    }
+
     fn events_matching<F>(&self, after: u64, limit: usize, matches: F) -> Result<EventPage, String>
     where
         F: Fn(&ApiEvent) -> bool,
@@ -905,6 +925,10 @@ fn validate_review_id(review_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_receipt_id(receipt_id: &str) -> Result<(), String> {
+    validate_token(receipt_id, 128, "receipt_id")
+}
+
 fn event_matches_review_id(payload: &Value, review_id: &str) -> bool {
     payload
         .get("response")
@@ -929,6 +953,33 @@ fn value_contains_review_id(value: &Value, review_id: &str) -> bool {
         Value::Array(values) => values
             .iter()
             .any(|child| value_contains_review_id(child, review_id)),
+        _ => false,
+    }
+}
+
+fn event_matches_receipt_id(payload: &Value, receipt_id: &str) -> bool {
+    payload
+        .get("delivery_receipt")
+        .is_some_and(|projection| value_contains_receipt_id(projection, receipt_id))
+        || payload
+            .get("response")
+            .is_some_and(|response| value_contains_receipt_id(response, receipt_id))
+}
+
+fn value_contains_receipt_id(value: &Value, receipt_id: &str) -> bool {
+    match value {
+        Value::Object(object) => {
+            object
+                .get("receipt_id")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == receipt_id)
+                || object
+                    .values()
+                    .any(|child| value_contains_receipt_id(child, receipt_id))
+        }
+        Value::Array(values) => values
+            .iter()
+            .any(|child| value_contains_receipt_id(child, receipt_id)),
         _ => false,
     }
 }
@@ -1021,6 +1072,39 @@ mod tests {
         assert_eq!(page.events.len(), 1);
         assert_eq!(page.events[0].request_id, "req-1");
         assert!(log.events_for_review(0, 10, &"z".repeat(63)).is_err());
+    }
+
+    #[test]
+    fn delivery_receipt_event_filter_accepts_projection_and_rejects_near_matches() {
+        let mut log = EventLog::new(4).unwrap();
+        log.emit(
+            "tool.completed",
+            "developer_delivery_receipt",
+            "req-1",
+            json!({
+                "tool": "developer_delivery_receipt",
+                "delivery_receipt": {
+                    "workflow": "developer_delivery_receipt",
+                    "receipt_id": "receipt-1",
+                    "receipt_digest": "a".repeat(64)
+                }
+            }),
+        )
+        .unwrap();
+        log.emit(
+            "tool.completed",
+            "developer_delivery_receipt",
+            "req-2",
+            json!({
+                "tool": "developer_delivery_receipt",
+                "delivery_receipt": { "receipt_id": "receipt-10" }
+            }),
+        )
+        .unwrap();
+        let page = log.events_for_receipt(0, 10, "receipt-1").unwrap();
+        assert_eq!(page.events.len(), 1);
+        assert_eq!(page.events[0].request_id, "req-1");
+        assert!(log.events_for_receipt(0, 10, "receipt-1\n").is_err());
     }
 
     #[test]

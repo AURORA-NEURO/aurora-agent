@@ -45,6 +45,16 @@ def validate_review_id(value: Any) -> str:
     return _review_id("review_id", value)
 
 
+def validate_receipt_id(value: Any) -> str:
+    """Validate a bounded delivery-receipt identifier for HTTP query/path use."""
+
+    if not isinstance(value, str) or not value.strip() or len(value) > 128:
+        raise ArgumentError("receipt_id must be a non-empty string of at most 128 characters")
+    if any(ord(character) < 0x20 for character in value):
+        raise ArgumentError("receipt_id must not contain control characters")
+    return value
+
+
 def _optional_bool(name: str, value: Any) -> bool | None:
     if value is None:
         return None
@@ -153,6 +163,33 @@ class RouteReviewEvidence:
         if found != bool(page.events):
             raise ArgumentError("route-review evidence found must match page events")
         return cls(raw=raw, review_id=review_id, found=found, page=page)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DeliveryReceiptEvents:
+    """Typed retained event evidence for one content-addressed delivery receipt."""
+
+    raw: dict[str, Any]
+    receipt_id: str
+    found: bool
+    page: EventPage
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DeliveryReceiptEvents":
+        raw = _mapping("delivery-receipt events", value)
+        if raw.get("workflow") != "developer_delivery_receipt_events":
+            raise ArgumentError("delivery-receipt events workflow is invalid")
+        found = raw.get("found")
+        if not isinstance(found, bool):
+            raise ArgumentError("delivery-receipt events found must be a boolean")
+        receipt_id = validate_receipt_id(raw.get("receipt_id"))
+        page = EventPage.from_wire(raw.get("page"))
+        if found != bool(page.events):
+            raise ArgumentError("delivery-receipt events found must match page events")
+        return cls(raw=raw, receipt_id=receipt_id, found=found, page=page)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)

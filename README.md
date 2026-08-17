@@ -313,7 +313,7 @@ cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <visible-tok
 ```
 
 It exposes the exact MCP tool catalogue through REST and JSON-RPC, bounded health/capability
-routes, cursor-addressable event pages/SSE snapshots, signed webhook outbox registration, retry,
+routes, cursor-addressable event pages/SSE snapshots, receipt-correlated event queries, signed webhook outbox registration, retry,
 and acknowledgement. `--mission-state` adds an optional bounded, atomic checkpoint for mission
 status, progress, traces, and size-limited result metadata; interrupted queued/running missions
 are marked failed after restart instead of being falsely resumed. Event cursors, subscriptions,
@@ -744,7 +744,9 @@ unvalidated nested JSON.
 The HTTP boundary exposes that evidence through exact `review_id` filtering on event pages and a
 bounded `/v1/route-reviews/{review_id}/evidence` lookup; the Python and TypeScript SDKs provide
 typed helpers while preserving retention gaps and the explicit “not found in retained window”
-meaning of an empty result.
+meaning of an empty result. Delivery receipts have the parallel
+`/v1/delivery-receipts/{receipt_id}/events` join and `receipt_id` event filter; oversized tool
+responses retain only a bounded receipt projection, never an unverified release claim.
 
 ## Evaluating a context policy
 

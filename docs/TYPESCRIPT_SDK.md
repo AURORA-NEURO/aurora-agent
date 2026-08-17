@@ -641,12 +641,17 @@ content-addressed `review_id` for correlating the same handoff across transports
 `routeReviewEvidence(reviewId, after, limit)` retrieves bounded retained event evidence for that
 exact id as `RouteReviewEvidenceResponse`; the result preserves cursor gaps and distinguishes an
 empty retained window from a claim that the review was never produced.
+`deliveryReceiptEvents(receiptId, after, limit)` provides the parallel
+`DeliveryReceiptEventsResponse` join for content-addressed delivery receipts. The event payload
+keeps a bounded receipt projection when a full tool response is too large; it is correlation
+metadata, not a replacement for `developer_delivery_receipt_verify`.
 
 ## Events and webhooks
 
 ```typescript
 const page = await api.events(0, 100);
 const stream = await api.eventStream(page.page.next_after, 100);
+const receiptEvents = await api.deliveryReceiptEvents("receipt-2026-08-1", 0, 100);
 for (const event of stream.events) {
   console.log(event.id, event.event, JSON.parse(event.data));
 }

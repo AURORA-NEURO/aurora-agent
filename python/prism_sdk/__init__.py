@@ -220,7 +220,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
-from .events import ApiEvent, DeliveryPage, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_review_id
+from .events import ApiEvent, DeliveryPage, DeliveryReceiptEvents, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_receipt_id, validate_review_id
 from .evidence import (
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
@@ -1886,6 +1886,7 @@ __all__ = [
     "AsyncApiClient",
     "AsyncWorkspace",
     "DeliveryPage",
+    "DeliveryReceiptEvents",
     "DeliveryView",
     "Admissibility",
     "AnalyticsDirection",
@@ -2235,6 +2236,7 @@ __all__ = [
     "SseEvent",
     "SseSnapshot",
     "parse_sse",
+    "validate_receipt_id",
     "validate_review_id",
     "ConformanceLevel",
     "CalibrationObservation",

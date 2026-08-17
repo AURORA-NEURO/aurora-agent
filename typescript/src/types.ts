@@ -153,6 +153,14 @@ export interface RouteReviewEvidenceResponse extends JsonObject {
   page: EventPage;
 }
 
+export interface DeliveryReceiptEventsResponse extends JsonObject {
+  ok: boolean;
+  workflow: "developer_delivery_receipt_events";
+  receipt_id: string;
+  found: boolean;
+  page: EventPage;
+}
+
 export interface SubscriptionView extends JsonObject {
   id: string;
   endpoint: string;

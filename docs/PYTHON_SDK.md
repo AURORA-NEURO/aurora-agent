@@ -511,6 +511,11 @@ invent defaults:
   `event_stream(...)`, and raw `events(...)` also accept `review_id=...` for transport-native
   filtering. An empty page is explicitly “not found in the retained cursor window,” not proof that
   the review never existed.
+- `ApiClient.delivery_receipt_events(...)` and its async counterpart expose the parallel
+  `DeliveryReceiptEvents` join for a content-addressed delivery receipt. `event_page(...)`,
+  `event_stream(...)`, and raw `events(...)` accept `receipt_id=...` as a mutually exclusive
+  filter. Large receipt responses retain a bounded projection in the event row; callers must still
+  use the receipt verifier for integrity.
 - `mission_from_route(route, mission_id, selections, policy=...)` converts that route into a
   provenance-preserving `MissionAssembly` only after every need has one caller-selected candidate,
   explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or

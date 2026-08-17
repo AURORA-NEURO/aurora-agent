@@ -172,6 +172,7 @@ import type {
   DeveloperDeliveryReceiptResult,
   DeveloperDeliveryReceiptVerificationArgs,
   DeveloperDeliveryReceiptVerificationResult,
+  DeliveryReceiptEventsResponse,
   DeveloperPlatformStatusArgs,
   DeveloperPlatformStatusResult,
   EpistemicVoiArgs,
@@ -1206,6 +1207,24 @@ export class ApiClient {
     return this.request(
       "GET",
       "/v1/route-reviews/" + encodeURIComponent(reviewId) + "/evidence?after=" + after + "&limit=" + limit,
+      undefined,
+      options,
+    );
+  }
+
+  /** Retrieve retained event evidence for one content-addressed delivery receipt. */
+  async deliveryReceiptEvents(
+    receiptId: string,
+    after = 0,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<DeliveryReceiptEventsResponse> {
+    visible(receiptId, "receipt id", 128);
+    cursor(after, "after");
+    pageLimit(limit);
+    return this.request(
+      "GET",
+      "/v1/delivery-receipts/" + encodeURIComponent(receiptId) + "/events?after=" + after + "&limit=" + limit,
       undefined,
       options,
     );

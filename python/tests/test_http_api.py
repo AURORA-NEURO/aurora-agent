@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryPage, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryPage, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -330,6 +330,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/v1/route-reviews/"):
             review_id = "a" * 64
             self._send(200, {"ok": True, "workflow": "capability_route_review_evidence", "review_id": review_id, "found": True, "page": {"events": [{"id": 1, "event_type": "tool.completed", "subject": "capability_route_review", "request_id": "req-1", "payload": {}}], "after": 0, "next_after": 1, "oldest": 1, "newest": 1, "gap": False, "dropped_events": 0}})
+        elif self.path.startswith("/v1/delivery-receipts/"):
+            self._send(200, {"ok": True, "workflow": "developer_delivery_receipt_events", "receipt_id": "receipt-http-1", "found": True, "page": {"events": [{"id": 2, "event_type": "tool.completed", "subject": "developer_delivery_receipt", "request_id": "req-2", "payload": {"delivery_receipt": {"receipt_id": "receipt-http-1"}}}], "after": 0, "next_after": 2, "oldest": 1, "newest": 2, "gap": False, "dropped_events": 0}})
         elif self.path.startswith("/v1/events/stream"):
             body = b'id: 1\nevent: mission.trace\ndata: {"mission_id":"async-1"}\n\n'
             self.send_response(200)
@@ -866,8 +868,14 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertIsInstance(evidence, RouteReviewEvidence)
         self.assertTrue(evidence.found)
         self.assertEqual(evidence.page.events[0].subject, "capability_route_review")
+        receipt_events = client.delivery_receipt_events("receipt-http-1")
+        self.assertIsInstance(receipt_events, DeliveryReceiptEvents)
+        self.assertTrue(receipt_events.found)
+        self.assertEqual(receipt_events.page.events[0].payload["delivery_receipt"]["receipt_id"], "receipt-http-1")
         with self.assertRaises(ArgumentError):
             client.route_review_evidence("invalid")
+        with self.assertRaises(ArgumentError):
+            client.delivery_receipt_events("bad\nreceipt")
         self.assertIsInstance(client.event_persistence(), EventPersistenceStatus)
         self.assertIsInstance(client.flush_event_persistence(), EventPersistenceStatus)
         with self.assertRaises(ArgumentError):
@@ -1290,6 +1298,7 @@ class HttpApiClientTests(unittest.TestCase):
             self.assertFalse((await client.event_page(review_id="a" * 64)).gap)
             self.assertEqual((await client.event_stream()).events[0].data, '{"mission_id":"async-1"}')
             self.assertTrue((await client.route_review_evidence("a" * 64)).found)
+            self.assertTrue((await client.delivery_receipt_events("receipt-http-1")).found)
             with patch.object(
                 AsyncApiClient,
                 "developer_delivery_audit",

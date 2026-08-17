@@ -483,6 +483,9 @@ impl ApiRouter {
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
+            ("GET", path) if path.starts_with("/v1/delivery-receipts/") => {
+                self.delivery_receipt_events(&request, &request_id)
+            }
             ("GET", path) if path.starts_with("/v1/route-reviews/") => {
                 self.route_review_evidence(&request, &request_id)
             }
@@ -711,6 +714,7 @@ impl ApiRouter {
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
+                    "delivery_receipt_events": "/v1/delivery-receipts/{receipt_id}/events",
                     "route_review_evidence": "/v1/route-reviews/{review_id}/evidence",
                     "event_persistence": "/v1/events/persistence",
                     "webhooks": "/v1/webhooks/subscriptions"
@@ -737,6 +741,7 @@ impl ApiRouter {
                     "mission_preflight": true,
                     "mission_inventory": true,
                     "mission_trace": true,
+                    "delivery_receipt_events": true,
                     "route_review_evidence": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
@@ -792,6 +797,15 @@ impl ApiRouter {
             Err(error) => return self.error(400, "invalid_query", &error, "query"),
         };
         let review_id = query.get("review_id").map(String::as_str);
+        let receipt_id = query.get("receipt_id").map(String::as_str);
+        if review_id.is_some() && receipt_id.is_some() {
+            return self.error(
+                400,
+                "invalid_query",
+                "review_id and receipt_id are mutually exclusive event filters",
+                "query",
+            );
+        }
         let events = match self.events.lock() {
             Ok(events) => events,
             Err(_) => {
@@ -803,9 +817,11 @@ impl ApiRouter {
                 )
             }
         };
-        let page = match review_id {
-            Some(review_id) => events.events_for_review(after, limit, review_id),
-            None => events.events(after, limit),
+        let page = match (review_id, receipt_id) {
+            (Some(review_id), None) => events.events_for_review(after, limit, review_id),
+            (None, Some(receipt_id)) => events.events_for_receipt(after, limit, receipt_id),
+            (None, None) => events.events(after, limit),
+            (Some(_), Some(_)) => unreachable!("mutually exclusive event filters were checked"),
         };
         match page {
             Ok(page) => HttpResponse::json(200, &json!({ "ok": true, "page": page })),
@@ -827,6 +843,15 @@ impl ApiRouter {
             Err(error) => return self.error(400, "invalid_query", &error, "query"),
         };
         let review_id = query.get("review_id").map(String::as_str);
+        let receipt_id = query.get("receipt_id").map(String::as_str);
+        if review_id.is_some() && receipt_id.is_some() {
+            return self.error(
+                400,
+                "invalid_query",
+                "review_id and receipt_id are mutually exclusive event filters",
+                "query",
+            );
+        }
         let events = match self.events.lock() {
             Ok(events) => events,
             Err(_) => {
@@ -838,9 +863,11 @@ impl ApiRouter {
                 )
             }
         };
-        let page = match review_id {
-            Some(review_id) => events.events_for_review(after, limit, review_id),
-            None => events.events(after, limit),
+        let page = match (review_id, receipt_id) {
+            (Some(review_id), None) => events.events_for_review(after, limit, review_id),
+            (None, Some(receipt_id)) => events.events_for_receipt(after, limit, receipt_id),
+            (None, None) => events.events(after, limit),
+            (Some(_), Some(_)) => unreachable!("mutually exclusive event filters were checked"),
         };
         match page {
             Ok(page) => {
@@ -848,6 +875,59 @@ impl ApiRouter {
                     .with_header("x-next-after", page.next_after.to_string())
             }
             Err(error) => self.error(400, "invalid_query", &error, "query"),
+        }
+    }
+
+    fn delivery_receipt_events(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(receipt_id) = delivery_receipt_id(&request.path_segments()) else {
+            return self.error(
+                404,
+                "not_found",
+                "delivery-receipt event route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let after = match query_u64(&query, "after", 0) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let limit = match query_usize(&query, "limit", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match events.events_for_receipt(after, limit, &receipt_id) {
+            Ok(page) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "workflow": "developer_delivery_receipt_events",
+                    "receipt_id": receipt_id,
+                    "found": !page.events.is_empty(),
+                    "page": page,
+                    "guarantees": [
+                        "evidence is limited to retained developer delivery receipt events with an exact receipt_id match",
+                        "after is an exclusive event cursor and next_after is the last returned event id",
+                        "retention gaps are reported instead of silently presented as complete history",
+                        "an empty result means no matching retained event was found in the requested cursor window"
+                    ]
+                }),
+            ),
+            Err(error) => self.error(400, "invalid_query", &error, request_id),
         }
     }
 
@@ -1900,8 +1980,13 @@ impl ApiRouter {
             "tool.completed"
         };
         let encoded = serde_json::to_vec(wire).unwrap_or_default();
+        let delivery_receipt = Self::delivery_receipt_projection(wire);
         let payload = if encoded.len() <= 64 * 1024 {
-            json!({ "tool": tool, "response": wire })
+            let mut payload = json!({ "tool": tool, "response": wire });
+            if let Some(projection) = delivery_receipt.clone() {
+                payload["delivery_receipt"] = projection;
+            }
+            payload
         } else {
             let mut projection = json!({
                 "tool": tool,
@@ -1926,12 +2011,55 @@ impl ApiRouter {
                     projection["mission_trace"] = trace;
                 }
             }
+            if let Some(receipt) = delivery_receipt {
+                projection["delivery_receipt"] = receipt;
+            }
             projection
         };
         if let Ok(mut events) = self.events.lock() {
             let _ = events.emit(outcome, tool, request_id, payload);
         }
         let _ = self.event_persistence.persist();
+    }
+
+    /// Keep a small stable join key in the event stream even when the complete receipt response
+    /// is omitted by the event-size bound. This is a projection only: the receipt itself remains
+    /// content-addressed and must be fetched or supplied separately for verification.
+    fn delivery_receipt_projection(wire: &Value) -> Option<Value> {
+        let text = wire.pointer("/result/content/0/text")?.as_str()?;
+        let output = serde_json::from_str::<Value>(text).ok()?;
+        let workflow = output.get("workflow")?.as_str()?;
+        let is_receipt = matches!(
+            workflow,
+            "developer_delivery_receipt" | "developer_delivery_receipt_verify"
+        );
+        if !is_receipt {
+            return None;
+        }
+        let mut projection = json!({
+            "workflow": workflow,
+            "receipt_id": output.get("receipt_id")?,
+        });
+        for field in [
+            "receipt_digest",
+            "supplied_receipt_digest",
+            "recomputed_receipt_digest",
+            "valid",
+            "verified",
+            "receipt_ready",
+            "release_candidate",
+            "target_count",
+            "ready_target_count",
+            "ready_evidence_count",
+            "receipt_digest_match",
+            "targets_match",
+            "evidence_match",
+        ] {
+            if let Some(value) = output.get(field) {
+                projection[field] = value.clone();
+            }
+        }
+        Some(projection)
     }
 
     fn error(&self, status: u16, code: &str, message: &str, request_id: &str) -> HttpResponse {
@@ -1969,8 +2097,9 @@ impl ApiRouter {
                     "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
-                    "/v1/events": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }], "responses": { "200": { "description": "cursor page" } } } },
-                    "/v1/events/stream": { "get": { "parameters": [{ "name": "review_id", "in": "query" }], "responses": { "200": { "description": "bounded Server-Sent Events snapshot" } } } },
+                    "/v1/events": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }, { "name": "receipt_id", "in": "query" }], "responses": { "200": { "description": "cursor page; review_id and receipt_id are mutually exclusive" } } } },
+                    "/v1/events/stream": { "get": { "parameters": [{ "name": "review_id", "in": "query" }, { "name": "receipt_id", "in": "query" }], "responses": { "200": { "description": "bounded Server-Sent Events snapshot" } } } },
+                    "/v1/delivery-receipts/{receipt_id}/events": { "get": { "parameters": [{ "name": "receipt_id", "in": "path", "required": true }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "retained delivery-receipt event page" } } } },
                     "/v1/route-reviews/{review_id}/evidence": { "get": { "parameters": [{ "name": "review_id", "in": "path", "required": true }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "retained route-review evidence page" } } } },
                     "/v1/events/persistence": { "get": { "responses": { "200": { "description": "event cursor checkpoint status" } } } },
                     "/v1/events/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded event cursor checkpoint" } } } },
@@ -2388,6 +2517,18 @@ fn route_review_id(segments: &Result<Vec<String>, crate::http::HttpError>) -> Op
     Some(segments[2].clone())
 }
 
+fn delivery_receipt_id(segments: &Result<Vec<String>, crate::http::HttpError>) -> Option<String> {
+    let segments = segments.as_ref().ok()?;
+    if segments.len() != 4
+        || segments[0] != "v1"
+        || segments[1] != "delivery-receipts"
+        || segments[3] != "events"
+    {
+        return None;
+    }
+    Some(segments[2].clone())
+}
+
 fn query_u64(
     query: &std::collections::BTreeMap<String, String>,
     name: &str,
@@ -2675,6 +2816,65 @@ mod tests {
         let flush = restored.handle(request("POST", "/v1/events/persistence/flush", json!({})));
         assert_eq!(flush.status, 200);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn delivery_receipt_events_keep_a_bounded_join_projection_and_cursor_filter() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let output = json!({
+            "ok": true,
+            "workflow": "developer_delivery_receipt",
+            "receipt_id": "receipt-api-1",
+            "receipt_digest": "a".repeat(64),
+            "valid": true,
+            "receipt_ready": true,
+            "release_candidate": true,
+            "target_count": 1,
+            "ready_target_count": 1,
+            "ready_evidence_count": 2,
+            "large_detail": "x".repeat(70_000)
+        });
+        let wire = json!({
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "result": { "content": [{ "type": "text", "text": output.to_string() }] }
+        });
+        router.record_tool_event("req-1", "developer_delivery_receipt", &wire);
+
+        let filtered = router.handle(request(
+            "GET",
+            "/v1/delivery-receipts/receipt-api-1/events?after=0&limit=10",
+            json!({}),
+        ));
+        assert_eq!(filtered.status, 200);
+        let filtered: Value = serde_json::from_slice(&filtered.body).unwrap();
+        assert_eq!(filtered["workflow"], "developer_delivery_receipt_events");
+        assert_eq!(filtered["found"], true);
+        assert_eq!(
+            filtered["page"]["events"][0]["payload"]["delivery_receipt"]["receipt_id"],
+            "receipt-api-1"
+        );
+        assert_eq!(
+            filtered["page"]["events"][0]["payload"]["response_omitted"],
+            true
+        );
+
+        let query = router.handle(request(
+            "GET",
+            "/v1/events?after=0&limit=10&receipt_id=receipt-api-1",
+            json!({}),
+        ));
+        assert_eq!(query.status, 200);
+        let query: Value = serde_json::from_slice(&query.body).unwrap();
+        assert_eq!(query["page"]["events"].as_array().unwrap().len(), 1);
+
+        let conflict = router.handle(request(
+            "GET",
+            "/v1/events?after=0&limit=10&review_id=a&receipt_id=receipt-api-1",
+            json!({}),
+        ));
+        assert_eq!(conflict.status, 400);
     }
 
     #[test]
