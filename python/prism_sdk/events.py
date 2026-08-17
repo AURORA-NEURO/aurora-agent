@@ -667,6 +667,158 @@ class OperationsHandoff:
 
 
 @dataclass(frozen=True)
+class OperationsDomainActivityGroup:
+    """One capability group with bounded local event observations."""
+
+    raw: dict[str, Any]
+    coverage: OperationsDomainGroup
+    observed_event_count: int
+    observed_tool_count: int
+    observed_tools: tuple[str, ...]
+    unobserved_advertised_tool_count: int
+    last_event_id: int | None
+    activity_state: str
+    observation_scope: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsDomainActivityGroup":
+        raw = _mapping("operations domain activity group", value)
+        observed_tools = _texts(
+            "operations domain activity observed_tools", raw.get("observed_tools")
+        )
+        observed_tool_count = _non_negative(
+            "operations domain activity observed_tool_count",
+            raw.get("observed_tool_count"),
+        )
+        if observed_tool_count != len(observed_tools):
+            raise ArgumentError("operations domain activity observed tool counts must reconcile")
+        last_event_id = raw.get("last_event_id")
+        if last_event_id is not None:
+            last_event_id = _non_negative(
+                "operations domain activity last_event_id", last_event_id
+            )
+        activity_state = _text(
+            "operations domain activity activity_state", raw.get("activity_state")
+        )
+        if activity_state not in {
+            "catalogue_gap",
+            "observed_in_page",
+            "catalogued_unobserved_in_page",
+        }:
+            raise ArgumentError("operations domain activity state is invalid")
+        return cls(
+            raw=raw,
+            coverage=OperationsDomainGroup.from_wire(raw),
+            observed_event_count=_non_negative(
+                "operations domain activity observed_event_count",
+                raw.get("observed_event_count"),
+            ),
+            observed_tool_count=observed_tool_count,
+            observed_tools=observed_tools,
+            unobserved_advertised_tool_count=_non_negative(
+                "operations domain activity unobserved_advertised_tool_count",
+                raw.get("unobserved_advertised_tool_count"),
+            ),
+            last_event_id=last_event_id,
+            activity_state=activity_state,
+            observation_scope=_text(
+                "operations domain activity observation_scope",
+                raw.get("observation_scope"),
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class OperationsDomainActivity:
+    """Typed per-domain activity projection with explicit cursor scope."""
+
+    raw: dict[str, Any]
+    workflow: str
+    schema: str
+    event_cursor: dict[str, Any]
+    groups: tuple[OperationsDomainActivityGroup, ...]
+    summary: dict[str, int]
+    observation_policy: dict[str, Any]
+    guarantees: tuple[str, ...]
+    non_claims: tuple[str, ...]
+    links: dict[str, str]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsDomainActivity":
+        raw = _mapping("operations domain activity", value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("operations domain activity must be successful")
+        if raw.get("workflow") != "operations_domain_activity":
+            raise ArgumentError("operations domain activity workflow is invalid")
+        if raw.get("schema") != "bioprism-operations-domain-activity/0.1":
+            raise ArgumentError("operations domain activity schema is invalid")
+        event_cursor = _mapping("operations domain activity event_cursor", raw.get("event_cursor"))
+        for name in ("after", "next_after", "returned_events", "dropped_events"):
+            _non_negative(f"operations domain activity event_cursor {name}", event_cursor.get(name))
+        for name in ("oldest", "newest"):
+            if event_cursor.get(name) is not None:
+                _non_negative(
+                    f"operations domain activity event_cursor {name}", event_cursor.get(name)
+                )
+        if not isinstance(event_cursor.get("gap"), bool):
+            raise ArgumentError("operations domain activity event_cursor gap must be a boolean")
+        groups_value = raw.get("groups")
+        if not isinstance(groups_value, Sequence) or isinstance(groups_value, (str, bytes)):
+            raise ArgumentError("operations domain activity groups must be an array")
+        groups = tuple(OperationsDomainActivityGroup.from_wire(item) for item in groups_value)
+        summary_raw = _mapping("operations domain activity summary", raw.get("summary"))
+        summary = {
+            name: _non_negative(
+                f"operations domain activity summary {name}", summary_raw.get(name)
+            )
+            for name in (
+                "group_count",
+                "returned_groups",
+                "tool_events_scanned",
+                "attributed_tool_events",
+                "unattributed_tool_events",
+                "groups_with_catalogue_gaps",
+                "groups_with_observed_activity",
+                "catalogued_unobserved_tool_count",
+            )
+        }
+        policy = _mapping(
+            "operations domain activity observation_policy", raw.get("observation_policy")
+        )
+        if policy.get("readiness_claimed") is not False:
+            raise ArgumentError("operations domain activity must not claim readiness")
+        links_raw = _mapping("operations domain activity links", raw.get("links"))
+        links = {
+            _text("operations domain activity link name", name): _text(
+                f"operations domain activity link {name}", target
+            )
+            for name, target in links_raw.items()
+        }
+        return cls(
+            raw=raw,
+            workflow="operations_domain_activity",
+            schema="bioprism-operations-domain-activity/0.1",
+            event_cursor=event_cursor,
+            groups=groups,
+            summary=summary,
+            observation_policy=policy,
+            guarantees=_texts(
+                "operations domain activity guarantees", raw.get("guarantees")
+            ),
+            non_claims=_texts(
+                "operations domain activity non_claims", raw.get("non_claims")
+            ),
+            links=links,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class OperationsSnapshot:
     """Typed bounded control-plane evidence assembled by the HTTP gateway."""
 
@@ -1127,6 +1279,8 @@ __all__ = [
     "OperationsDomainCoverage",
     "OperationsHandoffGroup",
     "OperationsHandoff",
+    "OperationsDomainActivityGroup",
+    "OperationsDomainActivity",
     "MAX_OPERATIONS_SNAPSHOT_LIMIT",
     "MAX_OPERATIONS_DOMAIN_GROUPS",
     "MAX_OPERATIONS_DOMAIN_TOOLS",

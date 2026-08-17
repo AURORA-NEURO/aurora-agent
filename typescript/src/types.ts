@@ -7275,6 +7275,46 @@ export interface OperationsHandoff extends JsonObject {
   links: Record<string, string>;
 }
 
+export interface OperationsDomainActivityGroup extends OperationsDomainGroup {
+  observed_event_count: number;
+  observed_tool_count: number;
+  observed_tools: string[];
+  unobserved_advertised_tool_count: number;
+  last_event_id: number | null;
+  activity_state: "catalogue_gap" | "observed_in_page" | "catalogued_unobserved_in_page";
+  observation_scope: "requested_event_page_only";
+}
+
+export interface OperationsDomainActivity extends JsonObject {
+  ok: boolean;
+  workflow: "operations_domain_activity";
+  schema: "bioprism-operations-domain-activity/0.1";
+  event_cursor: {
+    after: number;
+    next_after: number;
+    oldest: number | null;
+    newest: number | null;
+    gap: boolean;
+    dropped_events: number;
+    returned_events: number;
+  };
+  groups: OperationsDomainActivityGroup[];
+  summary: {
+    group_count: number;
+    returned_groups: number;
+    tool_events_scanned: number;
+    attributed_tool_events: number;
+    unattributed_tool_events: number;
+    groups_with_catalogue_gaps: number;
+    groups_with_observed_activity: number;
+    catalogued_unobserved_tool_count: number;
+  };
+  observation_policy: JsonObject;
+  guarantees: string[];
+  non_claims: string[];
+  links: Record<string, string>;
+}
+
 export interface OperationsSnapshot extends JsonObject {
   ok: boolean;
   schema: "bioprism-operations-snapshot/0.1";

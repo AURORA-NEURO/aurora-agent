@@ -21,6 +21,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/capabilities` | Tool/resource counts, transport support, limits, and workspace catalogue |
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
+| `GET /v1/operations/domains?after=N&limit=M` | Per-domain catalogue coverage plus exact local tool activity observed in the requested event page |
 | `POST /v1/operations/handoff` | Build a content-addressed, non-executing domain-to-`capability_route` handoff |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
@@ -150,6 +151,13 @@ status of `ready_for_capability_route`, `requires_catalogue_review`, `no_actiona
 `unresolved_domain`. The endpoint is deliberately non-executing: callers must submit the route to
 `capability_route`, review explicit selections with `capability_route_review`, and run
 `/v1/missions/preflight` before any mission dispatch.
+
+`GET /v1/operations/domains` applies the same cursor bounds to a per-domain activity projection.
+Each group retains catalogue counts, missing names, observed event/tool counts, the last observed
+event ID, and an `activity_state` of `catalogue_gap`, `observed_in_page`, or
+`catalogued_unobserved_in_page`. Matching is exact on the tool name carried by a retained event;
+the response declares that activity is limited to the requested page and never calls it runtime
+health or readiness.
 
 ## Asynchronous missions
 

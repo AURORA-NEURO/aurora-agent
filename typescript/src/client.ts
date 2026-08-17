@@ -30,6 +30,7 @@ import type {
   OperationsCatalogResult,
   OperationsHandoff,
   OperationsHandoffArgs,
+  OperationsDomainActivity,
   SafetyReleaseGateArgs,
   SafetyReleaseGateResult,
   MedicalBoundaryArgs,
@@ -460,6 +461,24 @@ export class ApiClient {
     if (normalized.domains !== undefined) normalized.domains = [...new Set(normalized.domains)].sort();
     if (normalized.group_ids !== undefined) normalized.group_ids = [...new Set(normalized.group_ids)].sort();
     return this.request<OperationsHandoff>("POST", "/v1/operations/handoff", normalized, options);
+  }
+
+  /** Read bounded local tool activity grouped by domain without claiming readiness. */
+  async operationsDomainActivity(
+    after = 0,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<OperationsDomainActivity> {
+    cursor(after, "after");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) {
+      throw new ArgumentError("limit must be 1..=256");
+    }
+    return this.request<OperationsDomainActivity>(
+      "GET",
+      `/v1/operations/domains?after=${after}&limit=${limit}`,
+      undefined,
+      options,
+    );
   }
 
   async tools(options?: ClientRequestOptions): Promise<ToolsResponse["tools"]> {

@@ -567,6 +567,9 @@ invent defaults:
   `OperationsHandoff` with selected domain groups, exact catalogue gaps, unresolved selectors,
   and a ready-to-submit `route_request`. It never dispatches the route; callers continue through
   `capability_route_report(...)`, `capability_route_review_report(...)`, and mission preflight.
+  `operations_domain_activity(after=..., limit=...)` returns typed per-domain activity rows with
+  explicit event-cursor scope, exact observed tools, and catalogue-gap/unobserved distinctions;
+  it is activity evidence rather than a readiness claim.
   `rebind_subscription(...)` supplies a secret in memory,
   re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

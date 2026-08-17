@@ -220,7 +220,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
-from .events import ApiEvent, DeliveryAttempt, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, MAX_OPERATIONS_DOMAIN_GROUPS, MAX_OPERATIONS_DOMAIN_TOOLS, MAX_OPERATIONS_SNAPSHOT_LIMIT, OperationsDomainCoverage, OperationsDomainGroup, OperationsHandoff, OperationsHandoffGroup, OperationsSnapshot, RecoveryBoundary, RecoveryMatrix, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_receipt_id, validate_review_id
+from .events import ApiEvent, DeliveryAttempt, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, MAX_OPERATIONS_DOMAIN_GROUPS, MAX_OPERATIONS_DOMAIN_TOOLS, MAX_OPERATIONS_SNAPSHOT_LIMIT, OperationsDomainActivity, OperationsDomainActivityGroup, OperationsDomainCoverage, OperationsDomainGroup, OperationsHandoff, OperationsHandoffGroup, OperationsSnapshot, RecoveryBoundary, RecoveryMatrix, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_receipt_id, validate_review_id
 from .evidence import (
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
@@ -2235,6 +2235,8 @@ __all__ = [
     "OperationsSnapshot",
     "OperationsDomainGroup",
     "OperationsDomainCoverage",
+    "OperationsDomainActivity",
+    "OperationsDomainActivityGroup",
     "OperationsHandoff",
     "OperationsHandoffGroup",
     "MAX_OPERATIONS_SNAPSHOT_LIMIT",

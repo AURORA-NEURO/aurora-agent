@@ -2414,6 +2414,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
           links: {},
         });
       }
+      if (path === "/v1/operations/domains") {
+        return jsonResponse({ ok: true, workflow: "operations_domain_activity", schema: "bioprism-operations-domain-activity/0.1", event_cursor: { after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0, returned_events: 1 }, groups: [{ id: "biological_domains", status: "available", domains: ["oncology"], declared_tool_count: 1, advertised_tool_count: 1, missing_tool_count: 0, missing_tools: [], fully_advertised: true, observed_event_count: 1, observed_tool_count: 1, observed_tools: ["modality_catalog"], unobserved_advertised_tool_count: 0, last_event_id: 1, activity_state: "observed_in_page", observation_scope: "requested_event_page_only" }], summary: { group_count: 1, returned_groups: 1, tool_events_scanned: 1, attributed_tool_events: 1, unattributed_tool_events: 0, groups_with_catalogue_gaps: 0, groups_with_observed_activity: 1, catalogued_unobserved_tool_count: 0 }, observation_policy: { event_matching: "exact", scope: "requested event page", cross_group_membership: "explicit", readiness_claimed: false }, guarantees: ["catalogue and activity separate"], non_claims: ["runtime health"], links: { events: "/v1/events" } });
+      }
       if (path === "/v1/operations/handoff") {
         return jsonResponse({
           ok: true,
@@ -2496,6 +2499,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   const handoff = await client.operationsHandoff({ goal: "prepare an oncology route", domains: ["oncology"], max_groups: 1 });
   assert.equal(handoff.handoff_status, "ready_for_capability_route");
   assert.equal(handoff.groups[0].route_need_id, "domain-group:biological_domains");
+  const activity = await client.operationsDomainActivity(0, 2);
+  assert.equal(activity.groups[0].activity_state, "observed_in_page");
+  assert.equal(activity.summary.attributed_tool_events, 1);
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
 });
 

@@ -81,6 +81,7 @@ from .events import (
     EventPersistenceStatus,
     OperationsSnapshot,
     OperationsHandoff,
+    OperationsDomainActivity,
     RecoveryMatrix,
     RouteReviewEvidence,
     SseSnapshot,
@@ -3457,6 +3458,25 @@ class ApiClient:
             payload["goal"] = goal
         return OperationsHandoff.from_wire(self.request("POST", "/v1/operations/handoff", payload))
 
+    def operations_domain_activity(
+        self, *, after: int = 0, limit: int = 100
+    ) -> OperationsDomainActivity:
+        """Return bounded local activity evidence grouped by capability domain."""
+
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= MAX_OPERATIONS_SNAPSHOT_LIMIT
+        ):
+            raise ArgumentError(
+                f"limit must be between 1 and {MAX_OPERATIONS_SNAPSHOT_LIMIT}"
+            )
+        return OperationsDomainActivity.from_wire(
+            self.request("GET", f"/v1/operations/domains?after={after}&limit={limit}")
+        )
+
     def flush_event_persistence(self) -> EventPersistenceStatus:
         """Force an event cursor checkpoint and return typed bounded status."""
 
@@ -3781,6 +3801,15 @@ class AsyncApiClient:
             group_ids=group_ids,
             include_complete=include_complete,
             max_groups=max_groups,
+        )
+
+    async def operations_domain_activity(
+        self, *, after: int = 0, limit: int = 100
+    ) -> OperationsDomainActivity:
+        """Async typed per-domain activity projection with an explicit event cursor."""
+
+        return await asyncio.to_thread(
+            self.client.operations_domain_activity, after=after, limit=limit
         )
 
     async def flush_event_persistence(self) -> EventPersistenceStatus:

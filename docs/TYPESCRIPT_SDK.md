@@ -666,6 +666,9 @@ send webhooks, or promote local observations into scientific or receiver-accepta
 groups, preserving exact catalogue gaps, unresolved selectors, a content-addressed handoff ID,
 and a `CapabilityRouteArgs` proposal. The proposal remains `execution: "not_started"` until the
 caller performs route review and mission preflight.
+`operationsDomainActivity(after, limit)` returns the typed per-domain activity projection and
+keeps the event cursor, exact observed tools, catalogue gaps, and catalogued-but-unobserved tools
+separate; its `observation_policy` explicitly does not claim readiness.
 
 ```typescript
 const page = await api.events(0, 100);

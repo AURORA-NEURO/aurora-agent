@@ -491,6 +491,9 @@ impl ApiRouter {
             ("GET", "/v1/capabilities") => self.capabilities(),
             ("GET", "/v1/recovery") => self.recovery_matrix(),
             ("GET", "/v1/operations/snapshot") => self.operations_snapshot(&request, &request_id),
+            ("GET", "/v1/operations/domains") => {
+                self.operations_domain_activity(&request, &request_id)
+            }
             ("POST", "/v1/operations/handoff") => self.operations_handoff(&request, &request_id),
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
@@ -958,6 +961,7 @@ impl ApiRouter {
                     "mission_inventory": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
+                    "operations_domains": true,
                     "operations_handoff": true,
                     "delivery_attempt_provenance": true,
                     "external_delivery_worker": false
@@ -997,6 +1001,214 @@ impl ApiRouter {
             Ok(value) => HttpResponse::json(200, &value),
             Err(error) => self.error(422, "invalid_operations_handoff", &error, request_id),
         }
+    }
+
+    fn operations_domain_activity(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if key != "after" && key != "limit" {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "operations domain activity accepts only after and limit",
+                    request_id,
+                );
+            }
+        }
+        let after = match query_u64(&query, "after", 0) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let limit = match query_usize(&query, "limit", 100) {
+            Ok(value) if (1..=MAX_OPERATIONS_SNAPSHOT_LIMIT).contains(&value) => value,
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    &format!("limit must be between 1 and {MAX_OPERATIONS_SNAPSHOT_LIMIT}"),
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let page = match self.events.lock() {
+            Ok(events) => match events.events(after, limit) {
+                Ok(page) => page,
+                Err(error) => return self.error(422, "invalid_query", &error, request_id),
+            },
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let coverage = operations_domain_coverage();
+        let groups = coverage
+            .get("groups")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let capability_groups = bioprism_mcp::workspace_capabilities();
+        let mut tools_by_group = BTreeMap::<String, BTreeSet<String>>::new();
+        if let Some(capability_groups) = capability_groups.as_array() {
+            for group in capability_groups {
+                let Some(id) = group.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let tools = group
+                    .get("mcp_tools")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect::<BTreeSet<_>>()
+                    })
+                    .unwrap_or_default();
+                tools_by_group.insert(id.to_string(), tools);
+            }
+        }
+        let advertised_tools = bioprism_mcp::tool_definitions()
+            .into_iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
+            .collect::<BTreeSet<_>>();
+        let tool_name = |event: &crate::events::ApiEvent| -> Option<String> {
+            event
+                .payload
+                .get("tool")
+                .and_then(Value::as_str)
+                .filter(|name| advertised_tools.contains(*name))
+                .map(str::to_owned)
+                .or_else(|| {
+                    advertised_tools
+                        .contains(&event.subject)
+                        .then_some(event.subject.clone())
+                })
+        };
+        let tool_events_scanned = page
+            .events
+            .iter()
+            .filter(|event| tool_name(event).is_some())
+            .count();
+        let mut attributed_event_ids = BTreeSet::new();
+        let mut groups_with_gaps = 0usize;
+        let mut groups_with_observed_activity = 0usize;
+        let mut catalogued_unobserved_tool_count = 0usize;
+        let mut domain_rows = Vec::new();
+        for group in groups {
+            let id = group.get("id").and_then(Value::as_str).unwrap_or("unknown");
+            let declared_tools = tools_by_group.get(id).cloned().unwrap_or_default();
+            let advertised_group_tools = declared_tools
+                .iter()
+                .filter(|tool| advertised_tools.contains(*tool))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let mut observed_tools = BTreeSet::new();
+            let mut observed_event_count = 0usize;
+            let mut last_event_id = None;
+            for event in &page.events {
+                let Some(tool) = tool_name(event) else {
+                    continue;
+                };
+                if !declared_tools.contains(&tool) {
+                    continue;
+                }
+                observed_event_count += 1;
+                observed_tools.insert(tool);
+                last_event_id = Some(event.id);
+                attributed_event_ids.insert(event.id);
+            }
+            let missing_tool_count = group
+                .get("missing_tool_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            if missing_tool_count > 0 {
+                groups_with_gaps += 1;
+            }
+            if observed_event_count > 0 {
+                groups_with_observed_activity += 1;
+            }
+            let unobserved_tool_count = advertised_group_tools
+                .len()
+                .saturating_sub(observed_tools.intersection(&advertised_group_tools).count());
+            catalogued_unobserved_tool_count += unobserved_tool_count;
+            let activity_state = if missing_tool_count > 0 {
+                "catalogue_gap"
+            } else if observed_event_count > 0 {
+                "observed_in_page"
+            } else {
+                "catalogued_unobserved_in_page"
+            };
+            let mut row = group;
+            row["observed_event_count"] = json!(observed_event_count);
+            row["observed_tool_count"] = json!(observed_tools.len());
+            row["observed_tools"] = json!(observed_tools.into_iter().collect::<Vec<_>>());
+            row["unobserved_advertised_tool_count"] = json!(unobserved_tool_count);
+            row["last_event_id"] = json!(last_event_id);
+            row["activity_state"] = json!(activity_state);
+            row["observation_scope"] = json!("requested_event_page_only");
+            domain_rows.push(row);
+        }
+        let unmatched_tool_events = tool_events_scanned.saturating_sub(attributed_event_ids.len());
+        let event_cursor = json!({
+            "after": page.after,
+            "next_after": page.next_after,
+            "oldest": page.oldest,
+            "newest": page.newest,
+            "gap": page.gap,
+            "dropped_events": page.dropped_events,
+            "returned_events": page.events.len()
+        });
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "workflow": "operations_domain_activity",
+                "schema": "bioprism-operations-domain-activity/0.1",
+                "event_cursor": event_cursor,
+                "groups": domain_rows,
+                "summary": {
+                    "group_count": coverage.get("group_count").and_then(Value::as_u64).unwrap_or(0),
+                    "returned_groups": coverage.get("returned_groups").and_then(Value::as_u64).unwrap_or(0),
+                    "tool_events_scanned": tool_events_scanned,
+                    "attributed_tool_events": attributed_event_ids.len(),
+                    "unattributed_tool_events": unmatched_tool_events,
+                    "groups_with_catalogue_gaps": groups_with_gaps,
+                    "groups_with_observed_activity": groups_with_observed_activity,
+                    "catalogued_unobserved_tool_count": catalogued_unobserved_tool_count
+                },
+                "observation_policy": {
+                    "event_matching": "exact advertised tool name from event payload or subject",
+                    "scope": "only the bounded event page requested by the caller",
+                    "cross_group_membership": "one tool event may contribute to multiple groups",
+                    "readiness_claimed": false
+                },
+                "guarantees": [
+                    "catalogue coverage and observed local activity remain separate fields",
+                    "event cursor gaps and the observation window are explicit",
+                    "no tool is invoked by this projection"
+                ],
+                "non_claims": [
+                    "runtime health or successful execution for unobserved tools",
+                    "scientific, clinical, safety, or release readiness",
+                    "complete historical activity when retention gaps or a bounded page apply"
+                ],
+                "links": {
+                    "operations_snapshot": "/v1/operations/snapshot",
+                    "operations_domains": "/v1/operations/domains",
+                    "operations_handoff": "/v1/operations/handoff",
+                    "events": "/v1/events",
+                    "capabilities": "/v1/capabilities"
+                }
+            }),
+        )
     }
 
     fn operations_mission_summary(&self) -> Result<Value, &'static str> {
@@ -1117,6 +1329,7 @@ impl ApiRouter {
                     "capabilities": "/v1/capabilities",
                     "recovery": "/v1/recovery",
                     "operations_snapshot": "/v1/operations/snapshot",
+                    "operations_domains": "/v1/operations/domains",
                     "operations_handoff": "/v1/operations/handoff",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
@@ -1158,6 +1371,7 @@ impl ApiRouter {
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
+                    "operations_domains": true,
                     "operations_handoff": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
@@ -2663,6 +2877,7 @@ impl ApiRouter {
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
                     "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
                     "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
+                    "/v1/operations/domains": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain observed activity projection" } } } },
                     "/v1/operations/handoff": { "post": { "responses": { "200": { "description": "content-addressed, non-executing domain routing handoff" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
@@ -4062,6 +4277,52 @@ mod tests {
             "POST",
             "/v1/operations/handoff",
             json!({ "unexpected": true }),
+        ));
+        assert_eq!(invalid.status, 422);
+    }
+
+    #[test]
+    fn operations_domain_activity_separates_catalogue_from_observation() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        assert_eq!(
+            router
+                .handle(request("POST", "/v1/tools/modality_catalog", json!({})))
+                .status,
+            200
+        );
+        let response = router.handle(request(
+            "GET",
+            "/v1/operations/domains?after=0&limit=10",
+            json!({}),
+        ));
+        assert_eq!(response.status, 200);
+        let activity: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(activity["workflow"], "operations_domain_activity");
+        assert_eq!(
+            activity["schema"],
+            "bioprism-operations-domain-activity/0.1"
+        );
+        assert_eq!(activity["event_cursor"]["returned_events"], 1);
+        assert_eq!(activity["summary"]["tool_events_scanned"], 1);
+        assert_eq!(activity["summary"]["attributed_tool_events"], 1);
+        assert!(
+            activity["summary"]["groups_with_observed_activity"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(activity["observation_policy"]["readiness_claimed"], false);
+        assert!(activity["groups"].as_array().unwrap().iter().any(|group| {
+            group["observed_tools"]
+                .as_array()
+                .is_some_and(|tools| tools.iter().any(|tool| tool == "modality_catalog"))
+        }));
+
+        let invalid = router.handle(request(
+            "GET",
+            "/v1/operations/domains?limit=257",
+            json!({}),
         ));
         assert_eq!(invalid.status, 422);
     }

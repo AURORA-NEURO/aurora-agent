@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsHandoff, OperationsSnapshot, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsHandoff, OperationsSnapshot, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -336,6 +336,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "workflow": "developer_delivery_receipt_events", "receipt_id": "receipt-http-1", "found": True, "page": {"events": [{"id": 2, "event_type": "tool.completed", "subject": "developer_delivery_receipt", "request_id": "req-2", "payload": {"delivery_receipt": {"receipt_id": "receipt-http-1"}}}], "after": 0, "next_after": 2, "oldest": 1, "newest": 2, "gap": False, "dropped_events": 0}})
         elif self.path.startswith("/v1/webhooks/subscriptions/") and "/attempts" in self.path:
             self._send(200, {"ok": True, "page": {"attempts": [{"attempt_id": 1, "delivery_id": 1, "subscription_id": "sub", "event_id": 2, "event_type": "tool.completed", "attempt": 1, "action": "send", "outcome": "accepted", "receiver_accepted": True, "retryable": None, "error": None, "signature": "sha256=x"}], "after": 0, "next_after": 1, "oldest": 1, "newest": 1, "gap": False, "dropped_attempts": 0}})
+        elif self.path.startswith("/v1/operations/domains"):
+            self._send(200, {"ok": True, "workflow": "operations_domain_activity", "schema": "bioprism-operations-domain-activity/0.1", "event_cursor": {"after": 0, "next_after": 1, "oldest": 1, "newest": 1, "gap": False, "dropped_events": 0, "returned_events": 1}, "groups": [{"id": "biological_domains", "status": "available", "domains": ["oncology"], "declared_tool_count": 1, "advertised_tool_count": 1, "missing_tool_count": 0, "missing_tools": [], "fully_advertised": True, "observed_event_count": 1, "observed_tool_count": 1, "observed_tools": ["modality_catalog"], "unobserved_advertised_tool_count": 0, "last_event_id": 1, "activity_state": "observed_in_page", "observation_scope": "requested_event_page_only"}], "summary": {"group_count": 1, "returned_groups": 1, "tool_events_scanned": 1, "attributed_tool_events": 1, "unattributed_tool_events": 0, "groups_with_catalogue_gaps": 0, "groups_with_observed_activity": 1, "catalogued_unobserved_tool_count": 0}, "observation_policy": {"event_matching": "exact", "scope": "requested event page", "cross_group_membership": "explicit", "readiness_claimed": False}, "guarantees": ["catalogue and activity separate"], "non_claims": ["runtime health"], "links": {"events": "/v1/events"}})
         elif self.path.startswith("/v1/operations/snapshot"):
             self._send(200, {
                 "ok": True,
@@ -931,6 +933,11 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertFalse(snapshot.consistency["cross_store_atomic"])
         self.assertEqual(snapshot.domain_coverage.groups[0].id, "operations")
         self.assertEqual(snapshot.domain_coverage.groups_with_gaps, 0)
+        activity = client.operations_domain_activity(limit=2)
+        self.assertIsInstance(activity, OperationsDomainActivity)
+        self.assertEqual(activity.workflow, "operations_domain_activity")
+        self.assertEqual(activity.groups[0].activity_state, "observed_in_page")
+        self.assertEqual(activity.summary["attributed_tool_events"], 1)
         handoff = client.operations_handoff(goal="prepare an oncology route", domains=["oncology"], max_groups=1)
         self.assertIsInstance(handoff, OperationsHandoff)
         self.assertEqual(handoff.handoff_status, "ready_for_capability_route")
@@ -1211,6 +1218,8 @@ class HttpApiClientTests(unittest.TestCase):
             handoff = await client.operations_handoff(domains=["oncology"], max_groups=1)
             self.assertIsInstance(handoff, OperationsHandoff)
             self.assertEqual(handoff.execution, "not_started")
+            activity = await client.operations_domain_activity(limit=2)
+            self.assertEqual(activity.groups[0].observed_tool_count, 1)
             self.assertTrue((await client.cancel_mission("async-1", "operator stop")).cancel_requested)
             self.assertEqual(
                 (await client.capability_route("async route", [{"id": "release", "tool": "bundle_verify"}]))["mcp"]["result"]["goal"],
