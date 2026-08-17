@@ -58,7 +58,7 @@ fn main() {
                      policy_screen, bioethics_action_review, bioethics_human_subject_screen,\n\
                      bioethics_dual_use_review, bioethics_validation_check, bioethics_representation_audit,\n\
                      influence_analyze, routing_decide, token_context_plan, bioql_compile, epistemic_voi,\n\
-                     benchmark_trace_analyze, pack_catalogue, pack_health_assess, world_generate, factory_lifecycle_simulate, factory_authority_verify, foundation_contract_check,\n\
+                     benchmark_trace_analyze, pack_catalogue, pack_health_assess, world_generate, factory_lifecycle_simulate, factory_authority_verify, artifact_registry_audit, foundation_contract_check,\n\
                      weavelang_compile,\n\
                      choreography_check, conformance_run,\n\
                      provider_capability_gate, sdk_registry_check, hub_submission_review, hub_disclosure_review,\n\

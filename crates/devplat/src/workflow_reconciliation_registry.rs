@@ -279,6 +279,7 @@ impl DomainWorkflowReconciliationRegistry {
     }
 
     /// Query deterministic digest-ordered index rows without returning full reports by default.
+    #[allow(clippy::too_many_arguments)]
     pub fn query(
         &self,
         mission_id: Option<&str>,

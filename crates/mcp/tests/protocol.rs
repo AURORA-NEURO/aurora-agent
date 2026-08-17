@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 191);
+    assert_eq!(tools.len(), 192);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -674,6 +674,61 @@ fn factory_authority_verify_audits_legacy_queue_checkpoint_without_dispatch() {
         .unwrap()
         .iter()
         .any(|item| item == "multi-host consensus or network-partition tolerance"));
+}
+
+#[test]
+fn artifact_registry_audit_joins_cross_domain_records_without_inventing_provenance() {
+    let mut server = server();
+    let leaf = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_report",
+                "subject_id": "mission-leaf",
+                "domains": ["oncology", "genomics"],
+                "parent_digests": [],
+                "artifact": {"status": "review_required"}
+            }
+        }),
+    );
+    assert_eq!(leaf["created"], json!(true));
+    let leaf_digest = leaf["content_digest"].as_str().unwrap();
+    let root = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({
+            "operation": "register",
+            "registration": {
+                "kind": "mission_report",
+                "subject_id": "mission-root",
+                "domains": ["oncology"],
+                "parent_digests": [leaf_digest, "f".repeat(64)],
+                "artifact": {"status": "partial"}
+            }
+        }),
+    );
+    assert_eq!(root["created"], json!(true));
+    let lineage = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({
+            "operation": "lineage",
+            "content_digest": root["content_digest"]
+        }),
+    );
+    assert_eq!(lineage["nodes"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        lineage["missing_parent_digests"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(lineage["cycles"], json!([]));
+    assert!(lineage["does_not_claim"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "parent presence proves causal provenance or scientific validity"));
 }
 
 #[test]
@@ -6031,12 +6086,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(191));
-    assert_eq!(result["advertised_tool_count"], json!(191));
+    assert_eq!(result["unique_catalog_tools"], json!(192));
+    assert_eq!(result["advertised_tool_count"], json!(192));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(191));
-    assert_eq!(result["schema_quality"]["valid"], json!(191));
+    assert_eq!(result["schema_quality"]["checked"], json!(192));
+    assert_eq!(result["schema_quality"]["valid"], json!(192));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -9340,7 +9395,7 @@ fn runtime_execution_simulate_records_replays_and_forks_without_live_effects() {
     assert_eq!(result["recording_complete"], json!(true));
     assert_eq!(result["partial_recording"], json!(false));
     assert_eq!(result["live_outcome_count"], json!(4));
-    assert_eq!(result["policy_journal_count"].as_u64().unwrap() >= 4, true);
+    assert!(result["policy_journal_count"].as_u64().unwrap() >= 4);
     assert_eq!(result["replay"]["verified"], json!(true));
     assert_eq!(result["replay"]["matched"], json!(true));
     assert_eq!(result["replay_complete"], json!(true));

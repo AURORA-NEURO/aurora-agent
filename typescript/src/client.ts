@@ -292,6 +292,13 @@ import type {
   MissionEvidenceBundleGetResult,
   MissionEvidenceBundleVerifyArgs,
   MissionEvidenceBundleVerifyResult,
+  ArtifactRegistrationArgs,
+  ArtifactRegistrationResult,
+  ArtifactQueryOptions,
+  ArtifactQueryResult,
+  ArtifactGetResult,
+  ArtifactLineageResult,
+  ArtifactRegistryPersistenceStatus,
   MissionJob,
   MissionJobStatus,
   MissionInventoryResponse,
@@ -1098,6 +1105,60 @@ export class ApiClient {
   async missionEvidenceBundleGetTool(bundleDigest: string, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleGetResult>> {
     const digest = pathSegment(bundleDigest, "bundle digest");
     return this.callTool<MissionEvidenceBundleGetResult>("mission_evidence_bundle_get", { bundle_digest: digest }, options);
+  }
+
+  async artifactRegistryAudit(
+    args: JsonObject = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<JsonObject>> {
+    if (!isObject(args)) throw new ArgumentError("artifact registry arguments must be an object");
+    return this.callTool<JsonObject>("artifact_registry_audit", args, options);
+  }
+
+  async artifactRegister(
+    args: ArtifactRegistrationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<ArtifactRegistrationResult> {
+    if (!isObject(args) || typeof args.kind !== "string" || typeof args.subject_id !== "string" || !("artifact" in args)) {
+      throw new ArgumentError("artifact registration requires kind, subject_id, and artifact");
+    }
+    return this.request<ArtifactRegistrationResult>("POST", "/v1/artifacts", args, options);
+  }
+
+  async artifactQuery(
+    args: ArtifactQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<ArtifactQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("artifact query arguments must be an object");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    if (args.include_artifacts !== undefined && typeof args.include_artifacts !== "boolean") throw new ArgumentError("include_artifacts must be a boolean");
+    const query = new URLSearchParams({ limit: String(maxItems), include_artifacts: String(args.include_artifacts ?? false) });
+    for (const [name, value] of [["kind", args.kind], ["domain", args.domain], ["subject_id", args.subject_id], ["after", args.after]] as const) {
+      if (value !== undefined) {
+        if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+        query.set(name, value);
+      }
+    }
+    return this.request<ArtifactQueryResult>("GET", `/v1/artifacts?${query.toString()}`, undefined, options);
+  }
+
+  async artifactGet(contentDigest: string, options?: ClientRequestOptions): Promise<ArtifactGetResult> {
+    const digest = pathSegment(contentDigest, "artifact content digest");
+    return this.request<ArtifactGetResult>("GET", `/v1/artifacts/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  async artifactLineage(contentDigest: string, options?: ClientRequestOptions): Promise<ArtifactLineageResult> {
+    const digest = pathSegment(contentDigest, "artifact content digest");
+    return this.request<ArtifactLineageResult>("GET", `/v1/artifacts/${encodeURIComponent(digest)}/lineage`, undefined, options);
+  }
+
+  async artifactRegistryPersistence(options?: ClientRequestOptions): Promise<ArtifactRegistryPersistenceStatus> {
+    return this.request<ArtifactRegistryPersistenceStatus>("GET", "/v1/artifacts/persistence", undefined, options);
+  }
+
+  async flushArtifactRegistryPersistence(options?: ClientRequestOptions): Promise<ArtifactRegistryPersistenceStatus> {
+    return this.request<ArtifactRegistryPersistenceStatus>("POST", "/v1/artifacts/persistence/flush", {}, options);
   }
 
   async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityAuditResult>> {

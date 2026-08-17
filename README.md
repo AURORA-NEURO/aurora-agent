@@ -576,6 +576,11 @@ identities, persist a hub ledger, export OTLP, execute models, or make clinical 
 `factory_lifecycle_simulate` adds deterministic lease, expiry, idempotency, compensation, quarantine,
 and atomic-commit replay; `factory_authority_verify` audits the durable queue envelope and bounded
 transition chain without dispatching work; `hub_disclosure_review`, `hub_card_render`, and `hub_leaderboard_render`
+`artifact_registry_audit` indexes exact-content mission, evaluator, reconciliation, and domain
+artifacts across the capability surface. It preserves verification posture, declared parent edges,
+missing parents, and bounded lineage traversal while explicitly refusing to infer causal provenance,
+scientific validity, clinical safety, publication authority, or external-effect completion from a
+digest or registry presence.
 carry disclosure ratchets, fail-closed score publication, comparability conditions, and typed
 unranked entries into agent-callable public-hub projections. `release_audit` composes required
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while

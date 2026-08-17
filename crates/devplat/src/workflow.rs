@@ -229,8 +229,8 @@ fn execution_resource_class(tool: &str) -> &'static str {
 fn execution_side_effect_posture(tool: &str) -> (&'static str, &'static str) {
     let name = tool.to_ascii_lowercase();
     if [
-        "mutate", "apply", "publish", "delivery", "submit", "accept", "release", "delete",
-        "write", "upload", "send", "rebind",
+        "mutate", "apply", "publish", "delivery", "submit", "accept", "release", "delete", "write",
+        "upload", "send", "rebind",
     ]
     .iter()
     .any(|word| name.contains(word))
@@ -478,7 +478,10 @@ fn argument_contract(schema: Option<&Value>) -> Value {
                 summary.insert("enum_count".into(), json!(values.len()));
             }
             summary.insert("required".into(), json!(required_set.contains(name)));
-            summary.insert("description_present".into(), json!(property.contains_key("description")));
+            summary.insert(
+                "description_present".into(),
+                json!(property.contains_key("description")),
+            );
             properties.insert(name.clone(), Value::Object(summary));
         }
     }
@@ -1116,7 +1119,10 @@ pub fn scaffold_domain_workflow(
         .as_object()
         .ok_or(DomainWorkflowError::RequestNotObject)?;
     for key in object.keys() {
-        if !matches!(key.as_str(), "workflow_id" | "mission_id" | "goal" | "tools" | "arguments") {
+        if !matches!(
+            key.as_str(),
+            "workflow_id" | "mission_id" | "goal" | "tools" | "arguments"
+        ) {
             return Err(DomainWorkflowError::InvalidRequest(format!(
                 "scaffold does not accept the {key:?} field"
             )));
@@ -1134,13 +1140,19 @@ pub fn scaffold_domain_workflow(
     let catalogue_report = build_domain_workflow_catalogue(catalogue, tool_definitions)?;
     let workflow = catalogue_report["workflows"]
         .as_array()
-        .and_then(|workflows| workflows.iter().find(|item| item["workflow_id"] == workflow_id))
+        .and_then(|workflows| {
+            workflows
+                .iter()
+                .find(|item| item["workflow_id"] == workflow_id)
+        })
         .ok_or_else(|| DomainWorkflowError::UnknownWorkflow {
             workflow_id: workflow_id.clone(),
         })?;
     let available = workflow["tools"]["available"]
         .as_array()
-        .ok_or_else(|| DomainWorkflowError::InvalidRequest("workflow has no available tool list".into()))?
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest("workflow has no available tool list".into())
+        })?
         .iter()
         .filter_map(Value::as_str)
         .map(str::to_owned)
@@ -1188,10 +1200,12 @@ pub fn scaffold_domain_workflow(
         let mut seen = BTreeSet::new();
         if let Some(stages) = workflow["recommended_stages"].as_array() {
             for stage in stages {
-                let Some(tool) = stage["tools"]
-                    .as_array()
-                    .and_then(|tools| tools.iter().filter_map(Value::as_str).find(|tool| scaffoldable.contains(*tool)))
-                else {
+                let Some(tool) = stage["tools"].as_array().and_then(|tools| {
+                    tools
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .find(|tool| scaffoldable.contains(*tool))
+                }) else {
                     continue;
                 };
                 if seen.insert(tool.to_string()) {
@@ -1274,7 +1288,8 @@ pub fn scaffold_domain_workflow(
             "allowed_tools": []
         }
     });
-    let instantiation = instantiate_domain_workflow(catalogue, tool_definitions, &instantiation_request)?;
+    let instantiation =
+        instantiate_domain_workflow(catalogue, tool_definitions, &instantiation_request)?;
     let omitted_tools = available
         .difference(&selected_tools.iter().cloned().collect::<BTreeSet<_>>())
         .cloned()
@@ -1379,8 +1394,7 @@ mod tests {
             .iter()
             .flat_map(|workflow| workflow["tool_contracts"].as_array().unwrap())
             .all(|contract| {
-                contract["execution_contract"]["providers"]["subprocess"]["state"]
-                    == "unavailable"
+                contract["execution_contract"]["providers"]["subprocess"]["state"] == "unavailable"
                     && contract["execution_contract"]["claims"]["readiness_claimed"] == false
             }));
         assert_eq!(
@@ -1497,8 +1511,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output["workflow"], "domain_workflow_scaffold");
-        assert_eq!(output["selection"]["strategy"], "one_available_tool_per_stage");
-        assert_eq!(output["selection"]["selected_tools"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            output["selection"]["strategy"],
+            "one_available_tool_per_stage"
+        );
+        assert_eq!(
+            output["selection"]["selected_tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(output["mission"]["policy"]["execute"], false);
         assert_eq!(output["execution"], "not_started");
         assert_eq!(output["readiness_claimed"], false);
@@ -1507,8 +1530,14 @@ mod tests {
             output["execution_contract"]["provider_boundary"]["subprocess"],
             "unavailable"
         );
-        assert_eq!(output["instantiation"]["workflow"], "domain_workflow_instantiate");
-        assert_eq!(output["mission"]["workflow_binding"]["workflow_id"], "oncology_workflows");
+        assert_eq!(
+            output["instantiation"]["workflow"],
+            "domain_workflow_instantiate"
+        );
+        assert_eq!(
+            output["mission"]["workflow_binding"]["workflow_id"],
+            "oncology_workflows"
+        );
         assert_eq!(output["scaffold_digest"].as_str().unwrap().len(), 64);
         assert!(output["next_actions"].as_array().unwrap().len() >= 3);
     }
@@ -1529,7 +1558,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output["selection"]["strategy"], "explicit_tools");
-        assert_eq!(output["selection"]["selected_tools"], json!(["onco_outcome_analyze"]));
+        assert_eq!(
+            output["selection"]["selected_tools"],
+            json!(["onco_outcome_analyze"])
+        );
         assert_eq!(
             output["mission"]["steps"][0]["arguments"],
             json!({"subject": "S1"})
@@ -1546,7 +1578,10 @@ mod tests {
                 "arguments": {"onco_boundary_check": {}}
             }),
         );
-        assert!(matches!(refused, Err(DomainWorkflowError::InvalidRequest(_))));
+        assert!(matches!(
+            refused,
+            Err(DomainWorkflowError::InvalidRequest(_))
+        ));
 
         let recursive_catalogue = json!([{
             "id": "recursive_workflow",

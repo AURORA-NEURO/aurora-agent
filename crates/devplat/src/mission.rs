@@ -88,8 +88,8 @@ fn require_text(field: &'static str, value: &str) -> Result<(), MissionError> {
 }
 
 fn validate_workflow_binding(binding: &Value) -> Result<(), MissionError> {
-    let encoded = serde_json::to_vec(binding)
-        .map_err(|error| MissionError::InvalidWorkflowBinding {
+    let encoded =
+        serde_json::to_vec(binding).map_err(|error| MissionError::InvalidWorkflowBinding {
             reason: format!("cannot measure binding: {error}"),
         })?;
     if encoded.len() > MAX_WORKFLOW_BINDING_BYTES {
@@ -175,8 +175,7 @@ fn validate_workflow_binding(binding: &Value) -> Result<(), MissionError> {
             reason: format!("cannot hash evidence plan: {error}"),
         })?
         .to_string();
-    if object.get("evidence_plan_digest").and_then(Value::as_str)
-        != Some(expected_digest.as_str())
+    if object.get("evidence_plan_digest").and_then(Value::as_str) != Some(expected_digest.as_str())
     {
         return Err(MissionError::InvalidWorkflowBinding {
             reason: "`evidence_plan_digest` does not match `evidence_plan`".into(),
@@ -699,10 +698,7 @@ fn validate_evaluator_review(
     let catalogue = MissionEvaluatorCatalogue::standard();
     if catalog_digest != catalogue.digest().to_string() {
         return Err(MissionError::InvalidEvaluatorReview {
-            reason: format!(
-                "catalog_digest is stale; expected {}",
-                catalogue.digest()
-            ),
+            reason: format!("catalog_digest is stale; expected {}", catalogue.digest()),
         });
     }
     let findings = object
@@ -724,7 +720,12 @@ fn validate_evaluator_review(
         })?;
     let expected = claims
         .iter()
-        .flat_map(|claim| claim.evaluator_bindings.iter().map(move |binding| (claim, binding)))
+        .flat_map(|claim| {
+            claim
+                .evaluator_bindings
+                .iter()
+                .map(move |binding| (claim, binding))
+        })
         .collect::<Vec<_>>();
     if expected.is_empty() {
         return Err(MissionError::InvalidEvaluatorReview {
@@ -801,11 +802,12 @@ fn validate_evaluator_review(
     }
 
     for (claim, binding) in expected {
-        let row = rows_by_id.get(&binding.id).ok_or_else(|| {
-            MissionError::InvalidEvaluatorReview {
-                reason: format!("binding `{}` is absent from evaluator_review", binding.id),
-            }
-        })?;
+        let row =
+            rows_by_id
+                .get(&binding.id)
+                .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                    reason: format!("binding `{}` is absent from evaluator_review", binding.id),
+                })?;
         let row_object = row.as_object().expect("review rows were checked above");
         for (field, expected_value) in [
             ("claim_id", claim.id.as_str()),
@@ -816,13 +818,19 @@ fn validate_evaluator_review(
         ] {
             if row_object.get(field).and_then(Value::as_str) != Some(expected_value) {
                 return Err(MissionError::InvalidEvaluatorReview {
-                    reason: format!("binding `{}` does not match review field `{field}`", binding.id),
+                    reason: format!(
+                        "binding `{}` does not match review field `{field}`",
+                        binding.id
+                    ),
                 });
             }
         }
         if row_object.get("required").and_then(Value::as_bool) != Some(binding.required) {
             return Err(MissionError::InvalidEvaluatorReview {
-                reason: format!("binding `{}` does not match review required posture", binding.id),
+                reason: format!(
+                    "binding `{}` does not match review required posture",
+                    binding.id
+                ),
             });
         }
         let proposed = row_object
@@ -841,13 +849,19 @@ fn validate_evaluator_review(
         ] {
             if proposed.get(field).and_then(Value::as_str) != Some(expected_value) {
                 return Err(MissionError::InvalidEvaluatorReview {
-                    reason: format!("binding `{}` proposed_binding does not match `{field}`", binding.id),
+                    reason: format!(
+                        "binding `{}` proposed_binding does not match `{field}`",
+                        binding.id
+                    ),
                 });
             }
         }
         if proposed.get("required").and_then(Value::as_bool) != Some(binding.required) {
             return Err(MissionError::InvalidEvaluatorReview {
-                reason: format!("binding `{}` proposed_binding does not match required posture", binding.id),
+                reason: format!(
+                    "binding `{}` proposed_binding does not match required posture",
+                    binding.id
+                ),
             });
         }
     }
@@ -1080,7 +1094,10 @@ fn retained_result_payload(result: &MissionStepResult) -> Option<(Value, &'stati
     if let Some(payload) = wire.pointer("/result/structuredContent") {
         return Some((payload.clone(), "structured_content"));
     }
-    if let Some(text) = wire.pointer("/result/content/0/text").and_then(Value::as_str) {
+    if let Some(text) = wire
+        .pointer("/result/content/0/text")
+        .and_then(Value::as_str)
+    {
         if let Ok(payload) = serde_json::from_str::<Value>(text) {
             return Some((payload, "content_text_json"));
         }
@@ -1227,7 +1244,11 @@ pub fn mission_claim_lineage_with_review(
                     row["evaluator_state"] = json!("step_not_successful");
                     row["outcome_state"] = json!(evaluator_outcome_state(&result.status));
                     row["step_status"] = json!(result.status);
-                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                    row["step_error"] = result
+                        .error
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null);
                     return row;
                 }
                 let Some((payload, output_source)) = retained_result_payload(result) else {
@@ -1235,7 +1256,11 @@ pub fn mission_claim_lineage_with_review(
                     row["evaluator_state"] = json!("evaluator_output_omitted");
                     row["outcome_state"] = json!("output_omitted");
                     row["step_status"] = json!(result.status);
-                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                    row["step_error"] = result
+                        .error
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null);
                     return row;
                 };
                 let output = if binding.output_pointer.is_empty() {
@@ -1248,13 +1273,21 @@ pub fn mission_claim_lineage_with_review(
                     row["evaluator_state"] = json!("evaluator_pointer_missing");
                     row["outcome_state"] = json!("pointer_missing");
                     row["step_status"] = json!(result.status);
-                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                    row["step_error"] = result
+                        .error
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null);
                     row["output_source"] = json!(output_source);
                     return row;
                 };
                 let mut row = base();
                 row["step_status"] = json!(result.status);
-                row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                row["step_error"] = result
+                    .error
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null);
                 row["output_source"] = json!(output_source);
                 row["output_type"] = json!(json_value_type(output));
                 row["output_bytes"] = serde_json::to_vec(output)
@@ -1297,11 +1330,19 @@ pub fn mission_claim_lineage_with_review(
             .collect::<Vec<_>>();
         let evaluator_required_total = evaluator_rows
             .iter()
-            .filter(|row| row.get("required").and_then(Value::as_bool).unwrap_or(false))
+            .filter(|row| {
+                row.get("required")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
             .count();
         let evaluator_required_retained = evaluator_rows
             .iter()
-            .filter(|row| row.get("required").and_then(Value::as_bool).unwrap_or(false))
+            .filter(|row| {
+                row.get("required")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
             .filter(|row| {
                 row.get("evaluator_state").and_then(Value::as_str)
                     == Some("evaluator_output_retained")
@@ -1866,22 +1907,24 @@ mod tests {
             requires_steps: vec!["observe".into()],
             level: "observation".into(),
             evidence_mode: "successful_tool_result".into(),
-            evaluator_bindings: vec![MissionClaimEvaluatorBinding {
-                id: "metrics-evaluator".into(),
-                adapter_id: "metrics-audit-v1".into(),
-                domain: "metrics".into(),
-                step_id: "observe".into(),
-                output_pointer: "/value".into(),
-                required: true,
-            },
-            MissionClaimEvaluatorBinding {
-                id: "evaluation-evaluator".into(),
-                adapter_id: "evaluation-audit-v1".into(),
-                domain: "evaluation".into(),
-                step_id: "observe".into(),
-                output_pointer: "/ok".into(),
-                required: true,
-            }],
+            evaluator_bindings: vec![
+                MissionClaimEvaluatorBinding {
+                    id: "metrics-evaluator".into(),
+                    adapter_id: "metrics-audit-v1".into(),
+                    domain: "metrics".into(),
+                    step_id: "observe".into(),
+                    output_pointer: "/value".into(),
+                    required: true,
+                },
+                MissionClaimEvaluatorBinding {
+                    id: "evaluation-evaluator".into(),
+                    adapter_id: "evaluation-audit-v1".into(),
+                    domain: "evaluation".into(),
+                    step_id: "observe".into(),
+                    output_pointer: "/ok".into(),
+                    required: true,
+                },
+            ],
         }];
         assert!(plan_mission(&value).is_ok());
 
@@ -1898,25 +1941,27 @@ mod tests {
             requires_steps: vec!["observe".into()],
             level: "observation".into(),
             evidence_mode: "successful_tool_result".into(),
-            evaluator_bindings: vec![MissionClaimEvaluatorBinding {
-                id: "metrics-evaluator".into(),
-                adapter_id: "metrics-audit-v1".into(),
-                domain: "metrics".into(),
-                step_id: "observe".into(),
-                output_pointer: "/value".into(),
-                required: true,
-            },
-            MissionClaimEvaluatorBinding {
-                id: "evaluation-evaluator".into(),
-                adapter_id: "evaluation-audit-v1".into(),
-                domain: "evaluation".into(),
-                step_id: "observe".into(),
-                output_pointer: "/ok".into(),
-                required: true,
-            }],
+            evaluator_bindings: vec![
+                MissionClaimEvaluatorBinding {
+                    id: "metrics-evaluator".into(),
+                    adapter_id: "metrics-audit-v1".into(),
+                    domain: "metrics".into(),
+                    step_id: "observe".into(),
+                    output_pointer: "/value".into(),
+                    required: true,
+                },
+                MissionClaimEvaluatorBinding {
+                    id: "evaluation-evaluator".into(),
+                    adapter_id: "evaluation-audit-v1".into(),
+                    domain: "evaluation".into(),
+                    step_id: "observe".into(),
+                    output_pointer: "/ok".into(),
+                    required: true,
+                },
+            ],
         };
         let retained = mission_claim_lineage(
-            &[claim.clone()],
+            std::slice::from_ref(&claim),
             &[MissionStepResult {
                 id: "observe".into(),
                 tool: "metrics_analytics_audit".into(),
@@ -2057,7 +2102,7 @@ mod tests {
             }],
         };
         let retained = mission_claim_lineage(
-            &[claim.clone()],
+            std::slice::from_ref(&claim),
             &[MissionStepResult {
                 id: "assay".into(),
                 tool: "oncoworlds_model_transport".into(),

@@ -7734,6 +7734,105 @@ export interface MissionEvidenceBundleGetResult extends JsonObject {
   limitations: string[];
 }
 
+export type ArtifactKind =
+  | "mission_evidence_bundle"
+  | "workflow_reconciliation"
+  | "mission_report"
+  | "evaluator_replay"
+  | "domain_report"
+  | "external_reference";
+
+export interface ArtifactRegistrationArgs extends JsonObject {
+  kind: ArtifactKind;
+  subject_id: string;
+  domains?: string[];
+  parent_digests?: string[];
+  declared_digest?: string;
+  artifact: JsonValue;
+}
+
+export interface ArtifactRegistrationResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_register";
+  content_digest: string;
+  kind: ArtifactKind;
+  subject_id: string;
+  declared_digest: string | null;
+  verification: JsonObject;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactQueryOptions extends JsonObject {
+  kind?: ArtifactKind;
+  domain?: string;
+  subject_id?: string;
+  after?: string;
+  max_items?: number;
+  include_artifacts?: boolean;
+}
+
+export interface ArtifactQueryResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_query";
+  filters: ArtifactQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactGetResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_get";
+  record: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactLineageResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_lineage";
+  root: string;
+  nodes: JsonObject[];
+  missing_parent_digests: string[];
+  cycles: string[];
+  bounded: true;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactRegistryPersistenceStatus extends JsonObject {
+  ok: boolean;
+  enabled: boolean;
+  file_present: boolean;
+  file_bytes: number | null;
+  schema: string;
+  state_digest: string | null;
+  integrity_verified: boolean | null;
+  registry_size: number;
+  registry_generation: number;
+  max_records: number;
+  max_file_bytes: number;
+  recovery_policy: string;
+  flush: string;
+}
+
 export interface MissionJob extends JsonObject {
   ok: boolean;
   mission_id: string;
@@ -7968,7 +8067,7 @@ export interface RecoveryBoundary extends JsonObject {
   id: string;
   configured: boolean;
   checkpoint_present: boolean;
-  schema_version: number | null;
+  schema_version: string | number | null;
   state_digest: string | null;
   integrity_verified: boolean | null;
   restores: string[];
@@ -8255,6 +8354,7 @@ export interface OperationsSnapshot extends JsonObject {
     missions: MissionPersistenceStatus;
     events: EventPersistenceStatus;
     workflow_reconciliations: DomainWorkflowReconciliationPersistenceStatus;
+    artifacts: ArtifactRegistryPersistenceStatus;
   };
   reconciliation_summary: DomainWorkflowReconciliationSummary;
   recovery: RecoveryMatrix;

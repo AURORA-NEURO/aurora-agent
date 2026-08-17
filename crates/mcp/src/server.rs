@@ -129,7 +129,7 @@ use bioprism_devplat::{
     build_domain_workflow_catalogue, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload, plan_mission,
     reconcile_domain_workflow, run_workbench, scaffold_domain_workflow, standard_walkthroughs,
-    verify_delivery_receipt, verify_mission_evidence_bundle, CapabilityCatalogue,
+    verify_delivery_receipt, verify_mission_evidence_bundle, ArtifactRegistry, CapabilityCatalogue,
     CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
     CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
     DeliveryReceiptVerificationRequest, DevPlatReport, DomainWorkflowReconciliationRegistry,
@@ -404,6 +404,7 @@ pub struct Server {
     mission_trace_observer: Option<MissionTraceObserver>,
     evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
     workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    artifact_registry: Arc<Mutex<ArtifactRegistry>>,
 }
 
 enum ParallelPending<'a> {
@@ -1014,10 +1015,11 @@ fn validate_static_mission_schemas(request: &MissionRequest) -> Result<(), Strin
 
 impl Server {
     pub fn new(root: PathBuf) -> Self {
-        Self::with_registries(
+        Self::with_registries_and_artifacts(
             root,
             Arc::new(Mutex::new(EvidenceBundleRegistry::new())),
             Arc::new(Mutex::new(DomainWorkflowReconciliationRegistry::new())),
+            Arc::new(Mutex::new(ArtifactRegistry::new())),
         )
     }
 
@@ -1032,12 +1034,33 @@ impl Server {
         evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
         workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
     ) -> Self {
+        Self::with_registries_and_artifacts(
+            root,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            Arc::new(Mutex::new(ArtifactRegistry::new())),
+        )
+    }
+
+    /// Construct a server over all caller-owned cross-domain registries.
+    ///
+    /// The artifact index is separate from evidence and reconciliation storage because it joins
+    /// their content identities without owning their semantic schemas. Sharing it here keeps MCP
+    /// and HTTP calls in one process on the same index while preserving each domain registry's
+    /// independent verification rules.
+    pub fn with_registries_and_artifacts(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+        artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    ) -> Self {
         Server {
             root: std::fs::canonicalize(&root).unwrap_or(root),
             lifecycle: Lifecycle::New,
             mission_trace_observer: None,
             evidence_registry,
             workflow_reconciliation_registry,
+            artifact_registry,
         }
     }
 
@@ -1337,6 +1360,7 @@ impl Server {
             "world_generate" => self.world_generate(&arguments),
             "factory_lifecycle_simulate" => self.factory_lifecycle_simulate(&arguments),
             "factory_authority_verify" => self.factory_authority_verify(&arguments),
+            "artifact_registry_audit" => self.artifact_registry_audit(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -2343,6 +2367,129 @@ impl Server {
                 "external provider effect completion"
             ]
         }))
+    }
+
+    /// Join bounded mission, evaluator, reconciliation, and domain artifacts by exact content
+    /// identity while preserving each artifact's own verification posture.
+    fn artifact_registry_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode artifact registry input: {error}"))?;
+        if encoded.len() > bioprism_devplat::MAX_ARTIFACT_REGISTRY_BYTES {
+            return Err(format!(
+                "artifact registry input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_ARTIFACT_REGISTRY_BYTES
+            ));
+        }
+        let operation = arguments
+            .get("operation")
+            .and_then(Value::as_str)
+            .unwrap_or("query");
+        let mut registry = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+        match operation {
+            "register" => {
+                let registration = arguments
+                    .get("registration")
+                    .ok_or("registration is required for artifact registry register")?;
+                registry
+                    .register(registration)
+                    .map_err(|error| format!("artifact registry registration refused: {error}"))
+            }
+            "query" => {
+                let optional_string = |name: &str| -> Result<Option<&str>, String> {
+                    arguments
+                        .get(name)
+                        .map(|value| {
+                            value
+                                .as_str()
+                                .ok_or_else(|| format!("{name} must be a string"))
+                        })
+                        .transpose()
+                };
+                let kind = optional_string("kind")?;
+                let domain = optional_string("domain")?;
+                let subject_id = optional_string("subject_id")?;
+                let after = optional_string("after")?;
+                let max_items = arguments
+                    .get("max_items")
+                    .map(|value| {
+                        value
+                            .as_u64()
+                            .ok_or_else(|| "max_items must be an integer".to_string())
+                            .and_then(|number| {
+                                usize::try_from(number)
+                                    .map_err(|_| "max_items is too large".to_string())
+                            })
+                    })
+                    .transpose()?
+                    .unwrap_or(100);
+                let include_artifacts = arguments
+                    .get("include_artifacts")
+                    .map(|value| {
+                        value
+                            .as_bool()
+                            .ok_or_else(|| "include_artifacts must be a boolean".to_string())
+                    })
+                    .transpose()?
+                    .unwrap_or(false);
+                registry
+                    .query(
+                        kind,
+                        domain,
+                        subject_id,
+                        after,
+                        max_items,
+                        include_artifacts,
+                    )
+                    .map_err(|error| format!("artifact registry query refused: {error}"))
+            }
+            "get" => {
+                let digest = arguments
+                    .get("content_digest")
+                    .and_then(Value::as_str)
+                    .ok_or("content_digest is required for artifact registry get")?;
+                registry
+                    .get(digest)
+                    .map_err(|error| format!("artifact registry get refused: {error}"))
+            }
+            "lineage" => {
+                let digest = arguments
+                    .get("content_digest")
+                    .and_then(Value::as_str)
+                    .ok_or("content_digest is required for artifact registry lineage")?;
+                registry
+                    .lineage(digest)
+                    .map_err(|error| format!("artifact registry lineage refused: {error}"))
+            }
+            "verify_snapshot" => {
+                let snapshot = arguments
+                    .get("snapshot")
+                    .ok_or("snapshot is required for artifact registry verification")?;
+                let verified = ArtifactRegistry::from_snapshot(snapshot)
+                    .map_err(|error| format!("artifact registry snapshot refused: {error}"))?;
+                Ok(json!({
+                    "ok": true,
+                    "schema": bioprism_devplat::ARTIFACT_REGISTRY_SCHEMA_VERSION,
+                    "workflow": "artifact_registry_snapshot_verify",
+                    "valid": true,
+                    "registry_generation": verified.generation(),
+                    "registry_size": verified.len(),
+                    "execution": "not_started",
+                    "guarantees": [
+                        "the outer state digest and every indexed artifact identity were rechecked",
+                        "known evidence and reconciliation formats were independently re-verified"
+                    ],
+                    "does_not_claim": [
+                        "scientific, clinical, publication, or external provenance validity"
+                    ]
+                }))
+            }
+            other => Err(format!(
+                "unknown artifact registry operation {other:?}; choose register, query, get, lineage, or verify_snapshot"
+            )),
+        }
     }
 
     fn context_compare(&self, arguments: &Value) -> Result<Value, String> {
@@ -15740,16 +15887,17 @@ impl Server {
                 .get("expiry")
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("waivers[{index}].expiry is required"))?;
-            let expiry =
-                match FactoryTimestamp::parse(expiry_text) {
-                    Ok(expiry) => expiry,
-                    Err(error) => return Ok(refusal(
+            let expiry = match FactoryTimestamp::parse(expiry_text) {
+                Ok(expiry) => expiry,
+                Err(error) => {
+                    return Ok(refusal(
                         "waiver_validation",
                         format!(
                             "waivers[{index}].expiry is not a valid RFC-3339 timestamp: {error}"
                         ),
-                    )),
-                };
+                    ))
+                }
+            };
             let affected_versions = object
                 .get("affected_versions")
                 .cloned()
@@ -19592,7 +19740,7 @@ impl Server {
             serde_json::to_value(&classifier).map_err(|error| error.to_string())?;
         let qc_value = serde_json::to_value(&context.qc).map_err(|error| error.to_string())?;
         let tumour_content_value =
-            serde_json::to_value(&context.tumour_content).map_err(|error| error.to_string())?;
+            serde_json::to_value(context.tumour_content).map_err(|error| error.to_string())?;
         let score_classes: Vec<String> = scores
             .keys()
             .map(|class| class.as_str().to_owned())
@@ -21639,7 +21787,7 @@ impl Server {
             .map_err(|error| format!("cannot serialize routing-lab regret account: {error}"))?;
         let calibration = serde_json::to_value(&report.calibration)
             .map_err(|error| format!("cannot serialize routing-lab calibration: {error}"))?;
-        let verdict = serde_json::to_value(&report.verdict)
+        let verdict = serde_json::to_value(report.verdict)
             .map_err(|error| format!("cannot serialize routing-lab verdict: {error}"))?;
         Ok(json!({
             "ok": true,
@@ -28118,7 +28266,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -28349,6 +28497,26 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_events": { "type": "integer", "minimum": 0, "maximum": 256, "description": "Maximum transition metadata rows to return when include_events is true." }
                 },
                 "required": ["checkpoint"]
+            }
+        }),
+        json!({
+            "name": "artifact_registry_audit",
+            "description": "Register, query, fetch, and traverse a bounded cross-domain artifact index keyed by exact JSON content digest. Known mission evidence bundles and workflow reconciliation records are independently re-verified before registration; generic mission, evaluator, and domain reports receive content-digest verification only. The registry preserves missing parents and never turns index presence into scientific, clinical, publication, or external-provenance authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "verify_snapshot"], "description": "Operation to perform; defaults to query." },
+                    "registration": { "type": "object", "description": "For register: {kind, subject_id, domains, parent_digests, declared_digest?, artifact}." },
+                    "kind": { "type": "string", "description": "For query: artifact kind such as mission_evidence_bundle, workflow_reconciliation, evaluator_replay, or domain_report." },
+                    "domain": { "type": "string", "description": "For query: one explicit domain label." },
+                    "subject_id": { "type": "string", "description": "For query: mission or subject identifier." },
+                    "after": { "type": "string", "description": "For query: exclusive content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "For query: bounded row count; defaults to 100." },
+                    "include_artifacts": { "type": "boolean", "description": "For query: include full bounded artifact bodies; defaults false." },
+                    "content_digest": { "type": "string", "description": "For get or lineage: exact content digest returned by register/query." },
+                    "snapshot": { "type": "object", "description": "For verify_snapshot: serialized artifact registry checkpoint." }
+                },
+                "required": []
             }
         }),
         json!({

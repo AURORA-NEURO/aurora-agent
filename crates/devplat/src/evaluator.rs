@@ -853,9 +853,9 @@ impl MissionEvaluatorCatalogue {
                         "binding_id": binding_id,
                         "adapter_id": adapter_id,
                     }));
-                } else {
+                } else if let Some(adapter) = adapter {
                     replayed_adapter_ids.insert(adapter_id.to_string());
-                    replayed_group_ids.insert(adapter.unwrap().group_id.clone());
+                    replayed_group_ids.insert(adapter.group_id.clone());
                 }
                 if adapter.is_some() && !domain_supported {
                     findings.push(json!({
@@ -1248,9 +1248,11 @@ impl MissionEvaluatorCatalogue {
             "historical_catalogue_rows_retained": false,
             "source": source,
         });
-        if let (Some(target), Some(snapshot_diff)) =
-            (result.as_object_mut(), self.catalogue_snapshot_diff(historical_snapshot).as_object())
-        {
+        if let (Some(target), Some(snapshot_diff)) = (
+            result.as_object_mut(),
+            self.catalogue_snapshot_diff(historical_snapshot)
+                .as_object(),
+        ) {
             for (key, value) in snapshot_diff {
                 target.insert(key.clone(), value.clone());
             }
@@ -1296,7 +1298,9 @@ impl MissionEvaluatorCatalogue {
                 "comparison_scope": "historical_digest_and_current_binding_compatibility"
             });
         };
-        let encoded_size = serde_json::to_vec(snapshot).map(|bytes| bytes.len()).unwrap_or(usize::MAX);
+        let encoded_size = serde_json::to_vec(snapshot)
+            .map(|bytes| bytes.len())
+            .unwrap_or(usize::MAX);
         if rows.len() > MAX_REPLAY_ITEMS || encoded_size > MAX_CATALOGUE_SNAPSHOT_BYTES {
             return json!({
                 "historical_snapshot_present": true,
@@ -1327,7 +1331,10 @@ impl MissionEvaluatorCatalogue {
                 invalid_reason = Some("snapshot.rows contains an invalid adapter row".to_string());
                 break;
             };
-            if historical_rows.insert(adapter.id.clone(), row.clone()).is_some() {
+            if historical_rows
+                .insert(adapter.id.clone(), row.clone())
+                .is_some()
+            {
                 invalid_reason = Some("snapshot.rows contains duplicate adapter IDs".to_string());
                 break;
             }
@@ -1356,12 +1363,23 @@ impl MissionEvaluatorCatalogue {
         let current_rows = self
             .adapters
             .iter()
-            .map(|adapter| (adapter.id.clone(), to_value(adapter).expect("adapter is serializable")))
+            .map(|adapter| {
+                (
+                    adapter.id.clone(),
+                    to_value(adapter).expect("adapter is serializable"),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         let historical_ids = historical_rows.keys().cloned().collect::<BTreeSet<_>>();
         let current_ids = current_rows.keys().cloned().collect::<BTreeSet<_>>();
-        let added_adapter_ids = current_ids.difference(&historical_ids).cloned().collect::<Vec<_>>();
-        let removed_adapter_ids = historical_ids.difference(&current_ids).cloned().collect::<Vec<_>>();
+        let added_adapter_ids = current_ids
+            .difference(&historical_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let removed_adapter_ids = historical_ids
+            .difference(&current_ids)
+            .cloned()
+            .collect::<Vec<_>>();
         let mut changed_adapter_ids = Vec::new();
         let mut unchanged_adapter_ids = Vec::new();
         let mut changed_adapter_fields = BTreeMap::<String, Vec<String>>::new();
@@ -1374,7 +1392,8 @@ impl MissionEvaluatorCatalogue {
             }
             changed_adapter_ids.push(id.clone());
             let mut fields = BTreeSet::new();
-            if let (Some(historical), Some(current)) = (historical.as_object(), current.as_object()) {
+            if let (Some(historical), Some(current)) = (historical.as_object(), current.as_object())
+            {
                 let keys = historical
                     .keys()
                     .chain(current.keys())
@@ -1753,7 +1772,10 @@ mod tests {
     fn retained_catalogue_snapshot_produces_exact_adapter_row_diff() {
         let catalogue = MissionEvaluatorCatalogue::standard();
         let snapshot = catalogue.snapshot();
-        assert_eq!(snapshot["schema"], MISSION_EVALUATOR_CATALOGUE_SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(
+            snapshot["schema"],
+            MISSION_EVALUATOR_CATALOGUE_SNAPSHOT_SCHEMA_VERSION
+        );
         assert_eq!(snapshot["row_count"], json!(29));
         assert_eq!(snapshot["snapshot_digest"], catalogue.digest().to_string());
         let mission = json!({
@@ -1782,8 +1804,11 @@ mod tests {
         assert_eq!(unchanged["catalog_drift"]["removed_adapter_ids"], json!([]));
 
         let mut changed_snapshot = catalogue.snapshot();
-        changed_snapshot["rows"][0]["purpose"] = json!("historical purpose before a catalogue revision");
-        let row_digest = ContentHash::of_value(&changed_snapshot["rows"]).unwrap().to_string();
+        changed_snapshot["rows"][0]["purpose"] =
+            json!("historical purpose before a catalogue revision");
+        let row_digest = ContentHash::of_value(&changed_snapshot["rows"])
+            .unwrap()
+            .to_string();
         changed_snapshot["snapshot_digest"] = json!(row_digest.clone());
         changed_snapshot["catalog_digest"] = json!(row_digest);
         let changed_mission = json!({
@@ -1808,12 +1833,22 @@ mod tests {
             .unwrap();
         assert_eq!(changed["catalog_drift"]["row_diff_status"], "exact");
         assert_eq!(changed["catalog_drift"]["status"], "drifted");
-        assert_eq!(changed["catalog_drift"]["changed_adapter_ids"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            changed["catalog_drift"]["changed_adapter_ids"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(changed["catalog_drift"]["changed_adapter_fields"]
             .as_object()
             .unwrap()
             .values()
-            .any(|fields| fields.as_array().unwrap().iter().any(|field| field == "purpose")));
+            .any(|fields| fields
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|field| field == "purpose")));
     }
 
     #[test]

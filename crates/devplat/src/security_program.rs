@@ -249,7 +249,7 @@ pub struct SecurityProgramDisclosure {
     pub published_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecurityProgramControls {
     #[serde(default)]
     pub scope_authorization: bool,
@@ -267,21 +267,6 @@ pub struct SecurityProgramControls {
     pub disclosure_review: bool,
     #[serde(default)]
     pub regression_testing: bool,
-}
-
-impl Default for SecurityProgramControls {
-    fn default() -> Self {
-        Self {
-            scope_authorization: false,
-            operator_separation: false,
-            independent_review: false,
-            evidence_retention: false,
-            remediation_tracking: false,
-            incident_response: false,
-            disclosure_review: false,
-            regression_testing: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -484,17 +469,40 @@ impl SecurityProgramManifest {
         let mut disclosures = BTreeMap::<String, &SecurityProgramDisclosure>::new();
 
         bound(&mut issues, "scopes", self.scopes.len(), MAX_SCOPES);
-        bound(&mut issues, "campaigns", self.campaigns.len(), MAX_CAMPAIGNS);
+        bound(
+            &mut issues,
+            "campaigns",
+            self.campaigns.len(),
+            MAX_CAMPAIGNS,
+        );
         bound(&mut issues, "findings", self.findings.len(), MAX_FINDINGS);
-        bound(&mut issues, "remediations", self.remediations.len(), MAX_REMEDIATIONS);
-        bound(&mut issues, "incidents", self.incidents.len(), MAX_INCIDENTS);
-        bound(&mut issues, "disclosures", self.disclosures.len(), MAX_DISCLOSURES);
+        bound(
+            &mut issues,
+            "remediations",
+            self.remediations.len(),
+            MAX_REMEDIATIONS,
+        );
+        bound(
+            &mut issues,
+            "incidents",
+            self.incidents.len(),
+            MAX_INCIDENTS,
+        );
+        bound(
+            &mut issues,
+            "disclosures",
+            self.disclosures.len(),
+            MAX_DISCLOSURES,
+        );
         if self.schema != SECURITY_PROGRAM_MANIFEST_SCHEMA {
             blocking(
                 &mut issues,
                 "schema_mismatch",
                 "manifest",
-                format!("expected {SECURITY_PROGRAM_MANIFEST_SCHEMA}, got {}", self.schema),
+                format!(
+                    "expected {SECURITY_PROGRAM_MANIFEST_SCHEMA}, got {}",
+                    self.schema
+                ),
                 "regenerate the declaration with the published security-program schema",
             );
         }
@@ -520,12 +528,24 @@ impl SecurityProgramManifest {
                 continue;
             }
             scopes.insert(scope.id.clone(), scope);
-            let authorization_valid = scope.authorization_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let methods_valid = !scope.allowed_methods.is_empty() && bounded_strings(&scope.allowed_methods, "scope.allowed_methods", &mut issues);
+            let authorization_valid = scope
+                .authorization_digest
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
+            let methods_valid = !scope.allowed_methods.is_empty()
+                && bounded_strings(&scope.allowed_methods, "scope.allowed_methods", &mut issues);
             let guardrails_valid = !scope.forbidden_actions.is_empty()
-                && bounded_strings(&scope.forbidden_actions, "scope.forbidden_actions", &mut issues)
+                && bounded_strings(
+                    &scope.forbidden_actions,
+                    "scope.forbidden_actions",
+                    &mut issues,
+                )
                 && scope.forbidden_actions.iter().all(|forbidden| {
-                    !scope.allowed_methods.iter().any(|allowed| allowed == forbidden)
+                    !scope
+                        .allowed_methods
+                        .iter()
+                        .any(|allowed| allowed == forbidden)
                 });
             let environments_valid = !scope.environments.is_empty()
                 && bounded_strings(&scope.environments, "scope.environments", &mut issues);
@@ -578,7 +598,13 @@ impl SecurityProgramManifest {
                     "name the staging, isolated, or other explicitly authorized environment",
                 );
             }
-            if scope.data_handling.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_none() {
+            if scope
+                .data_handling
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
+            {
                 warning(
                     &mut issues,
                     "scope_data_handling_unspecified",
@@ -615,8 +641,16 @@ impl SecurityProgramManifest {
             let methodology_valid = !campaign.methodology.trim().is_empty()
                 && !campaign.hypothesis.trim().is_empty()
                 && !campaign.stop_conditions.is_empty()
-                && bounded_strings(&campaign.stop_conditions, "campaign.stop_conditions", &mut issues);
-            let evidence_valid = campaign.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
+                && bounded_strings(
+                    &campaign.stop_conditions,
+                    "campaign.stop_conditions",
+                    &mut issues,
+                );
+            let evidence_valid = campaign
+                .evidence_digest
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
             let complete = campaign.status == SecurityProgramCampaignStatus::Completed;
             if !scope_valid {
                 blocking(
@@ -654,7 +688,9 @@ impl SecurityProgramManifest {
                     "bound the test method, expected failure, and conditions that stop activity",
                 );
             }
-            if self.policies.require_campaign_evidence && (!evidence_valid || (complete && campaign.completed_at.is_none())) {
+            if self.policies.require_campaign_evidence
+                && (!evidence_valid || (complete && campaign.completed_at.is_none()))
+            {
                 blocking(
                     &mut issues,
                     "campaign_evidence_missing",
@@ -664,7 +700,12 @@ impl SecurityProgramManifest {
                 );
             }
             if campaign.finding_ids.len() > MAX_LIST {
-                bound(&mut issues, "campaign.finding_ids", campaign.finding_ids.len(), MAX_LIST);
+                bound(
+                    &mut issues,
+                    "campaign.finding_ids",
+                    campaign.finding_ids.len(),
+                    MAX_LIST,
+                );
             }
         }
 
@@ -674,13 +715,30 @@ impl SecurityProgramManifest {
             }
             findings.insert(finding.id.clone(), finding);
             let campaign_valid = campaigns.contains_key(&finding.campaign);
-            let evidence_valid = finding.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let reproduction_valid = finding.reproduction_digest.as_deref().map(valid_digest).unwrap_or(false);
+            let evidence_valid = finding
+                .evidence_digest
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
+            let reproduction_valid = finding
+                .reproduction_digest
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
             let severity_requires_action = finding.severity.high_or_worse();
             let remediation_valid = !finding.remediation_ids.is_empty();
-            let incident_required = self.policies.require_incident_for_high && severity_requires_action;
-            let incident_valid = finding.incident_id.as_deref().map(|id| self.incidents.iter().any(|incident| incident.id == id)).unwrap_or(false);
-            let regression_present = finding.regression_digest.as_deref().map(valid_digest).unwrap_or(false);
+            let incident_required =
+                self.policies.require_incident_for_high && severity_requires_action;
+            let incident_valid = finding
+                .incident_id
+                .as_deref()
+                .map(|id| self.incidents.iter().any(|incident| incident.id == id))
+                .unwrap_or(false);
+            let regression_present = finding
+                .regression_digest
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
             if !campaign_valid {
                 blocking(
                     &mut issues,
@@ -690,7 +748,10 @@ impl SecurityProgramManifest {
                     "bind every finding to the campaign that produced its evidence",
                 );
             }
-            if finding.title.trim().is_empty() || finding.discovered_at.trim().is_empty() || finding.affected_targets.is_empty() {
+            if finding.title.trim().is_empty()
+                || finding.discovered_at.trim().is_empty()
+                || finding.affected_targets.is_empty()
+            {
                 blocking(
                     &mut issues,
                     "finding_incomplete",
@@ -708,7 +769,10 @@ impl SecurityProgramManifest {
                     "bind the observation to immutable evidence before triage",
                 );
             }
-            if severity_requires_action && self.policies.require_finding_evidence && !reproduction_valid {
+            if severity_requires_action
+                && self.policies.require_finding_evidence
+                && !reproduction_valid
+            {
                 blocking(
                     &mut issues,
                     "finding_reproduction_missing",
@@ -747,8 +811,17 @@ impl SecurityProgramManifest {
                     "bind a post-remediation regression witness before closing the finding",
                 );
             }
-            if matches!(finding.status, SecurityProgramFindingStatus::Accepted | SecurityProgramFindingStatus::FalsePositive | SecurityProgramFindingStatus::Duplicate)
-                && finding.resolution_note.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_none()
+            if matches!(
+                finding.status,
+                SecurityProgramFindingStatus::Accepted
+                    | SecurityProgramFindingStatus::FalsePositive
+                    | SecurityProgramFindingStatus::Duplicate
+            ) && finding
+                .resolution_note
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
             {
                 blocking(
                     &mut issues,
@@ -761,20 +834,34 @@ impl SecurityProgramManifest {
         }
 
         for remediation in &self.remediations {
-            if !insert_unique(&mut remediations, &remediation.id, "remediation", &mut issues) {
+            if !insert_unique(
+                &mut remediations,
+                &remediation.id,
+                "remediation",
+                &mut issues,
+            ) {
                 continue;
             }
             remediations.insert(remediation.id.clone(), remediation);
             let finding_valid = findings.contains_key(&remediation.finding);
-            let owner_valid = !remediation.owner.trim().is_empty() && !remediation.action.trim().is_empty() && !remediation.due_at.trim().is_empty();
+            let owner_valid = !remediation.owner.trim().is_empty()
+                && !remediation.action.trim().is_empty()
+                && !remediation.due_at.trim().is_empty();
             let complete = remediation.status == SecurityProgramRemediationStatus::Complete;
-            let verification_valid = remediation.verification_digest.as_deref().map(valid_digest).unwrap_or(false);
+            let verification_valid = remediation
+                .verification_digest
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
             if !finding_valid {
                 blocking(
                     &mut issues,
                     "remediation_finding_missing",
                     &remediation.id,
-                    format!("remediation names undeclared finding {}", remediation.finding),
+                    format!(
+                        "remediation names undeclared finding {}",
+                        remediation.finding
+                    ),
                     "bind each action to a finding in this program",
                 );
             }
@@ -797,8 +884,17 @@ impl SecurityProgramManifest {
                 );
             }
             if remediation.status == SecurityProgramRemediationStatus::Waived {
-                let rationale_valid = remediation.rationale.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some();
-                let approval_valid = remediation.approval_digest.as_deref().map(valid_digest).unwrap_or(false);
+                let rationale_valid = remediation
+                    .rationale
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .is_some();
+                let approval_valid = remediation
+                    .approval_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
                 if !rationale_valid || !approval_valid {
                     blocking(
                         &mut issues,
@@ -857,31 +953,105 @@ impl SecurityProgramManifest {
                 }
             }
         }
-        let incident_audits = self.incidents.iter().map(|incident| {
-            let finding_valid = findings.contains_key(&incident.finding);
-            let timeline_valid = timeline_valid(&incident.timeline, &mut issues, &incident.id);
-            let containment_valid = incident.containment_evidence.as_deref().map(valid_digest).unwrap_or(false)
-                && incident.contained_at.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some();
-            let closure_valid = incident.closure_evidence.as_deref().map(valid_digest).unwrap_or(false)
-                && incident.closed_at.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some();
-            let notification_valid = !incident.notification_required || timeline_valid;
-            if !finding_valid {
-                blocking(&mut issues, "incident_finding_missing", &incident.id, format!("incident names undeclared finding {}", incident.finding), "bind the incident to its triggering finding");
-            }
-            if !timeline_valid {
-                blocking(&mut issues, "incident_timeline_invalid", &incident.id, "incident timeline is empty, unordered, or incomplete", "retain an append-only timeline with actor, event, and evidence");
-            }
-            if matches!(incident.status, SecurityProgramIncidentStatus::Contained | SecurityProgramIncidentStatus::Closed) && !containment_valid {
-                blocking(&mut issues, "incident_containment_missing", &incident.id, "contained incident lacks timestamp or evidence", "bind a content-addressed containment witness");
-            }
-            if incident.status == SecurityProgramIncidentStatus::Closed && !closure_valid {
-                blocking(&mut issues, "incident_closure_missing", &incident.id, "closed incident lacks timestamp or closure evidence", "record independent closure evidence before closing");
-            }
-            if !notification_valid {
-                blocking(&mut issues, "incident_notification_missing", &incident.id, "incident requiring notification has no complete timeline", "record the notification decision as part of the incident chain");
-            }
-            SecurityProgramIncidentAudit { incident_id: incident.id.clone(), finding_valid, timeline_valid, containment_valid, closure_valid, notification_valid, ready: finding_valid && timeline_valid && (!matches!(incident.status, SecurityProgramIncidentStatus::Contained | SecurityProgramIncidentStatus::Closed) || containment_valid) && (incident.status != SecurityProgramIncidentStatus::Closed || closure_valid) && notification_valid }
-        }).collect::<Vec<_>>();
+        let incident_audits = self
+            .incidents
+            .iter()
+            .map(|incident| {
+                let finding_valid = findings.contains_key(&incident.finding);
+                let timeline_valid = timeline_valid(&incident.timeline, &mut issues, &incident.id);
+                let containment_valid = incident
+                    .containment_evidence
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false)
+                    && incident
+                        .contained_at
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .is_some();
+                let closure_valid = incident
+                    .closure_evidence
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false)
+                    && incident
+                        .closed_at
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .is_some();
+                let notification_valid = !incident.notification_required || timeline_valid;
+                if !finding_valid {
+                    blocking(
+                        &mut issues,
+                        "incident_finding_missing",
+                        &incident.id,
+                        format!("incident names undeclared finding {}", incident.finding),
+                        "bind the incident to its triggering finding",
+                    );
+                }
+                if !timeline_valid {
+                    blocking(
+                        &mut issues,
+                        "incident_timeline_invalid",
+                        &incident.id,
+                        "incident timeline is empty, unordered, or incomplete",
+                        "retain an append-only timeline with actor, event, and evidence",
+                    );
+                }
+                if matches!(
+                    incident.status,
+                    SecurityProgramIncidentStatus::Contained
+                        | SecurityProgramIncidentStatus::Closed
+                ) && !containment_valid
+                {
+                    blocking(
+                        &mut issues,
+                        "incident_containment_missing",
+                        &incident.id,
+                        "contained incident lacks timestamp or evidence",
+                        "bind a content-addressed containment witness",
+                    );
+                }
+                if incident.status == SecurityProgramIncidentStatus::Closed && !closure_valid {
+                    blocking(
+                        &mut issues,
+                        "incident_closure_missing",
+                        &incident.id,
+                        "closed incident lacks timestamp or closure evidence",
+                        "record independent closure evidence before closing",
+                    );
+                }
+                if !notification_valid {
+                    blocking(
+                        &mut issues,
+                        "incident_notification_missing",
+                        &incident.id,
+                        "incident requiring notification has no complete timeline",
+                        "record the notification decision as part of the incident chain",
+                    );
+                }
+                SecurityProgramIncidentAudit {
+                    incident_id: incident.id.clone(),
+                    finding_valid,
+                    timeline_valid,
+                    containment_valid,
+                    closure_valid,
+                    notification_valid,
+                    ready: finding_valid
+                        && timeline_valid
+                        && (!matches!(
+                            incident.status,
+                            SecurityProgramIncidentStatus::Contained
+                                | SecurityProgramIncidentStatus::Closed
+                        ) || containment_valid)
+                        && (incident.status != SecurityProgramIncidentStatus::Closed
+                            || closure_valid)
+                        && notification_valid,
+                }
+            })
+            .collect::<Vec<_>>();
 
         for disclosure in &self.disclosures {
             if !insert_unique(&mut disclosures, &disclosure.id, "disclosure", &mut issues) {
@@ -891,7 +1061,10 @@ impl SecurityProgramManifest {
         }
         let mut disclosure_stages = BTreeMap::<String, Vec<SecurityProgramDisclosureStage>>::new();
         for disclosure in &self.disclosures {
-            disclosure_stages.entry(disclosure.finding.clone()).or_default().push(disclosure.stage);
+            disclosure_stages
+                .entry(disclosure.finding.clone())
+                .or_default()
+                .push(disclosure.stage);
         }
         let disclosure_audits = self.disclosures.iter().map(|disclosure| {
             let finding_valid = findings.contains_key(&disclosure.finding);
@@ -931,45 +1104,185 @@ impl SecurityProgramManifest {
             SecurityProgramDisclosureAudit { disclosure_id: disclosure.id.clone(), finding_valid, stage_order_valid, approval_valid, advisory_valid, publication_valid, ready: finding_valid && stage_order_valid && (disclosure.stage == SecurityProgramDisclosureStage::Withheld || approval_valid) && advisory_valid && publication_valid && (disclosure.stage != SecurityProgramDisclosureStage::Public || finding_safe) }
         }).collect::<Vec<_>>();
 
-        let scope_audits = self.scopes.iter().map(|scope| {
-            let authorization_valid = scope.authorization_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let methods_valid = !scope.allowed_methods.is_empty() && scope.allowed_methods.iter().all(|method| bounded_string(method));
-            let guardrails_valid = !scope.forbidden_actions.is_empty() && scope.forbidden_actions.iter().all(|forbidden| bounded_string(forbidden)) && scope.forbidden_actions.iter().all(|forbidden| !scope.allowed_methods.contains(forbidden));
-            let environments_valid = !scope.environments.is_empty() && scope.environments.iter().all(|environment| bounded_string(environment));
-            SecurityProgramScopeAudit { scope_id: scope.id.clone(), authorization_valid, methods_valid, guardrails_valid, environments_valid, ready: authorization_valid && methods_valid && guardrails_valid && environments_valid }
-        }).collect::<Vec<_>>();
-        let campaign_audits = self.campaigns.iter().map(|campaign| {
-            let scope_valid = scopes.contains_key(&campaign.scope);
-            let operator_present = !campaign.operator.trim().is_empty();
-            let independent_review_valid = campaign.independent_reviewer.as_deref().map(|reviewer| !reviewer.trim().is_empty() && reviewer != campaign.operator && reviewer != self.system.owner).unwrap_or(false);
-            let methodology_valid = !campaign.methodology.trim().is_empty() && !campaign.hypothesis.trim().is_empty() && !campaign.stop_conditions.is_empty();
-            let evidence_valid = campaign.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let complete = campaign.status == SecurityProgramCampaignStatus::Completed;
-            SecurityProgramCampaignAudit { campaign_id: campaign.id.clone(), scope_valid, operator_present, independent_review_valid, methodology_valid, evidence_valid, complete, ready: scope_valid && operator_present && independent_review_valid && methodology_valid && evidence_valid && (!complete || campaign.completed_at.is_some()) }
-        }).collect::<Vec<_>>();
-        let remediation_audits = self.remediations.iter().map(|remediation| {
-            let finding_valid = findings.contains_key(&remediation.finding);
-            let owner_valid = !remediation.owner.trim().is_empty() && !remediation.action.trim().is_empty() && !remediation.due_at.trim().is_empty();
-            let completion_valid = remediation.status != SecurityProgramRemediationStatus::Complete || remediation.verification_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let verification_valid = remediation.verification_digest.as_deref().map(valid_digest).unwrap_or(false);
-            SecurityProgramRemediationAudit { remediation_id: remediation.id.clone(), finding_valid, owner_valid, completion_valid, verification_valid, ready: finding_valid && owner_valid && completion_valid }
-        }).collect::<Vec<_>>();
-        let finding_audits = self.findings.iter().map(|finding| {
-            let campaign_valid = campaigns.contains_key(&finding.campaign);
-            let evidence_valid = finding.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let reproduction_valid = finding.reproduction_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let severity_requires_action = finding.severity.high_or_worse();
-            let remediation_valid = finding.remediation_ids.iter().all(|id| remediations.contains_key(id)) && (!severity_requires_action || !finding.remediation_ids.is_empty());
-            let incident_required = self.policies.require_incident_for_high && severity_requires_action;
-            let incident_valid = finding.incident_id.as_deref().map(|id| incidents.contains_key(id)).unwrap_or(false);
-            let regression_present = finding.regression_digest.as_deref().map(valid_digest).unwrap_or(false);
-            SecurityProgramFindingAudit { finding_id: finding.id.clone(), campaign_valid, evidence_valid, reproduction_valid, severity_requires_action, remediation_valid, incident_required, incident_valid, regression_present, ready: campaign_valid && evidence_valid && (!severity_requires_action || reproduction_valid) && (!self.policies.require_remediation || !severity_requires_action || remediation_valid) && (!incident_required || incident_valid) && (finding.status != SecurityProgramFindingStatus::Closed || !self.policies.require_regression_for_closed || regression_present) }
-        }).collect::<Vec<_>>();
+        let scope_audits = self
+            .scopes
+            .iter()
+            .map(|scope| {
+                let authorization_valid = scope
+                    .authorization_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                let methods_valid = !scope.allowed_methods.is_empty()
+                    && scope
+                        .allowed_methods
+                        .iter()
+                        .all(|method| bounded_string(method));
+                let guardrails_valid = !scope.forbidden_actions.is_empty()
+                    && scope
+                        .forbidden_actions
+                        .iter()
+                        .all(|forbidden| bounded_string(forbidden))
+                    && scope
+                        .forbidden_actions
+                        .iter()
+                        .all(|forbidden| !scope.allowed_methods.contains(forbidden));
+                let environments_valid = !scope.environments.is_empty()
+                    && scope
+                        .environments
+                        .iter()
+                        .all(|environment| bounded_string(environment));
+                SecurityProgramScopeAudit {
+                    scope_id: scope.id.clone(),
+                    authorization_valid,
+                    methods_valid,
+                    guardrails_valid,
+                    environments_valid,
+                    ready: authorization_valid
+                        && methods_valid
+                        && guardrails_valid
+                        && environments_valid,
+                }
+            })
+            .collect::<Vec<_>>();
+        let campaign_audits = self
+            .campaigns
+            .iter()
+            .map(|campaign| {
+                let scope_valid = scopes.contains_key(&campaign.scope);
+                let operator_present = !campaign.operator.trim().is_empty();
+                let independent_review_valid = campaign
+                    .independent_reviewer
+                    .as_deref()
+                    .map(|reviewer| {
+                        !reviewer.trim().is_empty()
+                            && reviewer != campaign.operator
+                            && reviewer != self.system.owner
+                    })
+                    .unwrap_or(false);
+                let methodology_valid = !campaign.methodology.trim().is_empty()
+                    && !campaign.hypothesis.trim().is_empty()
+                    && !campaign.stop_conditions.is_empty();
+                let evidence_valid = campaign
+                    .evidence_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                let complete = campaign.status == SecurityProgramCampaignStatus::Completed;
+                SecurityProgramCampaignAudit {
+                    campaign_id: campaign.id.clone(),
+                    scope_valid,
+                    operator_present,
+                    independent_review_valid,
+                    methodology_valid,
+                    evidence_valid,
+                    complete,
+                    ready: scope_valid
+                        && operator_present
+                        && independent_review_valid
+                        && methodology_valid
+                        && evidence_valid
+                        && (!complete || campaign.completed_at.is_some()),
+                }
+            })
+            .collect::<Vec<_>>();
+        let remediation_audits = self
+            .remediations
+            .iter()
+            .map(|remediation| {
+                let finding_valid = findings.contains_key(&remediation.finding);
+                let owner_valid = !remediation.owner.trim().is_empty()
+                    && !remediation.action.trim().is_empty()
+                    && !remediation.due_at.trim().is_empty();
+                let completion_valid = remediation.status
+                    != SecurityProgramRemediationStatus::Complete
+                    || remediation
+                        .verification_digest
+                        .as_deref()
+                        .map(valid_digest)
+                        .unwrap_or(false);
+                let verification_valid = remediation
+                    .verification_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                SecurityProgramRemediationAudit {
+                    remediation_id: remediation.id.clone(),
+                    finding_valid,
+                    owner_valid,
+                    completion_valid,
+                    verification_valid,
+                    ready: finding_valid && owner_valid && completion_valid,
+                }
+            })
+            .collect::<Vec<_>>();
+        let finding_audits = self
+            .findings
+            .iter()
+            .map(|finding| {
+                let campaign_valid = campaigns.contains_key(&finding.campaign);
+                let evidence_valid = finding
+                    .evidence_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                let reproduction_valid = finding
+                    .reproduction_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                let severity_requires_action = finding.severity.high_or_worse();
+                let remediation_valid = finding
+                    .remediation_ids
+                    .iter()
+                    .all(|id| remediations.contains_key(id))
+                    && (!severity_requires_action || !finding.remediation_ids.is_empty());
+                let incident_required =
+                    self.policies.require_incident_for_high && severity_requires_action;
+                let incident_valid = finding
+                    .incident_id
+                    .as_deref()
+                    .map(|id| incidents.contains_key(id))
+                    .unwrap_or(false);
+                let regression_present = finding
+                    .regression_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                SecurityProgramFindingAudit {
+                    finding_id: finding.id.clone(),
+                    campaign_valid,
+                    evidence_valid,
+                    reproduction_valid,
+                    severity_requires_action,
+                    remediation_valid,
+                    incident_required,
+                    incident_valid,
+                    regression_present,
+                    ready: campaign_valid
+                        && evidence_valid
+                        && (!severity_requires_action || reproduction_valid)
+                        && (!self.policies.require_remediation
+                            || !severity_requires_action
+                            || remediation_valid)
+                        && (!incident_required || incident_valid)
+                        && (finding.status != SecurityProgramFindingStatus::Closed
+                            || !self.policies.require_regression_for_closed
+                            || regression_present),
+                }
+            })
+            .collect::<Vec<_>>();
         let control_audits = controls_from(&self.controls);
         if self.policies.require_controls {
             for control in &control_audits {
                 if control.required && !control.enabled {
-                    blocking(&mut issues, "required_control_disabled", &control.control, format!("required program control {} is disabled", control.control), "enable the control or narrow the program declaration");
+                    blocking(
+                        &mut issues,
+                        "required_control_disabled",
+                        &control.control,
+                        format!("required program control {} is disabled", control.control),
+                        "enable the control or narrow the program declaration",
+                    );
                 }
             }
         }
@@ -977,22 +1290,83 @@ impl SecurityProgramManifest {
             scopes: self.scopes.len(),
             authorized_scopes: scope_audits.iter().filter(|row| row.ready).count(),
             campaigns: self.campaigns.len(),
-            completed_campaigns: self.campaigns.iter().filter(|campaign| campaign.status == SecurityProgramCampaignStatus::Completed).count(),
+            completed_campaigns: self
+                .campaigns
+                .iter()
+                .filter(|campaign| campaign.status == SecurityProgramCampaignStatus::Completed)
+                .count(),
             findings: self.findings.len(),
-            high_or_worse_findings: self.findings.iter().filter(|finding| finding.severity.high_or_worse()).count(),
-            actionable_findings: self.findings.iter().filter(|finding| matches!(finding.status, SecurityProgramFindingStatus::New | SecurityProgramFindingStatus::Triaged)).count(),
+            high_or_worse_findings: self
+                .findings
+                .iter()
+                .filter(|finding| finding.severity.high_or_worse())
+                .count(),
+            actionable_findings: self
+                .findings
+                .iter()
+                .filter(|finding| {
+                    matches!(
+                        finding.status,
+                        SecurityProgramFindingStatus::New | SecurityProgramFindingStatus::Triaged
+                    )
+                })
+                .count(),
             remediations: self.remediations.len(),
-            completed_remediations: self.remediations.iter().filter(|remediation| remediation.status == SecurityProgramRemediationStatus::Complete).count(),
+            completed_remediations: self
+                .remediations
+                .iter()
+                .filter(|remediation| {
+                    remediation.status == SecurityProgramRemediationStatus::Complete
+                })
+                .count(),
             incidents: self.incidents.len(),
-            open_incidents: self.incidents.iter().filter(|incident| matches!(incident.status, SecurityProgramIncidentStatus::Open | SecurityProgramIncidentStatus::Contained)).count(),
-            closed_incidents: self.incidents.iter().filter(|incident| incident.status == SecurityProgramIncidentStatus::Closed).count(),
+            open_incidents: self
+                .incidents
+                .iter()
+                .filter(|incident| {
+                    matches!(
+                        incident.status,
+                        SecurityProgramIncidentStatus::Open
+                            | SecurityProgramIncidentStatus::Contained
+                    )
+                })
+                .count(),
+            closed_incidents: self
+                .incidents
+                .iter()
+                .filter(|incident| incident.status == SecurityProgramIncidentStatus::Closed)
+                .count(),
             disclosures: self.disclosures.len(),
-            advisory_disclosures: self.disclosures.iter().filter(|disclosure| disclosure.stage == SecurityProgramDisclosureStage::Advisory).count(),
-            public_disclosures: self.disclosures.iter().filter(|disclosure| disclosure.stage == SecurityProgramDisclosureStage::Public).count(),
-            enabled_controls: control_audits.iter().filter(|control| control.enabled).count(),
+            advisory_disclosures: self
+                .disclosures
+                .iter()
+                .filter(|disclosure| disclosure.stage == SecurityProgramDisclosureStage::Advisory)
+                .count(),
+            public_disclosures: self
+                .disclosures
+                .iter()
+                .filter(|disclosure| disclosure.stage == SecurityProgramDisclosureStage::Public)
+                .count(),
+            enabled_controls: control_audits
+                .iter()
+                .filter(|control| control.enabled)
+                .count(),
         };
-        issues.sort_by(|left, right| (left.code.as_str(), left.subject.as_str(), left.detail.as_str()).cmp(&(right.code.as_str(), right.subject.as_str(), right.detail.as_str())));
-        let valid = !issues.iter().any(|issue| issue.severity == SecurityProgramIssueSeverity::Blocking);
+        issues.sort_by(|left, right| {
+            (
+                left.code.as_str(),
+                left.subject.as_str(),
+                left.detail.as_str(),
+            )
+                .cmp(&(
+                    right.code.as_str(),
+                    right.subject.as_str(),
+                    right.detail.as_str(),
+                ))
+        });
+        let valid = !issues
+            .iter()
+            .any(|issue| issue.severity == SecurityProgramIssueSeverity::Blocking);
         Ok(SecurityProgramAudit {
             schema: SECURITY_PROGRAM_AUDIT_SCHEMA.into(),
             manifest_schema: self.schema.clone(),
@@ -1034,11 +1408,20 @@ fn controls_from(controls: &SecurityProgramControls) -> Vec<SecurityProgramContr
         ("regression_testing", controls.regression_testing),
     ]
     .into_iter()
-    .map(|(control, enabled)| SecurityProgramControlAudit { control: control.into(), enabled, required: true, ready: enabled })
+    .map(|(control, enabled)| SecurityProgramControlAudit {
+        control: control.into(),
+        enabled,
+        required: true,
+        ready: enabled,
+    })
     .collect()
 }
 
-fn timeline_valid(events: &[SecurityProgramTimelineEvent], issues: &mut Vec<SecurityProgramIssue>, subject: &str) -> bool {
+fn timeline_valid(
+    events: &[SecurityProgramTimelineEvent],
+    issues: &mut Vec<SecurityProgramIssue>,
+    subject: &str,
+) -> bool {
     if events.is_empty() || events.len() > MAX_LIST {
         if events.len() > MAX_LIST {
             bound(issues, "incident.timeline", events.len(), MAX_LIST);
@@ -1047,9 +1430,23 @@ fn timeline_valid(events: &[SecurityProgramTimelineEvent], issues: &mut Vec<Secu
     }
     let mut previous = None;
     for event in events {
-        let evidence_valid = event.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
-        if event.actor.trim().is_empty() || event.event.trim().is_empty() || !evidence_valid || previous.is_some_and(|value| event.epoch <= value) {
-            warning(issues, "incident_timeline_row_invalid", subject, "incident timeline contains an empty, unordered, or unbound event", "retain strictly increasing event epochs with actor, action, and evidence");
+        let evidence_valid = event
+            .evidence_digest
+            .as_deref()
+            .map(valid_digest)
+            .unwrap_or(false);
+        if event.actor.trim().is_empty()
+            || event.event.trim().is_empty()
+            || !evidence_valid
+            || previous.is_some_and(|value| event.epoch <= value)
+        {
+            warning(
+                issues,
+                "incident_timeline_row_invalid",
+                subject,
+                "incident timeline contains an empty, unordered, or unbound event",
+                "retain strictly increasing event epochs with actor, action, and evidence",
+            );
             return false;
         }
         previous = Some(event.epoch);
@@ -1073,9 +1470,20 @@ fn valid_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn insert_unique<'a, T>(map: &mut BTreeMap<String, &'a T>, id: &str, kind: &str, issues: &mut Vec<SecurityProgramIssue>) -> bool {
+fn insert_unique<T>(
+    map: &mut BTreeMap<String, &T>,
+    id: &str,
+    kind: &str,
+    issues: &mut Vec<SecurityProgramIssue>,
+) -> bool {
     if map.contains_key(id) {
-        blocking(issues, "duplicate_id", id, format!("duplicate {kind} identifier {id}"), format!("retain one canonical {kind} row for {id}"));
+        blocking(
+            issues,
+            "duplicate_id",
+            id,
+            format!("duplicate {kind} identifier {id}"),
+            format!("retain one canonical {kind} row for {id}"),
+        );
         false
     } else {
         true
@@ -1084,16 +1492,46 @@ fn insert_unique<'a, T>(map: &mut BTreeMap<String, &'a T>, id: &str, kind: &str,
 
 fn bound(issues: &mut Vec<SecurityProgramIssue>, field: &str, actual: usize, maximum: usize) {
     if actual > maximum {
-        blocking(issues, "bound_exceeded", field, format!("{field} contains {actual} rows, above the bound {maximum}"), format!("split or reduce {field} to at most {maximum} rows"));
+        blocking(
+            issues,
+            "bound_exceeded",
+            field,
+            format!("{field} contains {actual} rows, above the bound {maximum}"),
+            format!("split or reduce {field} to at most {maximum} rows"),
+        );
     }
 }
 
-fn blocking(issues: &mut Vec<SecurityProgramIssue>, code: &str, subject: impl Into<String>, detail: impl Into<String>, remediation: impl Into<String>) {
-    issues.push(SecurityProgramIssue { code: code.into(), severity: SecurityProgramIssueSeverity::Blocking, subject: subject.into(), detail: detail.into(), remediation: remediation.into() });
+fn blocking(
+    issues: &mut Vec<SecurityProgramIssue>,
+    code: &str,
+    subject: impl Into<String>,
+    detail: impl Into<String>,
+    remediation: impl Into<String>,
+) {
+    issues.push(SecurityProgramIssue {
+        code: code.into(),
+        severity: SecurityProgramIssueSeverity::Blocking,
+        subject: subject.into(),
+        detail: detail.into(),
+        remediation: remediation.into(),
+    });
 }
 
-fn warning(issues: &mut Vec<SecurityProgramIssue>, code: &str, subject: impl Into<String>, detail: impl Into<String>, remediation: impl Into<String>) {
-    issues.push(SecurityProgramIssue { code: code.into(), severity: SecurityProgramIssueSeverity::Warning, subject: subject.into(), detail: detail.into(), remediation: remediation.into() });
+fn warning(
+    issues: &mut Vec<SecurityProgramIssue>,
+    code: &str,
+    subject: impl Into<String>,
+    detail: impl Into<String>,
+    remediation: impl Into<String>,
+) {
+    issues.push(SecurityProgramIssue {
+        code: code.into(),
+        severity: SecurityProgramIssueSeverity::Warning,
+        subject: subject.into(),
+        detail: detail.into(),
+        remediation: remediation.into(),
+    });
 }
 
 #[cfg(test)]
@@ -1104,14 +1542,116 @@ mod tests {
         let digest = || Some("a".repeat(64));
         SecurityProgramManifest {
             schema: SECURITY_PROGRAM_MANIFEST_SCHEMA.into(),
-            system: SecurityProgramSystem { id: "aurora-security".into(), version: "0.1.0".into(), owner: "security-owner".into(), mission: "bounded adversarial assurance".into() },
-            scopes: vec![SecurityProgramScope { id: "api-staging".into(), name: "staging API".into(), kind: SecurityProgramScopeKind::Api, target: "api-staging.internal".into(), owner: "service-owner".into(), authorization_digest: digest(), allowed_methods: vec!["authenticated-read".into(), "rate-limited-input".into()], forbidden_actions: vec!["production-write".into(), "credential-exfiltration".into()], environments: vec!["isolated-staging".into()], data_handling: Some("synthetic fixtures only".into()) }],
-            campaigns: vec![SecurityProgramCampaign { id: "campaign-1".into(), scope: "api-staging".into(), operator: "red-team".into(), independent_reviewer: Some("independent-reviewer".into()), methodology: "bounded mutation and manual review".into(), hypothesis: "invalid input can cross a trust boundary".into(), status: SecurityProgramCampaignStatus::Completed, started_at: Some("2026-01-01".into()), completed_at: Some("2026-01-02".into()), evidence_digest: digest(), stop_conditions: vec!["stop on production boundary".into()], finding_ids: vec!["finding-1".into()] }],
-            findings: vec![SecurityProgramFinding { id: "finding-1".into(), campaign: "campaign-1".into(), title: "boundary mismatch".into(), severity: SecurityProgramFindingSeverity::High, status: SecurityProgramFindingStatus::Closed, evidence_digest: digest(), reproduction_digest: digest(), regression_digest: digest(), discovered_at: "2026-01-02".into(), affected_targets: vec!["api-staging".into()], remediation_ids: vec!["remediation-1".into()], incident_id: Some("incident-1".into()), public_safe: true, resolution_note: None }],
-            remediations: vec![SecurityProgramRemediation { id: "remediation-1".into(), finding: "finding-1".into(), owner: "service-owner".into(), action: "validate boundary before dispatch".into(), status: SecurityProgramRemediationStatus::Complete, due_at: "2026-01-10".into(), verification_digest: digest(), rationale: None, approval_digest: None }],
-            incidents: vec![SecurityProgramIncident { id: "incident-1".into(), finding: "finding-1".into(), severity: SecurityProgramFindingSeverity::High, owner: "incident-owner".into(), status: SecurityProgramIncidentStatus::Closed, opened_at: "2026-01-02".into(), contained_at: Some("2026-01-02".into()), closed_at: Some("2026-01-03".into()), containment_evidence: digest(), closure_evidence: digest(), notification_required: true, timeline: vec![SecurityProgramTimelineEvent { epoch: 1, actor: "incident-owner".into(), event: "incident opened".into(), evidence_digest: digest() }, SecurityProgramTimelineEvent { epoch: 2, actor: "incident-owner".into(), event: "containment verified".into(), evidence_digest: digest() }] }],
-            disclosures: vec![SecurityProgramDisclosure { id: "advisory-1".into(), finding: "finding-1".into(), stage: SecurityProgramDisclosureStage::Advisory, audience: "affected operators".into(), requested_at: "2026-01-04".into(), approver: Some("independent-reviewer".into()), approval_digest: digest(), advisory_digest: digest(), published_at: Some("2026-01-04".into()) }],
-            controls: SecurityProgramControls { scope_authorization: true, operator_separation: true, independent_review: true, evidence_retention: true, remediation_tracking: true, incident_response: true, disclosure_review: true, regression_testing: true },
+            system: SecurityProgramSystem {
+                id: "aurora-security".into(),
+                version: "0.1.0".into(),
+                owner: "security-owner".into(),
+                mission: "bounded adversarial assurance".into(),
+            },
+            scopes: vec![SecurityProgramScope {
+                id: "api-staging".into(),
+                name: "staging API".into(),
+                kind: SecurityProgramScopeKind::Api,
+                target: "api-staging.internal".into(),
+                owner: "service-owner".into(),
+                authorization_digest: digest(),
+                allowed_methods: vec!["authenticated-read".into(), "rate-limited-input".into()],
+                forbidden_actions: vec![
+                    "production-write".into(),
+                    "credential-exfiltration".into(),
+                ],
+                environments: vec!["isolated-staging".into()],
+                data_handling: Some("synthetic fixtures only".into()),
+            }],
+            campaigns: vec![SecurityProgramCampaign {
+                id: "campaign-1".into(),
+                scope: "api-staging".into(),
+                operator: "red-team".into(),
+                independent_reviewer: Some("independent-reviewer".into()),
+                methodology: "bounded mutation and manual review".into(),
+                hypothesis: "invalid input can cross a trust boundary".into(),
+                status: SecurityProgramCampaignStatus::Completed,
+                started_at: Some("2026-01-01".into()),
+                completed_at: Some("2026-01-02".into()),
+                evidence_digest: digest(),
+                stop_conditions: vec!["stop on production boundary".into()],
+                finding_ids: vec!["finding-1".into()],
+            }],
+            findings: vec![SecurityProgramFinding {
+                id: "finding-1".into(),
+                campaign: "campaign-1".into(),
+                title: "boundary mismatch".into(),
+                severity: SecurityProgramFindingSeverity::High,
+                status: SecurityProgramFindingStatus::Closed,
+                evidence_digest: digest(),
+                reproduction_digest: digest(),
+                regression_digest: digest(),
+                discovered_at: "2026-01-02".into(),
+                affected_targets: vec!["api-staging".into()],
+                remediation_ids: vec!["remediation-1".into()],
+                incident_id: Some("incident-1".into()),
+                public_safe: true,
+                resolution_note: None,
+            }],
+            remediations: vec![SecurityProgramRemediation {
+                id: "remediation-1".into(),
+                finding: "finding-1".into(),
+                owner: "service-owner".into(),
+                action: "validate boundary before dispatch".into(),
+                status: SecurityProgramRemediationStatus::Complete,
+                due_at: "2026-01-10".into(),
+                verification_digest: digest(),
+                rationale: None,
+                approval_digest: None,
+            }],
+            incidents: vec![SecurityProgramIncident {
+                id: "incident-1".into(),
+                finding: "finding-1".into(),
+                severity: SecurityProgramFindingSeverity::High,
+                owner: "incident-owner".into(),
+                status: SecurityProgramIncidentStatus::Closed,
+                opened_at: "2026-01-02".into(),
+                contained_at: Some("2026-01-02".into()),
+                closed_at: Some("2026-01-03".into()),
+                containment_evidence: digest(),
+                closure_evidence: digest(),
+                notification_required: true,
+                timeline: vec![
+                    SecurityProgramTimelineEvent {
+                        epoch: 1,
+                        actor: "incident-owner".into(),
+                        event: "incident opened".into(),
+                        evidence_digest: digest(),
+                    },
+                    SecurityProgramTimelineEvent {
+                        epoch: 2,
+                        actor: "incident-owner".into(),
+                        event: "containment verified".into(),
+                        evidence_digest: digest(),
+                    },
+                ],
+            }],
+            disclosures: vec![SecurityProgramDisclosure {
+                id: "advisory-1".into(),
+                finding: "finding-1".into(),
+                stage: SecurityProgramDisclosureStage::Advisory,
+                audience: "affected operators".into(),
+                requested_at: "2026-01-04".into(),
+                approver: Some("independent-reviewer".into()),
+                approval_digest: digest(),
+                advisory_digest: digest(),
+                published_at: Some("2026-01-04".into()),
+            }],
+            controls: SecurityProgramControls {
+                scope_authorization: true,
+                operator_separation: true,
+                independent_review: true,
+                evidence_retention: true,
+                remediation_tracking: true,
+                incident_response: true,
+                disclosure_review: true,
+                regression_testing: true,
+            },
             policies: SecurityProgramPolicies::default(),
         }
     }
@@ -1138,8 +1678,19 @@ mod tests {
         value.controls.disclosure_review = false;
         let report = value.audit().expect("audit");
         assert!(!report.valid);
-        for code in ["scope_authorization_missing", "campaign_independent_review_missing", "finding_evidence_missing", "remediation_verification_missing", "incident_closure_missing", "required_control_disabled"] {
-            assert!(report.issues.iter().any(|issue| issue.code == code), "missing {code}: {:?}", report.issues);
+        for code in [
+            "scope_authorization_missing",
+            "campaign_independent_review_missing",
+            "finding_evidence_missing",
+            "remediation_verification_missing",
+            "incident_closure_missing",
+            "required_control_disabled",
+        ] {
+            assert!(
+                report.issues.iter().any(|issue| issue.code == code),
+                "missing {code}: {:?}",
+                report.issues
+            );
         }
     }
 
@@ -1152,8 +1703,16 @@ mod tests {
         value.findings[0].public_safe = false;
         let report = value.audit().expect("audit");
         assert!(!report.valid);
-        for code in ["disclosure_stage_order_invalid", "disclosure_approval_missing", "disclosure_advisory_missing", "disclosure_finding_not_public_safe"] {
-            assert!(report.issues.iter().any(|issue| issue.code == code), "missing {code}");
+        for code in [
+            "disclosure_stage_order_invalid",
+            "disclosure_approval_missing",
+            "disclosure_advisory_missing",
+            "disclosure_finding_not_public_safe",
+        ] {
+            assert!(
+                report.issues.iter().any(|issue| issue.code == code),
+                "missing {code}"
+            );
         }
     }
 }

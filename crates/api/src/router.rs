@@ -11,10 +11,10 @@ use crate::events::{
 };
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
-    verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleError,
-    EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
-    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
-    MAX_EVIDENCE_REGISTRY_BYTES,
+    verify_mission_evidence_bundle, ArtifactRegistry, ArtifactRegistryError,
+    DomainWorkflowReconciliationRegistry, EvidenceBundleError, EvidenceBundleRegistry,
+    EvidenceRegistryError, MissionEvaluatorCatalogue, MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayRequest, MAX_ARTIFACT_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
 };
 use bioprism_factory::{
     AuthorityMutation, ExecutionOperation, Idempotency as FactoryIdempotency, Job as FactoryJob,
@@ -85,6 +85,8 @@ pub struct ApiConfig {
     pub evidence_state_path: Option<PathBuf>,
     /// Optional atomic JSON checkpoint for imported domain-workflow reconciliation reports.
     pub reconciliation_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for the bounded cross-domain artifact and lineage index.
+    pub artifact_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -101,6 +103,7 @@ impl Default for ApiConfig {
             event_state_path: None,
             evidence_state_path: None,
             reconciliation_state_path: None,
+            artifact_state_path: None,
         }
     }
 }
@@ -169,6 +172,13 @@ impl ApiConfig {
         {
             return Err("reconciliation_state_path must not be empty".into());
         }
+        if self
+            .artifact_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("artifact_state_path must not be empty".into());
+        }
         Ok(())
     }
 }
@@ -187,6 +197,8 @@ pub struct ApiRouter {
     evidence_persistence: Arc<EvidencePersistence>,
     reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
     reconciliation_persistence: Arc<ReconciliationPersistence>,
+    artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    artifact_persistence: Arc<ArtifactPersistence>,
 }
 
 struct MissionJob {
@@ -222,6 +234,12 @@ struct EvidencePersistence {
 struct ReconciliationPersistence {
     path: Option<PathBuf>,
     registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct ArtifactPersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<ArtifactRegistry>>,
     lock: Mutex<()>,
 }
 
@@ -712,6 +730,84 @@ impl ReconciliationPersistence {
     }
 }
 
+impl ArtifactPersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "artifact registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "artifact registry persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, &document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "artifact registry persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, document)
+    }
+
+    fn write_snapshot(path: &Path, document: &Value) -> Result<usize, String> {
+        let bytes = serde_json::to_vec_pretty(document)
+            .map_err(|error| format!("artifact state could not be serialized: {error}"))?;
+        if bytes.len() > MAX_ARTIFACT_REGISTRY_BYTES {
+            return Err(format!(
+                "artifact state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_ARTIFACT_REGISTRY_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("artifact state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "artifact_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("artifact state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "artifact state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "artifact state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
 impl MissionPersistence {
     fn persist(&self) -> Result<(), String> {
         let Some(path) = self.path.as_deref() else {
@@ -976,12 +1072,15 @@ impl ApiRouter {
         let restored_evidence = load_evidence_registry(config.evidence_state_path.as_deref())?;
         let restored_reconciliations =
             load_workflow_reconciliation_registry(config.reconciliation_state_path.as_deref())?;
+        let restored_artifacts = load_artifact_registry(config.artifact_state_path.as_deref())?;
         let evidence_registry = Arc::new(Mutex::new(restored_evidence));
         let reconciliation_registry = Arc::new(Mutex::new(restored_reconciliations));
-        let mut server = bioprism_mcp::Server::with_registries(
+        let artifact_registry = Arc::new(Mutex::new(restored_artifacts));
+        let mut server = bioprism_mcp::Server::with_registries_and_artifacts(
             root,
             Arc::clone(&evidence_registry),
             Arc::clone(&reconciliation_registry),
+            Arc::clone(&artifact_registry),
         );
         let initialize = Request {
             id: Some(json!(0)),
@@ -1023,6 +1122,11 @@ impl ApiRouter {
             registry: Arc::clone(&reconciliation_registry),
             lock: Mutex::new(()),
         });
+        let artifact_persistence = Arc::new(ArtifactPersistence {
+            path: config.artifact_state_path.clone(),
+            registry: Arc::clone(&artifact_registry),
+            lock: Mutex::new(()),
+        });
         let router = Self {
             server,
             mission_executor,
@@ -1037,6 +1141,8 @@ impl ApiRouter {
             evidence_persistence,
             reconciliation_registry,
             reconciliation_persistence,
+            artifact_registry,
+            artifact_persistence,
         };
         if router.config.mission_state_path.is_some() {
             router.persist_mission_registry()?;
@@ -1061,6 +1167,11 @@ impl ApiRouter {
                     )
                 })?;
         }
+        if router.config.artifact_state_path.is_some() {
+            router.artifact_persistence.persist().map_err(|error| {
+                format!("artifact registry state checkpoint failed during startup: {error}")
+            })?;
+        }
         Ok(router)
     }
 
@@ -1078,6 +1189,10 @@ impl ApiRouter {
 
     fn persist_reconciliation_registry(&self) -> Result<usize, String> {
         self.reconciliation_persistence.persist()
+    }
+
+    fn persist_artifact_registry(&self) -> Result<usize, String> {
+        self.artifact_persistence.persist()
     }
 
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
@@ -1176,6 +1291,18 @@ impl ApiRouter {
             }
             ("GET", path) if path.starts_with("/v1/evidence-bundles/") => {
                 self.get_evidence_bundle(&request, &request_id)
+            }
+            ("GET", "/v1/artifacts") => self.query_artifacts(&request, &request_id),
+            ("POST", "/v1/artifacts") => self.register_artifact(&request, &request_id),
+            ("GET", "/v1/artifacts/persistence") => self.artifact_persistence_status(),
+            ("POST", "/v1/artifacts/persistence/flush") => {
+                self.flush_artifact_persistence(&request_id)
+            }
+            ("GET", path) if path.ends_with("/lineage") && path.starts_with("/v1/artifacts/") => {
+                self.artifact_lineage(&request, &request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/artifacts/") => {
+                self.get_artifact(&request, &request_id)
             }
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
@@ -1553,6 +1680,15 @@ impl ApiRouter {
             .get("file_present")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let artifact_persistence = response_value(self.artifact_persistence_status());
+        let artifact_enabled = artifact_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let artifact_checkpoint_present = artifact_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         HttpResponse::json(
             200,
             &json!({
@@ -1696,6 +1832,23 @@ impl ApiRouter {
                         "operator_action": "inspect the reconciliation_digest and review_required posture; import or reconcile new evidence explicitly after a restart"
                     },
                     {
+                        "id": "cross_domain_artifact_registry",
+                        "configured": artifact_enabled,
+                        "checkpoint_present": artifact_checkpoint_present,
+                        "schema_version": artifact_persistence.get("schema").cloned().unwrap_or(Value::Null),
+                        "state_digest": artifact_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": artifact_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "registry_size": artifact_persistence.get("registry_size").cloned().unwrap_or(json!(0)),
+                        "restores": [
+                            "bounded exact-content artifact records, declared parent edges, and explicit verification posture"
+                        ],
+                        "does_not_restore": [
+                            "causal provenance, scientific validity, clinical safety, publication authority, or external effect completion",
+                            "execution or missing parent artifacts"
+                        ],
+                        "operator_action": "inspect /v1/artifacts/{content_digest}/lineage and treat missing parents as unresolved evidence"
+                    },
+                    {
                         "id": "webhook_signing_secrets",
                         "configured": event_enabled,
                         "checkpoint_present": false,
@@ -1726,6 +1879,7 @@ impl ApiRouter {
                     "mission_checkpoint_present": mission_checkpoint_present,
                     "mission_queue_checkpoint_present": mission_queue_checkpoint_present,
                     "event_checkpoint_present": event_checkpoint_present,
+                    "artifact_checkpoint_present": artifact_checkpoint_present,
                     "retained_events": metrics.retained_events,
                     "active_subscriptions": metrics.active_subscriptions,
                     "subscriptions": metrics.subscriptions,
@@ -1759,6 +1913,8 @@ impl ApiRouter {
                     "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
                     "workflow_reconciliation_persistence": "/v1/domain-workflows/reconciliations/persistence",
                     "workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
+                    "artifact_persistence": "/v1/artifacts/persistence",
+                    "artifact_persistence_flush": "/v1/artifacts/persistence/flush",
                     "event_flush": "/v1/events/persistence/flush",
                     "mission_flush": "/v1/missions/persistence/flush",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts",
@@ -1826,6 +1982,7 @@ impl ApiRouter {
         let event_persistence = response_value(self.event_persistence_status());
         let evidence_persistence = response_value(self.evidence_persistence_status());
         let reconciliation_persistence = response_value(self.reconciliation_persistence_status());
+        let artifact_persistence = response_value(self.artifact_persistence_status());
         let reconciliation_summary = match self.reconciliation_registry.lock() {
             Ok(registry) => registry.operator_summary(),
             Err(_) => {
@@ -1876,6 +2033,11 @@ impl ApiRouter {
                     .to_string(),
             );
         }
+        if self.config.artifact_state_path.is_none() {
+            operator_actions.push(
+                "configure artifact_state_path if cross-domain artifact records and parent-lineage inspection must survive an API restart".to_string(),
+            );
+        }
 
         HttpResponse::json(
             200,
@@ -1895,7 +2057,8 @@ impl ApiRouter {
                     "mission_queue": mission_queue_persistence,
                     "events": event_persistence,
                     "evidence_bundles": evidence_persistence,
-                    "workflow_reconciliations": reconciliation_persistence
+                    "workflow_reconciliations": reconciliation_persistence,
+                    "artifacts": artifact_persistence
                 },
                 "reconciliation_summary": reconciliation_summary,
                 "recovery": recovery,
@@ -2820,20 +2983,12 @@ impl ApiRouter {
         arguments: &Value,
         gate_digest: &Value,
     ) -> Option<u64> {
-        let Some(acceptance) = arguments
+        let acceptance = arguments
             .get("operations_gate_acceptance")
-            .and_then(Value::as_object)
-        else {
-            return None;
-        };
-        let Some(review_id) = acceptance.get("review_id").and_then(Value::as_str) else {
-            return None;
-        };
-        let Some(current_fingerprint) =
-            operations_gate_acceptance_canonical(&Value::Object(acceptance.clone()))
-        else {
-            return None;
-        };
+            .and_then(Value::as_object)?;
+        let review_id = acceptance.get("review_id").and_then(Value::as_str)?;
+        let current_fingerprint =
+            operations_gate_acceptance_canonical(&Value::Object(acceptance.clone()))?;
         let events = match self.events.lock() {
             Ok(events) => events,
             Err(_) => return None,
@@ -3121,6 +3276,9 @@ impl ApiRouter {
                      "evidence_bundles": "/v1/evidence-bundles",
                      "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
                      "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
+                     "artifacts": "/v1/artifacts",
+                     "artifact_persistence": "/v1/artifacts/persistence",
+                     "artifact_persistence_flush": "/v1/artifacts/persistence/flush",
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_queue": "/v1/missions/queue",
                      "mission_queue_persistence": "/v1/missions/queue/persistence",
@@ -3166,6 +3324,9 @@ impl ApiRouter {
                     "mission_evidence_bundle_import": true,
                     "mission_evidence_bundle_query": true,
                     "mission_evidence_bundle_persistence": self.config.evidence_state_path.is_some(),
+                    "artifact_registry": true,
+                    "artifact_registry_lineage": true,
+                    "artifact_registry_persistence": self.config.artifact_state_path.is_some(),
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -3208,6 +3369,9 @@ impl ApiRouter {
                     "workflow_reconciliation_file_bytes": MAX_WORKFLOW_RECONCILIATION_STATE_BYTES,
                     "workflow_reconciliation_max_records": bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
                     "workflow_reconciliation_max_query_items": bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
+                    "artifact_registry_file_bytes": MAX_ARTIFACT_REGISTRY_BYTES,
+                    "artifact_registry_max_records": bioprism_devplat::MAX_ARTIFACT_REGISTRY_RECORDS,
+                    "artifact_registry_max_query_items": bioprism_devplat::MAX_ARTIFACT_REGISTRY_QUERY_ITEMS,
                     "delivery_error_bytes": crate::events::MAX_DELIVERY_ERROR_BYTES,
                     "webhook_filters": MAX_FILTERS
                 }
@@ -5021,6 +5185,264 @@ impl ApiRouter {
         }
     }
 
+    fn register_artifact(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let registration = match self.json_object(request) {
+            Ok(arguments) => Value::Object(arguments),
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let mut registry = match self.artifact_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let report = match registry.register(&registration) {
+            Ok(report) => report,
+            Err(ArtifactRegistryError::Full { maximum }) => {
+                return self.error(
+                    413,
+                    "artifact_registry_full",
+                    &format!("artifact registry has reached its {maximum}-record limit"),
+                    request_id,
+                )
+            }
+            Err(error @ ArtifactRegistryError::ArtifactTooLarge { .. }) => {
+                return self.error(413, "artifact_too_large", &error.to_string(), request_id)
+            }
+            Err(error) => {
+                return self.error(
+                    422,
+                    "invalid_artifact_registration",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        let created = report
+            .get("created")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if created {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(
+                        503,
+                        "artifact_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
+                }
+            };
+            if let Err(error) = self.artifact_persistence.persist_snapshot(&snapshot) {
+                *registry = before;
+                return self.error(503, "artifact_persistence_unavailable", &error, request_id);
+            }
+        }
+        HttpResponse::json(if created { 201 } else { 200 }, &report)
+    }
+
+    fn query_artifacts(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "kind" | "domain" | "subject_id" | "after" | "limit" | "include_artifacts"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "artifact query accepts only kind, domain, subject_id, after, limit, and include_artifacts",
+                    request_id,
+                );
+            }
+        }
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_ARTIFACT_REGISTRY_QUERY_ITEMS).contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_artifacts = match query_bool(&query, "include_artifacts", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.query(
+                query.get("kind").map(String::as_str),
+                query.get("domain").map(String::as_str),
+                query.get("subject_id").map(String::as_str),
+                query.get("after").map(String::as_str),
+                max_items,
+                include_artifacts,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_artifact(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 3 || segments[0] != "v1" || segments[1] != "artifacts" {
+            return self.error(
+                404,
+                "not_found",
+                "artifact route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[2];
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.get(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(ArtifactRegistryError::NotFound { .. }) => {
+                self.error(404, "not_found", "artifact does not exist", request_id)
+            }
+            Err(error) => self.error(422, "invalid_digest", &error.to_string(), request_id),
+        }
+    }
+
+    fn artifact_lineage(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 4
+            || segments[0] != "v1"
+            || segments[1] != "artifacts"
+            || segments[3] != "lineage"
+        {
+            return self.error(
+                404,
+                "not_found",
+                "artifact lineage route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[2];
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.lineage(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(ArtifactRegistryError::NotFound { .. }) => {
+                self.error(404, "not_found", "artifact does not exist", request_id)
+            }
+            Err(error) => self.error(422, "invalid_digest", &error.to_string(), request_id),
+        }
+    }
+
+    fn artifact_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.artifact_state_path.is_some();
+        let file_bytes = self
+            .config
+            .artifact_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry = self.artifact_registry.lock();
+        let (registry_size, generation) = registry
+            .as_ref()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .artifact_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = ArtifactRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::ARTIFACT_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_records": bioprism_devplat::MAX_ARTIFACT_REGISTRY_RECORDS,
+                "max_file_bytes": MAX_ARTIFACT_REGISTRY_BYTES,
+                "recovery_policy": "only digest-valid artifact records restore; indexed artifacts never resume execution",
+                "flush": "/v1/artifacts/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_artifact_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.artifact_state_path.is_none() {
+            return self.error(
+                409,
+                "artifact_persistence_disabled",
+                "configure --artifact-state before flushing an artifact registry snapshot",
+                request_id,
+            );
+        }
+        match self.persist_artifact_registry() {
+            Ok(_) => self.artifact_persistence_status(),
+            Err(error) => self.error(503, "artifact_persistence_unavailable", &error, request_id),
+        }
+    }
+
     fn mission_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let Some(mission_id) = mission_id(&request.path_segments(), Some("evidence-bundle")) else {
             return self.error(
@@ -6362,6 +6784,11 @@ impl ApiRouter {
                     "/v1/evidence-bundles/{bundle_digest}": { "get": { "parameters": [{ "name": "bundle_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one verified evidence bundle" }, "404": { "description": "bundle digest is not present" } } } },
                     "/v1/evidence-bundles/persistence": { "get": { "responses": { "200": { "description": "restart-aware evidence registry checkpoint status" } } } },
                     "/v1/evidence-bundles/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded evidence registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
+                    "/v1/artifacts": { "get": { "parameters": [{ "name": "kind", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "subject_id", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_artifacts", "in": "query" }], "responses": { "200": { "description": "bounded cross-domain artifact index query" } } }, "post": { "responses": { "201": { "description": "registered content-addressed artifact" }, "200": { "description": "idempotent artifact registration" } } } },
+                    "/v1/artifacts/{content_digest}": { "get": { "parameters": [{ "name": "content_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one artifact record with verification posture" }, "404": { "description": "artifact digest is not present" } } } },
+                    "/v1/artifacts/{content_digest}/lineage": { "get": { "parameters": [{ "name": "content_digest", "in": "path", "required": true }], "responses": { "200": { "description": "bounded parent lineage with explicit missing nodes and cycles" } } } },
+                    "/v1/artifacts/persistence": { "get": { "responses": { "200": { "description": "restart-aware artifact registry checkpoint status" } } } },
+                    "/v1/artifacts/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded artifact registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
@@ -7441,10 +7868,7 @@ fn checkpoint_digest_from_path(path: Option<&Path>) -> Option<String> {
 }
 
 fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> Option<bool> {
-    let bytes = match path.and_then(|path| std::fs::read(path).ok()) {
-        Some(bytes) => bytes,
-        None => return None,
-    };
+    let bytes = path.and_then(|path| std::fs::read(path).ok())?;
     let document: Value = match serde_json::from_slice(&bytes) {
         Ok(document) => document,
         Err(_) => return Some(false),
@@ -7531,6 +7955,34 @@ fn load_workflow_reconciliation_registry(
     })?;
     DomainWorkflowReconciliationRegistry::from_snapshot(&document)
         .map_err(|error| format!("workflow reconciliation state snapshot is invalid: {error}"))
+}
+
+fn load_artifact_registry(path: Option<&Path>) -> Result<ArtifactRegistry, String> {
+    let Some(path) = path else {
+        return Ok(ArtifactRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ArtifactRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "artifact state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_ARTIFACT_REGISTRY_BYTES {
+        return Err(format!(
+            "artifact state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_ARTIFACT_REGISTRY_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("artifact state snapshot is invalid JSON: {error}"))?;
+    ArtifactRegistry::from_snapshot(&document)
+        .map_err(|error| format!("artifact state snapshot is invalid: {error}"))
 }
 
 fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
@@ -10255,6 +10707,87 @@ mod tests {
         let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
         assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
         assert_eq!(restored_query["registry_generation"], 1);
+    }
+
+    #[test]
+    fn artifact_registry_routes_join_lineage_and_restore_only_digest_valid_records() {
+        let path = test_state_path("artifact-registry");
+        let config = ApiConfig {
+            artifact_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let leaf = router.handle(request(
+            "POST",
+            "/v1/artifacts",
+            json!({
+                "kind": "domain_report",
+                "subject_id": "leaf",
+                "domains": ["oncology", "genomics"],
+                "parent_digests": [],
+                "artifact": {"status": "review_required"}
+            }),
+        ));
+        assert_eq!(leaf.status, 201);
+        let leaf: Value = serde_json::from_slice(&leaf.body).unwrap();
+        let leaf_digest = leaf["content_digest"].as_str().unwrap().to_string();
+        let root = router.handle(request(
+            "POST",
+            "/v1/artifacts",
+            json!({
+                "kind": "mission_report",
+                "subject_id": "root",
+                "domains": ["oncology"],
+                "parent_digests": [leaf_digest, "f".repeat(64)],
+                "artifact": {"status": "partial"}
+            }),
+        ));
+        assert_eq!(root.status, 201);
+        let root: Value = serde_json::from_slice(&root.body).unwrap();
+        let root_digest = root["content_digest"].as_str().unwrap().to_string();
+        let lineage = router.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{root_digest}/lineage"),
+            json!({}),
+        ));
+        assert_eq!(lineage.status, 200);
+        let lineage: Value = serde_json::from_slice(&lineage.body).unwrap();
+        assert_eq!(lineage["nodes"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            lineage["missing_parent_digests"].as_array().unwrap().len(),
+            1
+        );
+        assert!(lineage["does_not_claim"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|claim| claim
+                .as_str()
+                .unwrap()
+                .contains("causal provenance or scientific validity")));
+        let query = router.handle(request(
+            "GET",
+            "/v1/artifacts?domain=oncology&limit=10",
+            json!({}),
+        ));
+        assert_eq!(query.status, 200);
+        let query: Value = serde_json::from_slice(&query.body).unwrap();
+        assert_eq!(query["rows"].as_array().unwrap().len(), 2);
+        let persistence = router.handle(request("GET", "/v1/artifacts/persistence", json!({})));
+        let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
+        assert_eq!(persistence["integrity_verified"], true);
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/artifacts?domain=oncology&limit=10",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 2);
+        assert_eq!(restored_query["registry_generation"], 2);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

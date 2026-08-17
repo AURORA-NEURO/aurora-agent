@@ -11,6 +11,14 @@ the integration layer above the deterministic kernel described by [ADR-001](ADR-
 Python can orchestrate and author requests, while Rust remains the owner of canonical bytes,
 domain invariants, release gates, and evidence semantics.
 
+The artifact registry is available through typed `ArtifactRegistrationRequest`,
+`ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,
+`ArtifactGetReport`, and `ArtifactLineageReport` models. `ApiClient` exposes REST registration,
+query, lookup, lineage, persistence status, and flush methods; `Workspace` and
+`AsyncWorkspace` expose the MCP `artifact_registry_audit` flow. Parent presence remains an index
+observation, missing parents remain explicit, and no client model treats a digest as scientific,
+clinical, publication, causal, or external-effect authority.
+
 ## Lifecycle
 
 Both clients enforce the MCP sequence:

@@ -201,33 +201,34 @@
 //! six turned out to belong to a crate that already owns the artifact. That asymmetry is worth
 //! stating: a section can look two-thirds unimplemented while the platform underneath it is not.
 
+pub mod artifact_registry;
 pub mod audit;
 pub mod capability;
 pub mod capability_dashboard;
-pub mod citations;
 pub mod ci_evidence;
 pub mod ci_provider;
 pub mod ci_provider_evidence;
+pub mod citations;
 pub mod claim;
 pub mod classify;
 pub mod delivery_receipt;
-pub mod error;
-pub mod exploit;
 pub mod engineering;
 pub mod engineering_plan;
+pub mod error;
 pub mod evaluator;
 pub mod evidence_bundle;
 pub mod evidence_registry;
 pub mod execution_provenance;
+pub mod exploit;
 pub mod mission;
 pub mod operational_readiness;
-pub mod report;
 pub mod release_pipeline;
+pub mod report;
 pub mod repro;
-pub mod security_privacy;
-pub mod security_program;
 pub mod sandbox_admission;
 pub mod sandbox_runtime;
+pub mod security_privacy;
+pub mod security_program;
 pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
@@ -235,6 +236,14 @@ pub mod workflow;
 pub mod workflow_reconciliation;
 pub mod workflow_reconciliation_registry;
 
+pub use artifact_registry::{
+    ArtifactRecord, ArtifactRegistry, ArtifactRegistryError, ARTIFACT_REGISTRY_GET_SCHEMA_VERSION,
+    ARTIFACT_REGISTRY_LINEAGE_SCHEMA_VERSION, ARTIFACT_REGISTRY_QUERY_SCHEMA_VERSION,
+    ARTIFACT_REGISTRY_REGISTER_SCHEMA_VERSION, ARTIFACT_REGISTRY_SCHEMA_VERSION,
+    MAX_ARTIFACT_REGISTRY_BYTES, MAX_ARTIFACT_REGISTRY_DOMAINS,
+    MAX_ARTIFACT_REGISTRY_LINEAGE_NODES, MAX_ARTIFACT_REGISTRY_PARENTS,
+    MAX_ARTIFACT_REGISTRY_QUERY_ITEMS, MAX_ARTIFACT_REGISTRY_RECORDS,
+};
 pub use audit::{
     catalogues_are_disjoint, findings, recipes_are_all_in_tree, unimplemented_titles,
     DevPlatReport, Finding, WalkthroughSummary,
@@ -250,43 +259,42 @@ pub use capability_dashboard::{
 };
 pub use ci_evidence::{
     audit_ci_execution_evidence, CiCheckEvidence, CiCheckStatus, CiEvidenceError,
-    CiEvidenceFinding, CiEvidenceSource, CiExecutionEvidenceAudit,
-    CiExecutionEvidenceRequest, CiRunConclusion, CiRunEvidence, CI_EXECUTION_EVIDENCE_SCHEMA,
+    CiEvidenceFinding, CiEvidenceSource, CiExecutionEvidenceAudit, CiExecutionEvidenceRequest,
+    CiRunConclusion, CiRunEvidence, CI_EXECUTION_EVIDENCE_SCHEMA,
 };
 pub use ci_provider::{
     normalize_ci_provider_payload, CiProviderNormalization, CiProviderNormalizationError,
     CiProviderNormalizationRequest, CI_PROVIDER_NORMALIZATION_SCHEMA,
 };
 pub use ci_provider_evidence::{
-    audit_ci_provider_evidence, CiProviderArtifact, CiProviderAttestation,
-    CiProviderEvidenceAudit, CiProviderEvidenceError, CiProviderEvidenceRequest, CiProviderLog,
-    CI_PROVIDER_EVIDENCE_SCHEMA,
+    audit_ci_provider_evidence, CiProviderArtifact, CiProviderAttestation, CiProviderEvidenceAudit,
+    CiProviderEvidenceError, CiProviderEvidenceRequest, CiProviderLog, CI_PROVIDER_EVIDENCE_SCHEMA,
 };
 pub use citations::{audit as audit_citations, scan as scan_citations, CitationAudit};
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};
 pub use classify::{
     classification, implemented_module_ids, not_implemented, verdict_counts, ModuleVerdict, Verdict,
 };
-pub use error::{
-    CitationError, ClaimError, DevPlatError, ExploitError, ReportError, ReproError, SurfaceError,
-    WalkthroughError,
-};
-pub use exploit::{
-    intent_verdict, release_gate, standard_remediations, task_verdict, CellScore, Containment,
-    GateOutcome, IntentVerdict, Remediation, Reward, SecurityCell, ServiceState, TamperAttempt,
-    TaskVerdict,
+pub use delivery_receipt::{
+    build_delivery_receipt, verify_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
+    DeliveryReceiptFinding, DeliveryReceiptRequest, DeliveryReceiptTarget,
+    DeliveryReceiptVerification, DeliveryReceiptVerificationRequest, DELIVERY_RECEIPT_SCHEMA,
 };
 pub use engineering::{
-    AdrSpec, AdrStatus, EngineeringAudit, EngineeringCounts, EngineeringError,
+    AdrSpec, AdrStatus, AdrSupersession, EngineeringAudit, EngineeringCounts, EngineeringError,
     EngineeringIssue, EngineeringManifest, EngineeringPolicies, IssueSeverity, OwnershipSpec,
     PackageSpec, ProjectIdentity, TechnologyBaseline, TicketReadiness, TicketSpec, TicketStatus,
-    AdrSupersession, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_MANIFEST_SCHEMA,
+    ENGINEERING_AUDIT_SCHEMA, ENGINEERING_MANIFEST_SCHEMA,
 };
 pub use engineering_plan::{
     EngineeringPlanAudit, EngineeringPlanError, EngineeringPlanGate, EngineeringPlanPolicies,
     EngineeringPlanRequest, EngineeringPlanWave, EngineeringTicketPlan,
     ENGINEERING_PLAN_AUDIT_SCHEMA, ENGINEERING_PLAN_REQUEST_SCHEMA, MAX_PLAN_PARALLELISM,
     MAX_PLAN_TICKETS,
+};
+pub use error::{
+    CitationError, ClaimError, DevPlatError, ExploitError, ReportError, ReproError, SurfaceError,
+    WalkthroughError,
 };
 pub use evaluator::{
     EvaluatorError, MissionEvaluatorAdapter, MissionEvaluatorCatalogue, MissionEvaluatorMatch,
@@ -302,69 +310,75 @@ pub use evidence_bundle::{
 pub use evidence_registry::{
     EvidenceBundleRegistry, EvidenceRegistryError, EVIDENCE_REGISTRY_IMPORT_SCHEMA_VERSION,
     EVIDENCE_REGISTRY_QUERY_SCHEMA_VERSION, EVIDENCE_REGISTRY_SCHEMA_VERSION,
-    MAX_EVIDENCE_REGISTRY_BUNDLES, MAX_EVIDENCE_REGISTRY_BYTES,
-    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
-};
-pub use workflow_reconciliation_registry::{
-    DomainWorkflowReconciliationRegistry, DomainWorkflowReconciliationRegistryError,
-    DOMAIN_WORKFLOW_RECONCILIATION_IMPORT_SCHEMA_VERSION,
-    DOMAIN_WORKFLOW_RECONCILIATION_QUERY_SCHEMA_VERSION,
-    DOMAIN_WORKFLOW_RECONCILIATION_REGISTRY_SCHEMA_VERSION,
-    DOMAIN_WORKFLOW_RECONCILIATION_SUMMARY_SCHEMA_VERSION,
-    MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
-    MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES,
-    MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
+    MAX_EVIDENCE_REGISTRY_BUNDLES, MAX_EVIDENCE_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
 };
 pub use execution_provenance::{
     audit_execution_provenance, DelegatedCheckEvidence, ExecutionProvenanceAudit,
     ExecutionProvenanceFinding, ExecutionProvenanceRequest, EXECUTION_PROVENANCE_SCHEMA,
     MAX_DELEGATED_CHECKS, MAX_FINDINGS,
 };
-pub use delivery_receipt::{
-    build_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
-    verify_delivery_receipt, DeliveryReceiptFinding, DeliveryReceiptRequest,
-    DeliveryReceiptTarget, DeliveryReceiptVerification, DeliveryReceiptVerificationRequest,
-    DELIVERY_RECEIPT_SCHEMA,
+pub use exploit::{
+    intent_verdict, release_gate, standard_remediations, task_verdict, CellScore, Containment,
+    GateOutcome, IntentVerdict, Remediation, Reward, SecurityCell, ServiceState, TamperAttempt,
+    TaskVerdict,
 };
 pub use mission::{
-    apply_binding, mission_claim_lineage, mission_claim_lineage_with_review, plan_mission, MissionBinding, MissionClaimEvaluatorBinding,
-    MissionClaimRequest, MissionError, MissionPlan, MissionPolicy, MissionReport, MissionRequest, MissionStep,
-    MissionStepPlan, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
-    MAX_CLAIM_EVALUATORS, MAX_CLAIM_REFERENCES, MAX_CLAIM_REQUESTS,
-    MAX_WORKFLOW_BINDING_BYTES, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
+    apply_binding, mission_claim_lineage, mission_claim_lineage_with_review, plan_mission,
+    MissionBinding, MissionClaimEvaluatorBinding, MissionClaimRequest, MissionError, MissionPlan,
+    MissionPolicy, MissionReport, MissionRequest, MissionStep, MissionStepPlan, MissionStepResult,
+    MissionTraceEvent, MissionTraceObserver, MAX_CLAIM_EVALUATORS, MAX_CLAIM_REFERENCES,
+    MAX_CLAIM_REQUESTS, MAX_WORKFLOW_BINDING_BYTES, MISSION_SCHEMA_VERSION,
+    MISSION_TRACE_SCHEMA_VERSION,
 };
 pub use operational_readiness::{
-    DependencyCriticality, IncidentSeverity, IncidentState, IndicatorStatus,
-    OperationalContract, OperationalContractKind, OperationalControls, OperationalCriticality,
-    OperationalDependency, OperationalDependencyAudit, OperationalIncident, OperationalIncidentAudit,
-    OperationalIndicator, OperationalIndicatorAudit, OperationalIssueSeverity, OperationalReadinessAudit,
-    OperationalReadinessCounts, OperationalReadinessError, OperationalReadinessIssue,
-    OperationalReadinessManifest, OperationalReadinessPolicies, OperationalRunbook,
-    OperationalRunbookAudit, OperationalService, RunbookReviewStatus,
+    DependencyCriticality, IncidentSeverity, IncidentState, IndicatorStatus, OperationalContract,
+    OperationalContractKind, OperationalControls, OperationalCriticality, OperationalDependency,
+    OperationalDependencyAudit, OperationalIncident, OperationalIncidentAudit,
+    OperationalIndicator, OperationalIndicatorAudit, OperationalIssueSeverity,
+    OperationalReadinessAudit, OperationalReadinessCounts, OperationalReadinessError,
+    OperationalReadinessIssue, OperationalReadinessManifest, OperationalReadinessPolicies,
+    OperationalRunbook, OperationalRunbookAudit, OperationalService, RunbookReviewStatus,
     OPERATIONAL_READINESS_AUDIT_SCHEMA, OPERATIONAL_READINESS_MANIFEST_SCHEMA,
+};
+pub use release_pipeline::{
+    EnvironmentClass, PipelineArtifact, PipelineArtifactKind, PipelineAttestation,
+    PipelineAttestationKind, PipelineEnvironment, PipelineIssueSeverity, PipelineProject,
+    PipelinePromotion, PipelinePromotionAudit, PipelinePromotionKind, PipelineSource,
+    PipelineStage, PipelineStageKind, PipelineStageReadiness, ReleasePipelineAudit,
+    ReleasePipelineCounts, ReleasePipelineError, ReleasePipelineIssue, ReleasePipelineManifest,
+    ReleasePipelinePolicies, RELEASE_PIPELINE_AUDIT_SCHEMA, RELEASE_PIPELINE_MANIFEST_SCHEMA,
 };
 pub use report::{
     drifted_figures, render, render_all, Audience, Depth, EvidenceState, Figure, FigureStatus,
     Limitation, RenderedFigure, Rendering, Section, SourcePointer, Uncertainty,
 };
-pub use release_pipeline::{
-    EnvironmentClass, PipelineArtifact, PipelineArtifactKind, PipelineAttestation,
-    PipelineAttestationKind, PipelineEnvironment, PipelineIssueSeverity, PipelinePromotion,
-    PipelinePromotionAudit, PipelinePromotionKind, PipelineStage, PipelineStageKind,
-    PipelineStageReadiness, PipelineProject, PipelineSource, ReleasePipelineAudit,
-    ReleasePipelineCounts, ReleasePipelineError, ReleasePipelineIssue, ReleasePipelineManifest,
-    ReleasePipelinePolicies, RELEASE_PIPELINE_AUDIT_SCHEMA, RELEASE_PIPELINE_MANIFEST_SCHEMA,
+pub use repro::{
+    figure_reproduction_case, forbidden_by_default, summarise, Effect, MoleculeCard, Obligation,
+    ObligationLedger, ObligationStatus, ReproductionReport, ReproductionStatus,
+};
+pub use sandbox_admission::{
+    SandboxArtifact, SandboxArtifactAudit, SandboxArtifactKind, SandboxAudit, SandboxBoundaryAudit,
+    SandboxCapability, SandboxCapabilityAudit, SandboxCapabilityKind, SandboxDecision,
+    SandboxError, SandboxExecutionProfile, SandboxIssue, SandboxIssueSeverity, SandboxManifest,
+    SandboxMount, SandboxMountMode, SandboxNetworkMode, SandboxOutput, SandboxOutputAudit,
+    SandboxPolicies, SandboxProfileAudit, SandboxResourceAudit, SandboxResourceLimits,
+    SandboxSystem, SandboxTrust, SANDBOX_AUDIT_SCHEMA, SANDBOX_MANIFEST_SCHEMA,
+};
+pub use sandbox_runtime::{
+    SandboxRuntimeAudit, SandboxRuntimeDecision, SandboxRuntimeError, SandboxRuntimeIssue,
+    SandboxRuntimeManifest, SandboxRuntimePolicies, SandboxRuntimeRequest, SandboxRuntimeStepAudit,
+    SandboxRuntimeUsage, SANDBOX_RUNTIME_AUDIT_SCHEMA, SANDBOX_RUNTIME_MANIFEST_SCHEMA,
 };
 pub use security_privacy::{
-    SecurityPrivacyAsset, SecurityPrivacyAssetAudit, SecurityPrivacyAudit, SecurityPrivacyClassification,
-    SecurityPrivacyControlAudit, SecurityPrivacyControls, SecurityPrivacyError, SecurityPrivacyFlow,
-    SecurityPrivacyFlowAudit, SecurityPrivacyFlowDecision, SecurityPrivacyIdentity,
-    SecurityPrivacyIdentityAudit, SecurityPrivacyIssue, SecurityPrivacyIssueSeverity,
-    SecurityPrivacyManifest, SecurityPrivacyPolicies, SecurityPrivacyReview, SecurityPrivacyReviewAudit,
+    SecurityPrivacyAsset, SecurityPrivacyAssetAudit, SecurityPrivacyAudit,
+    SecurityPrivacyClassification, SecurityPrivacyControlAudit, SecurityPrivacyControls,
+    SecurityPrivacyCounts, SecurityPrivacyError, SecurityPrivacyFlow, SecurityPrivacyFlowAudit,
+    SecurityPrivacyFlowDecision, SecurityPrivacyIdentity, SecurityPrivacyIdentityAudit,
+    SecurityPrivacyIssue, SecurityPrivacyIssueSeverity, SecurityPrivacyManifest,
+    SecurityPrivacyPolicies, SecurityPrivacyReview, SecurityPrivacyReviewAudit,
     SecurityPrivacyReviewKind, SecurityPrivacyReviewStatus, SecurityPrivacySystem,
     SecurityPrivacyThreat, SecurityPrivacyThreatAudit, SecurityPrivacyThreatSeverity,
-    SecurityPrivacyThreatStatus, SecurityPrivacyCounts, SECURITY_PRIVACY_AUDIT_SCHEMA,
-    SECURITY_PRIVACY_MANIFEST_SCHEMA,
+    SecurityPrivacyThreatStatus, SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PRIVACY_MANIFEST_SCHEMA,
 };
 pub use security_program::{
     SecurityProgramAudit, SecurityProgramCampaign, SecurityProgramCampaignAudit,
@@ -378,24 +392,6 @@ pub use security_program::{
     SecurityProgramScope, SecurityProgramScopeAudit, SecurityProgramScopeKind,
     SecurityProgramSystem, SecurityProgramTimelineEvent, SECURITY_PROGRAM_AUDIT_SCHEMA,
     SECURITY_PROGRAM_MANIFEST_SCHEMA,
-};
-pub use sandbox_admission::{
-    SandboxArtifact, SandboxArtifactAudit, SandboxArtifactKind, SandboxAudit, SandboxBoundaryAudit,
-    SandboxCapability, SandboxCapabilityAudit, SandboxCapabilityKind, SandboxDecision, SandboxError,
-    SandboxExecutionProfile, SandboxIssue, SandboxIssueSeverity, SandboxManifest, SandboxMount,
-    SandboxMountMode, SandboxNetworkMode, SandboxOutput, SandboxOutputAudit, SandboxPolicies,
-    SandboxProfileAudit, SandboxResourceAudit, SandboxResourceLimits, SandboxSystem, SandboxTrust,
-    SANDBOX_AUDIT_SCHEMA, SANDBOX_MANIFEST_SCHEMA,
-};
-pub use sandbox_runtime::{
-    SandboxRuntimeAudit, SandboxRuntimeDecision, SandboxRuntimeError, SandboxRuntimeIssue,
-    SandboxRuntimeManifest, SandboxRuntimePolicies, SandboxRuntimeRequest,
-    SandboxRuntimeStepAudit, SandboxRuntimeUsage, SANDBOX_RUNTIME_AUDIT_SCHEMA,
-    SANDBOX_RUNTIME_MANIFEST_SCHEMA,
-};
-pub use repro::{
-    figure_reproduction_case, forbidden_by_default, summarise, Effect, MoleculeCard, Obligation,
-    ObligationLedger, ObligationStatus, ReproductionReport, ReproductionStatus,
 };
 pub use surface::{foreign_subjects, ForeignSubject, Locale, Surface, SurfaceKind};
 pub use walkthrough::{
@@ -411,10 +407,9 @@ pub use workbench::{
 };
 pub use workflow::{
     build_domain_workflow_catalogue, instantiate_domain_workflow, scaffold_domain_workflow,
-    DomainWorkflowError,
-    DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION, DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION,
-    DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION, DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION,
-    DOMAIN_WORKFLOW_SCHEMA_VERSION,
+    DomainWorkflowError, DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION, DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION, DOMAIN_WORKFLOW_SCHEMA_VERSION,
     MAX_DOMAIN_WORKFLOW_BYTES, MAX_DOMAIN_WORKFLOW_GROUPS, MAX_DOMAIN_WORKFLOW_STEPS,
     MAX_DOMAIN_WORKFLOW_TOOLS,
 };
@@ -422,4 +417,12 @@ pub use workflow_reconciliation::{
     reconcile_domain_workflow, DomainWorkflowReconcileError,
     DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_RECONCILE_BYTES,
     MAX_DOMAIN_WORKFLOW_RECONCILE_FINDINGS, MAX_DOMAIN_WORKFLOW_RECONCILE_STEPS,
+};
+pub use workflow_reconciliation_registry::{
+    DomainWorkflowReconciliationRegistry, DomainWorkflowReconciliationRegistryError,
+    DOMAIN_WORKFLOW_RECONCILIATION_IMPORT_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_RECONCILIATION_QUERY_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_RECONCILIATION_REGISTRY_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_RECONCILIATION_SUMMARY_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+    MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES, MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
 };

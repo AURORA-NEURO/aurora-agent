@@ -13,6 +13,15 @@ from .analytics import (
     analytics_request,
 )
 from .authoring import PackArtifact
+from .artifacts import (
+    ArtifactGetReport,
+    ArtifactGetRequest,
+    ArtifactLineageReport,
+    ArtifactQueryReport,
+    ArtifactQueryRequest,
+    ArtifactRegistrationReport,
+    ArtifactRegistrationRequest,
+)
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
 from .bioql import BioQlCompileRequest
 from .client import Client
@@ -1963,6 +1972,76 @@ class Workspace:
     ) -> DomainWorkflowReconciliationGetReport:
         return DomainWorkflowReconciliationGetReport.from_wire(
             self.domain_workflow_reconciliation_get(request)
+        )
+
+    def artifact_registry_audit(
+        self,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Register, query, fetch, or traverse bounded cross-domain artifacts through MCP."""
+
+        return self.tool("artifact_registry_audit", arguments)
+
+    def artifact_register(
+        self,
+        request: ArtifactRegistrationRequest | Mapping[str, Any],
+    ) -> ArtifactRegistrationReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactRegistrationRequest)
+            else ArtifactRegistrationRequest(**dict(request))
+        )
+        return ArtifactRegistrationReport.from_wire(
+            self.artifact_registry_audit(
+                {"operation": "register", "registration": normalized.to_arguments()}
+            )
+        )
+
+    def artifact_query(
+        self,
+        request: ArtifactQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactQueryReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactQueryRequest)
+            else ArtifactQueryRequest(**dict(request or {}))
+        )
+        return ArtifactQueryReport.from_wire(
+            self.artifact_registry_audit({"operation": "query", **normalized.to_arguments()})
+        )
+
+    def artifact_get(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactGetReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactGetRequest)
+            else ArtifactGetRequest(request)
+            if isinstance(request, str)
+            else ArtifactGetRequest(**dict(request))
+        )
+        return ArtifactGetReport.from_wire(
+            self.artifact_registry_audit(
+                {"operation": "get", "content_digest": normalized.content_digest}
+            )
+        )
+
+    def artifact_lineage(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactLineageReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactGetRequest)
+            else ArtifactGetRequest(request)
+            if isinstance(request, str)
+            else ArtifactGetRequest(**dict(request))
+        )
+        return ArtifactLineageReport.from_wire(
+            self.artifact_registry_audit(
+                {"operation": "lineage", "content_digest": normalized.content_digest}
+            )
         )
 
     def adapter_plan(
@@ -5154,6 +5233,76 @@ class AsyncWorkspace:
     ) -> DomainWorkflowReconciliationGetReport:
         return DomainWorkflowReconciliationGetReport.from_wire(
             await self.domain_workflow_reconciliation_get(request)
+        )
+
+    async def artifact_registry_audit(
+        self,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await self.tool("artifact_registry_audit", arguments)
+
+    async def artifact_register(
+        self,
+        request: ArtifactRegistrationRequest | Mapping[str, Any],
+    ) -> ArtifactRegistrationReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactRegistrationRequest)
+            else ArtifactRegistrationRequest(**dict(request))
+        )
+        return ArtifactRegistrationReport.from_wire(
+            await self.artifact_registry_audit(
+                {"operation": "register", "registration": normalized.to_arguments()}
+            )
+        )
+
+    async def artifact_query(
+        self,
+        request: ArtifactQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactQueryReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactQueryRequest)
+            else ArtifactQueryRequest(**dict(request or {}))
+        )
+        return ArtifactQueryReport.from_wire(
+            await self.artifact_registry_audit(
+                {"operation": "query", **normalized.to_arguments()}
+            )
+        )
+
+    async def artifact_get(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactGetReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactGetRequest)
+            else ArtifactGetRequest(request)
+            if isinstance(request, str)
+            else ArtifactGetRequest(**dict(request))
+        )
+        return ArtifactGetReport.from_wire(
+            await self.artifact_registry_audit(
+                {"operation": "get", "content_digest": normalized.content_digest}
+            )
+        )
+
+    async def artifact_lineage(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactLineageReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactGetRequest)
+            else ArtifactGetRequest(request)
+            if isinstance(request, str)
+            else ArtifactGetRequest(**dict(request))
+        )
+        return ArtifactLineageReport.from_wire(
+            await self.artifact_registry_audit(
+                {"operation": "lineage", "content_digest": normalized.content_digest}
+            )
         )
 
     async def adapter_plan(

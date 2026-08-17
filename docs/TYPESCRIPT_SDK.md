@@ -74,6 +74,13 @@ operator discovery. `tools()` returns the server's live catalogue rather than a 
 list. `callTool` accepts any path-safe tool name and a JSON object, so a client can use new Rust
 tools before the TypeScript package has a convenience method.
 
+The typed artifact registry facade covers `artifactRegister`, `artifactQuery`, `artifactGet`,
+`artifactLineage`, `artifactRegistryPersistence`, and `flushArtifactRegistryPersistence`, plus
+the generic `artifactRegistryAudit` MCP call. Artifact records are exact-content indexed and
+lineage responses preserve missing parent digests and cycles; the SDK does not promote index
+presence into causal provenance, scientific validity, clinical safety, publication authority, or
+external-effect completion.
+
 Convenience methods currently cover:
 
 - `domainWorkflowCatalogue` / `domainWorkflowCatalogueQuery`: the MCP and REST projections of
@@ -211,7 +218,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 191-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 192-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,

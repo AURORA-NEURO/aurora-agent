@@ -18,6 +18,15 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import quote, urlencode, urlsplit
 
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
+from .artifacts import (
+    ArtifactGetReport,
+    ArtifactGetRequest,
+    ArtifactLineageReport,
+    ArtifactQueryReport,
+    ArtifactQueryRequest,
+    ArtifactRegistrationReport,
+    ArtifactRegistrationRequest,
+)
 from .capability import (
     CapabilityAuditReport,
     CapabilitySearchReport,
@@ -649,6 +658,79 @@ class ApiClient:
         if not isinstance(name, str) or not name or "/" in name:
             raise ArgumentError("tool name must be a non-empty path-safe string")
         return self.request("POST", f"/v1/tools/{name}", dict(arguments or {}))
+
+    def register_artifact(
+        self,
+        request: ArtifactRegistrationRequest | Mapping[str, Any],
+    ) -> ArtifactRegistrationReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactRegistrationRequest)
+            else ArtifactRegistrationRequest(**dict(request))
+        )
+        return ArtifactRegistrationReport.from_wire(
+            self.request("POST", "/v1/artifacts", normalized.to_arguments())
+        )
+
+    def query_artifacts(
+        self,
+        request: ArtifactQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactQueryReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactQueryRequest)
+            else ArtifactQueryRequest(**dict(request or {}))
+        )
+        return ArtifactQueryReport.from_wire(
+            self.request("GET", f"/v1/artifacts?{urlencode(normalized.to_query_params())}")
+        )
+
+    def get_artifact(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactGetReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactGetRequest)
+            else ArtifactGetRequest(request)
+            if isinstance(request, str)
+            else ArtifactGetRequest(**dict(request))
+        )
+        return ArtifactGetReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/artifacts/{quote(normalized.content_digest, safe='')}",
+            )
+        )
+
+    def artifact_lineage(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactLineageReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactGetRequest)
+            else ArtifactGetRequest(request)
+            if isinstance(request, str)
+            else ArtifactGetRequest(**dict(request))
+        )
+        return ArtifactLineageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/artifacts/{quote(normalized.content_digest, safe='')}/lineage",
+            )
+        )
+
+    def artifact_registry_persistence(self) -> dict[str, Any]:
+        return self.request("GET", "/v1/artifacts/persistence")
+
+    def flush_artifact_registry_persistence(self) -> dict[str, Any]:
+        return self.request("POST", "/v1/artifacts/persistence/flush", {})
+
+    def artifact_registry_audit(self, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Call the MCP artifact registry tool while preserving its bounded evidence envelope."""
+
+        return self.call_tool("artifact_registry_audit", arguments)
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
         """Read the deterministic workflow template for every capability group."""
@@ -4337,6 +4419,39 @@ class AsyncApiClient:
 
     async def call_tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.call_tool, name, arguments)
+
+    async def register_artifact(
+        self,
+        request: ArtifactRegistrationRequest | Mapping[str, Any],
+    ) -> ArtifactRegistrationReport:
+        return await asyncio.to_thread(self.client.register_artifact, request)
+
+    async def query_artifacts(
+        self,
+        request: ArtifactQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactQueryReport:
+        return await asyncio.to_thread(self.client.query_artifacts, request)
+
+    async def get_artifact(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactGetReport:
+        return await asyncio.to_thread(self.client.get_artifact, request)
+
+    async def artifact_lineage(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactLineageReport:
+        return await asyncio.to_thread(self.client.artifact_lineage, request)
+
+    async def artifact_registry_persistence(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.artifact_registry_persistence)
+
+    async def flush_artifact_registry_persistence(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.flush_artifact_registry_persistence)
+
+    async def artifact_registry_audit(self, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.artifact_registry_audit, arguments)
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

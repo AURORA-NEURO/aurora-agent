@@ -170,7 +170,7 @@ pub struct OperationalIncident {
     pub postmortem: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OperationalControls {
     #[serde(default)]
     pub on_call: bool,
@@ -186,20 +186,6 @@ pub struct OperationalControls {
     pub restore_test: bool,
     #[serde(default)]
     pub access_review: bool,
-}
-
-impl Default for OperationalControls {
-    fn default() -> Self {
-        Self {
-            on_call: false,
-            alerting: false,
-            tracing: false,
-            audit_logging: false,
-            backup: false,
-            restore_test: false,
-            access_review: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -358,11 +344,31 @@ impl OperationalReadinessManifest {
         let mut runbooks = BTreeMap::<String, &OperationalRunbook>::new();
         let mut incidents = BTreeMap::<String, &OperationalIncident>::new();
 
-        bound(&mut issues, "contracts", self.contracts.len(), MAX_CONTRACTS);
-        bound(&mut issues, "indicators", self.indicators.len(), MAX_INDICATORS);
-        bound(&mut issues, "dependencies", self.dependencies.len(), MAX_DEPENDENCIES);
+        bound(
+            &mut issues,
+            "contracts",
+            self.contracts.len(),
+            MAX_CONTRACTS,
+        );
+        bound(
+            &mut issues,
+            "indicators",
+            self.indicators.len(),
+            MAX_INDICATORS,
+        );
+        bound(
+            &mut issues,
+            "dependencies",
+            self.dependencies.len(),
+            MAX_DEPENDENCIES,
+        );
         bound(&mut issues, "runbooks", self.runbooks.len(), MAX_RUNBOOKS);
-        bound(&mut issues, "incidents", self.incidents.len(), MAX_INCIDENTS);
+        bound(
+            &mut issues,
+            "incidents",
+            self.incidents.len(),
+            MAX_INCIDENTS,
+        );
         if self.schema != OPERATIONAL_READINESS_MANIFEST_SCHEMA {
             blocking(
                 &mut issues,
@@ -594,10 +600,7 @@ impl OperationalReadinessManifest {
                     "retain ordered response observations instead of only a terminal label",
                 );
             }
-            if self.policies.require_incident_closure
-                && closed
-                && !postmortem_present
-            {
+            if self.policies.require_incident_closure && closed && !postmortem_present {
                 blocking(
                     &mut issues,
                     "closed_incident_postmortem_missing",
@@ -610,14 +613,26 @@ impl OperationalReadinessManifest {
 
         let control_rows = [
             ("on_call", self.controls.on_call, true),
-            ("alerting", self.controls.alerting, self.policies.require_observability),
-            ("tracing", self.controls.tracing, self.policies.require_observability),
+            (
+                "alerting",
+                self.controls.alerting,
+                self.policies.require_observability,
+            ),
+            (
+                "tracing",
+                self.controls.tracing,
+                self.policies.require_observability,
+            ),
             (
                 "audit_logging",
                 self.controls.audit_logging,
                 self.policies.require_observability,
             ),
-            ("backup", self.controls.backup, self.service.criticality != OperationalCriticality::Advisory),
+            (
+                "backup",
+                self.controls.backup,
+                self.service.criticality != OperationalCriticality::Advisory,
+            ),
             (
                 "restore_test",
                 self.controls.restore_test,
@@ -659,7 +674,10 @@ impl OperationalReadinessManifest {
                     source_valid,
                     observed,
                     evidence_valid,
-                    ready: contract_valid && source_valid && evidence_valid && (observed || indicator.status == IndicatorStatus::NotApplicable),
+                    ready: contract_valid
+                        && source_valid
+                        && evidence_valid
+                        && (observed || indicator.status == IndicatorStatus::NotApplicable),
                 }
             })
             .collect::<Vec<_>>();
@@ -683,7 +701,9 @@ impl OperationalReadinessManifest {
                     critical,
                     ready: owner_valid
                         && failure_mode_valid
-                        && (!critical || !self.policies.require_dependency_fallback || fallback_present),
+                        && (!critical
+                            || !self.policies.require_dependency_fallback
+                            || fallback_present),
                 }
             })
             .collect::<Vec<_>>();
@@ -754,7 +774,10 @@ impl OperationalReadinessManifest {
                 .filter(|item| item.state == IncidentState::Open)
                 .count(),
             controls: control_rows.len(),
-            enabled_controls: control_rows.iter().filter(|(_, enabled, _)| *enabled).count(),
+            enabled_controls: control_rows
+                .iter()
+                .filter(|(_, enabled, _)| *enabled)
+                .count(),
         };
         let valid = !issues
             .iter()
@@ -786,8 +809,8 @@ impl OperationalReadinessManifest {
     }
 }
 
-fn insert_unique<'a, T>(
-    map: &mut BTreeMap<String, &'a T>,
+fn insert_unique<T>(
+    map: &mut BTreeMap<String, &T>,
     id: &str,
     kind: &'static str,
     issues: &mut Vec<OperationalReadinessIssue>,
@@ -806,12 +829,7 @@ fn insert_unique<'a, T>(
     }
 }
 
-fn bound(
-    issues: &mut Vec<OperationalReadinessIssue>,
-    subject: &str,
-    count: usize,
-    maximum: usize,
-) {
+fn bound(issues: &mut Vec<OperationalReadinessIssue>, subject: &str, count: usize, maximum: usize) {
     if count > maximum {
         blocking(
             issues,
@@ -949,9 +967,18 @@ mod tests {
         value.controls.restore_test = false;
         let report = value.audit().unwrap();
         assert!(!report.valid);
-        assert!(report.issues.iter().any(|issue| issue.code == "indicator_not_observed"));
-        assert!(report.issues.iter().any(|issue| issue.code == "critical_dependency_fallback_missing"));
-        assert!(report.issues.iter().any(|issue| issue.code == "required_control_disabled"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "indicator_not_observed"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "critical_dependency_fallback_missing"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "required_control_disabled"));
     }
 
     #[test]
@@ -960,6 +987,9 @@ mod tests {
         value.incidents[0].postmortem = None;
         let report = value.audit().unwrap();
         assert!(!report.valid);
-        assert!(report.issues.iter().any(|issue| issue.code == "closed_incident_postmortem_missing"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "closed_incident_postmortem_missing"));
     }
 }

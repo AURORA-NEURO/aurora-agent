@@ -467,10 +467,7 @@ mod tests {
             {"domain": "imaging", "adapter_id": "adapter.imaging"},
             {"domain": "oncology", "adapter_id": "adapter.oncology"}
         ]);
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("bundle_digest");
+        value.as_object_mut().unwrap().remove("bundle_digest");
         value["bundle_digest"] = Value::String(ContentHash::of_value(&value).unwrap().to_string());
         let mut registry = EvidenceBundleRegistry::new();
         registry.import(&value).unwrap();

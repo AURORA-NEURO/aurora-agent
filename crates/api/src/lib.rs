@@ -1,7 +1,7 @@
 //! A bounded HTTP/REST and event integration layer for the AURORA/Prism MCP kernel.
 //!
 //! The crate implements the network-facing half of the developer platform without duplicating
-//! domain logic.  `ApiRouter` exposes the same 114 (and future) MCP tools as REST routes, keeps
+//! domain logic.  `ApiRouter` exposes the same live MCP tool catalogue as REST routes, keeps
 //! JSON-RPC available for clients that already speak MCP, and records successful/refused tool
 //! calls in a cursor-addressable event log.  Webhook subscriptions produce signed outbox
 //! envelopes; an operator-owned worker polls, retries, sends, and acknowledges those envelopes.

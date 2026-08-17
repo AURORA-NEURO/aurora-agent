@@ -379,13 +379,26 @@ impl SandboxManifest {
         let mut capabilities = BTreeMap::<String, &SandboxCapability>::new();
         let mut outputs = BTreeMap::<String, &SandboxOutput>::new();
 
-        bound(&mut issues, "artifacts", self.artifacts.len(), MAX_ARTIFACTS);
+        bound(
+            &mut issues,
+            "artifacts",
+            self.artifacts.len(),
+            MAX_ARTIFACTS,
+        );
         bound(&mut issues, "profiles", self.profiles.len(), MAX_PROFILES);
-        bound(&mut issues, "capabilities", self.capabilities.len(), MAX_CAPABILITIES);
+        bound(
+            &mut issues,
+            "capabilities",
+            self.capabilities.len(),
+            MAX_CAPABILITIES,
+        );
         bound(
             &mut issues,
             "mounts",
-            self.profiles.iter().map(|profile| profile.mounts.len()).sum(),
+            self.profiles
+                .iter()
+                .map(|profile| profile.mounts.len())
+                .sum(),
             MAX_MOUNTS,
         );
         bound(&mut issues, "outputs", self.outputs.len(), MAX_OUTPUTS);
@@ -452,7 +465,11 @@ impl SandboxManifest {
                         "retain each lineage edge exactly once",
                     );
                 }
-                if !self.artifacts.iter().any(|candidate| candidate.id == *input) {
+                if !self
+                    .artifacts
+                    .iter()
+                    .any(|candidate| candidate.id == *input)
+                {
                     blocking(
                         &mut issues,
                         "artifact_input_unknown",
@@ -493,7 +510,12 @@ impl SandboxManifest {
                     "name the exact profile and resource target for the capability",
                 );
             }
-            if !profiles.is_empty() && !self.profiles.iter().any(|profile| profile.id == capability.profile) {
+            if !profiles.is_empty()
+                && !self
+                    .profiles
+                    .iter()
+                    .any(|profile| profile.id == capability.profile)
+            {
                 blocking(
                     &mut issues,
                     "capability_profile_unknown",
@@ -589,7 +611,10 @@ impl SandboxManifest {
                 SandboxNetworkMode::Deny => profile.network_allowlist.is_empty(),
                 SandboxNetworkMode::Allowlist => {
                     !profile.network_allowlist.is_empty()
-                        && profile.network_allowlist.iter().all(|item| valid_network_target(item))
+                        && profile
+                            .network_allowlist
+                            .iter()
+                            .all(|item| valid_network_target(item))
                 }
                 SandboxNetworkMode::Unrestricted => false,
             };
@@ -629,7 +654,10 @@ impl SandboxManifest {
                         &mut issues,
                         "mount_target_unsafe",
                         &profile.id,
-                        format!("mount target `{}` is absolute, traverses, or names a host namespace", mount.target),
+                        format!(
+                            "mount target `{}` is absolute, traverses, or names a host namespace",
+                            mount.target
+                        ),
                         "use a private, normalized target below the sandbox root",
                     );
                 }
@@ -638,7 +666,10 @@ impl SandboxManifest {
                         &mut issues,
                         "mount_source_unknown",
                         &profile.id,
-                        format!("mount source artifact `{}` is not declared", mount.source_artifact),
+                        format!(
+                            "mount source artifact `{}` is not declared",
+                            mount.source_artifact
+                        ),
                         "mount only content-addressed declared artifacts",
                     );
                 }
@@ -685,7 +716,9 @@ impl SandboxManifest {
             }
             let image_valid = valid_digest_option(profile.image_digest.as_ref());
             let environment_valid = valid_digest_option(profile.environment_digest.as_ref());
-            if self.policies.require_reproducible_environment && (!image_valid || !environment_valid) {
+            if self.policies.require_reproducible_environment
+                && (!image_valid || !environment_valid)
+            {
                 blocking(
                     &mut issues,
                     "reproducible_environment_missing",
@@ -751,7 +784,10 @@ impl SandboxManifest {
                 );
             }
             let lineage_valid = !output.parents.is_empty()
-                && output.parents.iter().all(|parent| artifacts.contains_key(parent));
+                && output
+                    .parents
+                    .iter()
+                    .all(|parent| artifacts.contains_key(parent));
             if self.policies.require_lineage && !lineage_valid {
                 blocking(
                     &mut issues,
@@ -798,7 +834,10 @@ impl SandboxManifest {
             .take(MAX_LIST)
             .map(|artifact| {
                 let digest_valid = valid_digest(&artifact.digest);
-                let lineage_valid = artifact.inputs.iter().all(|input| artifacts.contains_key(input))
+                let lineage_valid = artifact
+                    .inputs
+                    .iter()
+                    .all(|input| artifacts.contains_key(input))
                     && (!self.policies.require_lineage
                         || artifact.kind == SandboxArtifactKind::SourceCode
                         || !artifact.inputs.is_empty());
@@ -854,15 +893,18 @@ impl SandboxManifest {
                     SandboxNetworkMode::Deny => profile.network_allowlist.is_empty(),
                     SandboxNetworkMode::Allowlist => {
                         !profile.network_allowlist.is_empty()
-                            && profile.network_allowlist.iter().all(|item| valid_network_target(item))
+                            && profile
+                                .network_allowlist
+                                .iter()
+                                .all(|item| valid_network_target(item))
                     }
                     SandboxNetworkMode::Unrestricted => false,
                 };
                 let mounts_valid = profile.mounts.iter().all(|mount| valid_path(&mount.target));
                 let capabilities_valid = profile.capabilities.iter().all(|id| {
-                    capability_audits.iter().any(|capability| {
-                        capability.capability_id == *id && capability.ready
-                    })
+                    capability_audits
+                        .iter()
+                        .any(|capability| capability.capability_id == *id && capability.ready)
                 });
                 let resources_valid = resources_bounded(&profile.resources);
                 let output_valid = profile.output_quarantine && profile.release_requires_review;
@@ -895,7 +937,10 @@ impl SandboxManifest {
                 network_mode: profile.network,
                 allowlist_valid: profile.network != SandboxNetworkMode::Unrestricted
                     && (profile.network == SandboxNetworkMode::Deny
-                        || profile.network_allowlist.iter().all(|item| valid_network_target(item))),
+                        || profile
+                            .network_allowlist
+                            .iter()
+                            .all(|item| valid_network_target(item))),
                 host_paths_rejected: profile.mounts.iter().all(|mount| valid_path(&mount.target)),
                 dangerous_capabilities: profile
                     .capabilities
@@ -920,9 +965,15 @@ impl SandboxManifest {
                 profile_id: profile.id.clone(),
                 cpu_bounded: profile.resources.cpu_millis.is_some_and(|value| value > 0),
                 memory_bounded: profile.resources.memory_mb.is_some_and(|value| value > 0),
-                wall_time_bounded: profile.resources.wall_time_seconds.is_some_and(|value| value > 0),
+                wall_time_bounded: profile
+                    .resources
+                    .wall_time_seconds
+                    .is_some_and(|value| value > 0),
                 processes_bounded: profile.resources.processes.is_some_and(|value| value > 0),
-                output_bounded: profile.resources.output_bytes.is_some_and(|value| value > 0),
+                output_bounded: profile
+                    .resources
+                    .output_bytes
+                    .is_some_and(|value| value > 0),
                 ready: resources_bounded(&profile.resources),
             })
             .collect::<Vec<_>>();
@@ -935,7 +986,10 @@ impl SandboxManifest {
                 let artifact_valid = artifacts.contains_key(&output.artifact);
                 let digest_valid = valid_digest(&output.digest);
                 let lineage_valid = !output.parents.is_empty()
-                    && output.parents.iter().all(|parent| artifacts.contains_key(parent));
+                    && output
+                        .parents
+                        .iter()
+                        .all(|parent| artifacts.contains_key(parent));
                 let review_valid = !output.released
                     || (output.reviewed && valid_digest_option(output.review_evidence.as_ref()));
                 let release_valid = !output.released || (output.quarantined && review_valid);
@@ -972,7 +1026,10 @@ impl SandboxManifest {
                 .filter(|artifact| artifact.trust == SandboxTrust::Untrusted)
                 .count(),
             profiles: self.profiles.len(),
-            isolated_profiles: profile_audits.iter().filter(|profile| profile.isolation_valid).count(),
+            isolated_profiles: profile_audits
+                .iter()
+                .filter(|profile| profile.isolation_valid)
+                .count(),
             capabilities: self.capabilities.len(),
             approved_capabilities: self
                 .capabilities
@@ -985,7 +1042,11 @@ impl SandboxManifest {
                 .filter(|capability| capability.kind.dangerous())
                 .count(),
             outputs: self.outputs.len(),
-            quarantined_outputs: self.outputs.iter().filter(|output| output.quarantined).count(),
+            quarantined_outputs: self
+                .outputs
+                .iter()
+                .filter(|output| output.quarantined)
+                .count(),
             released_outputs: self.outputs.iter().filter(|output| output.released).count(),
         };
         let valid = !issues
@@ -1059,8 +1120,8 @@ fn resources_bounded(resources: &SandboxResourceLimits) -> bool {
         && resources.output_bytes.is_some_and(|value| value > 0)
 }
 
-fn insert_unique<'a, T>(
-    map: &mut BTreeMap<String, &'a T>,
+fn insert_unique<T>(
+    map: &mut BTreeMap<String, &T>,
     id: &str,
     kind: &str,
     issues: &mut Vec<SandboxIssue>,
@@ -1114,16 +1175,80 @@ mod tests {
     fn manifest() -> SandboxManifest {
         SandboxManifest {
             schema: SANDBOX_MANIFEST_SCHEMA.into(),
-            system: SandboxSystem { id: "aurora-sandbox".into(), version: "0.1.0".into(), owner: "platform".into() },
+            system: SandboxSystem {
+                id: "aurora-sandbox".into(),
+                version: "0.1.0".into(),
+                owner: "platform".into(),
+            },
             artifacts: vec![
-                SandboxArtifact { id: "source".into(), kind: SandboxArtifactKind::SourceCode, digest: "a".repeat(64), source: "repo/source.py".into(), producer: "ci".into(), trust: SandboxTrust::Reviewed, inputs: vec![] },
-                SandboxArtifact { id: "dataset".into(), kind: SandboxArtifactKind::Dataset, digest: "b".repeat(64), source: "registry/dataset".into(), producer: "registry".into(), trust: SandboxTrust::Untrusted, inputs: vec!["source".into()] },
+                SandboxArtifact {
+                    id: "source".into(),
+                    kind: SandboxArtifactKind::SourceCode,
+                    digest: "a".repeat(64),
+                    source: "repo/source.py".into(),
+                    producer: "ci".into(),
+                    trust: SandboxTrust::Reviewed,
+                    inputs: vec![],
+                },
+                SandboxArtifact {
+                    id: "dataset".into(),
+                    kind: SandboxArtifactKind::Dataset,
+                    digest: "b".repeat(64),
+                    source: "registry/dataset".into(),
+                    producer: "registry".into(),
+                    trust: SandboxTrust::Untrusted,
+                    inputs: vec!["source".into()],
+                },
             ],
             profiles: vec![SandboxExecutionProfile {
-                id: "profile".into(), artifact: "dataset".into(), runtime: "oci".into(), image_digest: Some("c".repeat(64)), environment_digest: Some("d".repeat(64)), user: "runner".into(), rootless: true, read_only_root: true, no_privilege_escalation: true, network: SandboxNetworkMode::Allowlist, network_allowlist: vec!["packages.example".into()], mounts: vec![SandboxMount { id: "input".into(), source_artifact: "dataset".into(), target: "/inputs/data".into(), mode: SandboxMountMode::ReadOnly }], capabilities: vec!["network".into()], resources: SandboxResourceLimits { cpu_millis: Some(1000), memory_mb: Some(1024), wall_time_seconds: Some(60), processes: Some(8), output_bytes: Some(1_000_000) }, output_quarantine: true, release_requires_review: true,
+                id: "profile".into(),
+                artifact: "dataset".into(),
+                runtime: "oci".into(),
+                image_digest: Some("c".repeat(64)),
+                environment_digest: Some("d".repeat(64)),
+                user: "runner".into(),
+                rootless: true,
+                read_only_root: true,
+                no_privilege_escalation: true,
+                network: SandboxNetworkMode::Allowlist,
+                network_allowlist: vec!["packages.example".into()],
+                mounts: vec![SandboxMount {
+                    id: "input".into(),
+                    source_artifact: "dataset".into(),
+                    target: "/inputs/data".into(),
+                    mode: SandboxMountMode::ReadOnly,
+                }],
+                capabilities: vec!["network".into()],
+                resources: SandboxResourceLimits {
+                    cpu_millis: Some(1000),
+                    memory_mb: Some(1024),
+                    wall_time_seconds: Some(60),
+                    processes: Some(8),
+                    output_bytes: Some(1_000_000),
+                },
+                output_quarantine: true,
+                release_requires_review: true,
             }],
-            capabilities: vec![SandboxCapability { id: "network".into(), profile: "profile".into(), kind: SandboxCapabilityKind::NetworkEgress, target: "packages.example".into(), decision: SandboxDecision::Allow, evidence_digest: Some("e".repeat(64)) }],
-            outputs: vec![SandboxOutput { id: "result".into(), profile: "profile".into(), artifact: "dataset".into(), digest: "f".repeat(64), destination: "quarantine".into(), quarantined: true, released: false, reviewed: false, review_evidence: None, parents: vec!["dataset".into()] }],
+            capabilities: vec![SandboxCapability {
+                id: "network".into(),
+                profile: "profile".into(),
+                kind: SandboxCapabilityKind::NetworkEgress,
+                target: "packages.example".into(),
+                decision: SandboxDecision::Allow,
+                evidence_digest: Some("e".repeat(64)),
+            }],
+            outputs: vec![SandboxOutput {
+                id: "result".into(),
+                profile: "profile".into(),
+                artifact: "dataset".into(),
+                digest: "f".repeat(64),
+                destination: "quarantine".into(),
+                quarantined: true,
+                released: false,
+                reviewed: false,
+                review_evidence: None,
+                parents: vec!["dataset".into()],
+            }],
             policies: SandboxPolicies::default(),
         }
     }
@@ -1149,8 +1274,18 @@ mod tests {
         value.capabilities[0].evidence_digest = None;
         let audit = value.audit().expect("audit");
         assert!(!audit.valid);
-        for code in ["rootless_required", "network_boundary_invalid", "resource_limits_missing", "capability_target_broad", "dangerous_capability_evidence_missing"] {
-            assert!(audit.issues.iter().any(|issue| issue.code == code), "missing {code}: {:?}", audit.issues);
+        for code in [
+            "rootless_required",
+            "network_boundary_invalid",
+            "resource_limits_missing",
+            "capability_target_broad",
+            "dangerous_capability_evidence_missing",
+        ] {
+            assert!(
+                audit.issues.iter().any(|issue| issue.code == code),
+                "missing {code}: {:?}",
+                audit.issues
+            );
         }
     }
 
@@ -1162,7 +1297,13 @@ mod tests {
         value.outputs[0].reviewed = false;
         let audit = value.audit().expect("audit");
         assert!(!audit.valid);
-        assert!(audit.issues.iter().any(|issue| issue.code == "released_output_unreviewed"));
-        assert!(audit.issues.iter().any(|issue| issue.code == "released_output_not_quarantined"));
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "released_output_unreviewed"));
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "released_output_not_quarantined"));
     }
 }

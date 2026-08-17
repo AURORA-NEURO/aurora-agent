@@ -7,7 +7,8 @@ available as a library (`bioprism_api::ApiRouter`) and as the `bioprism-api` bin
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes> \
   --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
   --event-state .local/event-state.json \
-  --reconciliation-state .local/reconciliation-state.json
+  --reconciliation-state .local/reconciliation-state.json \
+  --artifact-state .local/artifact-state.json
 ```
 
 The gateway is intentionally bounded and one-request-per-connection. Headers default to 32 KiB,
@@ -56,6 +57,12 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/evidence-bundles/{bundle_digest}` | Fetch one verified bundle by content hash |
 | `GET /v1/evidence-bundles/persistence` | Inspect restart-safe evidence registry checkpoint integrity and bounds |
 | `POST /v1/evidence-bundles/persistence/flush` | Force an atomic evidence registry checkpoint |
+| `POST /v1/artifacts` | Register one bounded exact-content cross-domain artifact |
+| `GET /v1/artifacts?kind=&domain=&subject_id=&after=&limit=&include_artifacts=` | Query digest-ordered artifact index rows |
+| `GET /v1/artifacts/{content_digest}` | Fetch one artifact record and its verification posture |
+| `GET /v1/artifacts/{content_digest}/lineage` | Traverse bounded parent lineage with explicit missing parents and cycles |
+| `GET /v1/artifacts/persistence` | Inspect restart-safe artifact registry checkpoint integrity and bounds |
+| `POST /v1/artifacts/persistence/flush` | Force an atomic artifact registry checkpoint |
 | `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |

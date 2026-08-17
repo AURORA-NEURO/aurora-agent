@@ -236,7 +236,10 @@ impl EngineeringManifest {
                 &mut issues,
                 "schema_mismatch",
                 "manifest",
-                format!("expected {ENGINEERING_MANIFEST_SCHEMA}, got {}", self.schema),
+                format!(
+                    "expected {ENGINEERING_MANIFEST_SCHEMA}, got {}",
+                    self.schema
+                ),
                 "regenerate the manifest with the published schema",
             );
         }
@@ -334,7 +337,7 @@ impl EngineeringManifest {
                 blocking(
                     &mut issues,
                     "package_cycle",
-                    &cycle.join(" -> "),
+                    cycle.join(" -> "),
                     "the package dependency graph contains a cycle".to_string(),
                     "break the cycle with an interface package or a one-way adapter",
                 );
@@ -386,7 +389,9 @@ impl EngineeringManifest {
                     "point the ticket at a declared package",
                 );
             }
-            if ticket.acceptance.is_empty() || ticket.acceptance.iter().any(|item| item.trim().is_empty()) {
+            if ticket.acceptance.is_empty()
+                || ticket.acceptance.iter().any(|item| item.trim().is_empty())
+            {
                 if self.policies.require_ticket_contracts {
                     blocking(
                         &mut issues,
@@ -459,7 +464,10 @@ impl EngineeringManifest {
                 .cloned()
                 .collect::<Vec<_>>();
             let dependency_ready = blocking_dependencies.is_empty()
-                && ticket.depends_on.iter().all(|dependency| ticket_map.contains_key(dependency));
+                && ticket
+                    .depends_on
+                    .iter()
+                    .all(|dependency| ticket_map.contains_key(dependency));
             let state = match ticket.status {
                 TicketStatus::Done => "complete",
                 TicketStatus::Blocked => "blocked",
@@ -502,16 +510,16 @@ impl EngineeringManifest {
                     );
                 }
             }
-            if adr.affects.is_empty() || adr.affects.iter().any(|item| item.trim().is_empty()) {
-                if self.policies.require_adr_targets {
-                    blocking(
-                        &mut issues,
-                        "adr_target_missing",
-                        &adr.id,
-                        "an ADR must name at least one affected surface".to_string(),
-                        "name the package, contract, or public surface changed by the decision",
-                    );
-                }
+            if (adr.affects.is_empty() || adr.affects.iter().any(|item| item.trim().is_empty()))
+                && self.policies.require_adr_targets
+            {
+                blocking(
+                    &mut issues,
+                    "adr_target_missing",
+                    &adr.id,
+                    "an ADR must name at least one affected surface".to_string(),
+                    "name the package, contract, or public surface changed by the decision",
+                );
             }
             adr_map.insert(adr.id.clone(), adr);
         }
@@ -539,7 +547,7 @@ impl EngineeringManifest {
             blocking(
                 &mut issues,
                 "adr_supersession_cycle",
-                &cycle.join(" -> "),
+                cycle.join(" -> "),
                 "ADR supersession must form a history, not a cycle".to_string(),
                 "retain one terminal decision and point newer records at it",
             );
@@ -558,28 +566,34 @@ impl EngineeringManifest {
                 );
             }
             ownership_surfaces.push(row.surface.clone());
-            if row.surface.trim().is_empty()
+            if (row.surface.trim().is_empty()
                 || row.accountable.trim().is_empty()
                 || row.responsible.is_empty()
-                || row.responsible.iter().any(|person| person.trim().is_empty())
+                || row
+                    .responsible
+                    .iter()
+                    .any(|person| person.trim().is_empty()))
+                && self.policies.require_ownership
             {
-                if self.policies.require_ownership {
-                    blocking(
-                        &mut issues,
-                        "ownership_row_incomplete",
-                        &row.surface,
-                        "a RACI row needs a surface, one accountable party, and one responsible party".to_string(),
-                        "complete the ownership row before treating it as a boundary",
-                    );
-                }
+                blocking(
+                    &mut issues,
+                    "ownership_row_incomplete",
+                    &row.surface,
+                    "a RACI row needs a surface, one accountable party, and one responsible party"
+                        .to_string(),
+                    "complete the ownership row before treating it as a boundary",
+                );
             }
             if let Some(reviewer) = &row.independent_reviewer {
-                if reviewer == &row.accountable || row.responsible.iter().any(|person| person == reviewer) {
+                if reviewer == &row.accountable
+                    || row.responsible.iter().any(|person| person == reviewer)
+                {
                     blocking(
                         &mut issues,
                         "reviewer_not_independent",
                         &row.surface,
-                        "the named independent reviewer is also accountable or responsible".to_string(),
+                        "the named independent reviewer is also accountable or responsible"
+                            .to_string(),
                         "name a reviewer outside the authoring and accountable roles",
                     );
                 }
@@ -598,7 +612,11 @@ impl EngineeringManifest {
             .count();
         let counts = EngineeringCounts {
             packages: self.packages.len(),
-            public_packages: self.packages.iter().filter(|package| package.public).count(),
+            public_packages: self
+                .packages
+                .iter()
+                .filter(|package| package.public)
+                .count(),
             tickets: self.tickets.len(),
             completed_tickets,
             actionable_tickets,
@@ -682,7 +700,10 @@ fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<St
         for dependency in dependencies {
             if graph.contains_key(dependency) {
                 *incoming.entry(node.clone()).or_default() += 1;
-                outgoing.entry(dependency.clone()).or_default().push(node.clone());
+                outgoing
+                    .entry(dependency.clone())
+                    .or_default()
+                    .push(node.clone());
             }
         }
     }
@@ -718,13 +739,22 @@ fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<St
     (order, cycles)
 }
 
-fn connected_cycles(graph: &BTreeMap<String, Vec<String>>, remaining: &BTreeSet<String>) -> Vec<Vec<String>> {
+fn connected_cycles(
+    graph: &BTreeMap<String, Vec<String>>,
+    remaining: &BTreeSet<String>,
+) -> Vec<Vec<String>> {
     let mut undirected = BTreeMap::<String, BTreeSet<String>>::new();
     for node in remaining {
         for dependency in graph.get(node).into_iter().flatten() {
             if remaining.contains(dependency) {
-                undirected.entry(node.clone()).or_default().insert(dependency.clone());
-                undirected.entry(dependency.clone()).or_default().insert(node.clone());
+                undirected
+                    .entry(node.clone())
+                    .or_default()
+                    .insert(dependency.clone());
+                undirected
+                    .entry(dependency.clone())
+                    .or_default()
+                    .insert(node.clone());
             }
         }
     }
@@ -774,7 +804,13 @@ fn visit_adr(
     }
     if !visiting.insert(id.to_string()) {
         let start = stack.iter().position(|item| item == id).unwrap_or(0);
-        return Some(stack[start..].iter().cloned().chain([id.to_string()]).collect());
+        return Some(
+            stack[start..]
+                .iter()
+                .cloned()
+                .chain([id.to_string()])
+                .collect(),
+        );
     }
     stack.push(id.to_string());
     if let Some(Some(next)) = adrs.get(id).map(|adr| adr.supersedes.as_ref()) {
@@ -891,7 +927,10 @@ mod tests {
         value.packages[0].depends_on = vec!["api".into(), "missing".into()];
         let report = value.audit().unwrap();
         assert!(!report.valid);
-        assert!(report.issues.iter().any(|issue| issue.code == "package_cycle"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "package_cycle"));
         assert!(report
             .issues
             .iter()
@@ -922,8 +961,14 @@ mod tests {
         ];
         value.ownership[0].independent_reviewer = Some("platform-lead".into());
         let report = value.audit().unwrap();
-        assert!(report.issues.iter().any(|issue| issue.code == "adr_supersession_cycle"));
-        assert!(report.issues.iter().any(|issue| issue.code == "reviewer_not_independent"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "adr_supersession_cycle"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "reviewer_not_independent"));
     }
 
     #[test]

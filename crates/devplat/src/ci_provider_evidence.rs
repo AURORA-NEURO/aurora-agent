@@ -150,6 +150,7 @@ fn check_known(check: Option<&str>, expected: &BTreeSet<String>) -> bool {
     check.map(|value| expected.contains(value)).unwrap_or(true)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn bind_row(
     findings: &mut Vec<CiEvidenceFinding>,
     subject: &str,

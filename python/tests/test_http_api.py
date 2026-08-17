@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionQueueFlushResult, MissionQueueInventory, MissionQueueLockReleaseResult, MissionQueueStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, ArtifactGetReport, ArtifactLineageReport, ArtifactQueryRequest, ArtifactRegistrationRequest, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionQueueFlushResult, MissionQueueInventory, MissionQueueLockReleaseResult, MissionQueueStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -104,6 +104,26 @@ def mission_queue_status_payload() -> dict:
         "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
         "does_not_claim": ["multi-host consensus or network-partition tolerance", "external effect completion", "provider authentication or tenant isolation"],
         "flush": "/v1/missions/queue/persistence/flush",
+    }
+
+
+def artifact_registration_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-artifact-register/0.1",
+        "workflow": "artifact_registry_register",
+        "content_digest": "a" * 64,
+        "kind": "domain_report",
+        "subject_id": "subject-1",
+        "declared_digest": None,
+        "verification": {"content_digest_verified": True, "semantic_verification": "not_run"},
+        "created": True,
+        "already_present": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+        "execution": "not_started",
+        "guarantees": ["exact content address"],
+        "does_not_claim": ["scientific validity"],
     }
 
 
@@ -348,6 +368,14 @@ class FakeApiHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/healthz":
             self._send(200, {"ok": True, "ready": True})
+        elif self.path.startswith("/v1/artifacts?"):
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-query/0.1", "workflow": "artifact_registry_query", "filters": {}, "registry_generation": 1, "registry_size": 1, "rows": [{"content_digest": "a" * 64, "kind": "domain_report", "subject_id": "subject-1", "domains": ["oncology"], "parent_digests": [], "declared_digest": None, "verification": {}}], "next_after": None, "has_more": False, "execution": "not_started", "guarantees": [], "does_not_claim": []})
+        elif self.path.endswith("/lineage") and self.path.startswith("/v1/artifacts/"):
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-lineage/0.1", "workflow": "artifact_registry_lineage", "root": "a" * 64, "nodes": [], "missing_parent_digests": ["b" * 64], "cycles": [], "bounded": True, "execution": "not_started", "guarantees": [], "does_not_claim": ["parent presence proves causal provenance or scientific validity"]})
+        elif self.path == "/v1/artifacts/persistence":
+            self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema": "bioprism-devplat-artifact-registry/0.1", "state_digest": "c" * 64, "integrity_verified": True, "registry_size": 1, "registry_generation": 1, "max_records": 512, "max_file_bytes": 64 * 1024 * 1024, "recovery_policy": "digest-valid records restore", "flush": "/v1/artifacts/persistence/flush"})
+        elif self.path.startswith("/v1/artifacts/"):
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-get/0.1", "workflow": "artifact_registry_get", "record": {"content_digest": "a" * 64, "kind": "domain_report", "subject_id": "subject-1", "domains": [], "parent_digests": [], "verification": {}, "artifact": {}}, "execution": "not_started", "guarantees": [], "does_not_claim": []})
         elif self.path == "/v1/tools":
             self._send(
                 200,
@@ -446,6 +474,10 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(size) or b"{}")
         if self.path == "/v1/missions/preflight":
             self._send(200, {"ok": True, "workflow": "agent_mission", "execution": "planned", "mission_status": "planned", "preflight": True, "dispatch": "not_started", "results": []})
+        elif self.path == "/v1/artifacts":
+            self._send(201, artifact_registration_payload())
+        elif self.path == "/v1/artifacts/persistence/flush":
+            self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema": "bioprism-devplat-artifact-registry/0.1", "state_digest": "c" * 64, "integrity_verified": True, "registry_size": 1, "registry_generation": 1, "max_records": 512, "max_file_bytes": 64 * 1024 * 1024, "recovery_policy": "digest-valid records restore", "flush": "/v1/artifacts/persistence/flush"})
         elif self.path == "/v1/missions":
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "queued", "cancel_requested": False})
         elif self.path == "/v1/missions/async-1/cancel":
@@ -518,6 +550,27 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertIs(page.deliveries[0].last_error_retryable, False)
         replayed = ApiClient(self.base_url).replay("sub", [1])
         self.assertEqual(replayed["replayed"][0]["state"], "pending")
+
+    def test_artifact_registry_http_surface_is_typed_and_lineage_explicit(self) -> None:
+        client = ApiClient(self.base_url)
+        registration = client.register_artifact(
+            ArtifactRegistrationRequest(
+                kind="domain_report",
+                subject_id="subject-1",
+                domains=("oncology",),
+                artifact={"status": "review_required"},
+            )
+        )
+        self.assertTrue(registration.created)
+        self.assertEqual(registration.content_digest, "a" * 64)
+        query = client.query_artifacts(ArtifactQueryRequest(domain="oncology"))
+        self.assertEqual(query.rows[0]["content_digest"], "a" * 64)
+        fetched = client.get_artifact("a" * 64)
+        self.assertIsInstance(fetched, ArtifactGetReport)
+        lineage = client.artifact_lineage("a" * 64)
+        self.assertIsInstance(lineage, ArtifactLineageReport)
+        self.assertEqual(lineage.missing_parent_digests, ("b" * 64,))
+        self.assertTrue(client.artifact_registry_persistence()["integrity_verified"])
 
     def test_http_health_tools_events_and_structured_errors(self) -> None:
         client = ApiClient(self.base_url, bearer_token="0123456789abcdef")

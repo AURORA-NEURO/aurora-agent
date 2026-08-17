@@ -28,6 +28,16 @@ from .analytics import (
     PairedObservation,
     analytics_request,
 )
+from .artifacts import (
+    ARTIFACT_KINDS,
+    ArtifactGetReport,
+    ArtifactGetRequest,
+    ArtifactLineageReport,
+    ArtifactQueryReport,
+    ArtifactQueryRequest,
+    ArtifactRegistrationReport,
+    ArtifactRegistrationRequest,
+)
 from .biological import (
     AdapterDescriptor,
     AdapterDescriptorReport,

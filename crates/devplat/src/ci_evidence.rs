@@ -326,9 +326,6 @@ pub fn audit_ci_execution_evidence(
         && complete
         && request.evidence.conclusion == CiRunConclusion::Success
         && passed_check_count == expected.len();
-    let mut required_missing = required_missing;
-    let mut required_failed = required_failed;
-    let mut optional_nonpassing = optional_nonpassing;
     required_missing.sort();
     required_failed.sort();
     optional_nonpassing.sort();
