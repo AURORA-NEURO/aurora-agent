@@ -29,9 +29,10 @@ budget, fault, and fork checks. The million-scale transport exposes mechanistic 
 qualification plus distributed placement, attestation, locality, fencing, and duplicate-effect
 audits. These endpoints make existing Rust contracts agent-callable; they do not claim that real
 containers, distributed workers, multi-node durable queues, external-state restoration, or
-biological calibration exist. The factory now has a bounded single-process checkpoint, explicit
-lease recovery, attempt fencing, and local admission/class occupancy bounds; that checkpoint is
-not a distributed queue or scheduler and does not provide tenant fairness.
+biological calibration exist. The factory now has a bounded shared-local-file authority envelope,
+explicit lease recovery, attempt fencing, transition journaling, orphan-lock audit, and local
+admission/class occupancy bounds; that authority is not multi-host consensus or a distributed
+scheduler and does not provide tenant fairness.
 The transport also exposes the deeper OncoWorld longitudinal-clock, integrated-classification, and
 identity-join contracts; these remain transport integrations of existing domain invariants and do
 not imply that clinical inference, identity or contamination oracles, or external data connectors
@@ -129,12 +130,15 @@ create a benchmark execution service, identity provider, durable public hub, OTL
 network publication path.
 The factory lifecycle and public-hub layers are now deeper as well: `factory_lifecycle_simulate`
 replays leases, expiry, idempotency-aware recovery, staged commits, compensation, quarantine, and
-cancellation; `hub_disclosure_review`, `hub_card_render`, and `hub_leaderboard_render` preserve
+cancellation; `factory_authority_verify` verifies the shared-local-file queue envelope and
+hash-chained transition journal without dispatch; `hub_disclosure_review`, `hub_card_render`, and `hub_leaderboard_render` preserve
 digest-bound disclosure ratchets, publication-state score withholding, comparability, and
 unranked reasons. `release_audit` composes registry, bundle, quality, conformance, research-CI,
 operations, pack-health, repository-impact, and developer-platform evidence into a strict required
 gate plus advisory projection. These are bounded local workflows, not durable queues, identity
-providers, web pages, public-key signatures, CI runners, or deployment approvals.
+providers, web pages, public-key signatures, CI runners, or deployment approvals. The authority
+coordinates cooperating processes on one local filesystem, but does not implement multi-host
+consensus, network-partition tolerance, or tenant fairness.
 `developer_delivery_audit` now composes the developer-platform and repository baselines with
 optional SDK admission, conformance, provider capability, governance-document, conservative
 impact, and release evidence. Its explicit target matrix makes local delivery, guarded claims,

@@ -7858,6 +7858,8 @@ export interface MissionQueueStatus extends JsonObject {
   file_bytes: number | null;
   schema_version: number;
   state_digest: string;
+  authority_digest: string;
+  authority: JsonObject;
   integrity_verified: boolean | null;
   max_file_bytes: number;
   admission_policy: JsonObject;
@@ -7889,6 +7891,18 @@ export interface MissionQueueFlushResponse extends JsonObject {
   queue: MissionQueueStatus;
   request_id: string;
   guarantees: string[];
+}
+
+export interface MissionQueueLockReleaseResponse extends JsonObject {
+  ok: true;
+  receipt: {
+    operator: string;
+    reason: string;
+    previous_owner: JsonObject;
+    recorded_revision: number;
+  };
+  request_id: string;
+  warning: string;
 }
 
 export interface EventPersistenceStatus extends JsonObject {

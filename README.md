@@ -342,12 +342,19 @@ idempotency class, attempts, staged/committed output boundaries, and explicit st
 `--mission-queue-max-jobs` and `--mission-queue-max-active-leases` add explicit local queue
 backpressure; the queue status reports per-resource-class fair-share limits and observed lease
 occupancy. Each lease attempt is also a fencing token, preventing stale attempts from committing
-after recovery. These controls are process-local and do not provide tenant isolation or
-cross-node fencing.
+after recovery. The queue checkpoint is now an execution-authority envelope: queue state and a
+bounded hash-chained transition journal are atomically replaced together, and cooperating API
+processes sharing the same local filesystem serialize mutations through a bounded lock. Status
+reports both the queue digest and authority digest, revision, event count, lock state, and
+integrity result. `POST /v1/missions/queue/authority/release-lock` is an attributed, audited
+operator override for a lock whose owner is known to be gone. This is local shared-file
+coordination; it does not provide tenant isolation, multi-host consensus, or network-partition
+tolerance.
 `GET /v1/missions/queue` exposes that queue projection without returning the original mission
 specification. Expired idempotent work is requeued and ambiguous non-idempotent work is quarantined,
-but no recovered job is automatically dispatched; the checkpoint is a single-process recovery
-image, not distributed scheduling, provider authentication, or proof of external effect completion.
+but no recovered job is automatically dispatched; the authority is a local recovery and audit
+boundary, not multi-host scheduling, provider authentication, or proof of external effect
+completion.
 `--event-state` checkpoints retained events, subscription metadata, and signed pending outbox rows while never persisting
 webhook secrets; the current schema-5 checkpoint is content-addressed with a SHA-256
 `state_digest`, and startup rejects tampering before restoring rows. It also retains a bounded,
@@ -567,7 +574,8 @@ semantic-loss report and optionally evaluates observed-versus-asserted operation
 three surfaces are local contract workflows only: they do not publish to a network, authenticate
 identities, persist a hub ledger, export OTLP, execute models, or make clinical claims.
 `factory_lifecycle_simulate` adds deterministic lease, expiry, idempotency, compensation, quarantine,
-and atomic-commit replay; `hub_disclosure_review`, `hub_card_render`, and `hub_leaderboard_render`
+and atomic-commit replay; `factory_authority_verify` audits the durable queue envelope and bounded
+transition chain without dispatching work; `hub_disclosure_review`, `hub_card_render`, and `hub_leaderboard_render`
 carry disclosure ratchets, fail-closed score publication, comparability conditions, and typed
 unranked entries into agent-callable public-hub projections. `release_audit` composes required
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while

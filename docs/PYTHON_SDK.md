@@ -639,13 +639,17 @@ invent defaults:
   idempotency class, attempt counters, recovery metadata, and links while keeping the checkpointed
   job specification out of the inventory. `mission_queue_persistence()` returns a typed
   `MissionQueueStatus` with the content digest, atomic-checkpoint integrity result, and startup
-  recovery rows plus admission/backpressure limits and observed lease occupancy.
+  recovery rows plus admission/backpressure limits and observed lease occupancy. Its `authority`
+  projection exposes the shared-file lock, revision, event count, authority digest, and queue
+  digest so operators can distinguish a queue projection from the journal that authorized it.
   `flush_mission_queue_persistence()` returns a typed `MissionQueueFlushResult`. Queue attempt
   numbers are local fencing tokens; a stale attempt is refused even when a worker identity is
   reused.
-  These methods expose the bounded single-process factory checkpoint; `automatic_resume` is
-  explicitly false and no method claims distributed scheduling, cross-node lease fencing, authentication,
-  tenant isolation, or external-effect completion.
+  `release_mission_queue_lock(operator, reason)` and its async counterpart provide the explicit,
+  attributed operator override for a stale local authority lock and return the recorded release
+  revision. These methods expose cooperating-process local-file authority; `automatic_resume` is
+  explicitly false and no method claims multi-host consensus, network-partition tolerance,
+  authentication, tenant isolation, or external-effect completion.
   `recovery_matrix()` and its async counterpart provide one typed matrix that keeps mission,
   event, subscription, outbox, secret, and external-effect recovery boundaries separate.
   `operations_snapshot(after=..., limit=...)` and its async counterpart return a typed

@@ -22,24 +22,31 @@
 //!
 //! ## Not implemented
 //!
-//! The live controller is single-process and time is passed in rather than read from a clock so
-//! the lifecycle is deterministically testable. It now provides a bounded, content-addressed JSON
-//! checkpoint with cross-index validation and atomic replacement, plus an explicit startup sweep
-//! for expired leases. A durable multi-node deployment still needs the append-only event ledger of
-//! 40.09, a transactional backend, cross-node lease fencing, and an authenticated worker
-//! identity. The local controller now has explicit queue admission and per-resource-class
-//! fair-share limits, but cross-node scheduling and tenant fairness remain absent rather than
-//! stubbed.
+//! The in-memory controller is single-process and time is passed in rather than read from a clock
+//! so the lifecycle is deterministically testable. [`authority::SharedExecutionAuthority`] wraps
+//! it in a bounded, content-addressed JSON envelope with an atomic queue-plus-journal write,
+//! hash-chained transitions, startup recovery, and a cooperative local-filesystem lock for
+//! cooperating processes. A durable multi-host deployment still needs the append-only event ledger
+//! of 40.09 behind a transactional backend, cross-host fencing/consensus, and authenticated worker
+//! identity. Tenant fairness, provider effects, and network-partition tolerance remain absent
+//! rather than stubbed.
 
-pub mod error;
 pub mod admission;
+pub mod authority;
+pub mod error;
 pub mod job;
 pub mod lease;
 pub mod snapshot;
 pub mod store;
 
-pub use error::FactoryError;
 pub use admission::QueueAdmissionPolicy;
+pub use authority::{
+    AuthorityLockInfo, AuthorityLockRelease, AuthorityMutation, ExecutionAuthoritySnapshot,
+    ExecutionAuthorityStatus, ExecutionOperation, ExecutionTransition, SharedExecutionAuthority,
+    EXECUTION_AUTHORITY_SCHEMA_VERSION, MAX_EXECUTION_AUTHORITY_BYTES,
+    MAX_EXECUTION_AUTHORITY_EVENTS,
+};
+pub use error::FactoryError;
 pub use job::{Idempotency, Job, JobState, ResourceClass};
 pub use lease::{Lease, WorkerCapability};
 pub use snapshot::{

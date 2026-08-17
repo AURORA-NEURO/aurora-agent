@@ -1729,6 +1729,8 @@ class MissionQueueStatus:
     file_bytes: int | None
     schema_version: int
     state_digest: str
+    authority_digest: str
+    authority: Mapping[str, Any]
     integrity_verified: bool | None
     max_file_bytes: int
     admission_policy: Mapping[str, Any]
@@ -1774,6 +1776,32 @@ class MissionQueueStatus:
             or any(character not in "0123456789abcdef" for character in state_digest)
         ):
             raise ArgumentError("mission queue state_digest must be 64 lowercase hexadecimal characters")
+        authority_digest = raw.get("authority_digest")
+        if (
+            not isinstance(authority_digest, str)
+            or len(authority_digest) != 64
+            or any(character not in "0123456789abcdef" for character in authority_digest)
+        ):
+            raise ArgumentError("mission queue authority_digest must be 64 lowercase hexadecimal characters")
+        authority_value = raw.get("authority")
+        if not isinstance(authority_value, Mapping):
+            raise ArgumentError("mission queue authority must be an object")
+        authority = dict(authority_value)
+        for name in ("revision", "event_count"):
+            candidate = authority.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission queue authority {name} must be a non-negative integer")
+        queue_state_digest = authority.get("queue_state_digest")
+        if (
+            not isinstance(queue_state_digest, str)
+            or len(queue_state_digest) != 64
+            or any(character not in "0123456789abcdef" for character in queue_state_digest)
+        ):
+            raise ArgumentError("mission queue authority queue_state_digest must be 64 lowercase hexadecimal characters")
+        if queue_state_digest != state_digest:
+            raise ArgumentError("mission queue authority queue_state_digest must match state_digest")
+        if authority.get("integrity_verified") is not True:
+            raise ArgumentError("mission queue authority integrity_verified must be true")
         integrity_verified = raw.get("integrity_verified")
         if integrity_verified is not None and not isinstance(integrity_verified, bool):
             raise ArgumentError("mission queue integrity_verified must be a boolean or null")
@@ -1822,6 +1850,8 @@ class MissionQueueStatus:
             file_bytes,
             schema_version,
             state_digest,
+            authority_digest,
+            authority,
             integrity_verified,
             non_negative("max_file_bytes"),
             admission_policy,
@@ -1913,6 +1943,46 @@ class MissionQueueFlushResult:
             _text("mission queue flush guarantee", guarantee)
             guarantee_values.append(guarantee)
         return cls(raw, byte_count, MissionQueueStatus.from_wire(queue), request_id, tuple(guarantee_values))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionQueueLockReleaseResult:
+    """Typed receipt for an explicitly attributed orphan-lock release."""
+
+    raw: dict[str, Any]
+    operator: str
+    reason: str
+    previous_owner: Mapping[str, Any]
+    recorded_revision: int
+    request_id: str
+    warning: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueLockReleaseResult":
+        raw = _mapping("mission queue lock release", value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("mission queue lock release ok must be true")
+        receipt = raw.get("receipt")
+        if not isinstance(receipt, Mapping):
+            raise ArgumentError("mission queue lock release receipt must be an object")
+        operator = receipt.get("operator")
+        reason = receipt.get("reason")
+        _text("mission queue lock release operator", operator)
+        _text("mission queue lock release reason", reason)
+        previous_owner = receipt.get("previous_owner")
+        if not isinstance(previous_owner, Mapping):
+            raise ArgumentError("mission queue lock release previous_owner must be an object")
+        recorded_revision = receipt.get("recorded_revision")
+        if not isinstance(recorded_revision, int) or isinstance(recorded_revision, bool) or recorded_revision < 0:
+            raise ArgumentError("mission queue lock release recorded_revision must be a non-negative integer")
+        request_id = raw.get("request_id")
+        warning = raw.get("warning")
+        _text("mission queue lock release request_id", request_id)
+        _text("mission queue lock release warning", warning)
+        return cls(raw, operator, reason, dict(previous_owner), recorded_revision, request_id, warning)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -2185,6 +2255,7 @@ __all__ = [
     "MissionQueueStatus",
     "MissionQueueInventory",
     "MissionQueueFlushResult",
+    "MissionQueueLockReleaseResult",
     "MissionTraceEvent",
     "MissionPreflightError",
     "MissionRouteSelection",

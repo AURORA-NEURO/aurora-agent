@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionQueueFlushResult, MissionQueueInventory, MissionQueueStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionQueueFlushResult, MissionQueueInventory, MissionQueueLockReleaseResult, MissionQueueStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -79,6 +79,8 @@ def mission_queue_status_payload() -> dict:
         "file_bytes": 128,
         "schema_version": 1,
         "state_digest": "a" * 64,
+        "authority_digest": "b" * 64,
+        "authority": {"configured": True, "revision": 3, "event_count": 3, "queue_state_digest": "a" * 64, "integrity_verified": True, "lock_present": False, "execution_scope": "cooperating processes sharing one local filesystem"},
         "integrity_verified": True,
         "max_file_bytes": 64 * 1024 * 1024,
         "admission_policy": {"max_jobs": 4096, "max_active_leases": 64, "observed_active_leases": 0, "max_jobs_by_class": {"evaluate": 4096}, "max_active_leases_by_class": {"evaluate": 64}, "backpressure": "refuse_before_checkpoint_mutation"},
@@ -98,9 +100,9 @@ def mission_queue_status_payload() -> dict:
         }],
         "startup_recoveries": [],
         "automatic_resume": False,
-        "execution_scope": "single-process-api-worker",
+        "execution_scope": "cooperating processes sharing one local filesystem",
         "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
-        "does_not_claim": ["distributed scheduling or cross-node lease fencing", "external effect completion", "provider authentication or tenant isolation"],
+        "does_not_claim": ["multi-host consensus or network-partition tolerance", "external effect completion", "provider authentication or tenant isolation"],
         "flush": "/v1/missions/queue/persistence/flush",
     }
 
@@ -450,6 +452,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "running", "cancel_requested": True, "cancel_reason": body.get("reason")})
         elif self.path == "/v1/missions/queue/persistence/flush":
             self._send(200, {"ok": True, "bytes": 128, "queue": mission_queue_status_payload(), "request_id": "queue-flush-1", "guarantees": ["the checkpoint is content-addressed and atomically replaced", "a successful flush does not claim external effect completion"]})
+        elif self.path == "/v1/missions/queue/authority/release-lock":
+            self._send(200, {"ok": True, "receipt": {"operator": body.get("operator"), "reason": body.get("reason"), "previous_owner": {"owner_id": "dead-api-process", "acquired_unix_nanos": 7}, "recorded_revision": 4}, "request_id": "queue-unlock-1", "warning": "release is an explicit operator override"})
         elif self.path in {"/v1/missions/persistence/flush", "/v1/events/persistence/flush"}:
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/operations/gate-reviews":
@@ -579,6 +583,11 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertFalse(queue_status.automatic_resume)
         self.assertTrue(queue_status.integrity_verified)
         self.assertEqual(queue_status.admission_policy["max_active_leases"], 64)
+        self.assertEqual(queue_status.authority["queue_state_digest"], queue_status.state_digest)
+        self.assertIsInstance(
+            client.release_mission_queue_lock("on-call", "confirmed previous process exited"),
+            MissionQueueLockReleaseResult,
+        )
         self.assertIsInstance(client.flush_mission_queue_persistence(), MissionQueueFlushResult)
         with self.assertRaises(ArgumentError):
             client.wait_mission("async-1", timeout=0)
@@ -1310,6 +1319,11 @@ class HttpApiClientTests(unittest.TestCase):
             queue_status = await client.mission_queue_persistence()
             self.assertIsInstance(queue_status, MissionQueueStatus)
             self.assertTrue(queue_status.integrity_verified)
+            self.assertEqual(queue_status.authority["queue_state_digest"], queue_status.state_digest)
+            self.assertIsInstance(
+                await client.release_mission_queue_lock("on-call", "confirmed previous process exited"),
+                MissionQueueLockReleaseResult,
+            )
             self.assertIsInstance(await client.flush_mission_queue_persistence(), MissionQueueFlushResult)
             snapshot = await client.operations_snapshot(limit=2)
             self.assertIsInstance(snapshot, OperationsSnapshot)

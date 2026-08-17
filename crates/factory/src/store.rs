@@ -8,12 +8,14 @@
 //! 3. outputs commit atomically;
 //! 4. cancellation and compensation are explicit.
 //!
-//! The live store is single-process. [`JobStore::checkpoint_to_path`] provides a bounded recovery
-//! image, but a multi-node deployment still needs the event ledger of 40.09, a transactional
-//! backend, and cross-node lease fencing; the checkpoint is not a substitute for those.
+//! The live [`JobStore`] is single-process. [`JobStore::checkpoint_to_path`] provides a bounded
+//! recovery image, while [`crate::authority::SharedExecutionAuthority`] adds a local shared-file
+//! lock and hash-chained transition journal for cooperating processes. A multi-host deployment
+//! still needs the event ledger of 40.09 behind a transactional backend, cross-host fencing and
+//! consensus; neither local checkpoint is a substitute for those.
 
-use crate::error::FactoryError;
 use crate::admission::QueueAdmissionPolicy;
+use crate::error::FactoryError;
 use crate::job::{Idempotency, Job, JobState, ResourceClass};
 use crate::lease::{Lease, WorkerCapability};
 use crate::snapshot::{
@@ -262,13 +264,19 @@ impl JobStore {
 
         let mut by_key = BTreeMap::new();
         for entry in snapshot.idempotency_index {
-            validate_identifier(&entry.key, MAX_JOB_STORE_SNAPSHOT_ID_BYTES, "idempotency key")?;
-            let job = jobs.get(&entry.job_id).ok_or_else(|| FactoryError::InvalidSnapshot {
-                reason: format!(
-                    "idempotency index entry {} references unknown job {}",
-                    entry.key, entry.job_id
-                ),
-            })?;
+            validate_identifier(
+                &entry.key,
+                MAX_JOB_STORE_SNAPSHOT_ID_BYTES,
+                "idempotency key",
+            )?;
+            let job = jobs
+                .get(&entry.job_id)
+                .ok_or_else(|| FactoryError::InvalidSnapshot {
+                    reason: format!(
+                        "idempotency index entry {} references unknown job {}",
+                        entry.key, entry.job_id
+                    ),
+                })?;
             if job.idempotency_key().as_str() != entry.key {
                 return Err(FactoryError::InvalidSnapshot {
                     reason: format!(
@@ -286,12 +294,14 @@ impl JobStore {
 
         let mut compensated = BTreeMap::new();
         for entry in snapshot.compensation {
-            let job = jobs.get(&entry.job_id).ok_or_else(|| FactoryError::InvalidSnapshot {
-                reason: format!(
-                    "compensation record references unknown job {}",
-                    entry.job_id
-                ),
-            })?;
+            let job = jobs
+                .get(&entry.job_id)
+                .ok_or_else(|| FactoryError::InvalidSnapshot {
+                    reason: format!(
+                        "compensation record references unknown job {}",
+                        entry.job_id
+                    ),
+                })?;
             if job.idempotency != Idempotency::Compensable {
                 return Err(FactoryError::InvalidSnapshot {
                     reason: format!(
@@ -348,18 +358,20 @@ impl JobStore {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            std::fs::create_dir_all(parent).map_err(|error| snapshot_io("create directory", path, error))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|error| snapshot_io("create directory", path, error))?;
         }
-        let filename = path.file_name().ok_or_else(|| FactoryError::SnapshotIo {
-            operation: "name temporary file".into(),
-            path: path.display().to_string(),
-            reason: "path must name a file".into(),
-        })?.to_string_lossy();
+        let filename = path
+            .file_name()
+            .ok_or_else(|| FactoryError::SnapshotIo {
+                operation: "name temporary file".into(),
+                path: path.display().to_string(),
+                reason: "path must name a file".into(),
+            })?
+            .to_string_lossy();
         let sequence = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
-        let temporary = path.with_file_name(format!(
-            ".{filename}.tmp-{}-{sequence}",
-            std::process::id()
-        ));
+        let temporary =
+            path.with_file_name(format!(".{filename}.tmp-{}-{sequence}", std::process::id()));
         if let Err(error) = std::fs::write(&temporary, &bytes) {
             let _ = std::fs::remove_file(&temporary);
             return Err(snapshot_io("write temporary file", &temporary, error));
@@ -401,6 +413,15 @@ impl JobStore {
         self.jobs.get(id)
     }
 
+    /// Return the live lease without exposing the store's mutable ownership boundary.
+    ///
+    /// Shared authority callers use this when an idempotent enqueue is retried after the first
+    /// process accepted the job. Returning the existing lease is safe because the lease still
+    /// carries the same attempt fence; minting a second lease would be the unsafe behavior.
+    pub fn active_lease(&self, job_id: &str) -> Option<&Lease> {
+        self.leases.get(job_id)
+    }
+
     /// Enqueues a job, deduplicating on its idempotency key.
     ///
     /// Returns the id of the existing job when the same work is already present, so a retrying
@@ -408,7 +429,11 @@ impl JobStore {
     pub fn enqueue(&mut self, job: Job) -> Result<String, FactoryError> {
         let key = job.idempotency_key().as_str().to_string();
         if let Some(existing) = self.by_key.get(&key) {
-            if self.jobs.get(existing).is_some_and(|j| !j.state.is_terminal()) {
+            if self
+                .jobs
+                .get(existing)
+                .is_some_and(|j| !j.state.is_terminal())
+            {
                 return Ok(existing.clone());
             }
         }
@@ -433,7 +458,11 @@ impl JobStore {
     ) -> Result<String, FactoryError> {
         let key = job.idempotency_key().as_str().to_string();
         if let Some(existing) = self.by_key.get(&key) {
-            if self.jobs.get(existing).is_some_and(|j| !j.state.is_terminal()) {
+            if self
+                .jobs
+                .get(existing)
+                .is_some_and(|j| !j.state.is_terminal())
+            {
                 return Ok(existing.clone());
             }
         }
@@ -476,7 +505,13 @@ impl JobStore {
                     return false;
                 }
                 match policy.max_active_leases_by_class.get(&job.resource_class) {
-                    Some(limit) => active_by_class.get(&job.resource_class).copied().unwrap_or(0) < *limit,
+                    Some(limit) => {
+                        active_by_class
+                            .get(&job.resource_class)
+                            .copied()
+                            .unwrap_or(0)
+                            < *limit
+                    }
                     None => true,
                 }
             })
@@ -486,7 +521,10 @@ impl JobStore {
             return Ok(None);
         }
         candidates.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
-        let job = candidates.into_iter().next().expect("candidate list is non-empty");
+        let job = candidates
+            .into_iter()
+            .next()
+            .expect("candidate list is non-empty");
         job.attempts += 1;
         job.state = JobState::Leased;
         let lease = Lease {
@@ -494,9 +532,7 @@ impl JobStore {
             worker_id: worker.worker_id.clone(),
             attempt: job.attempts,
             granted_at: now,
-            expires_at: Timestamp::from_nanos_utc(
-                now.as_nanos_utc() + worker.lease_duration_nanos,
-            ),
+            expires_at: Timestamp::from_nanos_utc(now.as_nanos_utc() + worker.lease_duration_nanos),
             last_heartbeat: now,
         };
         self.leases.insert(job.id.clone(), lease.clone());
@@ -530,9 +566,7 @@ impl JobStore {
             worker_id: worker.worker_id.clone(),
             attempt: job.attempts,
             granted_at: now,
-            expires_at: Timestamp::from_nanos_utc(
-                now.as_nanos_utc() + worker.lease_duration_nanos,
-            ),
+            expires_at: Timestamp::from_nanos_utc(now.as_nanos_utc() + worker.lease_duration_nanos),
             last_heartbeat: now,
         };
         self.leases.insert(job.id.clone(), lease.clone());
@@ -743,11 +777,7 @@ impl JobStore {
     }
 
     /// Releases a quarantined non-idempotent job after a human decided it is safe.
-    pub fn release_quarantine(
-        &mut self,
-        job_id: &str,
-        operator: &str,
-    ) -> Result<(), FactoryError> {
+    pub fn release_quarantine(&mut self, job_id: &str, operator: &str) -> Result<(), FactoryError> {
         if operator.trim().is_empty() {
             return Err(FactoryError::UnattributedRelease {
                 job_id: job_id.to_string(),
@@ -888,9 +918,11 @@ fn validate_output(
         MAX_JOB_STORE_SNAPSHOT_ID_BYTES,
         "output job id",
     )?;
-    let job = jobs.get(&output.job_id).ok_or_else(|| FactoryError::InvalidSnapshot {
-        reason: format!("output references unknown job {}", output.job_id),
-    })?;
+    let job = jobs
+        .get(&output.job_id)
+        .ok_or_else(|| FactoryError::InvalidSnapshot {
+            reason: format!("output references unknown job {}", output.job_id),
+        })?;
     if job.state != required_state {
         return Err(FactoryError::InvalidSnapshot {
             reason: format!(
@@ -904,9 +936,10 @@ fn validate_output(
             reason: format!("staged output for {} has no active lease", output.job_id),
         });
     }
-    let encoded = serde_json::to_vec(&output.value).map_err(|error| FactoryError::InvalidSnapshot {
-        reason: format!("output for {} is not serializable: {error}", output.job_id),
-    })?;
+    let encoded =
+        serde_json::to_vec(&output.value).map_err(|error| FactoryError::InvalidSnapshot {
+            reason: format!("output for {} is not serializable: {error}", output.job_id),
+        })?;
     if encoded.len() > MAX_JOB_STORE_SNAPSHOT_VALUE_BYTES {
         return Err(FactoryError::InvalidSnapshot {
             reason: format!(
@@ -920,11 +953,7 @@ fn validate_output(
     Ok(())
 }
 
-fn snapshot_io(
-    operation: &str,
-    path: &Path,
-    error: impl std::fmt::Display,
-) -> FactoryError {
+fn snapshot_io(operation: &str, path: &Path, error: impl std::fmt::Display) -> FactoryError {
     FactoryError::SnapshotIo {
         operation: operation.into(),
         path: path.display().to_string(),

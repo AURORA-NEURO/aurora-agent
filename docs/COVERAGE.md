@@ -10,17 +10,18 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 178 callable tools. That count is intentionally
+The MCP integration layer currently exposes 191 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
-contract, and observability projection workflows. `factory_lifecycle_simulate`,
+contract, and observability projection workflows. `factory_lifecycle_simulate` and
+`factory_authority_verify`,
 `hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, `release_audit`, and
 `developer_delivery_audit` now
 compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
 multi-node durable queues, identity, public-key signing, UI, OTLP export, and network publication
-explicit as unimplemented; the factory checkpoint is bounded single-process recovery state, not a
-distributed queue;
+explicit as unimplemented; the factory now has a shared-local-file authority envelope with a
+hash-chained transition journal, not a multi-host distributed queue;
 the Python MCP transport foundation is documented separately and does not imply the full SDK.
 `trace_otel_ingest` adds a bounded, dependency-free OTLP JSON span importer with source-preserving
 Event IR mapping and explicit semantic-loss accounting; it does not export to a collector or infer
@@ -153,8 +154,10 @@ queued/running jobs become explicit `failed` records with `recovered_after_resta
 restart, never falsely claiming that interrupted work resumed. The latter checkpoints the typed
 factory lease/idempotency lifecycle and classifies expired work without automatic dispatch. It also
 enforces configured total-job and active-lease backpressure, exposes per-resource-class occupancy,
-and uses lease attempts as local fencing tokens. This is restart-aware mission inspection plus bounded local queue recovery, not durable event ledger
-storage, distributed scheduling, provider execution, or effect rollback.
+and uses lease attempts as local fencing tokens. A shared authority lock serializes cooperating
+processes on one local filesystem, while an attributed release path records orphan-lock recovery.
+This is restart-aware mission inspection plus bounded local queue authority, not multi-host
+consensus, distributed scheduling, provider execution, or effect rollback.
 Mission-state schema 2 now carries a content SHA-256 digest and rejects tampered snapshots before
 restoration; schema 1 remains a migration input and is rewritten with a digest after startup.
 Mission and event persistence status now expose both the digest and an observation-time

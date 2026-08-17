@@ -11,15 +11,16 @@ use crate::events::{
 };
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
-    verify_mission_evidence_bundle, EvidenceBundleError, EvidenceBundleRegistry,
-    DomainWorkflowReconciliationRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
-    MissionEvaluatorReplayCompareRequest,
-    MissionEvaluatorReplayRequest, MAX_EVIDENCE_REGISTRY_BYTES,
+    verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleError,
+    EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
+    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MAX_EVIDENCE_REGISTRY_BYTES,
 };
 use bioprism_factory::{
-    Idempotency as FactoryIdempotency, Job as FactoryJob, JobStore, QueueAdmissionPolicy,
-    Lease as FactoryLease, Recovery as FactoryRecovery, ResourceClass, WorkerCapability,
-    JOB_STORE_SNAPSHOT_SCHEMA_VERSION, MAX_JOB_STORE_SNAPSHOT_BYTES,
+    AuthorityMutation, ExecutionOperation, Idempotency as FactoryIdempotency, Job as FactoryJob,
+    JobStore, Lease as FactoryLease, QueueAdmissionPolicy, Recovery as FactoryRecovery,
+    ResourceClass, SharedExecutionAuthority, WorkerCapability, EXECUTION_AUTHORITY_SCHEMA_VERSION,
+    JOB_STORE_SNAPSHOT_SCHEMA_VERSION, MAX_EXECUTION_AUTHORITY_BYTES,
 };
 use bioprism_ids::ContentHash;
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
@@ -201,8 +202,7 @@ struct MissionPersistence {
 
 struct MissionQueuePersistence {
     path: Option<PathBuf>,
-    queue: Arc<Mutex<JobStore>>,
-    lock: Mutex<()>,
+    authority: Arc<SharedExecutionAuthority>,
     startup_recoveries: Vec<FactoryRecovery>,
     admission_policy: QueueAdmissionPolicy,
 }
@@ -230,93 +230,95 @@ impl MissionQueuePersistence {
         admission_policy
             .validate()
             .map_err(|error| format!("invalid mission queue admission policy: {error}"))?;
-        let mut queue = match path.as_deref() {
-            Some(path) => JobStore::load_from_path(path)
-                .map_err(|error| format!("mission queue checkpoint could not be loaded: {error}"))?,
-            None => JobStore::new(),
-        };
+        let authority = SharedExecutionAuthority::open(path.clone())
+            .map_err(|error| format!("mission execution authority could not be opened: {error}"))?;
         let startup_recoveries = if path.is_some() {
             let now = current_timestamp()?;
-            queue.recover_expired(now)
+            authority
+                .mutate(
+                    AuthorityMutation::new(
+                        ExecutionOperation::LeaseRecovered,
+                        format!("startup-recovery-sweep:{}", now.as_nanos_utc()),
+                        None,
+                        Some(MISSION_QUEUE_WORKER_ID.into()),
+                        None,
+                        now,
+                        json!({ "source": "api_startup" }),
+                    ),
+                    |queue| Ok(queue.recover_expired(now)),
+                )
+                .map_err(|error| format!("mission queue startup recovery failed: {error}"))?
         } else {
             Vec::new()
         };
-        if let Some(path) = path.as_deref() {
-            queue
-                .checkpoint_to_path(path)
-                .map_err(|error| format!("mission queue checkpoint failed during startup: {error}"))?;
-        }
+        authority.flush().map_err(|error| {
+            format!("mission queue authority checkpoint failed during startup: {error}")
+        })?;
         Ok(Self {
             path,
-            queue: Arc::new(Mutex::new(queue)),
-            lock: Mutex::new(()),
+            authority,
             startup_recoveries,
             admission_policy,
         })
     }
 
     fn persist(&self) -> Result<usize, String> {
-        let Some(path) = self.path.as_deref() else {
-            return Ok(0);
-        };
-        let _write_guard = self
-            .lock
-            .lock()
-            .map_err(|_| "mission queue persistence lock is unavailable".to_string())?;
-        let queue = self
-            .queue
-            .lock()
-            .map_err(|_| "mission queue is unavailable".to_string())?;
-        queue
-            .checkpoint_to_path(path)
-            .map_err(|error| format!("mission queue checkpoint failed: {error}"))
+        self.authority
+            .flush()
+            .map_err(|error| format!("mission queue authority checkpoint failed: {error}"))
     }
 
-    /// Apply a queue transition transactionally. The candidate store is checkpointed before it
-    /// replaces the live projection, so a full disk or malformed result cannot leave memory ahead
-    /// of the durable boundary.
-    fn mutate<T, F>(&self, operation: &str, transition: F) -> Result<T, String>
+    /// Apply a queue transition through the shared authority. The queue image and journal row are
+    /// committed together, and a second process reloads the latest image while holding the file
+    /// lock instead of mutating a stale in-memory copy.
+    fn mutate<T, F>(&self, mutation: AuthorityMutation, transition: F) -> Result<T, String>
     where
         F: FnOnce(&mut JobStore) -> Result<T, String>,
     {
-        let _write_guard = self
-            .lock
-            .lock()
-            .map_err(|_| "mission queue persistence lock is unavailable".to_string())?;
-        let mut queue = self
-            .queue
-            .lock()
-            .map_err(|_| "mission queue is unavailable".to_string())?;
-        let mut candidate = queue.clone();
-        let value = transition(&mut candidate)
-            .map_err(|error| format!("mission queue {operation} was refused: {error}"))?;
-        if let Some(path) = self.path.as_deref() {
-            candidate.checkpoint_to_path(path).map_err(|error| {
-                format!("mission queue {operation} could not be checkpointed: {error}")
-            })?;
-        }
-        *queue = candidate;
-        Ok(value)
+        self.authority
+            .mutate(mutation.clone(), |queue| {
+                transition(queue).map_err(|error| {
+                    bioprism_factory::FactoryError::InvalidAuthoritySnapshot { reason: error }
+                })
+            })
+            .map_err(|error| {
+                format!(
+                    "mission queue {:?} was refused: {error}",
+                    mutation.operation
+                )
+            })
     }
 
-    fn enqueue_and_lease(
-        &self,
-        job: FactoryJob,
-        now: Timestamp,
-    ) -> Result<FactoryLease, String> {
+    fn enqueue_and_lease(&self, job: FactoryJob, now: Timestamp) -> Result<FactoryLease, String> {
         let mission_id = job.id.clone();
-        self.mutate("enqueue", move |queue| {
+        let work_digest = job.idempotency_key().to_string();
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::EnqueueAndLease,
+            format!("queue-enqueue-lease:{mission_id}"),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            Some(job.attempts.saturating_add(1).max(1)),
+            now,
+            json!({
+                "resource_class": job.resource_class,
+                "work_digest": work_digest,
+            }),
+        );
+        self.mutate(mutation, move |queue| {
             let accepted = queue
                 .enqueue_with_policy(job, &self.admission_policy)
                 .map_err(|error| error.to_string())?;
             if accepted != mission_id {
-                return Err(format!("duplicate work is already represented by {accepted}"));
+                return Err(format!(
+                    "duplicate work is already represented by {accepted}"
+                ));
             }
-            let worker = WorkerCapability::new(
-                MISSION_QUEUE_WORKER_ID,
-                vec![ResourceClass::Evaluate],
-            )
-            .with_lease_duration_nanos(MISSION_QUEUE_LEASE_DURATION_NANOS);
+            if let Some(lease) = queue.active_lease(&mission_id) {
+                return Ok(lease.clone());
+            }
+            let worker =
+                WorkerCapability::new(MISSION_QUEUE_WORKER_ID, vec![ResourceClass::Evaluate])
+                    .with_lease_duration_nanos(MISSION_QUEUE_LEASE_DURATION_NANOS);
             queue
                 .lease_with_policy(&worker, now, &self.admission_policy)
                 .map_err(|error| error.to_string())?
@@ -326,7 +328,19 @@ impl MissionQueuePersistence {
 
     fn heartbeat(&self, mission_id: &str, attempt: u32, now: Timestamp) -> Result<(), String> {
         let mission_id = mission_id.to_string();
-        self.mutate("heartbeat", move |queue| {
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::Heartbeat,
+            format!(
+                "queue-heartbeat:{mission_id}:{attempt}:{}",
+                now.as_nanos_utc()
+            ),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            Some(attempt),
+            now,
+            json!({ "lease_duration_nanos": MISSION_QUEUE_LEASE_DURATION_NANOS }),
+        );
+        self.mutate(mutation, move |queue| {
             queue
                 .heartbeat(
                     &mission_id,
@@ -347,7 +361,26 @@ impl MissionQueuePersistence {
         now: Timestamp,
     ) -> Result<(), String> {
         let mission_id = mission_id.to_string();
-        self.mutate("commit", move |queue| {
+        let result_digest = ContentHash::of_value(&result)
+            .map_err(|error| format!("mission result could not be digested: {error}"))?
+            .to_string();
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::Committed,
+            format!("queue-commit:{mission_id}:{attempt}:{result_digest}"),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            Some(attempt),
+            now,
+            json!({ "result_digest": result_digest }),
+        );
+        self.mutate(mutation, move |queue| {
+            if let Some(job) = queue.job(&mission_id) {
+                if job.state == bioprism_factory::JobState::Succeeded
+                    && queue.result(&mission_id) == Some(&result)
+                {
+                    return Ok(());
+                }
+            }
             queue
                 .stage(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now, result)
                 .and_then(|_| queue.commit(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now))
@@ -363,7 +396,29 @@ impl MissionQueuePersistence {
         now: Timestamp,
     ) -> Result<(), String> {
         let mission_id = mission_id.to_string();
-        self.mutate("failure", move |queue| {
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::Failed,
+            format!("queue-failure:{mission_id}:{attempt}:{reason}"),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            Some(attempt),
+            now,
+            json!({ "reason": reason }),
+        );
+        let retry_reason = reason.clone();
+        self.mutate(mutation, move |queue| {
+            if let Some(job) = queue.job(&mission_id) {
+                if queue.active_lease(&mission_id).is_none()
+                    && job.reason.as_deref() == Some(retry_reason.as_str())
+                    && matches!(
+                        job.state,
+                        bioprism_factory::JobState::Queued
+                            | bioprism_factory::JobState::DeadLettered
+                    )
+                {
+                    return Ok(());
+                }
+            }
             queue
                 .fail(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now, reason)
                 .map(|_| ())
@@ -374,7 +429,24 @@ impl MissionQueuePersistence {
     fn cancel(&self, mission_id: &str, reason: &str) -> Result<(), String> {
         let mission_id = mission_id.to_string();
         let reason = reason.to_string();
-        self.mutate("cancellation", move |queue| {
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::Cancelled,
+            format!("queue-cancel:{mission_id}:{reason}"),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            None,
+            current_timestamp().map_err(|error| error.to_string())?,
+            json!({ "reason": reason }),
+        );
+        let retry_reason = reason.clone();
+        self.mutate(mutation, move |queue| {
+            if let Some(job) = queue.job(&mission_id) {
+                if job.state == bioprism_factory::JobState::Cancelled
+                    && job.reason.as_deref() == Some(retry_reason.as_str())
+                {
+                    return Ok(());
+                }
+            }
             queue
                 .cancel(&mission_id, reason)
                 .map_err(|error| error.to_string())
@@ -383,31 +455,41 @@ impl MissionQueuePersistence {
 
     fn status(&self) -> Result<Value, String> {
         let path = self.path.as_deref();
-        let queue = self
-            .queue
-            .lock()
-            .map_err(|_| "mission queue is unavailable".to_string())?;
-        let snapshot = queue
+        let authority_snapshot = self
+            .authority
             .snapshot()
-            .map_err(|error| format!("mission queue snapshot failed: {error}"))?;
-        let jobs = snapshot
+            .map_err(|error| format!("mission authority snapshot failed: {error}"))?;
+        let queue = JobStore::from_snapshot(authority_snapshot.queue.clone())
+            .map_err(|error| format!("mission queue projection failed: {error}"))?;
+        let authority_status = self
+            .authority
+            .status()
+            .map_err(|error| format!("mission authority status failed: {error}"))?;
+        let jobs = authority_snapshot
+            .queue
             .jobs
             .iter()
             .map(mission_queue_job_json)
             .collect::<Vec<_>>();
-        let file_bytes = path.and_then(|path| std::fs::metadata(path).ok()).map(|m| m.len());
-        let integrity_verified = mission_queue_checkpoint_integrity(path, &snapshot.state_digest);
+        let file_bytes = path
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|m| m.len());
+        let authority_json = serde_json::to_value(&authority_status)
+            .map_err(|error| format!("mission authority status serialization failed: {error}"))?;
         Ok(json!({
             "ok": true,
             "enabled": path.is_some(),
             "file_present": file_bytes.is_some(),
             "file_bytes": file_bytes,
-            "schema_version": JOB_STORE_SNAPSHOT_SCHEMA_VERSION,
-            "state_digest": snapshot.state_digest,
-            "integrity_verified": integrity_verified,
-            "max_file_bytes": MAX_JOB_STORE_SNAPSHOT_BYTES,
+            "schema_version": EXECUTION_AUTHORITY_SCHEMA_VERSION,
+            "queue_schema_version": JOB_STORE_SNAPSHOT_SCHEMA_VERSION,
+            "state_digest": authority_snapshot.queue.state_digest,
+            "authority_digest": authority_snapshot.state_digest,
+            "integrity_verified": authority_status.integrity_verified,
+            "max_file_bytes": MAX_EXECUTION_AUTHORITY_BYTES,
             "registry_size": jobs.len(),
             "jobs": jobs,
+            "authority": authority_json,
             "admission_policy": {
                 "max_jobs": self.admission_policy.max_jobs,
                 "max_active_leases": self.admission_policy.max_active_leases,
@@ -419,10 +501,10 @@ impl MissionQueuePersistence {
             },
             "startup_recoveries": self.startup_recoveries,
             "automatic_resume": false,
-            "execution_scope": "single-process-api-worker",
+            "execution_scope": authority_status.execution_scope,
             "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
             "does_not_claim": [
-                "distributed scheduling or cross-node lease fencing",
+                "multi-host consensus or network-partition tolerance",
                 "external effect completion",
                 "automatic resume of an interrupted mission",
                 "provider authentication or tenant isolation"
@@ -432,14 +514,27 @@ impl MissionQueuePersistence {
     }
 
     fn projection(&self, mission_id: &str) -> Result<Value, String> {
-        let queue = self
-            .queue
-            .lock()
-            .map_err(|_| "mission queue is unavailable".to_string())?;
-        Ok(queue
+        Ok(self
+            .authority
             .job(mission_id)
+            .map_err(|error| format!("mission authority projection failed: {error}"))?
+            .as_ref()
             .map(mission_queue_job_json)
             .unwrap_or(Value::Null))
+    }
+
+    fn release_orphaned_lock(
+        &self,
+        operator: &str,
+        reason: &str,
+        at: Timestamp,
+    ) -> Result<Value, String> {
+        let release = self
+            .authority
+            .release_orphaned_lock(operator, reason, at)
+            .map_err(|error| format!("mission authority lock release refused: {error}"))?;
+        serde_json::to_value(release)
+            .map_err(|error| format!("mission authority lock receipt failed: {error}"))
     }
 }
 
@@ -961,7 +1056,9 @@ impl ApiRouter {
                 .reconciliation_persistence
                 .persist()
                 .map_err(|error| {
-                    format!("workflow reconciliation state checkpoint failed during startup: {error}")
+                    format!(
+                        "workflow reconciliation state checkpoint failed during startup: {error}"
+                    )
                 })?;
         }
         Ok(router)
@@ -1043,9 +1140,7 @@ impl ApiRouter {
                 self.create_operations_gate_review(&request, &request_id)
             }
             ("POST", "/v1/operations/handoff") => self.operations_handoff(&request, &request_id),
-            ("GET", "/v1/domain-workflows") => {
-                self.domain_workflow_catalogue(&request_id)
-            }
+            ("GET", "/v1/domain-workflows") => self.domain_workflow_catalogue(&request_id),
             ("POST", "/v1/domain-workflows/reconcile") => {
                 self.domain_workflow_reconcile(&request, &request_id)
             }
@@ -1073,15 +1168,9 @@ impl ApiRouter {
             ("POST", "/v1/evidence-bundles/verify") => {
                 self.verify_evidence_bundle(&request, &request_id)
             }
-            ("GET", "/v1/evidence-bundles") => {
-                self.query_evidence_bundles(&request, &request_id)
-            }
-            ("POST", "/v1/evidence-bundles") => {
-                self.import_evidence_bundle(&request, &request_id)
-            }
-            ("GET", "/v1/evidence-bundles/persistence") => {
-                self.evidence_persistence_status()
-            }
+            ("GET", "/v1/evidence-bundles") => self.query_evidence_bundles(&request, &request_id),
+            ("POST", "/v1/evidence-bundles") => self.import_evidence_bundle(&request, &request_id),
+            ("GET", "/v1/evidence-bundles/persistence") => self.evidence_persistence_status(),
             ("POST", "/v1/evidence-bundles/persistence/flush") => {
                 self.flush_evidence_persistence(&request_id)
             }
@@ -1114,6 +1203,9 @@ impl ApiRouter {
             ("GET", "/v1/missions/queue/persistence") => self.mission_queue_persistence_status(),
             ("POST", "/v1/missions/queue/persistence/flush") => {
                 self.flush_mission_queue_persistence(&request_id)
+            }
+            ("POST", "/v1/missions/queue/authority/release-lock") => {
+                self.release_mission_queue_lock(&request, &request_id)
             }
             ("POST", "/v1/missions/preflight") => self.preflight_mission(&request, &request_id),
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
@@ -1277,6 +1369,7 @@ impl ApiRouter {
                     "links": {
                         "persistence": "/v1/missions/queue/persistence",
                         "flush": "/v1/missions/queue/persistence/flush",
+                        "release_lock": "/v1/missions/queue/authority/release-lock",
                         "mission_inventory": "/v1/missions"
                     }
                 }),
@@ -1300,7 +1393,67 @@ impl ApiRouter {
                     ]
                 }),
             ),
-            Err(error) => self.error(503, "mission_queue_persistence_unavailable", &error, request_id),
+            Err(error) => self.error(
+                503,
+                "mission_queue_persistence_unavailable",
+                &error,
+                request_id,
+            ),
+        }
+    }
+
+    fn release_mission_queue_lock(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let operator = match arguments.get("operator").and_then(Value::as_str) {
+            Some(operator) if !operator.trim().is_empty() => operator,
+            _ => {
+                return self.error(
+                    422,
+                    "invalid_authority_operator",
+                    "operator must be a non-empty string",
+                    request_id,
+                )
+            }
+        };
+        let reason = match arguments.get("reason").and_then(Value::as_str) {
+            Some(reason) if !reason.trim().is_empty() => reason,
+            _ => {
+                return self.error(
+                    422,
+                    "invalid_authority_release_reason",
+                    "reason must be a non-empty string",
+                    request_id,
+                )
+            }
+        };
+        let at = match current_timestamp() {
+            Ok(at) => at,
+            Err(error) => {
+                return self.error(500, "authority_clock_unavailable", &error, request_id)
+            }
+        };
+        match self
+            .mission_queue_persistence
+            .release_orphaned_lock(operator, reason, at)
+        {
+            Ok(receipt) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "receipt": receipt,
+                    "request_id": request_id,
+                    "warning": "release is an explicit operator override; confirm the previous process cannot still mutate the shared authority"
+                }),
+            ),
+            Err(error) => self.error(
+                409,
+                "mission_queue_authority_lock_release_refused",
+                &error,
+                request_id,
+            ),
         }
     }
 
@@ -1703,7 +1856,7 @@ impl ApiRouter {
         if self.config.mission_state_path.is_none() {
             operator_actions.push(
                 "configure mission_state_path if terminal mission snapshots must survive restart"
-                .to_string(),
+                    .to_string(),
             );
         }
         if self.config.mission_queue_state_path.is_none() {
@@ -2970,8 +3123,9 @@ impl ApiRouter {
                      "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_queue": "/v1/missions/queue",
-                    "mission_queue_persistence": "/v1/missions/queue/persistence",
-                    "mission_queue_persistence_flush": "/v1/missions/queue/persistence/flush",
+                     "mission_queue_persistence": "/v1/missions/queue/persistence",
+                     "mission_queue_persistence_flush": "/v1/missions/queue/persistence/flush",
+                     "mission_queue_authority_release_lock": "/v1/missions/queue/authority/release-lock",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
                     "delivery_receipt_events": "/v1/delivery-receipts/{receipt_id}/events",
@@ -3433,11 +3587,7 @@ impl ApiRouter {
         self.domain_workflow_tool(request_id, "domain_workflow_catalogue", json!({}))
     }
 
-    fn domain_workflow_instantiate(
-        &self,
-        request: &HttpRequest,
-        request_id: &str,
-    ) -> HttpResponse {
+    fn domain_workflow_instantiate(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let arguments = match self.json_object(request) {
             Ok(arguments) => arguments,
             Err(error) => return self.error(400, "invalid_json", &error, request_id),
@@ -3449,11 +3599,7 @@ impl ApiRouter {
         )
     }
 
-    fn domain_workflow_scaffold(
-        &self,
-        request: &HttpRequest,
-        request_id: &str,
-    ) -> HttpResponse {
+    fn domain_workflow_scaffold(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let arguments = match self.json_object(request) {
             Ok(arguments) => arguments,
             Err(error) => return self.error(400, "invalid_json", &error, request_id),
@@ -3465,11 +3611,7 @@ impl ApiRouter {
         )
     }
 
-    fn domain_workflow_reconcile(
-        &self,
-        request: &HttpRequest,
-        request_id: &str,
-    ) -> HttpResponse {
+    fn domain_workflow_reconcile(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let arguments = match self.json_object(request) {
             Ok(arguments) => arguments,
             Err(error) => return self.error(400, "invalid_json", &error, request_id),
@@ -3515,16 +3657,30 @@ impl ApiRouter {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     *registry = before;
-                    return self.error(503, "reconciliation_persistence_unavailable", &error.to_string(), request_id);
+                    return self.error(
+                        503,
+                        "reconciliation_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
                 }
             };
             if let Err(error) = self.reconciliation_persistence.persist_snapshot(&snapshot) {
                 *registry = before;
-                return self.error(503, "reconciliation_persistence_unavailable", &error, request_id);
+                return self.error(
+                    503,
+                    "reconciliation_persistence_unavailable",
+                    &error,
+                    request_id,
+                );
             }
         }
         HttpResponse::json(
-            if report["created"].as_bool().unwrap_or(false) { 201 } else { 200 },
+            if report["created"].as_bool().unwrap_or(false) {
+                201
+            } else {
+                200
+            },
             &report,
         )
     }
@@ -3565,7 +3721,10 @@ impl ApiRouter {
         let max_items = match query_usize(&query, "limit", 100) {
             Ok(value)
                 if (1..=bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS)
-                    .contains(&value) => value,
+                    .contains(&value) =>
+            {
+                value
+            }
             Ok(_) => {
                 return self.error(
                     422,
@@ -3605,11 +3764,7 @@ impl ApiRouter {
         }
     }
 
-    fn get_workflow_reconciliation(
-        &self,
-        request: &HttpRequest,
-        request_id: &str,
-    ) -> HttpResponse {
+    fn get_workflow_reconciliation(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let segments = match request.path_segments() {
             Ok(segments) => segments,
             Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
@@ -3619,11 +3774,21 @@ impl ApiRouter {
             || segments[1] != "domain-workflows"
             || segments[2] != "reconciliations"
         {
-            return self.error(404, "not_found", "workflow reconciliation route does not exist", request_id);
+            return self.error(
+                404,
+                "not_found",
+                "workflow reconciliation route does not exist",
+                request_id,
+            );
         }
         let digest = &segments[3];
         if ContentHash::parse(digest.clone()).is_err() {
-            return self.error(422, "invalid_digest", "reconciliation_digest must be a 64-character SHA-256 digest", request_id);
+            return self.error(
+                422,
+                "invalid_digest",
+                "reconciliation_digest must be a 64-character SHA-256 digest",
+                request_id,
+            );
         }
         let record = match self.reconciliation_registry.lock() {
             Ok(registry) => registry.get(digest),
@@ -3648,7 +3813,12 @@ impl ApiRouter {
                     "execution": "not_started"
                 }),
             ),
-            None => self.error(404, "not_found", "workflow reconciliation does not exist", request_id),
+            None => self.error(
+                404,
+                "not_found",
+                "workflow reconciliation does not exist",
+                request_id,
+            ),
         }
     }
 
@@ -3708,16 +3878,16 @@ impl ApiRouter {
         }
         match self.persist_reconciliation_registry() {
             Ok(_) => self.reconciliation_persistence_status(),
-            Err(error) => self.error(503, "reconciliation_persistence_unavailable", &error, request_id),
+            Err(error) => self.error(
+                503,
+                "reconciliation_persistence_unavailable",
+                &error,
+                request_id,
+            ),
         }
     }
 
-    fn domain_workflow_tool(
-        &self,
-        request_id: &str,
-        tool: &str,
-        arguments: Value,
-    ) -> HttpResponse {
+    fn domain_workflow_tool(&self, request_id: &str, tool: &str, arguments: Value) -> HttpResponse {
         let call = Request {
             id: Some(Value::String(request_id.to_string())),
             method: "tools/call".into(),
@@ -3743,10 +3913,12 @@ impl ApiRouter {
             .pointer("/result/content/0/text")
             .and_then(Value::as_str)
             .and_then(|text| serde_json::from_str::<Value>(text).ok())
-            .unwrap_or_else(|| json!({
-                "ok": false,
-                "error": "domain workflow dispatcher returned no structured payload"
-            }));
+            .unwrap_or_else(|| {
+                json!({
+                    "ok": false,
+                    "error": "domain workflow dispatcher returned no structured payload"
+                })
+            });
         if is_error {
             let message = payload
                 .get("error")
@@ -3865,7 +4037,9 @@ impl ApiRouter {
 
         let queue_now = match current_timestamp() {
             Ok(now) => now,
-            Err(error) => return self.error(500, "mission_queue_clock_unavailable", &error, request_id),
+            Err(error) => {
+                return self.error(500, "mission_queue_clock_unavailable", &error, request_id)
+            }
         };
         let queue_idempotency = if mission_execution_requested(&arguments) {
             FactoryIdempotency::NonIdempotent
@@ -3884,17 +4058,13 @@ impl ApiRouter {
             .enqueue_and_lease(queue_job, queue_now)
         {
             Ok(lease) => lease,
-            Err(error)
-                if error.contains("duplicate work") || error.contains("already present") =>
-            {
+            Err(error) if error.contains("duplicate work") || error.contains("already present") => {
                 return self.error(409, "mission_duplicate_work", &error, request_id)
             }
             Err(error) if error.contains("admission limit") => {
                 return self.error(429, "mission_queue_backpressure", &error, request_id)
             }
-            Err(error) => {
-                return self.error(503, "mission_queue_unavailable", &error, request_id)
-            }
+            Err(error) => return self.error(503, "mission_queue_unavailable", &error, request_id),
         };
 
         let queue_attempt = queue_lease.attempt;
@@ -4596,7 +4766,12 @@ impl ApiRouter {
                 &format!("bundle is {actual} bytes; maximum is {maximum} bytes"),
                 request_id,
             ),
-            Err(error) => self.error(422, "invalid_evidence_bundle", &error.to_string(), request_id),
+            Err(error) => self.error(
+                422,
+                "invalid_evidence_bundle",
+                &error.to_string(),
+                request_id,
+            ),
         }
     }
 
@@ -4639,15 +4814,30 @@ impl ApiRouter {
             Err(EvidenceRegistryError::Verification(reason)) => {
                 return self.error(422, "evidence_bundle_not_verified", &reason, request_id)
             }
-            Err(error) => return self.error(422, "invalid_evidence_bundle", &error.to_string(), request_id),
+            Err(error) => {
+                return self.error(
+                    422,
+                    "invalid_evidence_bundle",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
         };
-        let created = report.get("created").and_then(Value::as_bool).unwrap_or(false);
+        let created = report
+            .get("created")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if created {
             let snapshot = match registry.snapshot() {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     *registry = before;
-                    return self.error(503, "evidence_persistence_unavailable", &error.to_string(), request_id);
+                    return self.error(
+                        503,
+                        "evidence_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
                 }
             };
             if let Err(error) = self.evidence_persistence.persist_snapshot(&snapshot) {
@@ -4681,7 +4871,11 @@ impl ApiRouter {
         let domain = query.get("domain").map(String::as_str);
         let after = query.get("after").map(String::as_str);
         let max_items = match query_usize(&query, "limit", 100) {
-            Ok(value) if (1..=bioprism_devplat::MAX_EVIDENCE_REGISTRY_QUERY_ITEMS).contains(&value) => value,
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_EVIDENCE_REGISTRY_QUERY_ITEMS).contains(&value) =>
+            {
+                value
+            }
             Ok(_) => {
                 return self.error(
                     422,
@@ -4719,11 +4913,21 @@ impl ApiRouter {
             Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
         };
         if segments.len() != 3 || segments[0] != "v1" || segments[1] != "evidence-bundles" {
-            return self.error(404, "not_found", "evidence bundle route does not exist", request_id);
+            return self.error(
+                404,
+                "not_found",
+                "evidence bundle route does not exist",
+                request_id,
+            );
         }
         let digest = &segments[2];
         if ContentHash::parse(digest.clone()).is_err() {
-            return self.error(422, "invalid_digest", "bundle digest must be a 64-character SHA-256 digest", request_id);
+            return self.error(
+                422,
+                "invalid_digest",
+                "bundle digest must be a 64-character SHA-256 digest",
+                request_id,
+            );
         }
         let bundle = match self.evidence_registry.lock() {
             Ok(registry) => registry.get(digest),
@@ -4737,15 +4941,23 @@ impl ApiRouter {
             }
         };
         match bundle {
-            Some(bundle) => HttpResponse::json(200, &json!({
-                "ok": true,
-                "schema": "bioprism-api/evidence-bundle-record/0.1",
-                "workflow": "mission_evidence_bundle_get",
-                "bundle_digest": digest,
-                "bundle": bundle,
-                "execution": "not_started"
-            })),
-            None => self.error(404, "not_found", "verified evidence bundle does not exist", request_id),
+            Some(bundle) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "schema": "bioprism-api/evidence-bundle-record/0.1",
+                    "workflow": "mission_evidence_bundle_get",
+                    "bundle_digest": digest,
+                    "bundle": bundle,
+                    "execution": "not_started"
+                }),
+            ),
+            None => self.error(
+                404,
+                "not_found",
+                "verified evidence bundle does not exist",
+                request_id,
+            ),
         }
     }
 
@@ -4774,21 +4986,24 @@ impl ApiRouter {
                 (digest, Value::Bool(valid))
             })
             .unwrap_or((Value::Null, Value::Null));
-        HttpResponse::json(200, &json!({
-            "ok": true,
-            "enabled": enabled,
-            "file_present": file_bytes.is_some(),
-            "file_bytes": file_bytes,
-            "schema": bioprism_devplat::EVIDENCE_REGISTRY_SCHEMA_VERSION,
-            "state_digest": state_digest,
-            "integrity_verified": integrity_verified,
-            "registry_size": registry_size,
-            "registry_generation": generation,
-            "max_bundles": bioprism_devplat::MAX_EVIDENCE_REGISTRY_BUNDLES,
-            "max_file_bytes": MAX_EVIDENCE_REGISTRY_BYTES,
-            "recovery_policy": "only independently verified bundles restore; imported evidence never resumes execution",
-            "flush": "/v1/evidence-bundles/persistence/flush"
-        }))
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::EVIDENCE_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_bundles": bioprism_devplat::MAX_EVIDENCE_REGISTRY_BUNDLES,
+                "max_file_bytes": MAX_EVIDENCE_REGISTRY_BYTES,
+                "recovery_policy": "only independently verified bundles restore; imported evidence never resumes execution",
+                "flush": "/v1/evidence-bundles/persistence/flush"
+            }),
+        )
     }
 
     fn flush_evidence_persistence(&self, request_id: &str) -> HttpResponse {
@@ -5529,10 +5744,7 @@ impl ApiRouter {
         state.cancel_reason = current.cancel_reason.clone();
         state.progress.request_cancel();
         drop(state);
-        if let Err(error) = self
-            .mission_queue_persistence
-            .cancel(&mission_id, &reason)
-        {
+        if let Err(error) = self.mission_queue_persistence.cancel(&mission_id, &reason) {
             if !error.contains("already terminal") {
                 return self.error(503, "mission_queue_unavailable", &error, request_id);
             }
@@ -6159,6 +6371,7 @@ impl ApiRouter {
                     "/v1/missions/queue": { "get": { "responses": { "200": { "description": "typed factory mission queue projection and recovery posture" } } } },
                     "/v1/missions/queue/persistence": { "get": { "responses": { "200": { "description": "content-addressed mission queue checkpoint status" } } } },
                     "/v1/missions/queue/persistence/flush": { "post": { "responses": { "200": { "description": "force an atomic mission queue checkpoint" }, "503": { "description": "queue checkpoint unavailable" } } } },
+                    "/v1/missions/queue/authority/release-lock": { "post": { "responses": { "200": { "description": "explicitly release and audit an orphaned shared-authority lock" }, "409": { "description": "lock release refused or no orphaned lock exists" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
                     "/v1/missions/{mission_id}/provenance": { "get": { "responses": { "200": { "description": "retained execution gate, review, evaluator, and dispatch provenance" } } } },
                      "/v1/missions/{mission_id}/claims": { "get": { "responses": { "200": { "description": "bounded claim-to-step evidence lineage projection" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "terminal report was omitted from the bounded registry" } } } },
@@ -7261,22 +7474,6 @@ fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> 
     Some(computed == stored)
 }
 
-fn mission_queue_checkpoint_integrity(
-    path: Option<&Path>,
-    expected_digest: &str,
-) -> Option<bool> {
-    let path = path?;
-    if std::fs::metadata(path).is_err() {
-        return None;
-    }
-    Some(
-        JobStore::load_from_path(path)
-            .and_then(|store| store.snapshot())
-            .map(|snapshot| snapshot.state_digest == expected_digest)
-            .unwrap_or(false),
-    )
-}
-
 fn load_evidence_registry(path: Option<&Path>) -> Result<EvidenceBundleRegistry, String> {
     let Some(path) = path else {
         return Ok(EvidenceBundleRegistry::new());
@@ -7286,7 +7483,11 @@ fn load_evidence_registry(path: Option<&Path>) -> Result<EvidenceBundleRegistry,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(EvidenceBundleRegistry::new())
         }
-        Err(error) => return Err(format!("evidence state snapshot could not be read: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "evidence state snapshot could not be read: {error}"
+            ))
+        }
     };
     if bytes.len() > MAX_EVIDENCE_REGISTRY_BYTES {
         return Err(format!(
@@ -8373,10 +8574,16 @@ mod tests {
         assert_eq!(snapshot["event_metrics"]["retained_events"], 1);
         assert_eq!(snapshot["mission_summary"]["total"], 0);
         assert_eq!(snapshot["persistence"]["events"]["enabled"], false);
-        assert_eq!(snapshot["persistence"]["workflow_reconciliations"]["enabled"], false);
+        assert_eq!(
+            snapshot["persistence"]["workflow_reconciliations"]["enabled"],
+            false
+        );
         assert_eq!(snapshot["reconciliation_summary"]["registry_size"], 0);
         assert_eq!(snapshot["reconciliation_summary"]["ready_count"], 0);
-        assert_eq!(snapshot["reconciliation_summary"]["readiness_claimed"], false);
+        assert_eq!(
+            snapshot["reconciliation_summary"]["readiness_claimed"],
+            false
+        );
         assert_eq!(snapshot["recovery"]["automatic_resume"], false);
         assert_eq!(
             snapshot["domain_coverage"]["schema"],
@@ -8387,7 +8594,10 @@ mod tests {
         assert_eq!(snapshot["consistency"]["cross_store_atomic"], false);
         assert_eq!(snapshot["consistency"]["clock_free"], true);
         assert_eq!(snapshot["capabilities"]["operations_snapshot"], true);
-        assert_eq!(snapshot["capabilities"]["workflow_reconciliation_registry"], true);
+        assert_eq!(
+            snapshot["capabilities"]["workflow_reconciliation_registry"],
+            true
+        );
         assert!(snapshot["operator_actions"].as_array().unwrap().len() >= 3);
         assert!(snapshot["non_claims"]
             .as_array()
@@ -8600,7 +8810,9 @@ mod tests {
             "execution": "not_started"
         });
         incomplete_reconciliation["reconciliation_digest"] =
-            json!(ContentHash::of_value(&incomplete_reconciliation).unwrap().to_string());
+            json!(ContentHash::of_value(&incomplete_reconciliation)
+                .unwrap()
+                .to_string());
         let imported = router.handle(request(
             "POST",
             "/v1/domain-workflows/reconciliations",
@@ -8626,7 +8838,10 @@ mod tests {
         );
         assert_eq!(biological["gate_state"], "insufficient_evidence");
         assert_eq!(blocked["summary"]["groups_reconciliation_blocked"], 1);
-        assert_ne!(blocked["gate_digest"].as_str(), Some(initial_gate_digest.as_str()));
+        assert_ne!(
+            blocked["gate_digest"].as_str(),
+            Some(initial_gate_digest.as_str())
+        );
 
         let invalid = router.handle(request("GET", "/v1/operations/gates?limit=257", json!({})));
         assert_eq!(invalid.status, 422);
@@ -8702,7 +8917,10 @@ mod tests {
                 group["gates"]["reconciliation_evidence"]["state"],
                 "incomplete"
             );
-            assert_eq!(group["gates"]["reconciliation_evidence"]["readiness_claimed"], false);
+            assert_eq!(
+                group["gates"]["reconciliation_evidence"]["readiness_claimed"],
+                false
+            );
             assert_eq!(group["gate_state"], "insufficient_evidence");
         }
 
@@ -9586,6 +9804,13 @@ mod tests {
         assert_eq!(queue["queue"]["jobs"][0]["spec_returned"], false);
         assert_eq!(queue["queue"]["jobs"][0]["state"], "succeeded");
         assert_eq!(queue["queue"]["state_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(queue["queue"]["authority"]["configured"], true);
+        assert_eq!(queue["queue"]["authority"]["integrity_verified"], true);
+        assert!(queue["queue"]["authority"]["revision"].as_u64().unwrap() >= 1);
+        assert_eq!(
+            queue["queue"]["authority"]["event_count"],
+            queue["queue"]["authority"]["revision"]
+        );
         drop(router);
 
         let restored = ApiRouter::new(
@@ -9596,16 +9821,71 @@ mod tests {
             },
         )
         .unwrap();
-        let restored_queue = restored.handle(request(
-            "GET",
-            "/v1/missions/queue/persistence",
-            json!({}),
-        ));
+        let restored_queue =
+            restored.handle(request("GET", "/v1/missions/queue/persistence", json!({})));
         assert_eq!(restored_queue.status, 200);
         let restored_queue: Value = serde_json::from_slice(&restored_queue.body).unwrap();
         assert_eq!(restored_queue["integrity_verified"], true);
         assert_eq!(restored_queue["jobs"][0]["state"], "succeeded");
+        assert_eq!(
+            restored_queue["authority"]["queue_state_digest"],
+            restored_queue["state_digest"]
+        );
         let _ = std::fs::remove_file(queue_path);
+    }
+
+    #[test]
+    fn mission_queue_authority_reports_and_audits_explicit_orphan_lock_release() {
+        let queue_path = test_state_path("mission-queue-lock-release");
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_queue_state_path: Some(queue_path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let lock_path = queue_path.with_file_name(format!(
+            ".{}.authority-lock",
+            queue_path.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::create_dir_all(&lock_path).unwrap();
+        std::fs::write(
+            lock_path.join("owner.json"),
+            serde_json::to_vec(&json!({
+                "owner_id": "dead-api-process",
+                "acquired_unix_nanos": 7
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let before = router.handle(request("GET", "/v1/missions/queue/persistence", json!({})));
+        let before: Value = serde_json::from_slice(&before.body).unwrap();
+        assert_eq!(before["authority"]["lock_present"], true);
+        let release = router.handle(request(
+            "POST",
+            "/v1/missions/queue/authority/release-lock",
+            json!({
+                "operator": "on-call",
+                "reason": "confirmed the previous API process exited"
+            }),
+        ));
+        assert_eq!(release.status, 200);
+        let release: Value = serde_json::from_slice(&release.body).unwrap();
+        assert_eq!(
+            release["receipt"]["previous_owner"]["owner_id"],
+            "dead-api-process"
+        );
+        let after = router.handle(request("GET", "/v1/missions/queue/persistence", json!({})));
+        let after: Value = serde_json::from_slice(&after.body).unwrap();
+        assert_eq!(after["authority"]["lock_present"], false);
+        assert!(
+            after["authority"]["revision"].as_u64().unwrap()
+                > before["authority"]["revision"].as_u64().unwrap()
+        );
+        drop(router);
+        let _ = std::fs::remove_file(queue_path);
+        let _ = std::fs::remove_dir_all(lock_path);
     }
 
     #[test]
@@ -9742,7 +10022,10 @@ mod tests {
         }
         assert_eq!(terminal["status"], "succeeded");
         assert_eq!(terminal["result"]["mission_status"], "succeeded");
-        assert_eq!(terminal["result"]["workflow_reconciliation"]["present"], true);
+        assert_eq!(
+            terminal["result"]["workflow_reconciliation"]["present"],
+            true
+        );
         assert_eq!(
             terminal["result"]["workflow_reconciliation"]["automatic"],
             true
@@ -9763,13 +10046,12 @@ mod tests {
         assert_eq!(query.status, 200);
         let query: Value = serde_json::from_slice(&query.body).unwrap();
         assert_eq!(query["rows"].as_array().unwrap().len(), 1);
-        assert_eq!(query["rows"][0]["reconciliation_digest"], reconciliation_digest);
+        assert_eq!(
+            query["rows"][0]["reconciliation_digest"],
+            reconciliation_digest
+        );
 
-        let flush = router.handle(request(
-            "POST",
-            "/v1/missions/persistence/flush",
-            json!({}),
-        ));
+        let flush = router.handle(request("POST", "/v1/missions/persistence/flush", json!({})));
         assert_eq!(flush.status, 200);
         drop(router);
         let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
@@ -9860,10 +10142,23 @@ mod tests {
         assert_eq!(fetched.status, 200);
         let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
         assert_eq!(fetched["bundle"]["bundle_digest"], digest);
-        assert_eq!(router.handle(request("POST", "/v1/evidence-bundles/persistence/flush", json!({}))).status, 200);
+        assert_eq!(
+            router
+                .handle(request(
+                    "POST",
+                    "/v1/evidence-bundles/persistence/flush",
+                    json!({})
+                ))
+                .status,
+            200
+        );
         drop(router);
         let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
-        let status = restored.handle(request("GET", "/v1/evidence-bundles/persistence", json!({})));
+        let status = restored.handle(request(
+            "GET",
+            "/v1/evidence-bundles/persistence",
+            json!({}),
+        ));
         let status: Value = serde_json::from_slice(&status.body).unwrap();
         assert_eq!(status["integrity_verified"], true);
         assert_eq!(status["registry_size"], 1);
@@ -9901,7 +10196,8 @@ mod tests {
             "integrity": {"valid": true, "finding_count": 0},
             "execution": "not_started"
         });
-        record["reconciliation_digest"] = json!(ContentHash::of_value(&record).unwrap().to_string());
+        record["reconciliation_digest"] =
+            json!(ContentHash::of_value(&record).unwrap().to_string());
         let imported = router.handle(request(
             "POST",
             "/v1/domain-workflows/reconciliations",
@@ -9910,7 +10206,10 @@ mod tests {
         assert_eq!(imported.status, 201);
         let imported: Value = serde_json::from_slice(&imported.body).unwrap();
         assert_eq!(imported["created"], true);
-        let digest = imported["reconciliation_digest"].as_str().unwrap().to_string();
+        let digest = imported["reconciliation_digest"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         let duplicate = router.handle(request(
             "POST",
@@ -9972,7 +10271,10 @@ mod tests {
         assert_eq!(catalogue["workflow"], "domain_workflow_catalogue");
         assert_eq!(catalogue["workflow_count"], 29);
         assert_eq!(catalogue["coverage"]["all_groups_have_workflow"], true);
-        assert_eq!(catalogue["coverage"]["all_workflows_have_domain_contract"], true);
+        assert_eq!(
+            catalogue["coverage"]["all_workflows_have_domain_contract"],
+            true
+        );
         assert!(catalogue["workflows"]
             .as_array()
             .unwrap()
@@ -10014,10 +10316,19 @@ mod tests {
         assert_eq!(instantiated.status, 200);
         let instantiated: Value = serde_json::from_slice(&instantiated.body).unwrap();
         assert_eq!(instantiated["workflow"], "domain_workflow_instantiate");
-        assert_eq!(instantiated["preflight_report"]["workflow"], "agent_mission");
+        assert_eq!(
+            instantiated["preflight_report"]["workflow"],
+            "agent_mission"
+        );
         assert_eq!(instantiated["execution"], "not_started");
-        assert_eq!(instantiated["selection"]["all_selected_tools_available"], true);
-        assert_eq!(instantiated["evidence_plan"]["steps"][0]["step_id"], "catalog");
+        assert_eq!(
+            instantiated["selection"]["all_selected_tools_available"],
+            true
+        );
+        assert_eq!(
+            instantiated["evidence_plan"]["steps"][0]["step_id"],
+            "catalog"
+        );
 
         let executed = router.handle(request(
             "POST",
@@ -10047,7 +10358,10 @@ mod tests {
         assert_eq!(automatic_query.status, 200);
         let automatic_query: Value = serde_json::from_slice(&automatic_query.body).unwrap();
         assert_eq!(automatic_query["rows"].as_array().unwrap().len(), 1);
-        assert_eq!(automatic_query["rows"][0]["reconciliation_digest"], automatic_digest);
+        assert_eq!(
+            automatic_query["rows"][0]["reconciliation_digest"],
+            automatic_digest
+        );
         let reconciled = router.handle(request(
             "POST",
             "/v1/domain-workflows/reconcile",
@@ -10082,7 +10396,10 @@ mod tests {
         assert_eq!(restored_query.status, 200);
         let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
         assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
-        assert_eq!(restored_query["rows"][0]["reconciliation_digest"], automatic_digest);
+        assert_eq!(
+            restored_query["rows"][0]["reconciliation_digest"],
+            automatic_digest
+        );
         let _ = std::fs::remove_file(reconciliation_path);
     }
 

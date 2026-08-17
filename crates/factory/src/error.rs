@@ -74,4 +74,26 @@ pub enum FactoryError {
 
     #[error("job-store snapshot could not be serialized: {reason}")]
     SnapshotSerialization { reason: String },
+
+    #[error("execution authority is busy at {path}")]
+    AuthorityBusy { path: String },
+
+    #[error("execution authority I/O {operation} failed for {path}: {reason}")]
+    AuthorityIo {
+        operation: String,
+        path: String,
+        reason: String,
+    },
+
+    #[error("execution authority snapshot is invalid: {reason}")]
+    InvalidAuthoritySnapshot { reason: String },
+
+    #[error("execution authority digest mismatch: expected {expected}, computed {actual}")]
+    AuthorityDigestMismatch { expected: String, actual: String },
+
+    #[error("execution authority transition key {key:?} conflicts with an existing transition")]
+    AuthorityIdempotencyConflict { key: String },
+
+    #[error("execution authority operator identity is required for {operation}")]
+    UnattributedAuthorityAction { operation: String },
 }

@@ -43,6 +43,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/missions/queue` | Inspect typed factory queue state, lease/recovery posture, and bounded job projections |
 | `GET /v1/missions/queue/persistence` | Inspect mission queue checkpoint integrity and startup recovery rows |
 | `POST /v1/missions/queue/persistence/flush` | Force an atomic content-addressed factory checkpoint |
+| `POST /v1/missions/queue/authority/release-lock` | Attribute and audit an explicit release of an orphaned shared-authority lock |
 | `GET /v1/missions/{mission_id}` | Poll job state and retrieve the authoritative mission report |
 | `GET /v1/missions/{mission_id}/provenance` | Retrieve retained gate, review, domain-evaluator, and accepted-dispatch evidence |
 | `GET /v1/missions/{mission_id}/claims` | Retrieve the bounded claim-to-step evidence-lineage projection |
@@ -210,7 +211,10 @@ execution separately from the mission read model. Each accepted mission is repre
 `Evaluate` job with an explicit idempotency class, leased to the local API worker, and committed
 only after the executor report is staged. Queue checkpoint writes are bounded, digest-verified,
 cross-index validated, and atomically replaced. A failed checkpoint does not replace the live
-queue projection. Configure `--mission-queue-max-jobs <n>` and
+queue projection. A hash-chained transition journal is atomically replaced with the queue image,
+and cooperating API processes that point at the same local file serialize mutation through a
+bounded authority lock. Status exposes the authority digest, revision, event count, lock state,
+and observation-time integrity result. Configure `--mission-queue-max-jobs <n>` and
 `--mission-queue-max-active-leases <n>` to apply explicit backpressure before queue mutation;
 the status route reports those limits and observed active leases. Factory lease attempts are
 fencing tokens, so a stale worker attempt cannot mutate a later attempt with the same worker ID.
@@ -218,8 +222,11 @@ fencing tokens, so a stale worker attempt cannot mutate a later attempt with the
 On startup, expired leases are classified by the factory policy: idempotent jobs are requeued,
 non-idempotent jobs are quarantined, and compensable jobs await compensation. This is recovery
 classification, not automatic resumption. The API never dispatches a recovered job without a new
-explicit submission, and the queue does not claim distributed scheduling, cross-node lease fencing, provider
-authentication, tenant isolation, or external-effect completion. The queue inventory intentionally
+explicit submission. If a process dies while holding the authority lock, an operator can call
+`POST /v1/missions/queue/authority/release-lock` with a non-empty identity and reason; the release
+is refused unless the lock owner is stale and the resulting `LockReleased` transition is recorded.
+This local shared-file authority does not claim multi-host consensus, network-partition tolerance,
+provider authentication, tenant isolation, or external-effect completion. The queue inventory intentionally
 returns job metadata and an idempotency digest while omitting the original mission specification.
 
 Pass `--event-state <file>` to checkpoint the retained event cursor plus bounded subscription and

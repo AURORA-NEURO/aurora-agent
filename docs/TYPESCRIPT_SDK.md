@@ -199,15 +199,19 @@ resource class, idempotency, attempt counters, terminal state, and the deliberat
 the content digest, integrity result, startup recovery rows, and explicit `automatic_resume: false`.
 Its admission policy projection preserves total-job/active-lease backpressure and resource-class
 occupancy. Queue attempt numbers are local fencing tokens, not distributed lease authority.
+Its authority projection carries the authority digest, queue digest, revision, event count,
+integrity result, and shared-file lock state.
 `flushMissionQueuePersistence()` returns the atomic checkpoint byte count plus the resulting queue
-status. These are local checkpoint controls, not distributed scheduling, cross-node lease fencing, provider
-authentication, tenant isolation, or external-effect completion.
+status. `releaseMissionQueueLock(operator, reason)` records an attributed operator override when a
+cooperating process has left an orphaned local lock. These are shared-local-file authority controls,
+not multi-host consensus, network-partition tolerance, provider authentication, tenant isolation,
+or external-effect completion.
 `eventPersistence()` and `flushEventPersistence()` provide the event-cursor equivalent while
 typing the explicit non-durability of webhook subscriptions and pending deliveries.
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 178-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 191-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,

@@ -15,8 +15,7 @@ fn main() {
     let mut mission_state_path = None;
     let mut mission_queue_state_path = None;
     let mut mission_queue_max_jobs = ApiConfig::default().mission_queue_max_jobs;
-    let mut mission_queue_max_active_leases =
-        ApiConfig::default().mission_queue_max_active_leases;
+    let mut mission_queue_max_active_leases = ApiConfig::default().mission_queue_max_active_leases;
     let mut event_state_path = None;
     let mut evidence_state_path = None;
     let mut reconciliation_state_path = None;
@@ -38,8 +37,10 @@ fn main() {
                 mission_state_path = Some(PathBuf::from(value("--mission-state", &mut arguments)))
             }
             "--mission-queue-state" => {
-                mission_queue_state_path =
-                    Some(PathBuf::from(value("--mission-queue-state", &mut arguments)))
+                mission_queue_state_path = Some(PathBuf::from(value(
+                    "--mission-queue-state",
+                    &mut arguments,
+                )))
             }
             "--mission-queue-max-jobs" => {
                 mission_queue_max_jobs = value("--mission-queue-max-jobs", &mut arguments)
@@ -67,8 +68,10 @@ fn main() {
                 evidence_state_path = Some(PathBuf::from(value("--evidence-state", &mut arguments)))
             }
             "--reconciliation-state" => {
-                reconciliation_state_path =
-                    Some(PathBuf::from(value("--reconciliation-state", &mut arguments)))
+                reconciliation_state_path = Some(PathBuf::from(value(
+                    "--reconciliation-state",
+                    &mut arguments,
+                )))
             }
             "--max-body-bytes" => {
                 max_body_bytes = value("--max-body-bytes", &mut arguments)
@@ -93,7 +96,7 @@ fn main() {
                      GET /healthz and /readyz are public. Other /v1 routes require --token when configured.\n\
                      REST tools: POST /v1/tools/<name> with a JSON object body.\n\
                      JSON-RPC: POST /v1/rpc. Events: GET /v1/events or /v1/events/stream.\n\
-                     Missions: POST /v1/missions; --mission-state enables bounded restart-aware snapshots; --mission-queue-state enables the typed factory execution ledger; queue max flags provide explicit backpressure.\n\
+                     Missions: POST /v1/missions; --mission-state enables bounded restart-aware snapshots; --mission-queue-state enables the typed factory execution authority and transition ledger; queue max flags provide explicit backpressure; /v1/missions/queue/authority/release-lock audits orphan-lock recovery.\n\
                      Events: --event-state enables bounded event, subscription, and signed outbox checkpoints; secrets remain process-local.\n\
                      Evidence: --evidence-state enables bounded restart-safe imports of independently verified mission bundles.\n\
                      Reconciliation: --reconciliation-state enables bounded restart-safe imports of digest-valid workflow reconciliation reports.\n\

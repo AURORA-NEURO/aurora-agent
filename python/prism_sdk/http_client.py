@@ -166,6 +166,7 @@ from .mission import (
     MissionPersistenceStatus,
     MissionQueueFlushResult,
     MissionQueueInventory,
+    MissionQueueLockReleaseResult,
     MissionQueueStatus,
     MissionPolicy,
     MissionPreflight,
@@ -1239,6 +1240,21 @@ class ApiClient:
 
         return MissionQueueFlushResult.from_wire(
             self.request("POST", "/v1/missions/queue/persistence/flush", {})
+        )
+
+    def release_mission_queue_lock(self, operator: str, reason: str) -> MissionQueueLockReleaseResult:
+        """Explicitly release an orphaned shared-authority lock with an auditable operator reason."""
+
+        if not isinstance(operator, str) or not operator.strip():
+            raise ArgumentError("operator must be a non-empty string")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ArgumentError("reason must be a non-empty string")
+        return MissionQueueLockReleaseResult.from_wire(
+            self.request(
+                "POST",
+                "/v1/missions/queue/authority/release-lock",
+                {"operator": operator, "reason": reason},
+            )
         )
 
     def missions(self, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
@@ -4871,6 +4887,11 @@ class AsyncApiClient:
         """Async atomic queue checkpoint flush."""
 
         return await asyncio.to_thread(self.client.flush_mission_queue_persistence)
+
+    async def release_mission_queue_lock(self, operator: str, reason: str) -> MissionQueueLockReleaseResult:
+        """Async attributed release of an orphaned shared-authority lock."""
+
+        return await asyncio.to_thread(self.client.release_mission_queue_lock, operator, reason)
 
     async def delivery_page(self, subscription_id: str, *, after: int = 0, limit: int = 100) -> DeliveryPage:
         """Async typed cursor page over pending signed deliveries."""

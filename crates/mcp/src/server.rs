@@ -29,33 +29,29 @@ use bioprism_atlas::{
 };
 use bioprism_atlashub::{CiReport, ResultUnderReview};
 use bioprism_atlasx::{
-    audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility,
-    DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet,
-    Surface as AtlasxSurface, Visibility as AtlasxVisibility, ATLASX_SCHEMA_VERSION,
-    DEFINED_HERE, NAMED_NEVER_DEFINED, named_in_scope,
+    audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
+    DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
+    Visibility as AtlasxVisibility, ATLASX_SCHEMA_VERSION, DEFINED_HERE, NAMED_NEVER_DEFINED,
 };
 use bioprism_backends::{Budget as InfluenceBudget, QueryRegion, RegionFactor};
+use bioprism_benchcompiler::counterfactual::pair as benchmark_counterfactual_pair;
 use bioprism_benchcompiler::{
-    analyse as analyse_benchmark, boundaries as benchmark_boundaries,
-    assess_contamination as benchmark_assess_contamination,
-    assign_holdout as benchmark_assign_holdout, calibrate as benchmark_calibrate,
-    contrast as benchmark_contrast,
+    analyse as analyse_benchmark, assess_contamination as benchmark_assess_contamination,
+    assign_holdout as benchmark_assign_holdout, boundaries as benchmark_boundaries,
+    calibrate as benchmark_calibrate, compile as benchmark_compile, contrast as benchmark_contrast,
     deduplicate as benchmark_deduplicate, effective_diversity as benchmark_effective_diversity,
     episodes as benchmark_episodes, failure_card as benchmark_failure_card,
-    compile as benchmark_compile, ContextItem as BenchmarkContextItem,
-    InterestSignature as BenchmarkInterestSignature, MinimizeBudget as BenchmarkMinimizeBudget,
-    Compilation as BenchmarkCompilation,
     repetitions as benchmark_repetitions, Assertion as BenchmarkAssertion,
     BenchInstance as BenchmarkBenchInstance, CandidateAction as BenchmarkCandidateAction,
-    CandidateActionSet as BenchmarkCandidateActionSet, ContaminationRisk as BenchmarkContaminationRisk,
+    CandidateActionSet as BenchmarkCandidateActionSet, Compilation as BenchmarkCompilation,
+    ConstraintRecord as BenchmarkConstraintRecord, ContaminationRisk as BenchmarkContaminationRisk,
+    ContextItem as BenchmarkContextItem, ExpectedResponse as BenchmarkExpectedResponse,
     ExposureLedger as BenchmarkExposureLedger, Instance as BenchmarkInstance,
-    ExpectedResponse as BenchmarkExpectedResponse, Intervention as BenchmarkIntervention,
-    LeakProbe as BenchmarkLeakProbe, NoRealismReview as BenchmarkNoRealismReview,
-    PanelRun as BenchmarkPanelRun, ProposedOracle as BenchmarkProposedOracle,
-    ConstraintRecord as BenchmarkConstraintRecord,
-    SYNTHESIS_ORDER as BENCHMARK_SYNTHESIS_ORDER,
+    InterestSignature as BenchmarkInterestSignature, Intervention as BenchmarkIntervention,
+    LeakProbe as BenchmarkLeakProbe, MinimizeBudget as BenchmarkMinimizeBudget,
+    NoRealismReview as BenchmarkNoRealismReview, PanelRun as BenchmarkPanelRun,
+    ProposedOracle as BenchmarkProposedOracle, SYNTHESIS_ORDER as BENCHMARK_SYNTHESIS_ORDER,
 };
-use bioprism_benchcompiler::counterfactual::pair as benchmark_counterfactual_pair;
 use bioprism_bioethics::action::{refer as refer_physical_action, ActionPlan, Authorisation};
 use bioprism_bioethics::dualuse::{refer as refer_dual_use, CapabilityRelease};
 use bioprism_bioethics::humansubject::{screen as screen_human_subject, StudyDescription};
@@ -65,30 +61,41 @@ use bioprism_bioethics::representation::{
 use bioprism_bioethics::validation::ValidationDossier;
 use bioprism_bioeval::{Dispersion, ReferenceDistribution, ReferenceStandard};
 use bioprism_bioevalx::acquisition::{
-    Action as AcquisitionTraceAction, AcquisitionKind, Obligation as AcquisitionObligation,
+    AcquisitionKind, Action as AcquisitionTraceAction, Obligation as AcquisitionObligation,
     ReferencePolicy as AcquisitionReferencePolicy, Trace as AcquisitionTrace,
+};
+use bioprism_bioevalx::boundary::{
+    Assessment as BioevalBoundaryAssessment, Flow as BioevalFlow, Policy as BioevalBoundaryPolicy,
 };
 use bioprism_bioevalx::burden::{
     BranchLedger as BioevalBranchLedger, Draw as BioevalDraw, Ledger as BioevalLedger,
     Resource as BioevalResource,
 };
-use bioprism_bioevalx::boundary::{
-    Assessment as BioevalBoundaryAssessment, Flow as BioevalFlow,
-    Policy as BioevalBoundaryPolicy,
-};
-use bioprism_bioevalx::grounding::{
-    ClaimState as GroundingClaimState, EdgeKind as GroundingEdgeKind,
-    Evidence as GroundingEvidence, Grounding,
-    LocatorStatus as GroundingLocatorStatus, SupportEdge as GroundingSupportEdge,
+use bioprism_bioevalx::design::{
+    Arm as BioevalDesignArm, FactorialDesign as BioevalFactorialDesign,
 };
 use bioprism_bioevalx::estimand::{
     ClaimKind as BioevalClaimKind, Corroboration as BioevalCorroboration,
-    Estimand as BioevalEstimand, Evidentiary as BioevalEvidentiary,
-    Finding as BioevalFinding, Identification as BioevalIdentification,
+    Estimand as BioevalEstimand, Evidentiary as BioevalEvidentiary, Finding as BioevalFinding,
+    Identification as BioevalIdentification,
 };
 use bioprism_bioevalx::evaluator::{
     EvaluatorRun as BioevalEvaluatorRun, Panel as BioevalEvaluatorPanel,
     TaskOutcome as BioevalTaskOutcome,
+};
+use bioprism_bioevalx::grounding::{
+    ClaimState as GroundingClaimState, EdgeKind as GroundingEdgeKind,
+    Evidence as GroundingEvidence, Grounding, LocatorStatus as GroundingLocatorStatus,
+    SupportEdge as GroundingSupportEdge,
+};
+use bioprism_bioevalx::mesh::{
+    Disagreement as BioevalDisagreement, EvaluatorDecl as BioevalEvaluatorDecl,
+    EvaluatorVerdict as BioevalEvaluatorVerdict, Mesh as BioevalMesh,
+};
+use bioprism_bioevalx::metamorphic::{
+    verdict as bioeval_metamorphic_verdict, Family as BioevalMetamorphicFamily,
+    Relation as BioevalMetamorphicRelation, Suite as BioevalMetamorphicSuite,
+    Trial as BioevalMetamorphicTrial, TrialVerdict as BioevalTrialVerdict,
 };
 use bioprism_bioevalx::plane::{
     Cell as BioevalCell, FoldPolicy as BioevalFoldPolicy, ScorePlane as BioevalScorePlane,
@@ -96,22 +103,11 @@ use bioprism_bioevalx::plane::{
 use bioprism_bioevalx::reveal::{
     Commitment as BioevalCommitment, Outcome as BioevalOutcome, Registration as BioevalRegistration,
 };
-use bioprism_bioevalx::metamorphic::{
-    verdict as bioeval_metamorphic_verdict, Family as BioevalMetamorphicFamily,
-    Relation as BioevalMetamorphicRelation, Suite as BioevalMetamorphicSuite,
-    Trial as BioevalMetamorphicTrial, TrialVerdict as BioevalTrialVerdict,
-};
 use bioprism_bioevalx::waiver::{
     Gate as BioevalReleaseGate, ReleaseDecision as BioevalReleaseDecision,
     Waiver as BioevalReleaseWaiver,
 };
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
-use bioprism_bioevalx::design::{Arm as BioevalDesignArm, FactorialDesign as BioevalFactorialDesign};
-use bioprism_bioevalx::mesh::{
-    Disagreement as BioevalDisagreement, EvaluatorDecl as BioevalEvaluatorDecl,
-    EvaluatorVerdict as BioevalEvaluatorVerdict, Mesh as BioevalMesh,
-};
-use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
 use bioprism_bundle::ResultBundle;
@@ -129,59 +125,47 @@ use bioprism_dataops::{
 };
 use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
-    audit_execution_provenance, build_dashboard,
-    build_delivery_receipt, plan_mission, run_workbench, verify_delivery_receipt,
-    build_domain_workflow_catalogue, instantiate_domain_workflow, scaffold_domain_workflow,
-    reconcile_domain_workflow,
-    DomainWorkflowReconciliationRegistry,
-    normalize_ci_provider_payload,
-    standard_walkthroughs,
-    CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
-    DeliveryReceiptRequest,
-    DeliveryReceiptVerificationRequest,
-    DevPlatReport, ExecutionProvenanceRequest, MissionReport, mission_claim_lineage_with_review,
-    MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
-    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest,
-    MissionEvaluatorReplayRequest,
-    MissionEvaluatorReviewRequest,
-    EvidenceBundleRegistry,
-    verify_mission_evidence_bundle,
-    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
-    MISSION_EVALUATOR_SCHEMA_VERSION,
-    WorkbenchRequest,
-    EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
-    SecurityPrivacyManifest,
-    SandboxManifest,
-    SandboxRuntimeManifest,
-    SecurityProgramManifest,
-    CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
-    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA,
-    SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
-    MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    audit_execution_provenance, build_dashboard, build_delivery_receipt,
+    build_domain_workflow_catalogue, instantiate_domain_workflow,
+    mission_claim_lineage_with_review, normalize_ci_provider_payload, plan_mission,
+    reconcile_domain_workflow, run_workbench, scaffold_domain_workflow, standard_walkthroughs,
+    verify_delivery_receipt, verify_mission_evidence_bundle, CapabilityCatalogue,
+    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
+    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
+    DeliveryReceiptVerificationRequest, DevPlatReport, DomainWorkflowReconciliationRegistry,
+    EngineeringManifest, EngineeringPlanRequest, EvidenceBundleRegistry,
+    ExecutionProvenanceRequest, MissionEvaluatorCatalogue, MissionEvaluatorQuery,
+    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
+    MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
+    SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
+    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
+    ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
+    SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
     compile_bundle, impact_of, lint, scan_markdown_tree, DocEdgeType, ModuleId, NodeStatus,
     ScanOptions, TaskRoute, TraversalPolicy,
 };
+use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
 use bioprism_epistemic::{
     brute_force_optimum as epistemic_brute_force_optimum,
-    complementarity as epistemic_complementarity, joint_value as epistemic_joint_value,
-    evaluate_context as epistemic_evaluate_context,
-    frontier as epistemic_frontier,
-    greedy as epistemic_greedy,
+    complementarity as epistemic_complementarity, evaluate_context as epistemic_evaluate_context,
+    frontier as epistemic_frontier, greedy as epistemic_greedy,
+    identification as epistemic_identification, joint_value as epistemic_joint_value,
     lazy_greedy as epistemic_lazy_greedy,
-    identification as epistemic_identification,
     minimal_sufficient_context as epistemic_minimal_sufficient_context,
-    Constraint as EpistemicConstraint,
     value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
-    Belief as EpistemicBelief, DecisionProblem as EpistemicDecisionProblem,
+    Belief as EpistemicBelief, Constraint as EpistemicConstraint,
+    DecisionProblem as EpistemicDecisionProblem,
     DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
-    Outcome as EpistemicOutcome,
-    RegretReduction as EpistemicRegretReduction, SetFunction as EpistemicSetFunction,
+    Outcome as EpistemicOutcome, RegretReduction as EpistemicRegretReduction,
+    SetFunction as EpistemicSetFunction,
 };
-use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
+use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_evalengine::{
     CapabilityPosterior, CreditPolicy, Observation, ReleaseGate as EvalReleaseGate,
 };
@@ -189,7 +173,7 @@ use bioprism_fabric::synth::{
     synthesize as synthesize_fabric, unimplemented_stages, Candidate as FabricCandidate,
     Goal as FabricGoal,
 };
-use bioprism_factory::{Job as FactoryJob, JobStore, WorkerCapability};
+use bioprism_factory::{ExecutionAuthoritySnapshot, Job as FactoryJob, JobStore, WorkerCapability};
 use bioprism_fiber::{compile, Query};
 use bioprism_foundation::contract::{ContractDraft, FalsifiableContract};
 use bioprism_foundation::maturity::ApplicabilityEnvelope;
@@ -216,15 +200,15 @@ use bioprism_infra::{
 };
 use bioprism_interweave::workflow::{catalogue as interweave_catalogue, outstanding_deliverables};
 use bioprism_lab::{
-    expand as expand_acquisitions, separate as separate_hypotheses, AcquisitionAction,
-    AcquisitionCost, HypothesisSet as LabHypothesisSet,
     evolution::{ChangeProposal, ContaminationRecord, EvolutionCard},
+    expand as expand_acquisitions,
     holdout::{Holdout, HoldoutId, HoldoutLedger, Partition},
     pareto::{Direction as LabParetoDirection, ParetoFront, Profile as LabParetoProfile},
     risk::{BranchLedger, BranchOutcome, BranchPolicy, RiskFeatures},
     rollback::{Checkpoint, Deployment},
+    separate as separate_hypotheses,
     space::{ArchitectureSpace, CandidateArchitecture, ConfigurationId},
-    Observations,
+    AcquisitionAction, AcquisitionCost, HypothesisSet as LabHypothesisSet, Observations,
 };
 use bioprism_ledger::{ClassCounts, Event, EventLedger, SubjectLatest, TemporalCut};
 use bioprism_lens::{catalogue as lens_catalogue, run as run_lens, CohortLeakageLens, CohortSplit};
@@ -233,45 +217,27 @@ use bioprism_megafactory::{
     WorkRequest, WorkerProfile,
 };
 use bioprism_metrics::{
-    analyse_analytics, breakdown as metrics_breakdown, AnalyticsInput, CapabilityVector,
-    ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting, PartialRanking,
-    CapabilityGrid, RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
+    analyse_analytics, breakdown as metrics_breakdown, AnalyticsInput, CapabilityGrid,
+    CapabilityVector, ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting,
+    PartialRanking, RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
 };
 use bioprism_modalities::{
     analysis_unit as modality_analysis_unit, catalog::all as all_modalities,
     cites as modality_cites, independent_unit as modality_independent_unit,
-    report as modality_comparability_report,
-    supported_claims as modality_supported_claims, supports_descriptor as modality_supports_descriptor,
-    ClaimKind, EvaluationHorizon, EvidenceTier, LiteratureClaim, Modality, ModalityDescriptor,
-    ModalMeasurement, ModalityTransport, Resolution, TransportKind,
+    report as modality_comparability_report, supported_claims as modality_supported_claims,
+    supports_descriptor as modality_supports_descriptor, ClaimKind, EvaluationHorizon,
+    EvidenceTier, LiteratureClaim, ModalMeasurement, Modality, ModalityDescriptor,
+    ModalityTransport, Resolution, TransportKind,
 };
-use bioprism_obligation::{may_perform, Action as ObligationAction, ObligationGraph};
 use bioprism_mutation::{
     generate as generate_mutations, measure as measure_diversity, standard_suite,
 };
+use bioprism_obligation::{may_perform, Action as ObligationAction, ObligationGraph};
 use bioprism_onco::{
     assess as onco_assess, classify as onco_classify, AcquisitionTime, AvailabilityTime,
     BoundaryRequest, ClinicalObservation, Estimand, FollowUp, Histology, ImagingObservation,
-    MarkerPanel, MolecularMarker, ProgressionEvidence, ResearchBoundary,
-    ResponseCriterion, ResponseRequest, Timepoint, TreatmentContext, TumourWorldline,
-};
-use bioprism_oncoworlds::{
-    attribute_to_treatment as onco_attribute_to_treatment,
-    as_negative_call as onco_as_negative_call,
-    assert_claim as onco_assert_radiogenomic_claim,
-    classify as onco_classify_methylation,
-    compatible_histories as onco_compatible_histories, joinable_with_bridge,
-    comparable_cohorts as onco_comparable_cohorts,
-    explain_new_alteration as onco_explain_new_alteration,
-    equity_report as onco_equity_report,
-    reconcile_versions as onco_reconcile_methylation,
-    transport_to_patients as onco_transport_model, AnalysisUnit, Artifact, ClassifierVersion,
-    CausalDesign, ClonalHistory, Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse,
-    EntityMapping, EpochBridge, EstablishmentCohort, EvaluationDesign, FidelityEvidence,
-    IdentityEvidence, JoinReport, JoinVerdict, MethylationClass, ModelResult,
-    PopulationDescriptor, PooledScore, RadiogenomicClaim, SampleContext, SiteAssayContext,
-    SpecimenObservation, TumourPopulation,
-    use_descriptor as onco_use_descriptor, VersionedResult,
+    MarkerPanel, MolecularMarker, ProgressionEvidence, ResearchBoundary, ResponseCriterion,
+    ResponseRequest, Timepoint, TreatmentContext, TumourWorldline,
 };
 use bioprism_oncoworlds::entities::{
     declare_cluster as onco_declare_cluster, handle_event as onco_handle_event,
@@ -281,6 +247,21 @@ use bioprism_oncoworlds::entities::{
 };
 use bioprism_oncoworlds::models::REQUIRED_ASSUMPTIONS as MODEL_REQUIRED_ASSUMPTIONS;
 use bioprism_oncoworlds::radiogenomics::{MECHANISM_STRATA, REQUIRED_ASSUMPTIONS};
+use bioprism_oncoworlds::{
+    as_negative_call as onco_as_negative_call, assert_claim as onco_assert_radiogenomic_claim,
+    attribute_to_treatment as onco_attribute_to_treatment, classify as onco_classify_methylation,
+    comparable_cohorts as onco_comparable_cohorts,
+    compatible_histories as onco_compatible_histories, equity_report as onco_equity_report,
+    explain_new_alteration as onco_explain_new_alteration, joinable_with_bridge,
+    reconcile_versions as onco_reconcile_methylation,
+    transport_to_patients as onco_transport_model, use_descriptor as onco_use_descriptor,
+    AnalysisUnit, Artifact, CausalDesign, ClassifierVersion, ClonalHistory,
+    Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse, EntityMapping, EpochBridge,
+    EstablishmentCohort, EvaluationDesign, FidelityEvidence, IdentityEvidence, JoinReport,
+    JoinVerdict, MethylationClass, ModelResult, PooledScore, PopulationDescriptor,
+    RadiogenomicClaim, SampleContext, SiteAssayContext, SpecimenObservation, TumourPopulation,
+    VersionedResult,
+};
 use bioprism_ops::{
     audit_statement as telemetry_audit_statement, CapacityModel, DegradationPlan, Demand,
     DomainEvent, MetricDefinition, Observations as TelemetryObservations, RedactionPolicy, TraceId,
@@ -1355,6 +1336,7 @@ impl Server {
             "world_validate" => self.world_validate(&arguments),
             "world_generate" => self.world_generate(&arguments),
             "factory_lifecycle_simulate" => self.factory_lifecycle_simulate(&arguments),
+            "factory_authority_verify" => self.factory_authority_verify(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -1520,7 +1502,9 @@ impl Server {
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "developer_delivery_receipt" => self.developer_delivery_receipt(&arguments),
-            "developer_delivery_receipt_verify" => self.developer_delivery_receipt_verify(&arguments),
+            "developer_delivery_receipt_verify" => {
+                self.developer_delivery_receipt_verify(&arguments)
+            }
             "engineering_manifest_audit" => self.engineering_manifest_audit(&arguments),
             "engineering_execution_plan" => self.engineering_execution_plan(&arguments),
             "release_pipeline_audit" => self.release_pipeline_audit(&arguments),
@@ -2290,6 +2274,77 @@ impl Server {
         }))
     }
 
+    /// Verify an execution-authority envelope without trusting its claimed digests or replaying
+    /// any worker effect. This is the MCP-side audit seam for API operators and offline tooling.
+    fn factory_authority_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let checkpoint = arguments
+            .get("checkpoint")
+            .cloned()
+            .ok_or("checkpoint is required and must be a serialized execution authority object")?;
+        let encoded = serde_json::to_vec(&checkpoint)
+            .map_err(|error| format!("cannot measure authority checkpoint: {error}"))?;
+        if encoded.len() > 64 * 1024 * 1024 {
+            return Err("authority checkpoint exceeds the 64 MiB safety bound".into());
+        }
+        let snapshot = ExecutionAuthoritySnapshot::from_json_bytes(&encoded)
+            .map_err(|error| format!("execution authority verification refused: {error}"))?;
+        let include_events = arguments
+            .get("include_events")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let max_events = arguments
+            .get("max_events")
+            .and_then(Value::as_u64)
+            .unwrap_or(64)
+            .min(256) as usize;
+        let events = if include_events {
+            snapshot
+                .events
+                .iter()
+                .rev()
+                .take(max_events)
+                .map(|event| {
+                    json!({
+                        "sequence": event.sequence,
+                        "operation": event.operation,
+                        "idempotency_key": event.idempotency_key,
+                        "job_id": event.job_id,
+                        "worker_id": event.worker_id,
+                        "attempt": event.attempt,
+                        "at": event.at,
+                        "digest": event.digest,
+                        "previous_digest": event.previous_digest,
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        Ok(json!({
+            "schema": "bioprism-factory-execution-authority/0.1",
+            "valid": true,
+            "schema_version": snapshot.schema_version,
+            "revision": snapshot.revision,
+            "authority_epoch": snapshot.authority_epoch,
+            "state_digest": snapshot.state_digest,
+            "queue_state_digest": snapshot.queue.state_digest,
+            "job_count": snapshot.queue.jobs.len(),
+            "active_lease_count": snapshot.queue.leases.len(),
+            "event_count": snapshot.events.len(),
+            "events": events,
+            "guarantees": [
+                "the queue snapshot and transition journal verify under one content digest",
+                "transition sequence and previous-digest links were checked before projection",
+                "legacy bare queue checkpoints are accepted only after their queue digest verifies"
+            ],
+            "does_not_claim": [
+                "multi-host consensus or network-partition tolerance",
+                "worker liveness",
+                "external provider effect completion"
+            ]
+        }))
+    }
+
     fn context_compare(&self, arguments: &Value) -> Result<Value, String> {
         let world_relative = arguments
             .get("world")
@@ -2505,8 +2560,9 @@ impl Server {
                     "refusal_text": Value::Null,
                 }),
                 Err(refusal) => {
-                    let refusal_value = serde_json::to_value(&refusal)
-                        .map_err(|error| format!("cannot serialize analysis-unit refusal: {error}"))?;
+                    let refusal_value = serde_json::to_value(&refusal).map_err(|error| {
+                        format!("cannot serialize analysis-unit refusal: {error}")
+                    })?;
                     json!({
                         "requested": true,
                         "counted": counted,
@@ -2605,7 +2661,9 @@ impl Server {
             ));
         }
         if source.purpose.len() > 100_000 {
-            return Err("source modality descriptor purpose exceeds the 100000-byte safety bound".into());
+            return Err(
+                "source modality descriptor purpose exceeds the 100000-byte safety bound".into(),
+            );
         }
         let kind: TransportKind = serde_json::from_value(
             arguments
@@ -2659,7 +2717,9 @@ impl Server {
                 })
                 .map_err(|error| format!("cannot serialize modality transport refusal: {error}"))
         };
-        let support_row = |descriptor: &ModalityDescriptor, claim: ClaimKind| -> Result<Value, String> {
+        let support_row = |descriptor: &ModalityDescriptor,
+                           claim: ClaimKind|
+         -> Result<Value, String> {
             match modality_supports_descriptor(descriptor, claim) {
                 Ok(()) => Ok(json!({
                     "claim": claim,
@@ -2715,7 +2775,9 @@ impl Server {
                 let mapped = transport.to_scope_mapping();
                 let mapping_check = match mapped.check() {
                     bioprism_scope::MappingCheck::Sound => "sound",
-                    bioprism_scope::MappingCheck::MisdeclaredRestriction => "misdeclared_restriction",
+                    bioprism_scope::MappingCheck::MisdeclaredRestriction => {
+                        "misdeclared_restriction"
+                    }
                     bioprism_scope::MappingCheck::UndeclaredLoss => "undeclared_loss",
                 };
                 let inverse = match transport.invert() {
@@ -2754,22 +2816,30 @@ impl Server {
                                 }))
                             })
                             .collect::<Result<Vec<_>, String>>()?;
-                        (json!({
-                            "descriptor": {
-                                "modality": descriptor.modality,
-                                "measurand": descriptor.measurand,
-                                "design": descriptor.design,
-                                "complete": descriptor.is_complete(),
-                                "resolutions": Resolution::ALL.into_iter().map(|axis| json!({"axis": axis, "status": descriptor.resolution(axis)})).collect::<Vec<_>>(),
-                                "resolved_axes": descriptor.resolved_axes(),
-                                "unresolved_axes": descriptor.unresolved_axes(),
-                                "undeclared_axes": descriptor.undeclared_axes(),
-                            }
-                        }), json!({"applied": true, "refusal": Value::Null, "refusal_kind": Value::Null, "refusal_text": Value::Null}), claim_rows)
+                        (
+                            json!({
+                                "descriptor": {
+                                    "modality": descriptor.modality,
+                                    "measurand": descriptor.measurand,
+                                    "design": descriptor.design,
+                                    "complete": descriptor.is_complete(),
+                                    "resolutions": Resolution::ALL.into_iter().map(|axis| json!({"axis": axis, "status": descriptor.resolution(axis)})).collect::<Vec<_>>(),
+                                    "resolved_axes": descriptor.resolved_axes(),
+                                    "unresolved_axes": descriptor.unresolved_axes(),
+                                    "undeclared_axes": descriptor.undeclared_axes(),
+                                }
+                            }),
+                            json!({"applied": true, "refusal": Value::Null, "refusal_kind": Value::Null, "refusal_text": Value::Null}),
+                            claim_rows,
+                        )
                     }
                     Err(refusal) => {
                         let projection = refusal_projection(&refusal)?;
-                        (Value::Null, json!({"applied": false, "refusal": projection["refusal"].clone(), "refusal_kind": projection["refusal_kind"].clone(), "refusal_text": projection["refusal_text"].clone()}), Vec::new())
+                        (
+                            Value::Null,
+                            json!({"applied": false, "refusal": projection["refusal"].clone(), "refusal_kind": projection["refusal_kind"].clone(), "refusal_text": projection["refusal_text"].clone()}),
+                            Vec::new(),
+                        )
                     }
                 };
                 Ok(json!({
@@ -2885,7 +2955,9 @@ impl Server {
             return Err("literature claim text exceeds the 100000-byte safety bound".into());
         }
         if claim.provenance.identifier.is_empty() || claim.provenance.identifier.len() > 2_000 {
-            return Err("literature source identifier must contain between 1 and 2000 bytes".into());
+            return Err(
+                "literature source identifier must contain between 1 and 2000 bytes".into(),
+            );
         }
         let target: ScopeKey = serde_json::from_value(
             arguments
@@ -2985,8 +3057,8 @@ impl Server {
                 }
             }
             Err(refusal) => {
-                let refusal_value = serde_json::to_value(&refusal)
-                    .map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["outcome_kind"] = json!("refused");
                 projection["refusal"] = refusal_value.clone();
                 projection["refusal_kind"] = refusal_value["binding_refusal"].clone();
@@ -7132,7 +7204,9 @@ impl Server {
         let mut space = ArchitectureSpace::new();
         let mut candidate_rows = Vec::with_capacity(raw_candidates.len());
         for (index, raw_candidate) in raw_candidates.iter().enumerate() {
-            let candidate: CandidateArchitecture = match serde_json::from_value(raw_candidate.clone()) {
+            let candidate: CandidateArchitecture = match serde_json::from_value(
+                raw_candidate.clone(),
+            ) {
                 Ok(candidate) => candidate,
                 Err(error) => {
                     return Ok(json!({
@@ -7171,9 +7245,11 @@ impl Server {
                 .map(|component| component.parameters.len())
                 .sum::<usize>();
             if let Err(error) = candidate.validate(cost_ceiling) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 candidate_rows.push(json!({
                     "index": index,
                     "id": candidate.id,
@@ -7214,9 +7290,11 @@ impl Server {
                 }));
             }
             if let Err(error) = space.register(candidate.clone()) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 candidate_rows.push(json!({
                     "index": index,
                     "id": candidate.id,
@@ -7267,8 +7345,10 @@ impl Server {
                 "registration": "registered",
             });
             if include_components {
-                row["components"] = serde_json::to_value(candidate.components)
-                    .map_err(|error| format!("cannot serialize architecture components: {error}"))?;
+                row["components"] =
+                    serde_json::to_value(candidate.components).map_err(|error| {
+                        format!("cannot serialize architecture components: {error}")
+                    })?;
             }
             candidate_rows.push(row);
         }
@@ -7298,9 +7378,9 @@ impl Server {
             let candidate = space.get(&configuration).ok_or_else(|| {
                 format!("inspect[{index}] names unknown configuration `{configuration}`")
             })?;
-            let lineage = space
-                .lineage(&configuration)
-                .map_err(|error| format!("cannot resolve lineage for `{configuration}`: {error}"))?;
+            let lineage = space.lineage(&configuration).map_err(|error| {
+                format!("cannot resolve lineage for `{configuration}`: {error}")
+            })?;
             let root = lineage.last().cloned();
             let mut row = json!({
                 "index": index,
@@ -7433,8 +7513,9 @@ impl Server {
             .iter()
             .enumerate()
             .map(|(index, value)| {
-                let objective: bioprism_lab::pareto::Objective = serde_json::from_value(value.clone())
-                    .map_err(|error| format!("invalid objectives[{index}]: {error}"))?;
+                let objective: bioprism_lab::pareto::Objective =
+                    serde_json::from_value(value.clone())
+                        .map_err(|error| format!("invalid objectives[{index}]: {error}"))?;
                 if objective.axis.trim().is_empty() || objective.axis.len() > 256 {
                     return Err(format!(
                         "objectives[{index}].axis must contain between 1 and 256 bytes"
@@ -7494,9 +7575,11 @@ impl Server {
         let mut front = match ParetoFront::new(objectives.clone()) {
             Ok(front) => front,
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "pareto_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "pareto_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-pareto-audit/0.1",
@@ -7518,9 +7601,11 @@ impl Server {
             let admission = match front.insert(profile) {
                 Ok(admission) => admission,
                 Err(error) => {
-                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                        "error": "pareto_error_serialization_failed"
-                    }));
+                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                        json!({
+                            "error": "pareto_error_serialization_failed"
+                        })
+                    });
                     return Ok(json!({
                         "ok": false,
                         "schema": "bioprism-mcp/lab-pareto-audit/0.1",
@@ -7665,9 +7750,11 @@ impl Server {
         ) {
             Ok(policy) => policy,
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "branch_policy_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "branch_policy_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-branch-audit/0.1",
@@ -7826,9 +7913,11 @@ impl Server {
                 ));
             }
             if let Err(error) = candidate.validate(cost_ceiling) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-holdout-audit/0.1",
@@ -7845,9 +7934,11 @@ impl Server {
                 }));
             }
             if let Err(error) = space.register(candidate) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-holdout-audit/0.1",
@@ -7894,13 +7985,17 @@ impl Server {
             let query_budget = object
                 .get("query_budget")
                 .and_then(Value::as_u64)
-                .ok_or_else(|| format!("holdouts[{index}].query_budget must be a non-negative integer"))?;
+                .ok_or_else(|| {
+                    format!("holdouts[{index}].query_budget must be a non-negative integer")
+                })?;
             if query_budget > u32::MAX as u64 {
                 return Err(format!("holdouts[{index}].query_budget exceeds u32"));
             }
             holdouts
                 .register(Holdout::new(id, partition, query_budget as u32))
-                .map_err(|error| format!("holdout registration refused holdouts[{index}]: {error}"))?;
+                .map_err(|error| {
+                    format!("holdout registration refused holdouts[{index}]: {error}")
+                })?;
         }
 
         let current = arguments
@@ -7911,9 +8006,11 @@ impl Server {
         let mut deployment = match Deployment::new(space, holdouts, current) {
             Ok(deployment) => deployment,
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "rollback_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "rollback_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-holdout-audit/0.1",
@@ -7962,10 +8059,14 @@ impl Server {
                         .and_then(Value::as_str)
                         .ok_or_else(|| format!("operations[{index}].label must be a string"))?;
                     if label.trim().is_empty() || label.len() > 512 {
-                        return Err(format!("operations[{index}].label must contain between 1 and 512 bytes"));
+                        return Err(format!(
+                            "operations[{index}].label must contain between 1 and 512 bytes"
+                        ));
                     }
                     if checkpoints.contains_key(label) {
-                        return Err(format!("operations[{index}] duplicates checkpoint label {label:?}"));
+                        return Err(format!(
+                            "operations[{index}] duplicates checkpoint label {label:?}"
+                        ));
                     }
                     let checkpoint = deployment.checkpoint(label);
                     checkpoints.insert(label.to_string(), checkpoint.clone());
@@ -7980,15 +8081,16 @@ impl Server {
                     let configuration = object
                         .get("configuration")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| format!("operations[{index}].configuration must be a string"))?;
+                        .ok_or_else(|| {
+                            format!("operations[{index}].configuration must be a string")
+                        })?;
                     let configuration = ConfigurationId::new(configuration);
                     let selected_using = object
                         .get("selected_using")
                         .map(|value| {
-                            value
-                                .as_str()
-                                .map(HoldoutId::new)
-                                .ok_or_else(|| format!("operations[{index}].selected_using must be a string"))
+                            value.as_str().map(HoldoutId::new).ok_or_else(|| {
+                                format!("operations[{index}].selected_using must be a string")
+                            })
                         })
                         .transpose()?;
                     let rationale = object
@@ -7997,7 +8099,9 @@ impl Server {
                         .ok_or_else(|| format!("operations[{index}].rationale must be a string"))?;
                     deployment
                         .promote(&configuration, selected_using.as_ref(), rationale)
-                        .map_err(|error| format!("operations[{index}] promotion refused: {error}"))?;
+                        .map_err(|error| {
+                            format!("operations[{index}] promotion refused: {error}")
+                        })?;
                     json!({
                         "index": index,
                         "kind": kind,
@@ -8014,9 +8118,13 @@ impl Server {
                     let raw_configurations = object
                         .get("configurations")
                         .and_then(Value::as_array)
-                        .ok_or_else(|| format!("operations[{index}].configurations must be an array"))?;
+                        .ok_or_else(|| {
+                            format!("operations[{index}].configurations must be an array")
+                        })?;
                     if raw_configurations.is_empty() || raw_configurations.len() > 512 {
-                        return Err(format!("operations[{index}].configurations must contain between 1 and 512 ids"));
+                        return Err(format!(
+                            "operations[{index}].configurations must contain between 1 and 512 ids"
+                        ));
                     }
                     let configurations: Vec<ConfigurationId> = raw_configurations
                         .iter()
@@ -8052,7 +8160,9 @@ impl Server {
                     let configuration = object
                         .get("configuration")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| format!("operations[{index}].configuration must be a string"))?;
+                        .ok_or_else(|| {
+                            format!("operations[{index}].configuration must be a string")
+                        })?;
                     let metric = object
                         .get("metric")
                         .and_then(Value::as_str)
@@ -8080,9 +8190,11 @@ impl Server {
                         }
                         Err(error) => {
                             measurement_refusal_count += 1;
-                            let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                                "error": "holdout_error_serialization_failed"
-                            }));
+                            let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                                json!({
+                                    "error": "holdout_error_serialization_failed"
+                                })
+                            });
                             json!({
                                 "index": index,
                                 "kind": kind,
@@ -8098,14 +8210,15 @@ impl Server {
                     let label = object
                         .get("checkpoint")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| format!("operations[{index}].checkpoint must be a string"))?;
-                    let checkpoint = checkpoints
-                        .get(label)
-                        .cloned()
-                        .ok_or_else(|| format!("operations[{index}] names unknown checkpoint {label:?}"))?;
-                    let receipt = deployment
-                        .rollback(&checkpoint)
-                        .map_err(|error| format!("operations[{index}] rollback refused: {error}"))?;
+                        .ok_or_else(|| {
+                            format!("operations[{index}].checkpoint must be a string")
+                        })?;
+                    let checkpoint = checkpoints.get(label).cloned().ok_or_else(|| {
+                        format!("operations[{index}] names unknown checkpoint {label:?}")
+                    })?;
+                    let receipt = deployment.rollback(&checkpoint).map_err(|error| {
+                        format!("operations[{index}] rollback refused: {error}")
+                    })?;
                     rollback_count += 1;
                     json!({
                         "index": index,
@@ -8224,16 +8337,21 @@ impl Server {
             .and_then(Value::as_array)
             .ok_or("candidates is required and must be an array")?;
         if raw_candidates.len() != 2 {
-            return Err("candidates must contain exactly baseline and candidate architecture bundles".into());
+            return Err(
+                "candidates must contain exactly baseline and candidate architecture bundles"
+                    .into(),
+            );
         }
         let mut space = ArchitectureSpace::new();
         for (index, raw_candidate) in raw_candidates.iter().enumerate() {
             let candidate: CandidateArchitecture = serde_json::from_value(raw_candidate.clone())
                 .map_err(|error| format!("invalid candidates[{index}]: {error}"))?;
             if let Err(error) = candidate.validate(cost_ceiling) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-evolution-audit/0.1",
@@ -8248,9 +8366,11 @@ impl Server {
                 }));
             }
             if let Err(error) = space.register(candidate) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-evolution-audit/0.1",
@@ -8414,9 +8534,11 @@ impl Server {
                     if first_refusal.is_none() {
                         first_refusal = Some((configuration_id.clone(), error.clone()));
                     }
-                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                        "error": "holdout_error_serialization_failed"
-                    }));
+                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                        json!({
+                            "error": "holdout_error_serialization_failed"
+                        })
+                    });
                     measurement_rows.push(json!({
                         "index": index,
                         "configuration": configuration_id,
@@ -8496,9 +8618,11 @@ impl Server {
         ) {
             Ok(card) => card,
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "evolution_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "evolution_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-evolution-audit/0.1",
@@ -8539,9 +8663,11 @@ impl Server {
                 ]
             })),
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "evolution_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "evolution_error_serialization_failed"
+                    })
+                });
                 Ok(json!({
                     "ok": true,
                     "schema": "bioprism-mcp/lab-evolution-audit/0.1",
@@ -8613,7 +8739,9 @@ impl Server {
         let frontier = graph.frontier().ok();
         let undischarged = graph.undischarged().ok();
         let topological_count = topological.as_ref().map_or(0, Vec::len);
-        let effective_count = effective.as_ref().map_or(0, std::collections::BTreeMap::len);
+        let effective_count = effective
+            .as_ref()
+            .map_or(0, std::collections::BTreeMap::len);
         let frontier_count = frontier.as_ref().map_or(0, Vec::len);
         let undischarged_count = undischarged.as_ref().map_or(0, Vec::len);
         let topological = topological
@@ -8624,30 +8752,29 @@ impl Server {
                 states
                     .into_iter()
                     .take(max_items)
-                    .map(|(obligation, state)| json!({
-                        "obligation": obligation,
-                        "effective": state,
-                    }))
+                    .map(|(obligation, state)| {
+                        json!({
+                            "obligation": obligation,
+                            "effective": state,
+                        })
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
         let frontier = frontier
-            .map(|entries| {
-                entries
-                    .into_iter()
-                    .take(max_items)
-                    .collect::<Vec<_>>()
-            })
+            .map(|entries| entries.into_iter().take(max_items).collect::<Vec<_>>())
             .unwrap_or_default();
         let undischarged = undischarged
             .map(|entries| {
                 entries
                     .into_iter()
                     .take(max_items)
-                    .map(|(obligation, state)| json!({
-                        "obligation": obligation,
-                        "effective": state,
-                    }))
+                    .map(|(obligation, state)| {
+                        json!({
+                            "obligation": obligation,
+                            "effective": state,
+                        })
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -9607,8 +9734,9 @@ impl Server {
         }
         let pool = EpistemicEvidencePool::new(parsed_pool.items().to_vec())
             .map_err(|error| format!("evidence pool invariant failed: {error}"))?;
-        pool.check_against(&problem)
-            .map_err(|error| format!("evidence pool is incompatible with the decision problem: {error}"))?;
+        pool.check_against(&problem).map_err(|error| {
+            format!("evidence pool is incompatible with the decision problem: {error}")
+        })?;
 
         let parse_optional_cardinality = |key: &str| -> Result<Option<usize>, String> {
             raw_constraint
@@ -9640,9 +9768,9 @@ impl Server {
                 .iter()
                 .enumerate()
                 .map(|(index, value)| {
-                    value.as_f64().ok_or_else(|| {
-                        format!("constraint costs[{index}] must be a finite number")
-                    })
+                    value
+                        .as_f64()
+                        .ok_or_else(|| format!("constraint costs[{index}] must be a finite number"))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             None => pool.items().iter().map(|item| item.cost).collect(),
@@ -9857,25 +9985,22 @@ impl Server {
                 "cap": 20,
             })
         } else {
-            let (chosen, value) = match epistemic_brute_force_optimum(
-                &objective,
-                &constraint,
-                &protected,
-            ) {
-                Ok(result) => result,
-                Err(error) => {
-                    return Ok(json!({
-                        "ok": false,
-                        "schema": SCHEMA,
-                        "stage": "exact_optimum",
-                        "refusal": error.to_string(),
-                        "fail_closed": true,
-                        "submodularity": submodularity,
-                        "greedy": project_selection(&selection),
-                        "lazy": lazy_selection.as_ref().map(project_selection),
-                    }))
-                }
-            };
+            let (chosen, value) =
+                match epistemic_brute_force_optimum(&objective, &constraint, &protected) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        return Ok(json!({
+                            "ok": false,
+                            "schema": SCHEMA,
+                            "stage": "exact_optimum",
+                            "refusal": error.to_string(),
+                            "fail_closed": true,
+                            "submodularity": submodularity,
+                            "greedy": project_selection(&selection),
+                            "lazy": lazy_selection.as_ref().map(project_selection),
+                        }))
+                    }
+                };
             let selected_value = selection.value;
             let (ratio, ratio_status) = if value.abs() <= 1e-12 {
                 (Value::Null, "undefined_zero_optimum")
@@ -10019,7 +10144,9 @@ impl Server {
             parsed_problem.actions().to_vec(),
             parsed_problem.models().to_vec(),
             (0..action_count)
-                .flat_map(|action| (0..model_count).map(move |model| problem_ref.loss(action, model)))
+                .flat_map(|action| {
+                    (0..model_count).map(move |model| problem_ref.loss(action, model))
+                })
                 .collect(),
         )
         .map_err(|error| format!("decision problem invariant failed: {error}"))?;
@@ -10133,17 +10260,22 @@ impl Server {
             let mut refusal = None;
             for (position, value) in values.iter().enumerate() {
                 let Some(raw_index) = value.as_u64() else {
-                    refusal = Some(format!("subsets[{index}][{position}] must be a non-negative integer"));
+                    refusal = Some(format!(
+                        "subsets[{index}][{position}] must be a non-negative integer"
+                    ));
                     break;
                 };
-                let evidence_index = usize::try_from(raw_index)
-                    .map_err(|_| format!("subsets[{index}][{position}] is outside the supported range"))?;
+                let evidence_index = usize::try_from(raw_index).map_err(|_| {
+                    format!("subsets[{index}][{position}] is outside the supported range")
+                })?;
                 if evidence_index >= pool.len() {
                     refusal = Some(format!("subsets[{index}] names evidence index {evidence_index}, outside pool size {}", pool.len()));
                     break;
                 }
                 if !subset.insert(evidence_index) {
-                    refusal = Some(format!("subsets[{index}] repeats evidence index {evidence_index}"));
+                    refusal = Some(format!(
+                        "subsets[{index}] repeats evidence index {evidence_index}"
+                    ));
                     break;
                 }
             }
@@ -10505,11 +10637,13 @@ impl Server {
         }))
         .map_err(|error| format!("cannot measure benchmark decision-audit envelope: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("benchmark decision-audit input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "benchmark decision-audit input exceeds the 20000000-byte safety bound".into(),
+            );
         }
 
-        let trace: TraceIr = serde_json::from_value(raw_trace)
-            .map_err(|error| format!("invalid trace: {error}"))?;
+        let trace: TraceIr =
+            serde_json::from_value(raw_trace).map_err(|error| format!("invalid trace: {error}"))?;
         if trace.events.len() > 100_000 {
             return Err("trace is bounded at 100000 events".into());
         }
@@ -10526,13 +10660,15 @@ impl Server {
             return Err("reference trace is bounded at 100000 events".into());
         }
 
-        let mut candidate_actions: Vec<BenchmarkCandidateAction> = serde_json::from_value(raw_actions)
-            .map_err(|error| format!("invalid candidate action: {error}"))?;
+        let mut candidate_actions: Vec<BenchmarkCandidateAction> =
+            serde_json::from_value(raw_actions)
+                .map_err(|error| format!("invalid candidate action: {error}"))?;
         if candidate_actions.len() > 10_000 {
             return Err("candidate actions are bounded at 10000 items".into());
         }
-        let constraints: Vec<BenchmarkConstraintRecord> = serde_json::from_value(raw_constraints)
-            .map_err(|error| format!("invalid constraint record: {error}"))?;
+        let constraints: Vec<BenchmarkConstraintRecord> =
+            serde_json::from_value(raw_constraints)
+                .map_err(|error| format!("invalid constraint record: {error}"))?;
         if constraints.len() > 10_000 {
             return Err("constraint records are bounded at 10000 items".into());
         }
@@ -10543,11 +10679,7 @@ impl Server {
         }
         let evaluator_dispute = match arguments.get("evaluator_dispute") {
             None => None,
-            Some(value) => Some(
-                value
-                    .as_str()
-                    .ok_or("evaluator_dispute must be a string")?,
-            ),
+            Some(value) => Some(value.as_str().ok_or("evaluator_dispute must be a string")?),
         };
 
         let analysis = match analyse_benchmark(&trace, reference.as_ref()) {
@@ -10578,29 +10710,27 @@ impl Server {
             ),
         };
         let selected_step = match explicit_decision_step {
-            Some(step) => {
-                match analysis.localise_to(&trace, step) {
-                    Ok(step) => step,
-                    Err(error) => {
-                        return Ok(json!({
-                            "ok": false,
-                            "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
-                            "stage": "decision_selection",
-                            "refusal": error.to_string(),
-                            "fail_closed": true,
-                            "trace_id": trace.trace_id,
-                            "analysis": {
-                                "verdict": analysis.verdict,
-                                "localized_step": analysis.first_causal_step(),
-                            },
-                            "guarantees": [
-                                "observations and results are never silently replaced by their nearest decision",
-                                "an explicit decision step is checked against the actual trace before reconstruction",
-                            ],
-                        }))
-                    }
+            Some(step) => match analysis.localise_to(&trace, step) {
+                Ok(step) => step,
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
+                        "stage": "decision_selection",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "trace_id": trace.trace_id,
+                        "analysis": {
+                            "verdict": analysis.verdict,
+                            "localized_step": analysis.first_causal_step(),
+                        },
+                        "guarantees": [
+                            "observations and results are never silently replaced by their nearest decision",
+                            "an explicit decision step is checked against the actual trace before reconstruction",
+                        ],
+                    }))
                 }
-            }
+            },
             None => match analysis.first_causal_step() {
                 Some(step) => step,
                 None => {
@@ -10660,7 +10790,7 @@ impl Server {
                         "future-sourced options remain available for validation but cannot be mislabeled as visible at decision time",
                         "a candidate with false visible provenance is rejected before coverage is reported",
                     ],
-                }))
+                }));
             }
         }
 
@@ -10678,11 +10808,7 @@ impl Server {
             .take(max_items)
             .cloned()
             .collect::<Vec<_>>();
-        let visible_actions = visible
-            .iter()
-            .take(max_items)
-            .cloned()
-            .collect::<Vec<_>>();
+        let visible_actions = visible.iter().take(max_items).cloned().collect::<Vec<_>>();
         let validation_actions = validation_only
             .iter()
             .take(max_items)
@@ -10694,12 +10820,7 @@ impl Server {
             .cloned()
             .collect::<Vec<_>>();
 
-        let card = benchmark_failure_card(
-            &analysis,
-            &constraints,
-            evaluator_dispute,
-            claims,
-        );
+        let card = benchmark_failure_card(&analysis, &constraints, evaluator_dispute, claims);
         let mut card_projection = card.clone();
         let card_omitted = json!({
             "recommended_cell_steps": card.recommended_cell_steps.len().saturating_sub(max_items),
@@ -10862,8 +10983,9 @@ impl Server {
         if panel_runs.len() > 100_000 {
             return Err("panel_runs are bounded at 100000 items".into());
         }
-        let bench_instances: Vec<BenchmarkBenchInstance> = serde_json::from_value(raw_bench_instances)
-            .map_err(|error| format!("invalid effective-diversity instance: {error}"))?;
+        let bench_instances: Vec<BenchmarkBenchInstance> =
+            serde_json::from_value(raw_bench_instances)
+                .map_err(|error| format!("invalid effective-diversity instance: {error}"))?;
         if bench_instances.len() > 100_000 {
             return Err("bench_instances are bounded at 100000 items".into());
         }
@@ -10899,8 +11021,9 @@ impl Server {
             );
         }
 
-        let exposure: BTreeMap<String, BenchmarkExposureLedger> = serde_json::from_value(raw_exposure)
-            .map_err(|error| format!("invalid exposure ledger map: {error}"))?;
+        let exposure: BTreeMap<String, BenchmarkExposureLedger> =
+            serde_json::from_value(raw_exposure)
+                .map_err(|error| format!("invalid exposure ledger map: {error}"))?;
         if exposure.len() > 100_000 {
             return Err("exposure is bounded at 100000 instance entries".into());
         }
@@ -10925,11 +11048,8 @@ impl Server {
         let mut holdout_counts: BTreeMap<String, usize> = BTreeMap::new();
         for instance in &instances {
             let fingerprint = bioprism_benchcompiler::content_fingerprint(instance);
-            let holdout = benchmark_assign_holdout(
-                instance,
-                private_share as u8,
-                rotating_panels as usize,
-            );
+            let holdout =
+                benchmark_assign_holdout(instance, private_share as u8, rotating_panels as usize);
             let label = match &holdout {
                 bioprism_benchcompiler::Holdout::Public => "public",
                 bioprism_benchcompiler::Holdout::Private => "private",
@@ -11211,9 +11331,7 @@ impl Server {
         let grade = match arguments.get("grade") {
             None => Value::Null,
             Some(raw_grade) => {
-                let grade = raw_grade
-                    .as_object()
-                    .ok_or("grade must be an object")?;
+                let grade = raw_grade.as_object().ok_or("grade must be an object")?;
                 let verdict = grade
                     .get("verdict")
                     .and_then(Value::as_str)
@@ -11252,23 +11370,17 @@ impl Server {
         let cell = match arguments.get("cell") {
             None => Value::Null,
             Some(raw_cell) => {
-                let cell = raw_cell
-                    .as_object()
-                    .ok_or("cell must be an object")?;
+                let cell = raw_cell.as_object().ok_or("cell must be an object")?;
                 let cell_id = cell
                     .get("cell_id")
                     .and_then(Value::as_str)
                     .ok_or("cell.cell_id must be a string")?;
                 let world: bioprism_prism::InputRef = serde_json::from_value(
-                    cell.get("world")
-                        .cloned()
-                        .ok_or("cell.world is required")?,
+                    cell.get("world").cloned().ok_or("cell.world is required")?,
                 )
                 .map_err(|error| format!("invalid cell.world InputRef: {error}"))?;
                 let query: bioprism_prism::InputRef = serde_json::from_value(
-                    cell.get("query")
-                        .cloned()
-                        .ok_or("cell.query is required")?,
+                    cell.get("query").cloned().ok_or("cell.query is required")?,
                 )
                 .map_err(|error| format!("invalid cell.query InputRef: {error}"))?;
                 serde_json::to_value(reviewed.clone().into_cell(cell_id, world, query))
@@ -11325,11 +11437,17 @@ impl Server {
                     .map_err(|error| format!("invalid benchmark reference trace: {error}"))?,
             ),
         };
-        if reference.as_ref().is_some_and(|trace| trace.events.len() > 100_000) {
+        if reference
+            .as_ref()
+            .is_some_and(|trace| trace.events.len() > 100_000)
+        {
             return Err("reference trace may contain at most 100000 events".into());
         }
         let context: Vec<BenchmarkContextItem> = serde_json::from_value(
-            arguments.get("context").cloned().unwrap_or_else(|| json!([])),
+            arguments
+                .get("context")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
         )
         .map_err(|error| format!("invalid benchmark context: {error}"))?;
         if context.len() > 5_000 {
@@ -11404,14 +11522,20 @@ impl Server {
             return Err("budget.max_evaluations must be between 1 and 100000".into());
         }
         let ledger: Vec<BenchmarkConstraintRecord> = serde_json::from_value(
-            arguments.get("ledger").cloned().unwrap_or_else(|| json!([])),
+            arguments
+                .get("ledger")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
         )
         .map_err(|error| format!("invalid benchmark constraint ledger: {error}"))?;
         if ledger.len() > 10_000 {
             return Err("ledger may contain at most 10000 records".into());
         }
         let claims: Vec<BenchmarkAssertion> = serde_json::from_value(
-            arguments.get("claims").cloned().unwrap_or_else(|| json!([])),
+            arguments
+                .get("claims")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
         )
         .map_err(|error| format!("invalid benchmark claims: {error}"))?;
         if claims.len() > 10_000 {
@@ -11582,7 +11706,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure compile-review input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("benchmark compile-review input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "benchmark compile-review input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let compiled = self.benchmark_compile(arguments)?;
         if compiled.get("ok") != Some(&Value::Bool(true)) {
@@ -11627,9 +11753,7 @@ impl Server {
         let grade = match arguments.get("grade") {
             None => Value::Null,
             Some(raw_grade) => {
-                let grade = raw_grade
-                    .as_object()
-                    .ok_or("grade must be an object")?;
+                let grade = raw_grade.as_object().ok_or("grade must be an object")?;
                 let verdict = grade
                     .get("verdict")
                     .and_then(Value::as_str)
@@ -12741,7 +12865,11 @@ impl Server {
         let report = pack_coverage(&selected);
         let matrix = pack_coverage_matrix(&selected);
         let max_items = max_items as usize;
-        let covered = report.rows.iter().filter(|row| !row.packs.is_empty()).count();
+        let covered = report
+            .rows
+            .iter()
+            .filter(|row| !row.packs.is_empty())
+            .count();
         Ok(json!({
             "ok": true,
             "schema": "bioprism-mcp/pack-coverage-audit/0.1",
@@ -12822,7 +12950,10 @@ impl Server {
                 }
             }
         } else {
-            selected = all_packs().iter().filter(|pack| section_matches(pack)).collect();
+            selected = all_packs()
+                .iter()
+                .filter(|pack| section_matches(pack))
+                .collect();
             selected_ids.extend(selected.iter().map(|pack| pack.id.to_string()));
         }
         if !unknown.is_empty() || !out_of_section.is_empty() {
@@ -12850,7 +12981,8 @@ impl Server {
                 "guarantees": ["an empty portfolio is not rendered as a complete release plan"],
             }));
         }
-        let selected_ids: BTreeSet<String> = selected.iter().map(|pack| pack.id.to_string()).collect();
+        let selected_ids: BTreeSet<String> =
+            selected.iter().map(|pack| pack.id.to_string()).collect();
         let global_release = pack_release_order();
         let global_positions: BTreeMap<&str, usize> = global_release
             .iter()
@@ -13388,20 +13520,16 @@ impl Server {
         if browse_subject.trim().is_empty() || browse_subject.len() > 4_096 {
             return Err("failure_subject must be a non-empty string of at most 4096 bytes".into());
         }
-        let browse = match atlasx_browse_with_visibility(
-            browse_subject,
-            &failures,
-            facet,
-            &visibility,
-        ) {
-            Ok(browse) => browse,
-            Err(error) => {
-                return Ok(refusal(
-                    "failure_browse",
-                    format!("cannot construct failure browse: {error}"),
-                ))
-            }
-        };
+        let browse =
+            match atlasx_browse_with_visibility(browse_subject, &failures, facet, &visibility) {
+                Ok(browse) => browse,
+                Err(error) => {
+                    return Ok(refusal(
+                        "failure_browse",
+                        format!("cannot construct failure browse: {error}"),
+                    ))
+                }
+            };
         if require_no_withheld && browse.withheld() > 0 {
             return Ok(refusal(
                 "visibility_policy",
@@ -14201,13 +14329,20 @@ impl Server {
                     if values.len() > MAX_GRAPH_ROWS {
                         return Ok(refusal(
                             "evidence_validation",
-                            format!("evidence[{index}].lineage is bounded at {MAX_GRAPH_ROWS} entries"),
+                            format!(
+                                "evidence[{index}].lineage is bounded at {MAX_GRAPH_ROWS} entries"
+                            ),
                         ));
                     }
                     let mut lineage = Vec::with_capacity(values.len());
                     for (lineage_index, value) in values.iter().enumerate() {
                         let ancestor = match value.as_str() {
-                            Some(ancestor) if !ancestor.trim().is_empty() && ancestor.len() <= MAX_ID_BYTES => ancestor,
+                            Some(ancestor)
+                                if !ancestor.trim().is_empty()
+                                    && ancestor.len() <= MAX_ID_BYTES =>
+                            {
+                                ancestor
+                            }
                             _ => {
                                 return Ok(refusal(
                                     "evidence_validation",
@@ -14222,15 +14357,17 @@ impl Server {
             };
             let locator = match raw.get("locator_status") {
                 None | Some(Value::Null) => GroundingLocatorStatus::NotChecked,
-                Some(value) => match serde_json::from_value::<GroundingLocatorStatus>(value.clone()) {
-                    Ok(locator) => locator,
-                    Err(error) => {
-                        return Ok(refusal(
-                            "evidence_validation",
-                            format!("evidence[{index}].locator_status is invalid: {error}"),
-                        ));
+                Some(value) => {
+                    match serde_json::from_value::<GroundingLocatorStatus>(value.clone()) {
+                        Ok(locator) => locator,
+                        Err(error) => {
+                            return Ok(refusal(
+                                "evidence_validation",
+                                format!("evidence[{index}].locator_status is invalid: {error}"),
+                            ));
+                        }
                     }
-                },
+                }
             };
             let evidence = GroundingEvidence {
                 id: id.to_string(),
@@ -14261,7 +14398,9 @@ impl Server {
                 }
             };
             let evidence = match raw.get("evidence").and_then(Value::as_str) {
-                Some(evidence) if !evidence.trim().is_empty() && evidence.len() <= MAX_ID_BYTES => evidence,
+                Some(evidence) if !evidence.trim().is_empty() && evidence.len() <= MAX_ID_BYTES => {
+                    evidence
+                }
                 Some(_) => {
                     return Ok(refusal(
                         "edge_validation",
@@ -14304,7 +14443,9 @@ impl Server {
         let freeze = match arguments.get("stale_against") {
             None | Some(Value::Null) => None,
             Some(value) => {
-                let raw = value.as_str().ok_or("stale_against must be an RFC-3339 string")?;
+                let raw = value
+                    .as_str()
+                    .ok_or("stale_against must be an RFC-3339 string")?;
                 match FactoryTimestamp::parse(raw) {
                     Ok(timestamp) => Some(timestamp),
                     Err(error) => {
@@ -14504,7 +14645,9 @@ impl Server {
             .count();
         let unresolvable_count = evidence_records
             .values()
-            .filter(|(_, _, locator)| matches!(locator, GroundingLocatorStatus::Unresolvable { .. }))
+            .filter(|(_, _, locator)| {
+                matches!(locator, GroundingLocatorStatus::Unresolvable { .. })
+            })
             .count();
         let support_edge_count = graph
             .edges()
@@ -14633,17 +14776,12 @@ impl Server {
         let outcome = text_field("outcome")?;
         let horizon = text_field("horizon")?;
         let scope = text_field("scope")?;
-        let estimand = match BioevalEstimand::declare(
-            intervention,
-            comparator,
-            unit,
-            outcome,
-            horizon,
-            scope,
-        ) {
-            Ok(estimand) => estimand,
-            Err(error) => return Ok(refusal("estimand_validation", error.to_string())),
-        };
+        let estimand =
+            match BioevalEstimand::declare(intervention, comparator, unit, outcome, horizon, scope)
+            {
+                Ok(estimand) => estimand,
+                Err(error) => return Ok(refusal("estimand_validation", error.to_string())),
+            };
 
         let kind = match arguments.get("kind") {
             Some(value) => match serde_json::from_value::<BioevalClaimKind>(value.clone()) {
@@ -14833,7 +14971,9 @@ impl Server {
                 .get("declared_scopes")
                 .ok_or_else(|| format!("transport_requests[{index}] requires declared_scopes"))?
                 .as_array()
-                .ok_or_else(|| format!("transport_requests[{index}].declared_scopes must be an array"))?;
+                .ok_or_else(|| {
+                    format!("transport_requests[{index}].declared_scopes must be an array")
+                })?;
             let mut declared_scopes = BTreeSet::new();
             for (scope_index, scope) in declared.iter().enumerate() {
                 let scope = scope.as_str().ok_or_else(|| {
@@ -14842,7 +14982,9 @@ impl Server {
                 if scope.trim().is_empty() || scope.len() > MAX_TEXT_BYTES {
                     return Ok(refusal(
                         "transport_validation",
-                        format!("transport_requests[{index}].declared_scopes[{scope_index}] is invalid"),
+                        format!(
+                            "transport_requests[{index}].declared_scopes[{scope_index}] is invalid"
+                        ),
                     ));
                 }
                 declared_scopes.insert(scope.to_string());
@@ -15061,11 +15203,7 @@ impl Server {
                         BioevalTaskOutcome::NotMet => not_met_count += 1,
                         BioevalTaskOutcome::Inapplicable => inapplicable_count += 1,
                     }
-                    (
-                        json!(task_outcome_name(outcome)),
-                        "accepted",
-                        Value::Null,
-                    )
+                    (json!(task_outcome_name(outcome)), "accepted", Value::Null)
                 }
                 Err(error) => {
                     refused_ids.insert(run.evaluator.clone());
@@ -15109,7 +15247,8 @@ impl Server {
         {
             return Ok(refusal(
                 "panel_policy",
-                "require_task_evidence was true but no evaluator produced a usable task outcome".into(),
+                "require_task_evidence was true but no evaluator produced a usable task outcome"
+                    .into(),
             ));
         }
         if arguments
@@ -15120,7 +15259,10 @@ impl Server {
         {
             return Ok(refusal(
                 "hidden_data_policy",
-                format!("fail_on_hidden_data refused {} evaluator row(s)", hidden_ids.len()),
+                format!(
+                    "fail_on_hidden_data refused {} evaluator row(s)",
+                    hidden_ids.len()
+                ),
             ));
         }
         let bounded_rows = |rows: &[Value]| {
@@ -15197,10 +15339,9 @@ impl Server {
         const MAX_TRIALS: usize = 4_096;
         const MAX_ID_BYTES: usize = 256;
 
-        let raw_families = arguments
-            .get("families")
-            .and_then(Value::as_array)
-            .ok_or("families is required and must be an array of serialized metamorphic Family values")?;
+        let raw_families = arguments.get("families").and_then(Value::as_array).ok_or(
+            "families is required and must be an array of serialized metamorphic Family values",
+        )?;
         if raw_families.is_empty() || raw_families.len() > MAX_FAMILIES {
             return Err("families must contain 1 to 1024 family rows".into());
         }
@@ -15273,7 +15414,10 @@ impl Server {
             if parsed.trials().is_empty() || parsed.trials().len() > MAX_TRIALS {
                 return Ok(refusal(
                     "family_validation",
-                    format!("family {:?} must contain 1 to {MAX_TRIALS} trials", parsed.id),
+                    format!(
+                        "family {:?} must contain 1 to {MAX_TRIALS} trials",
+                        parsed.id
+                    ),
                 ));
             }
             trial_total = trial_total.saturating_add(parsed.trials().len());
@@ -15306,10 +15450,12 @@ impl Server {
         let has_invariant = suite
             .relations_covered()
             .contains(&BioevalMetamorphicRelation::Invariant);
-        let has_directional = suite
-            .relations_covered()
-            .iter()
-            .any(|relation| matches!(relation, BioevalMetamorphicRelation::DirectionalChange { .. }));
+        let has_directional = suite.relations_covered().iter().any(|relation| {
+            matches!(
+                relation,
+                BioevalMetamorphicRelation::DirectionalChange { .. }
+            )
+        });
         if arguments
             .get("require_both_relations")
             .and_then(Value::as_bool)
@@ -15594,15 +15740,16 @@ impl Server {
                 .get("expiry")
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("waivers[{index}].expiry is required"))?;
-            let expiry = match FactoryTimestamp::parse(expiry_text) {
-                Ok(expiry) => expiry,
-                Err(error) => {
-                    return Ok(refusal(
+            let expiry =
+                match FactoryTimestamp::parse(expiry_text) {
+                    Ok(expiry) => expiry,
+                    Err(error) => return Ok(refusal(
                         "waiver_validation",
-                        format!("waivers[{index}].expiry is not a valid RFC-3339 timestamp: {error}"),
-                    ))
-                }
-            };
+                        format!(
+                            "waivers[{index}].expiry is not a valid RFC-3339 timestamp: {error}"
+                        ),
+                    )),
+                };
             let affected_versions = object
                 .get("affected_versions")
                 .cloned()
@@ -15904,7 +16051,10 @@ impl Server {
                 ));
             }
             for (factor, level) in &arm.levels {
-                if factor.len() > MAX_ID_BYTES || level.trim().is_empty() || level.len() > MAX_ID_BYTES {
+                if factor.len() > MAX_ID_BYTES
+                    || level.trim().is_empty()
+                    || level.len() > MAX_ID_BYTES
+                {
                     return Ok(refusal(
                         "arm_validation",
                         format!("arms[{index}] has a factor or level outside the {MAX_ID_BYTES}-byte bound"),
@@ -16108,7 +16258,9 @@ impl Server {
             return Err("mesh audit input exceeds the 20000000-byte safety bound".into());
         }
         let parse_strings = |name: &str, raw: Option<&Value>| -> Result<Vec<String>, String> {
-            let Some(raw) = raw else { return Ok(Vec::new()) };
+            let Some(raw) = raw else {
+                return Ok(Vec::new());
+            };
             let values = raw
                 .as_array()
                 .ok_or_else(|| format!("{name} must be an array of strings"))?;
@@ -16126,26 +16278,26 @@ impl Server {
             }
             Ok(output)
         };
-        let system_artifacts = match parse_strings(
-            "system_artifacts",
-            arguments.get("system_artifacts"),
-        ) {
-            Ok(values) => {
-                let mut seen = BTreeSet::new();
-                if values.iter().any(|value| !seen.insert(value.clone())) {
-                    return Ok(refusal(
-                        "mesh_validation",
-                        "system_artifacts must be unique".into(),
-                    ));
+        let system_artifacts =
+            match parse_strings("system_artifacts", arguments.get("system_artifacts")) {
+                Ok(values) => {
+                    let mut seen = BTreeSet::new();
+                    if values.iter().any(|value| !seen.insert(value.clone())) {
+                        return Ok(refusal(
+                            "mesh_validation",
+                            "system_artifacts must be unique".into(),
+                        ));
+                    }
+                    values
                 }
-                values
-            }
-            Err(error) => return Ok(refusal("mesh_validation", error)),
-        };
+                Err(error) => return Ok(refusal("mesh_validation", error)),
+            };
         let raw_evaluators = arguments
             .get("evaluators")
             .and_then(Value::as_array)
-            .ok_or("evaluators is required and must be an array of serialized EvaluatorDecl values")?;
+            .ok_or(
+                "evaluators is required and must be an array of serialized EvaluatorDecl values",
+            )?;
         if raw_evaluators.is_empty() || raw_evaluators.len() > MAX_EVALUATORS {
             return Err("evaluators must contain 1 to 1024 rows".into());
         }
@@ -16206,8 +16358,14 @@ impl Server {
                     format!("evaluator {:?} appears more than once", evaluator.id),
                 ));
             }
-            if evaluator.inputs.iter().any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
-                || evaluator.derived_from.iter().any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
+            if evaluator
+                .inputs
+                .iter()
+                .any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
+                || evaluator
+                    .derived_from
+                    .iter()
+                    .any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
             {
                 return Ok(refusal(
                     "evaluator_validation",
@@ -16240,10 +16398,15 @@ impl Server {
             if !verdict_ids.insert(verdict.evaluator.clone()) {
                 return Ok(refusal(
                     "verdict_validation",
-                    format!("verdicts contain more than one row for evaluator {:?}", verdict.evaluator),
+                    format!(
+                        "verdicts contain more than one row for evaluator {:?}",
+                        verdict.evaluator
+                    ),
                 ));
             }
-            if !verdict.abstained && (verdict.position.trim().is_empty() || verdict.position.len() > MAX_ID_BYTES) {
+            if !verdict.abstained
+                && (verdict.position.trim().is_empty() || verdict.position.len() > MAX_ID_BYTES)
+            {
                 return Ok(refusal(
                     "verdict_validation",
                     format!("verdicts[{index}].position must contain 1 to {MAX_ID_BYTES} bytes for a called evaluator"),
@@ -16259,7 +16422,8 @@ impl Server {
         if require_independence && !census.independence_verified() {
             return Ok(refusal(
                 "independence_policy",
-                "require_independence was true but one or more evaluators declared no inputs".into(),
+                "require_independence was true but one or more evaluators declared no inputs"
+                    .into(),
             ));
         }
         let classes = mesh.independence_classes();
@@ -16286,7 +16450,8 @@ impl Server {
                 })
             })
             .collect::<Vec<_>>();
-        let (rating_status, rating_rows, rating_refusal) = match mesh.independent_ratings(&verdicts) {
+        let (rating_status, rating_rows, rating_refusal) = match mesh.independent_ratings(&verdicts)
+        {
             Ok(ratings) => (
                 "accepted",
                 serde_json::to_value(ratings).expect("ratings serialize"),
@@ -16486,9 +16651,7 @@ impl Server {
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("{name} must be a string"))?;
             if value.trim().is_empty() || value.len() > MAX_ID_BYTES {
-                return Err(format!(
-                    "{name} must contain 1 to {MAX_ID_BYTES} bytes"
-                ));
+                return Err(format!("{name} must contain 1 to {MAX_ID_BYTES} bytes"));
             }
             Ok(value.to_string())
         };
@@ -16579,19 +16742,18 @@ impl Server {
                     format!("branches[{index}] must be an object"),
                 ));
             };
-            let id = match bounded_text(
-                &format!("branches[{index}].id"),
-                object.get("id"),
-            ) {
+            let id = match bounded_text(&format!("branches[{index}].id"), object.get("id")) {
                 Ok(id) => id,
                 Err(error) => return Ok(refusal("branch_validation", error)),
             };
             let parent = match object.get("parent") {
                 None | Some(Value::Null) => root.clone(),
-                Some(value) => match bounded_text(&format!("branches[{index}].parent"), Some(value)) {
-                    Ok(parent) => parent,
-                    Err(error) => return Ok(refusal("branch_validation", error)),
-                },
+                Some(value) => {
+                    match bounded_text(&format!("branches[{index}].parent"), Some(value)) {
+                        Ok(parent) => parent,
+                        Err(error) => return Ok(refusal("branch_validation", error)),
+                    }
+                }
             };
             if !branch_ids.insert(id.clone()) {
                 return Ok(refusal(
@@ -16619,10 +16781,8 @@ impl Server {
                     format!("draws[{index}] must be an object"),
                 ));
             };
-            let branch = match bounded_text(
-                &format!("draws[{index}].branch"),
-                object.get("branch"),
-            ) {
+            let branch = match bounded_text(&format!("draws[{index}].branch"), object.get("branch"))
+            {
                 Ok(branch) => branch,
                 Err(error) => return Ok(refusal("draw_validation", error)),
             };
@@ -16737,15 +16897,18 @@ impl Server {
             ));
         }
 
-        let class_counts = resources.iter().fold(BTreeMap::<String, usize>::new(), |mut counts, resource| {
-            let class = serde_json::to_value(resource.class)
-                .expect("resource class serializes")
-                .as_str()
-                .expect("resource class is a string")
-                .to_string();
-            *counts.entry(class).or_default() += 1;
-            counts
-        });
+        let class_counts =
+            resources
+                .iter()
+                .fold(BTreeMap::<String, usize>::new(), |mut counts, resource| {
+                    let class = serde_json::to_value(resource.class)
+                        .expect("resource class serializes")
+                        .as_str()
+                        .expect("resource class is a string")
+                        .to_string();
+                    *counts.entry(class).or_default() += 1;
+                    counts
+                });
         let nonrenewable_resources = resources
             .iter()
             .filter(|resource| resource.class.is_nonrenewable())
@@ -16761,8 +16924,9 @@ impl Server {
             .iter()
             .take(max_items)
             .map(|branch| {
-                let branch_ledger: &BioevalBranchLedger =
-                    ledger.branch(branch).expect("branch selection was validated");
+                let branch_ledger: &BioevalBranchLedger = ledger
+                    .branch(branch)
+                    .expect("branch selection was validated");
                 let residual = ledger.residual(branch).expect("branch residual is valid");
                 let consumed = resources
                     .iter()
@@ -16915,15 +17079,16 @@ impl Server {
                 "reveal audit input exceeds the {MAX_INPUT_BYTES}-byte safety bound"
             ));
         }
-        let bounded_text = |name: &str, value: Option<&Value>, limit: usize| -> Result<String, String> {
-            let value = value
-                .and_then(Value::as_str)
-                .ok_or_else(|| format!("{name} must be a string"))?;
-            if value.trim().is_empty() || value.len() > limit {
-                return Err(format!("{name} must contain 1 to {limit} bytes"));
-            }
-            Ok(value.to_string())
-        };
+        let bounded_text =
+            |name: &str, value: Option<&Value>, limit: usize| -> Result<String, String> {
+                let value = value
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("{name} must be a string"))?;
+                if value.trim().is_empty() || value.len() > limit {
+                    return Err(format!("{name} must contain 1 to {limit} bytes"));
+                }
+                Ok(value.to_string())
+            };
         let study = bounded_text("study", arguments.get("study"), MAX_ID_BYTES)?;
         let sealed_at_text = bounded_text("sealed_at", arguments.get("sealed_at"), MAX_TEXT_BYTES)?;
         let sealed_at = match bioprism_scope::Timestamp::parse(&sealed_at_text) {
@@ -17058,7 +17223,13 @@ impl Server {
         };
         let (scoring_status, scoring_value, scoring_refusal, scoring_complete, unrevealed_targets) =
             match score_rubric.as_ref() {
-                None => ("not_requested", Value::Null, Value::Null, Value::Null, Vec::new()),
+                None => (
+                    "not_requested",
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Vec::new(),
+                ),
                 Some(score_rubric) => match revealed.score_under(score_rubric) {
                     Ok(scoring) => {
                         let complete = scoring.complete();
@@ -17085,14 +17256,17 @@ impl Server {
                 "rubric_integrity_policy",
                 format!(
                     "require_rubric_match was true but scoring was not admitted: {}",
-                    scoring_refusal.as_str().unwrap_or("scoring was not requested")
+                    scoring_refusal
+                        .as_str()
+                        .unwrap_or("scoring was not requested")
                 ),
             ));
         }
         if require_complete && (scoring_status != "accepted" || scoring_complete != json!(true)) {
             return Ok(refusal(
                 "completeness_policy",
-                "require_complete was true but the admitted scoring projection is not complete".into(),
+                "require_complete was true but the admitted scoring projection is not complete"
+                    .into(),
             ));
         }
         let bounded_ids = |values: BTreeSet<String>| {
@@ -17269,7 +17443,9 @@ impl Server {
             {
                 return Ok(refusal(
                     "policy_validation",
-                    format!("policies[{index}] id and transmission_principle must be bounded strings"),
+                    format!(
+                        "policies[{index}] id and transmission_principle must be bounded strings"
+                    ),
                 ));
             }
             if !policy_ids.insert(policy.id.clone()) {
@@ -17302,12 +17478,12 @@ impl Server {
                 ("recipient", flow.recipient.as_str()),
                 ("information_type", flow.information_type.as_str()),
                 ("purpose", flow.purpose.as_str()),
-                ("transmission_principle", flow.transmission_principle.as_str()),
+                (
+                    "transmission_principle",
+                    flow.transmission_principle.as_str(),
+                ),
             ];
-            if fields
-                .iter()
-                .any(|(_, value)| value.len() > MAX_TEXT_BYTES)
-            {
+            if fields.iter().any(|(_, value)| value.len() > MAX_TEXT_BYTES) {
                 return Ok(refusal(
                     "flow_validation",
                     format!("flows[{index}] contains text over the {MAX_TEXT_BYTES}-byte bound"),
@@ -17593,21 +17769,29 @@ impl Server {
             if !dimension.weight.is_finite() || dimension.weight <= 0.0 {
                 return Ok(refusal(
                     "plane_validation",
-                    format!("dimension {:?} has a non-positive or non-finite weight", dimension.id),
+                    format!(
+                        "dimension {:?} has a non-positive or non-finite weight",
+                        dimension.id
+                    ),
                 ));
             }
-            let cell = plane.cell(&dimension.id).ok_or_else(|| {
-                format!("dimension {:?} has no corresponding cell", dimension.id)
-            })?;
+            let cell = plane
+                .cell(&dimension.id)
+                .ok_or_else(|| format!("dimension {:?} has no corresponding cell", dimension.id))?;
             let cell_value = serde_json::to_value(cell).expect("Cell serializes");
-            let parsed_cell: BioevalCell = serde_json::from_value(cell_value.clone())
-                .map_err(|error| format!("dimension {:?} has an invalid Cell: {error}", dimension.id))?;
+            let parsed_cell: BioevalCell =
+                serde_json::from_value(cell_value.clone()).map_err(|error| {
+                    format!("dimension {:?} has an invalid Cell: {error}", dimension.id)
+                })?;
             match &parsed_cell {
                 BioevalCell::Scored { .. } => {
                     if !plane.tier.admits(dimension.required) {
                         return Ok(refusal(
                             "plane_validation",
-                            format!("dimension {:?} is scored despite being out of tier", dimension.id),
+                            format!(
+                                "dimension {:?} is scored despite being out of tier",
+                                dimension.id
+                            ),
                         ));
                     }
                     scored_count += 1;
@@ -17620,7 +17804,10 @@ impl Server {
                     if *required != dimension.required || *declared != plane.tier {
                         return Ok(refusal(
                             "plane_validation",
-                            format!("dimension {:?} carries an inconsistent inapplicable tier", dimension.id),
+                            format!(
+                                "dimension {:?} carries an inconsistent inapplicable tier",
+                                dimension.id
+                            ),
                         ));
                     }
                     inapplicable_count += 1;
@@ -17743,7 +17930,9 @@ impl Server {
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("obligations[{index}] requires an id"))?;
             if id.trim().is_empty() || id.len() > 256 {
-                return Err(format!("obligations[{index}] ids must contain 1 to 256 bytes"));
+                return Err(format!(
+                    "obligations[{index}] ids must contain 1 to 256 bytes"
+                ));
             }
             if !obligation_ids.insert(id.to_string()) {
                 return Err(format!("obligations[{index}] duplicates id {id:?}"));
@@ -17773,7 +17962,9 @@ impl Server {
                     .cloned()
                     .ok_or_else(|| format!("actions[{index}] requires kind"))?,
             )
-            .map_err(|error| format!("actions[{index}] has an invalid acquisition kind: {error}"))?;
+            .map_err(|error| {
+                format!("actions[{index}] has an invalid acquisition kind: {error}")
+            })?;
             let cost = raw
                 .get("cost")
                 .and_then(Value::as_u64)
@@ -17789,7 +17980,9 @@ impl Server {
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             if raw_closes.len() > 512 {
-                return Err(format!("actions[{index}].closes is bounded at 512 obligations"));
+                return Err(format!(
+                    "actions[{index}].closes is bounded at 512 obligations"
+                ));
             }
             let mut closes = BTreeSet::new();
             let mut action = AcquisitionTraceAction::new(id, kind, cost);
@@ -17868,7 +18061,10 @@ impl Server {
         }
 
         let open = trace.open();
-        let open_ids: BTreeSet<&str> = open.iter().map(|obligation| obligation.id.as_str()).collect();
+        let open_ids: BTreeSet<&str> = open
+            .iter()
+            .map(|obligation| obligation.id.as_str())
+            .collect();
         let redundant: BTreeSet<&str> = trace
             .redundant()
             .iter()
@@ -17925,7 +18121,11 @@ impl Server {
             .collect::<Vec<_>>();
         let regret = reference
             .as_ref()
-            .map(|policy| trace.regret_against(Some(policy)).map_err(|error| error.to_string()))
+            .map(|policy| {
+                trace
+                    .regret_against(Some(policy))
+                    .map_err(|error| error.to_string())
+            })
             .transpose()?;
         let reference_projection = reference.as_ref().map(|policy| {
             json!({
@@ -18712,7 +18912,8 @@ impl Server {
                 }))
             }
         };
-        let disposition_value = serde_json::to_value(&disposition).map_err(|error| error.to_string())?;
+        let disposition_value =
+            serde_json::to_value(&disposition).map_err(|error| error.to_string())?;
         let disposition_kind = disposition_value["disposition"]
             .as_str()
             .ok_or("boundary disposition must carry a tagged disposition")?;
@@ -18848,7 +19049,8 @@ impl Server {
                 }))
             }
         };
-        let assessment_value = serde_json::to_value(&assessment).map_err(|error| error.to_string())?;
+        let assessment_value =
+            serde_json::to_value(&assessment).map_err(|error| error.to_string())?;
         let call_kind = assessment_value["call"]["call"]
             .as_str()
             .ok_or("response assessment must carry a tagged call")?;
@@ -19202,7 +19404,8 @@ impl Server {
         let bias_count = all_bias_flags.len();
         let informative_bias_count = informative_bias_flags.len();
         let outcome = analysis.outcome;
-        let censoring_informative = censoring_reason.map(|reason| reason.is_potentially_informative());
+        let censoring_informative =
+            censoring_reason.map(|reason| reason.is_potentially_informative());
         Ok(json!({
             "ok": true,
             "schema": "bioprism-mcp/onco-outcome-analyze/0.1",
@@ -19282,10 +19485,8 @@ impl Server {
                 })
             })
             .collect();
-        let transport_assumption_names: Vec<String> = transport
-            .assumption_names()
-            .map(str::to_owned)
-            .collect();
+        let transport_assumption_names: Vec<String> =
+            transport.assumption_names().map(str::to_owned).collect();
         let model_identity = json!({
             "model": result.model.model,
             "system": result.model.system,
@@ -19335,7 +19536,8 @@ impl Server {
                 ]
             })),
             Err(refusal) => {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/oncoworlds-model-transport/0.1",
@@ -19386,16 +19588,21 @@ impl Server {
                 .ok_or("context is required and must be a SampleContext")?,
         )
         .map_err(|error| format!("invalid methylation sample context: {error}"))?;
-        let classifier_value = serde_json::to_value(&classifier).map_err(|error| error.to_string())?;
+        let classifier_value =
+            serde_json::to_value(&classifier).map_err(|error| error.to_string())?;
         let qc_value = serde_json::to_value(&context.qc).map_err(|error| error.to_string())?;
         let tumour_content_value =
             serde_json::to_value(&context.tumour_content).map_err(|error| error.to_string())?;
-        let score_classes: Vec<String> = scores.keys().map(|class| class.as_str().to_owned()).collect();
+        let score_classes: Vec<String> = scores
+            .keys()
+            .map(|class| class.as_str().to_owned())
+            .collect();
         match onco_classify_methylation(&classifier, &scores, &context) {
             Ok(report) => {
                 let classified = report.outcome.is_classified();
                 let class = report.outcome.class().cloned();
-                let report_value = serde_json::to_value(&report).map_err(|error| error.to_string())?;
+                let report_value =
+                    serde_json::to_value(&report).map_err(|error| error.to_string())?;
                 let outcome_kind = report_value["outcome"]["outcome"]
                     .as_str()
                     .ok_or("methylation report must carry a tagged outcome")?;
@@ -19466,9 +19673,12 @@ impl Server {
         )
         .map_err(|error| format!("invalid right versioned result: {error}"))?;
         let comparison = onco_reconcile_methylation(&left, &right);
-        let comparison_value = serde_json::to_value(&comparison).map_err(|error| error.to_string())?;
-        let left_outcome = serde_json::to_value(&left.outcome).map_err(|error| error.to_string())?;
-        let right_outcome = serde_json::to_value(&right.outcome).map_err(|error| error.to_string())?;
+        let comparison_value =
+            serde_json::to_value(&comparison).map_err(|error| error.to_string())?;
+        let left_outcome =
+            serde_json::to_value(&left.outcome).map_err(|error| error.to_string())?;
+        let right_outcome =
+            serde_json::to_value(&right.outcome).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
             "schema": "bioprism-mcp/oncoworlds-methylation-compare/0.1",
@@ -19531,10 +19741,8 @@ impl Server {
             "strata": design.strata,
             "mechanism_strata_present": MECHANISM_STRATA.iter().all(|stratum| design.strata.contains(*stratum))
         });
-        let transport_assumption_names: Vec<String> = transport
-            .assumption_names()
-            .map(str::to_owned)
-            .collect();
+        let transport_assumption_names: Vec<String> =
+            transport.assumption_names().map(str::to_owned).collect();
         match onco_assert_radiogenomic_claim(claim, &design, &observation, &transport) {
             Ok(supported) => Ok(json!({
                 "ok": true,
@@ -19663,9 +19871,7 @@ impl Server {
         let mut checks = serde_json::Map::new();
 
         if let Some(value) = arguments.get("promotion") {
-            let object = value
-                .as_object()
-                .ok_or("promotion must be an object")?;
+            let object = value.as_object().ok_or("promotion must be an object")?;
             let observation: SpecimenObservation = serde_json::from_value(
                 object
                     .get("observation")
@@ -19708,9 +19914,7 @@ impl Server {
         }
 
         if let Some(value) = arguments.get("resistance") {
-            let object = value
-                .as_object()
-                .ok_or("resistance must be an object")?;
+            let object = value.as_object().ok_or("resistance must be an object")?;
             let diagnosis: SpecimenObservation = serde_json::from_value(
                 object
                     .get("diagnosis")
@@ -19740,8 +19944,8 @@ impl Server {
             });
             match sole {
                 Ok(explanation) => {
-                    projection["unique_explanation"] = serde_json::to_value(explanation)
-                        .map_err(|error| error.to_string())?;
+                    projection["unique_explanation"] =
+                        serde_json::to_value(explanation).map_err(|error| error.to_string())?;
                     projection["refusal"] = Value::Null;
                     projection["refusal_kind"] = Value::Null;
                 }
@@ -19757,9 +19961,7 @@ impl Server {
         }
 
         if let Some(value) = arguments.get("attribution") {
-            let object = value
-                .as_object()
-                .ok_or("attribution must be an object")?;
+            let object = value.as_object().ok_or("attribution must be an object")?;
             let treatment = object
                 .get("treatment")
                 .and_then(Value::as_str)
@@ -19790,7 +19992,8 @@ impl Server {
                 "allowed": result.is_ok()
             });
             let refusal = result.expect_err("temporal-attribution design is always refused");
-            let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+            let refusal_value =
+                serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
             projection["refusal"] = refusal_value.clone();
             projection["refusal_kind"] = refusal_value["refusal"].clone();
             projection["refusal_text"] = json!(refusal.to_string());
@@ -19853,7 +20056,10 @@ impl Server {
             .map(serde_json::from_value)
             .transpose()
             .map_err(|error| format!("invalid OncoWorlds entity mapping: {error}"))?;
-        if mapping.as_ref().is_some_and(|item| item.fate_count() > 10_000) {
+        if mapping
+            .as_ref()
+            .is_some_and(|item| item.fate_count() > 10_000)
+        {
             return Err("OncoWorlds entity mapping exceeds the 10000-label safety bound".into());
         }
         let assays: Vec<SiteAssayContext> = arguments
@@ -19873,8 +20079,10 @@ impl Server {
                     .map_err(|error| error.to_string())?;
                 let observation = serde_json::to_value(context.observation())
                     .map_err(|error| error.to_string())?;
-                let refusal = onco_as_negative_call(context).expect_err("negative conversion always refuses");
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal =
+                    onco_as_negative_call(context).expect_err("negative conversion always refuses");
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 Ok(json!({
                     "site": context.site,
                     "assay": context.assay,
@@ -19892,7 +20100,9 @@ impl Server {
             .cloned()
             .unwrap_or_default();
         if descriptor_values.len() > 100 {
-            return Err("population descriptor check panel exceeds the 100-check safety bound".into());
+            return Err(
+                "population descriptor check panel exceeds the 100-check safety bound".into(),
+            );
         }
         let descriptor_projections: Vec<Value> = descriptor_values
             .iter()
@@ -19911,7 +20121,8 @@ impl Server {
                         .ok_or("descriptor check requires use")?,
                 )
                 .map_err(|error| format!("invalid population descriptor use: {error}"))?;
-                let descriptor_value = serde_json::to_value(descriptor).map_err(|error| error.to_string())?;
+                let descriptor_value =
+                    serde_json::to_value(descriptor).map_err(|error| error.to_string())?;
                 let use_value = serde_json::to_value(use_).map_err(|error| error.to_string())?;
                 match onco_use_descriptor(descriptor, use_) {
                     Ok(()) => Ok(json!({
@@ -19923,7 +20134,8 @@ impl Server {
                         "allowed": true
                     })),
                     Err(refusal) => {
-                        let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                        let refusal_value =
+                            serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                         Ok(json!({
                             "descriptor": descriptor_value,
                             "descriptor_label": descriptor.as_str(),
@@ -19987,7 +20199,8 @@ impl Server {
                 ]
             })),
             Err(refusal) => {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/oncoworlds-era-shift-check/0.1",
@@ -20060,7 +20273,8 @@ impl Server {
                 }))
             }
             Err(refusal) => {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/oncoworlds-equity-check/0.1",
@@ -20086,9 +20300,7 @@ impl Server {
         let mut checks = serde_json::Map::new();
 
         if let Some(value) = arguments.get("provenance") {
-            let object = value
-                .as_object()
-                .ok_or("provenance must be an object")?;
+            let object = value.as_object().ok_or("provenance must be an object")?;
             let left: TissueProvenance = serde_json::from_value(
                 object
                     .get("left")
@@ -20117,7 +20329,8 @@ impl Server {
                 "allowed": result.is_ok()
             });
             if let Err(refusal) = result {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["refusal"] = refusal_value.clone();
                 projection["refusal_kind"] = refusal_value["refusal"].clone();
                 projection["refusal_text"] = json!(refusal.to_string());
@@ -20129,9 +20342,7 @@ impl Server {
         }
 
         if let Some(value) = arguments.get("alterations") {
-            let object = value
-                .as_object()
-                .ok_or("alterations must be an object")?;
+            let object = value.as_object().ok_or("alterations must be an object")?;
             let left: AlterationMechanism = serde_json::from_value(
                 object
                     .get("left")
@@ -20158,7 +20369,8 @@ impl Server {
                 "allowed": result.is_ok()
             });
             if let Err(refusal) = result {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["refusal"] = refusal_value.clone();
                 projection["refusal_kind"] = refusal_value["refusal"].clone();
                 projection["refusal_text"] = json!(refusal.to_string());
@@ -20170,9 +20382,7 @@ impl Server {
         }
 
         if let Some(value) = arguments.get("benchmark") {
-            let object = value
-                .as_object()
-                .ok_or("benchmark must be an object")?;
+            let object = value.as_object().ok_or("benchmark must be an object")?;
             let macro_score = object
                 .get("macro_score")
                 .and_then(Value::as_f64)
@@ -20206,15 +20416,16 @@ impl Server {
                     let feasibility = serde_json::to_value(published.feasibility())
                         .map_err(|error| error.to_string())?;
                     projection["allowed"] = json!(true);
-                    projection["published"] = serde_json::to_value(&published)
-                        .map_err(|error| error.to_string())?;
+                    projection["published"] =
+                        serde_json::to_value(&published).map_err(|error| error.to_string())?;
                     projection["feasibility"] = feasibility.clone();
                     projection["feasibility_kind"] = feasibility["feasibility"].clone();
                     projection["refusal"] = Value::Null;
                     projection["refusal_kind"] = Value::Null;
                 }
                 Err(refusal) => {
-                    let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                    let refusal_value =
+                        serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                     projection["refusal"] = refusal_value.clone();
                     projection["refusal_kind"] = refusal_value["refusal"].clone();
                     projection["refusal_text"] = json!(refusal.to_string());
@@ -20240,7 +20451,9 @@ impl Server {
                     as usize,
             };
             if set.lesions > 1_000_000 || set.participants > 1_000_000 {
-                return Err("lesion analysis counts exceed the 1000000-subject safety bound".into());
+                return Err(
+                    "lesion analysis counts exceed the 1000000-subject safety bound".into(),
+                );
             }
             let cluster_declared = object
                 .get("cluster_declared")
@@ -20281,7 +20494,8 @@ impl Server {
                 "allowed": cluster_result.is_ok() && event_result.is_ok()
             });
             if let Err(refusal) = cluster_result {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["cluster_refusal"] = refusal_value.clone();
                 projection["cluster_refusal_kind"] = refusal_value["refusal"].clone();
                 projection["cluster_refusal_text"] = json!(refusal.to_string());
@@ -20290,7 +20504,8 @@ impl Server {
                 projection["cluster_refusal_kind"] = Value::Null;
             }
             if let Err(refusal) = event_result {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["event_refusal"] = refusal_value.clone();
                 projection["event_refusal_kind"] = refusal_value["refusal"].clone();
                 projection["event_refusal_text"] = json!(refusal.to_string());
@@ -22346,14 +22561,17 @@ impl Server {
         })?;
         if encoded.len() > 1_000_000 {
             return Err(
-                "domain workflow reconciliation query input exceeds the 1000000-byte bound"
-                    .into(),
+                "domain workflow reconciliation query input exceeds the 1000000-byte bound".into(),
             );
         }
         let optional_string = |name: &str| -> Result<Option<&str>, String> {
             arguments
                 .get(name)
-                .map(|value| value.as_str().ok_or_else(|| format!("{name} must be a string")))
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{name} must be a string"))
+                })
                 .transpose()
         };
         let mission_id = optional_string("mission_id")?;
@@ -22547,8 +22765,9 @@ impl Server {
             .cloned()
             .collect::<Vec<_>>();
         let coverage_complete = uncovered_groups.is_empty() && unbound_groups.is_empty();
-        let mut output = serde_json::to_value(search)
-            .map_err(|error| format!("cannot encode mission evaluator discovery result: {error}"))?;
+        let mut output = serde_json::to_value(search).map_err(|error| {
+            format!("cannot encode mission evaluator discovery result: {error}")
+        })?;
         output["ok"] = json!(true);
         output["workflow"] = json!("mission_evaluator_discover");
         output["mission_evaluator_schema_version"] = json!(MISSION_EVALUATOR_SCHEMA_VERSION);
@@ -22590,7 +22809,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode mission evaluator review input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("mission evaluator review input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "mission evaluator review input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let request: MissionEvaluatorReviewRequest = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("invalid mission evaluator review input: {error}"))?;
@@ -22601,7 +22822,9 @@ impl Server {
         let output_bytes = serde_json::to_vec(&output)
             .map_err(|error| format!("cannot measure mission evaluator review result: {error}"))?;
         if output_bytes.len() > 20_000_000 {
-            return Err("mission evaluator review result exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "mission evaluator review result exceeds the 20000000-byte safety bound".into(),
+            );
         }
         Ok(output)
     }
@@ -22611,7 +22834,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode mission evaluator replay input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("mission evaluator replay input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "mission evaluator replay input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let request: MissionEvaluatorReplayRequest = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("invalid mission evaluator replay input: {error}"))?;
@@ -22622,7 +22847,9 @@ impl Server {
         let output_bytes = serde_json::to_vec(&output)
             .map_err(|error| format!("cannot measure mission evaluator replay result: {error}"))?;
         if output_bytes.len() > 20_000_000 {
-            return Err("mission evaluator replay result exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "mission evaluator replay result exceeds the 20000000-byte safety bound".into(),
+            );
         }
         Ok(output)
     }
@@ -22668,9 +22895,7 @@ impl Server {
                     .into(),
             );
         }
-        let bundle = arguments
-            .get("bundle")
-            .ok_or("bundle is required")?;
+        let bundle = arguments.get("bundle").ok_or("bundle is required")?;
         let output = verify_mission_evidence_bundle(bundle)
             .map_err(|error| format!("mission evidence bundle verification refused: {error}"))?;
         let output_bytes = serde_json::to_vec(&output).map_err(|error| {
@@ -22691,8 +22916,9 @@ impl Server {
     /// is a process-local index (REST can add restart persistence); importing never turns an
     /// evidence artifact into execution state or a scientific/release claim.
     fn mission_evidence_bundle_import(&self, arguments: &Value) -> Result<Value, String> {
-        let encoded = serde_json::to_vec(arguments)
-            .map_err(|error| format!("cannot encode mission evidence bundle import input: {error}"))?;
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode mission evidence bundle import input: {error}")
+        })?;
         if encoded.len() > bioprism_devplat::MAX_EVIDENCE_REGISTRY_BYTES {
             return Err(format!(
                 "mission evidence bundle import input exceeds the {}-byte safety bound",
@@ -22709,15 +22935,22 @@ impl Server {
 
     /// Query deterministic, digest-ordered registry rows without executing anything.
     fn mission_evidence_bundle_query(&self, arguments: &Value) -> Result<Value, String> {
-        let encoded = serde_json::to_vec(arguments)
-            .map_err(|error| format!("cannot encode mission evidence bundle query input: {error}"))?;
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode mission evidence bundle query input: {error}")
+        })?;
         if encoded.len() > 1_000_000 {
-            return Err("mission evidence bundle query input exceeds the 1000000-byte safety bound".into());
+            return Err(
+                "mission evidence bundle query input exceeds the 1000000-byte safety bound".into(),
+            );
         }
         let optional_string = |name: &str| -> Result<Option<&str>, String> {
             arguments
                 .get(name)
-                .map(|value| value.as_str().ok_or_else(|| format!("{name} must be a string")))
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{name} must be a string"))
+                })
                 .transpose()
         };
         let mission_id = optional_string("mission_id")?;
@@ -23042,7 +23275,9 @@ impl Server {
         let output_bytes = serde_json::to_vec(&output)
             .map_err(|error| format!("cannot measure capability dashboard result: {error}"))?;
         if output_bytes.len() > 20_000_000 {
-            return Err("capability dashboard result exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "capability dashboard result exceeds the 20000000-byte safety bound".into(),
+            );
         }
         Ok(output)
     }
@@ -23785,7 +24020,11 @@ impl Server {
         let Ok(mut result) = result else {
             return result;
         };
-        if arguments.pointer("/policy/execute").and_then(Value::as_bool) != Some(true) {
+        if arguments
+            .pointer("/policy/execute")
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
             return Ok(result);
         }
         let Some(binding) = arguments.get("workflow_binding") else {
@@ -24850,7 +25089,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode CI execution evidence input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("CI execution evidence input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "CI execution evidence input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let request: CiExecutionEvidenceRequest = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("invalid CI execution evidence input: {error}"))?;
@@ -24886,7 +25127,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode CI provider normalization input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("CI provider normalization input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "CI provider normalization input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let request: CiProviderNormalizationRequest = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("invalid CI provider normalization input: {error}"))?;
@@ -25172,12 +25415,16 @@ impl Server {
         let blocking_issue_count = audit
             .issues
             .iter()
-            .filter(|issue| issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Blocking)
+            .filter(|issue| {
+                issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Blocking
+            })
             .count();
         let warning_count = audit
             .issues
             .iter()
-            .filter(|issue| issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Warning)
+            .filter(|issue| {
+                issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Warning
+            })
             .count();
         Ok(json!({
             "ok": true,
@@ -25318,12 +25565,16 @@ impl Server {
         let blocking_issue_count = audit
             .issues
             .iter()
-            .filter(|issue| issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Blocking)
+            .filter(|issue| {
+                issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Blocking
+            })
             .count();
         let warning_count = audit
             .issues
             .iter()
-            .filter(|issue| issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Warning)
+            .filter(|issue| {
+                issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Warning
+            })
             .count();
         Ok(json!({
             "ok": true,
@@ -25445,15 +25696,17 @@ impl Server {
             }
             None => None,
         };
-        let ci_evidence = ci_evidence.or_else(|| {
-            ci_provider_normalization
-                .as_ref()
-                .map(|(_, audit)| audit.clone())
-        }).or_else(|| {
-            ci_provider_evidence
-                .as_ref()
-                .map(|(_, audit)| audit.clone())
-        });
+        let ci_evidence = ci_evidence
+            .or_else(|| {
+                ci_provider_normalization
+                    .as_ref()
+                    .map(|(_, audit)| audit.clone())
+            })
+            .or_else(|| {
+                ci_provider_evidence
+                    .as_ref()
+                    .map(|(_, audit)| audit.clone())
+            });
         let execution_provenance = match arguments.get("execution_provenance") {
             Some(raw) => Some(self.execution_provenance_audit(raw)?),
             None => None,
@@ -25601,10 +25854,7 @@ impl Server {
         let ci_evidence_ready = ci_evidence
             .as_ref()
             .map(|value| {
-                value
-                    .get("ok")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
                     && value
                         .get("ci_evidence_ready")
                         .and_then(Value::as_bool)
@@ -25614,10 +25864,7 @@ impl Server {
         let ci_provider_evidence_ready = ci_provider_evidence
             .as_ref()
             .map(|(value, _)| {
-                value
-                    .get("ok")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
                     && value
                         .get("conformance_ready")
                         .and_then(Value::as_bool)
@@ -25981,7 +26228,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery receipt input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("developer-delivery receipt input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "developer-delivery receipt input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let receipt_id = arguments
             .get("receipt_id")
@@ -26011,8 +26260,9 @@ impl Server {
     }
 
     fn developer_delivery_receipt_verify(&self, arguments: &Value) -> Result<Value, String> {
-        let encoded = serde_json::to_vec(arguments)
-            .map_err(|error| format!("cannot measure developer-delivery receipt verification input: {error}"))?;
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot measure developer-delivery receipt verification input: {error}")
+        })?;
         if encoded.len() > 20_000_000 {
             return Err("developer-delivery receipt verification input exceeds the 20000000-byte safety bound".into());
         }
@@ -26024,12 +26274,11 @@ impl Server {
             .get("delivery")
             .cloned()
             .ok_or("delivery is required and must be the completed developer delivery audit")?;
-        let verification = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
-            receipt,
-            delivery,
+        let verification =
+            verify_delivery_receipt(&DeliveryReceiptVerificationRequest { receipt, delivery })?;
+        let mut output = serde_json::to_value(&verification).map_err(|error| {
+            format!("cannot encode developer-delivery receipt verification: {error}")
         })?;
-        let mut output = serde_json::to_value(&verification)
-            .map_err(|error| format!("cannot encode developer-delivery receipt verification: {error}"))?;
         output["ok"] = json!(true);
         output["workflow"] = json!("developer_delivery_receipt_verify");
         output["verified"] = json!(verification.valid);
@@ -27869,7 +28118,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -28087,6 +28336,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "actions": { "type": "array", "maxItems": 2000, "description": "Ordered actions: enqueue, lease, heartbeat, stage, commit, fail, recover_expired, compensate, release_quarantine, or cancel. Heartbeat, stage, commit, and fail require the attempt returned by the corresponding lease; the attempt is a fencing token." }
                 },
                 "required": ["jobs", "workers", "actions"]
+            }
+        }),
+        json!({
+            "name": "factory_authority_verify",
+            "description": "Verify a serialized factory execution-authority envelope, including the queue snapshot digest, transition-chain links, revision, and bounded lease/event counts. This audits durable state without dispatching workers or claiming provider-effect completion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "checkpoint": { "type": "object", "description": "Serialized bioprism-factory execution-authority snapshot, or a legacy digest-verified JobStoreSnapshot for migration audit." },
+                    "include_events": { "type": "boolean", "description": "Include up to max_events newest transition metadata rows; defaults false." },
+                    "max_events": { "type": "integer", "minimum": 0, "maximum": 256, "description": "Maximum transition metadata rows to return when include_events is true." }
+                },
+                "required": ["checkpoint"]
             }
         }),
         json!({

@@ -297,6 +297,7 @@ import type {
   MissionInventoryResponse,
   MissionQueueFlushResponse,
   MissionQueueInventoryResponse,
+  MissionQueueLockReleaseResponse,
   MissionQueueStatus,
   MissionPersistenceStatus,
   MissionPreflightResult,
@@ -1447,6 +1448,26 @@ export class ApiClient {
   /** Atomically flush the queue checkpoint and return its resulting status and byte count. */
   async flushMissionQueuePersistence(options?: ClientRequestOptions): Promise<MissionQueueFlushResponse> {
     return this.request<MissionQueueFlushResponse>("POST", "/v1/missions/queue/persistence/flush", {}, options);
+  }
+
+  /** Explicitly release an orphaned shared-authority lock with an auditable operator reason. */
+  async releaseMissionQueueLock(
+    operator: string,
+    reason: string,
+    options?: ClientRequestOptions,
+  ): Promise<MissionQueueLockReleaseResponse> {
+    if (typeof operator !== "string" || operator.trim().length === 0) {
+      throw new ArgumentError("operator must be a non-empty string");
+    }
+    if (typeof reason !== "string" || reason.trim().length === 0) {
+      throw new ArgumentError("reason must be a non-empty string");
+    }
+    return this.request<MissionQueueLockReleaseResponse>(
+      "POST",
+      "/v1/missions/queue/authority/release-lock",
+      { operator, reason },
+      options,
+    );
   }
 
   /** Read the current asynchronous mission status and, once terminal, its authoritative report. */
