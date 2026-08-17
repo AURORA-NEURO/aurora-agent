@@ -6976,6 +6976,16 @@ export interface MissionClaimRequest extends JsonObject {
   requires_steps: string[];
   level?: "observation" | "evaluation" | "operational" | "release";
   evidence_mode?: "completed_step" | "successful_tool_result";
+  evaluator_bindings?: MissionClaimEvaluatorBinding[];
+}
+
+export interface MissionClaimEvaluatorBinding extends JsonObject {
+  id: string;
+  adapter_id: string;
+  domain: string;
+  step_id: string;
+  output_pointer: string;
+  required?: boolean;
 }
 
 export interface AgentMissionArgs extends JsonObject {

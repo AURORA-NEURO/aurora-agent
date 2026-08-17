@@ -687,7 +687,8 @@ accepted-dispatch event; it is an audit/replay record rather than a readiness cl
 `AgentMissionArgs.claim_requests` adds bounded caller-authored claims with explicit required step
 IDs and evidence mode. Reports expose `claim_lineage`, while `missionClaimLineage(missionId)` reads
 the dedicated response with retained-output digests, omission/refusal states, and explicit
-non-claims. `claimable` is evidence-retention posture only and never means the statement is true.
+non-claims. `evaluator_bindings` carries explicit adapter/domain/source-pointer coverage; `claimable`
+is evidence-retention posture only and never means the statement is true.
 
 ```typescript
 const page = await api.events(0, 100);

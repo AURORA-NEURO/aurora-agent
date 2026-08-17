@@ -206,7 +206,9 @@ contains an `id`, the statement text, one or more domain labels, and explicit `r
 `level` (`observation`, `evaluation`, `operational`, or `release`) and `evidence_mode`
 (`completed_step` or `successful_tool_result`) are routing/evidence posture labels, not semantic
 interpretations. Every referenced step must exist in the same mission; at most 64 claims and 32
-step references per claim are accepted.
+step references per claim are accepted. A claim may additionally declare up to 16 explicit
+`evaluator_bindings`, each naming an `adapter_id`, domain, source step, and RFC 6901 output pointer.
+The binding is a coverage declaration, not an assertion that the adapter is calibrated or valid.
 
 The terminal mission report includes `claim_lineage`, and
 `GET /v1/missions/{mission_id}/claims` returns the same projection in a small dedicated envelope.
@@ -216,6 +218,10 @@ and output omission remain distinct. `claimable: true` means only that the reque
 evidence posture was retained; `claim_status` remains `unreviewed` and `readiness_claimed` remains
 false. The projection never establishes scientific, clinical, causal, operational, regulatory, or
 release truth, and a 409/410 response makes live-vs-omitted result state explicit.
+Evaluator rows add `evaluator_coverage` with required/retained counts and a
+`required_incomplete` posture when a declared evaluator output is missing, refused, omitted, or
+does not contain the requested pointer. This lets domain adapters remain heterogeneous while the
+mission layer keeps one auditable cross-domain envelope.
 
 ## Asynchronous missions
 

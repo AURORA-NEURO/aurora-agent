@@ -29654,7 +29654,24 @@ pub fn tool_definitions() -> Vec<Value> {
                                 "domains": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string", "maxLength": 256 } },
                                 "requires_steps": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string" } },
                                 "level": { "type": "string", "enum": ["observation", "evaluation", "operational", "release"], "default": "observation" },
-                                "evidence_mode": { "type": "string", "enum": ["completed_step", "successful_tool_result"], "default": "completed_step" }
+                                "evidence_mode": { "type": "string", "enum": ["completed_step", "successful_tool_result"], "default": "completed_step" },
+                                "evaluator_bindings": {
+                                    "type": "array",
+                                    "maxItems": 16,
+                                    "description": "Explicit adapter/evaluator bindings. Each binding names a domain, source step, and JSON pointer; the server reports retention/omission posture without interpreting the selected value.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": { "type": "string", "maxLength": 128 },
+                                            "adapter_id": { "type": "string", "maxLength": 256 },
+                                            "domain": { "type": "string", "maxLength": 256 },
+                                            "step_id": { "type": "string" },
+                                            "output_pointer": { "type": "string", "description": "Empty selects the whole retained nested result; otherwise use RFC 6901." },
+                                            "required": { "type": "boolean", "default": true }
+                                        },
+                                        "required": ["id", "adapter_id", "domain", "step_id", "output_pointer"]
+                                    }
+                                }
                             },
                             "required": ["id", "claim", "domains", "requires_steps"]
                         }

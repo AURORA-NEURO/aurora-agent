@@ -26,6 +26,7 @@ MAX_MISSION_WAIT_SECONDS = 86_400.0
 MAX_MISSION_POLL_INTERVAL_SECONDS = 60.0
 MAX_MISSION_CLAIM_REQUESTS = 64
 MAX_MISSION_CLAIM_REFERENCES = 32
+MAX_MISSION_CLAIM_EVALUATORS = 16
 OPERATIONS_REQUIRED_GATES = (
     "catalogue",
     "observed_activity",
@@ -263,6 +264,62 @@ def _step(value: MissionStep | Mapping[str, Any]) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class MissionClaimEvaluatorBinding:
+    """Explicit adapter/evaluator binding to one retained mission output pointer."""
+
+    id: str
+    adapter_id: str
+    domain: str
+    step_id: str
+    output_pointer: str
+    required: bool = True
+
+    def __post_init__(self) -> None:
+        for name, value, maximum in (
+            ("evaluator id", self.id, 128),
+            ("evaluator adapter_id", self.adapter_id, 256),
+            ("evaluator domain", self.domain, 256),
+            ("evaluator step_id", self.step_id, 256),
+        ):
+            _text(name, value)
+            if len(value.encode("utf-8")) > maximum:
+                raise ArgumentError(f"{name} must be at most {maximum} UTF-8 bytes")
+        if not isinstance(self.output_pointer, str) or not _valid_pointer(self.output_pointer, allow_empty=True):
+            raise ArgumentError("evaluator output_pointer must be empty or an RFC 6901 pointer")
+        if not isinstance(self.required, bool):
+            raise ArgumentError("evaluator required must be a boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "adapter_id": self.adapter_id,
+            "domain": self.domain,
+            "step_id": self.step_id,
+            "output_pointer": self.output_pointer,
+            "required": self.required,
+        }
+
+
+def _claim_evaluator(
+    value: MissionClaimEvaluatorBinding | Mapping[str, Any],
+) -> dict[str, Any]:
+    if isinstance(value, MissionClaimEvaluatorBinding):
+        return value.to_dict()
+    raw = _mapping("mission claim evaluator binding", value)
+    for name in ("id", "adapter_id", "domain", "step_id", "output_pointer"):
+        if name not in raw:
+            raise ArgumentError(f"mission claim evaluator binding requires {name}")
+    return MissionClaimEvaluatorBinding(
+        id=raw["id"],
+        adapter_id=raw["adapter_id"],
+        domain=raw["domain"],
+        step_id=raw["step_id"],
+        output_pointer=raw["output_pointer"],
+        required=raw.get("required", True),
+    ).to_dict()
+
+
+@dataclass(frozen=True)
 class MissionClaimRequest:
     """A bounded, caller-authored claim whose evidence must be traceable to mission steps."""
 
@@ -272,6 +329,7 @@ class MissionClaimRequest:
     requires_steps: Sequence[str] = ()
     level: str = "observation"
     evidence_mode: str = "completed_step"
+    evaluator_bindings: Sequence[MissionClaimEvaluatorBinding | Mapping[str, Any]] = ()
 
     def __post_init__(self) -> None:
         _text("claim id", self.id)
@@ -306,6 +364,18 @@ class MissionClaimRequest:
             raise ArgumentError("claim level must be observation, evaluation, operational, or release")
         if self.evidence_mode not in {"completed_step", "successful_tool_result"}:
             raise ArgumentError("claim evidence_mode must be completed_step or successful_tool_result")
+        if not isinstance(self.evaluator_bindings, Sequence) or isinstance(self.evaluator_bindings, (str, bytes)):
+            raise ArgumentError("claim evaluator_bindings must be a sequence")
+        if len(self.evaluator_bindings) > MAX_MISSION_CLAIM_EVALUATORS:
+            raise ArgumentError(
+                f"claim evaluator_bindings may contain at most {MAX_MISSION_CLAIM_EVALUATORS} entries"
+            )
+        evaluator_ids: set[str] = set()
+        for value in self.evaluator_bindings:
+            evaluator = _claim_evaluator(value)
+            if evaluator["id"] in evaluator_ids:
+                raise ArgumentError("claim evaluator_bindings must contain unique ids")
+            evaluator_ids.add(evaluator["id"])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -315,6 +385,7 @@ class MissionClaimRequest:
             "requires_steps": list(self.requires_steps),
             "level": self.level,
             "evidence_mode": self.evidence_mode,
+            "evaluator_bindings": [_claim_evaluator(value) for value in self.evaluator_bindings],
         }
 
 
@@ -332,6 +403,7 @@ def _claim_request(value: MissionClaimRequest | Mapping[str, Any]) -> dict[str, 
         requires_steps=raw.get("requires_steps", ()),
         level=raw.get("level", "observation"),
         evidence_mode=raw.get("evidence_mode", "completed_step"),
+        evaluator_bindings=raw.get("evaluator_bindings", ()),
     ).to_dict()
 
 
@@ -452,6 +524,16 @@ class MissionRequest:
                 raise ArgumentError(
                     f"claim {claim['id']} requires unknown steps: {', '.join(sorted(unknown_steps))}"
                 )
+            required_steps = set(claim["requires_steps"])
+            for evaluator in claim["evaluator_bindings"]:
+                if evaluator["step_id"] not in known_step_ids:
+                    raise ArgumentError(
+                        f"claim evaluator {evaluator['id']} requires unknown step {evaluator['step_id']}"
+                    )
+                if evaluator["step_id"] not in required_steps:
+                    raise ArgumentError(
+                        f"claim evaluator {evaluator['id']} must reference one of the claim requires_steps"
+                    )
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         arguments: dict[str, Any] = {
@@ -1664,6 +1746,7 @@ __all__ = [
     "MAX_MISSION_POLL_INTERVAL_SECONDS",
     "MAX_MISSION_CLAIM_REQUESTS",
     "MAX_MISSION_CLAIM_REFERENCES",
+    "MAX_MISSION_CLAIM_EVALUATORS",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
     "OPERATIONS_REQUIRED_GATES",
@@ -1672,6 +1755,7 @@ __all__ = [
     "MISSION_TRACE_SCHEMA_VERSION",
     "MISSION_TRACE_EVENTS",
     "MissionBinding",
+    "MissionClaimEvaluatorBinding",
     "MissionClaimRequest",
     "MissionAssembly",
     "MissionPolicy",

@@ -285,7 +285,9 @@ then include a non-semantic `claim_lineage` projection that maps each claim to e
 retained-output digests, omission states, and durable non-claims. The HTTP gateway exposes the same
 projection at `/v1/missions/{mission_id}/claims`, and the Python/TypeScript clients provide typed
 helpers for it. `claimable` describes retained evidence posture only: it never means the claim is true
-or release-ready.
+or release-ready. Claims can also declare explicit evaluator/adapter bindings to source-step output
+pointers; coverage and pointer/refusal/omission posture are reported separately, so every domain can
+plug in a named evaluator without giving the orchestration layer semantic authority.
 The Rust executor also performs bounded authoritative JSON Schema preflight against the live
 `tools/list` definitions: static arguments are checked before a mission is accepted or planned,
 and bound arguments are checked again after upstream payloads are materialized, before either

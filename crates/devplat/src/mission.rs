@@ -29,6 +29,7 @@ const MAX_TOTAL_OUTPUT_BYTES: usize = 20_000_000;
 pub const MAX_PARALLEL_WAVE_WIDTH: usize = 16;
 pub const MAX_CLAIM_REQUESTS: usize = 64;
 pub const MAX_CLAIM_REFERENCES: usize = 32;
+pub const MAX_CLAIM_EVALUATORS: usize = 16;
 
 fn default_true() -> bool {
     true
@@ -366,6 +367,73 @@ pub struct MissionClaimRequest {
     pub level: String,
     #[serde(default = "default_claim_evidence_mode")]
     pub evidence_mode: String,
+    #[serde(default)]
+    pub evaluator_bindings: Vec<MissionClaimEvaluatorBinding>,
+}
+
+/// Explicit adapter/evaluator binding for one claim.
+///
+/// The adapter identifier and output pointer are caller-owned declarations. The mission runtime
+/// only checks whether the named step returned a successful, retained value at that pointer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissionClaimEvaluatorBinding {
+    pub id: String,
+    pub adapter_id: String,
+    pub domain: String,
+    pub step_id: String,
+    pub output_pointer: String,
+    #[serde(default = "default_true")]
+    pub required: bool,
+}
+
+impl MissionClaimEvaluatorBinding {
+    fn validate(
+        &self,
+        claim_id: &str,
+        known_steps: &BTreeSet<String>,
+        required_steps: &BTreeSet<String>,
+    ) -> Result<(), MissionError> {
+        for (field, value, maximum) in [
+            ("evaluator.id", &self.id, 128),
+            ("evaluator.adapter_id", &self.adapter_id, 256),
+            ("evaluator.domain", &self.domain, 256),
+        ] {
+            require_text(field, value)?;
+            if value.len() > maximum {
+                return Err(MissionError::InvalidClaim {
+                    claim: claim_id.into(),
+                    reason: format!("{field} must be at most {maximum} bytes"),
+                });
+            }
+        }
+        require_text("evaluator.step_id", &self.step_id)?;
+        if !known_steps.contains(&self.step_id) {
+            return Err(MissionError::UnknownClaimStep {
+                claim: claim_id.into(),
+                step: self.step_id.clone(),
+            });
+        }
+        if !required_steps.contains(&self.step_id) {
+            return Err(MissionError::InvalidClaim {
+                claim: claim_id.into(),
+                reason: format!(
+                    "evaluator {} must reference one of the claim's requires_steps",
+                    self.id
+                ),
+            });
+        }
+        if self.output_pointer.contains('\0')
+            || self.output_pointer.contains('\n')
+            || self.output_pointer.contains('\r')
+            || !valid_json_pointer(&self.output_pointer, true)
+        {
+            return Err(MissionError::InvalidClaim {
+                claim: claim_id.into(),
+                reason: format!("evaluator {} has an invalid output_pointer", self.id),
+            });
+        }
+        Ok(())
+    }
 }
 
 impl MissionClaimRequest {
@@ -408,7 +476,7 @@ impl MissionClaimRequest {
                 ),
             });
         }
-        let mut steps = BTreeSet::new();
+        let mut steps = BTreeSet::<String>::new();
         for step in &self.requires_steps {
             require_text("claim.requires_steps", step)?;
             if !known_steps.contains(step) {
@@ -417,7 +485,7 @@ impl MissionClaimRequest {
                     step: step.clone(),
                 });
             }
-            if !steps.insert(step) {
+            if !steps.insert(step.clone()) {
                 return Err(MissionError::InvalidClaim {
                     claim: self.id.clone(),
                     reason: "requires_steps must not contain duplicates".into(),
@@ -441,6 +509,23 @@ impl MissionClaimRequest {
                 claim: self.id.clone(),
                 reason: "evidence_mode must be completed_step or successful_tool_result".into(),
             });
+        }
+        if self.evaluator_bindings.len() > MAX_CLAIM_EVALUATORS {
+            return Err(MissionError::TooMany {
+                kind: "claim evaluator bindings",
+                count: self.evaluator_bindings.len(),
+                maximum: MAX_CLAIM_EVALUATORS,
+            });
+        }
+        let mut evaluator_ids = BTreeSet::new();
+        for evaluator in &self.evaluator_bindings {
+            if !evaluator_ids.insert(evaluator.id.clone()) {
+                return Err(MissionError::Duplicate {
+                    kind: "claim evaluator",
+                    id: evaluator.id.clone(),
+                });
+            }
+            evaluator.validate(&self.id, known_steps, &steps)?;
         }
         Ok(())
     }
@@ -717,9 +802,87 @@ pub fn mission_claim_lineage(
         } else {
             "completed_output_retained"
         };
+        let evaluator_rows = claim
+            .evaluator_bindings
+            .iter()
+            .take(MAX_CLAIM_EVALUATORS)
+            .map(|binding| {
+                let base = || {
+                    json!({
+                        "id": binding.id,
+                        "adapter_id": binding.adapter_id,
+                        "domain": binding.domain,
+                        "step_id": binding.step_id,
+                        "output_pointer": binding.output_pointer,
+                        "required": binding.required
+                    })
+                };
+                let Some(result) = result_by_id.get(binding.step_id.as_str()) else {
+                    let mut row = base();
+                    row["evaluator_state"] = json!("missing_step_result");
+                    return row;
+                };
+                if result.status != "succeeded" {
+                    let mut row = base();
+                    row["evaluator_state"] = json!("step_not_successful");
+                    return row;
+                }
+                let Some(wire) = result.wire.as_ref() else {
+                    let mut row = base();
+                    row["evaluator_state"] = json!("evaluator_output_omitted");
+                    return row;
+                };
+                let output = if binding.output_pointer.is_empty() {
+                    Some(wire)
+                } else {
+                    wire.pointer(&binding.output_pointer)
+                };
+                let Some(output) = output else {
+                    let mut row = base();
+                    row["evaluator_state"] = json!("evaluator_pointer_missing");
+                    return row;
+                };
+                let mut row = base();
+                row["output_digest"] = ContentHash::of_value(output)
+                    .ok()
+                    .map(|digest| json!(digest.to_string()))
+                    .unwrap_or(Value::Null);
+                row["evaluator_state"] = json!("evaluator_output_retained");
+                row
+            })
+            .collect::<Vec<_>>();
+        let evaluator_required_total = evaluator_rows
+            .iter()
+            .filter(|row| row.get("required").and_then(Value::as_bool).unwrap_or(false))
+            .count();
+        let evaluator_required_retained = evaluator_rows
+            .iter()
+            .filter(|row| row.get("required").and_then(Value::as_bool).unwrap_or(false))
+            .filter(|row| {
+                row.get("evaluator_state").and_then(Value::as_str)
+                    == Some("evaluator_output_retained")
+            })
+            .count();
+        let evaluator_required_complete = evaluator_required_total == evaluator_required_retained;
+        let evaluator_coverage = json!({
+            "requested": claim.evaluator_bindings.len(),
+            "returned": evaluator_rows.len(),
+            "omitted": claim.evaluator_bindings.len().saturating_sub(MAX_CLAIM_EVALUATORS),
+            "required": evaluator_required_total,
+            "required_retained": evaluator_required_retained,
+            "required_complete": evaluator_required_complete,
+            "posture": if claim.evaluator_bindings.is_empty() {
+                "not_requested"
+            } else if evaluator_required_complete {
+                "required_complete"
+            } else {
+                "required_incomplete"
+            }
+        });
         let claimable = all_found
             && all_succeeded
-            && (claim.evidence_mode == "completed_step" || all_outputs_retained);
+            && (claim.evidence_mode == "completed_step" || all_outputs_retained)
+            && evaluator_required_complete;
         let mut row = json!({
             "id": claim.id,
             "claim": claim.claim,
@@ -729,6 +892,8 @@ pub fn mission_claim_lineage(
             "requires_steps": claim.requires_steps,
             "evidence_state": evidence_state,
             "evidence": evidence,
+            "evaluator_bindings": evaluator_rows,
+            "evaluator_coverage": evaluator_coverage,
             "claim_status": "unreviewed",
             "claimable": claimable,
             "readiness_claimed": false,
@@ -753,11 +918,12 @@ pub fn mission_claim_lineage(
         "guarantees": [
             "each returned claim retains its caller-declared domain labels and required step IDs",
             "each evidence row retains the exact step status, argument digest, byte count, and retained result digest when available",
+            "explicit evaluator bindings retain adapter identity, domain, source pointer, and required-retention coverage",
             "missing, refused, cancelled, and output-omitted steps remain distinct from completed retained outputs"
         ],
         "non_claims": [
             "no scientific, clinical, causal, operational, or release truth is inferred",
-            "claim lineage is not evaluator validation, authority approval, or evidence completeness beyond retained mission results"
+            "claim lineage is not evaluator calibration, authority approval, or evidence completeness beyond retained mission results"
         ]
     });
     if let Ok(digest) = ContentHash::of_value(&output) {
@@ -1185,6 +1351,14 @@ mod tests {
             requires_steps: vec!["observe".into()],
             level: "observation".into(),
             evidence_mode: "successful_tool_result".into(),
+            evaluator_bindings: vec![MissionClaimEvaluatorBinding {
+                id: "metrics-evaluator".into(),
+                adapter_id: "metrics-audit-v1".into(),
+                domain: "metrics".into(),
+                step_id: "observe".into(),
+                output_pointer: "/value".into(),
+                required: true,
+            }],
         }];
         assert!(plan_mission(&value).is_ok());
 
@@ -1201,6 +1375,14 @@ mod tests {
             requires_steps: vec!["observe".into()],
             level: "observation".into(),
             evidence_mode: "successful_tool_result".into(),
+            evaluator_bindings: vec![MissionClaimEvaluatorBinding {
+                id: "metrics-evaluator".into(),
+                adapter_id: "metrics-audit-v1".into(),
+                domain: "metrics".into(),
+                step_id: "observe".into(),
+                output_pointer: "/value".into(),
+                required: true,
+            }],
         };
         let retained = mission_claim_lineage(
             &[claim.clone()],
@@ -1221,6 +1403,14 @@ mod tests {
         assert_eq!(
             retained["claims"][0]["evidence"][0]["evidence_state"],
             "completed_output_retained"
+        );
+        assert_eq!(
+            retained["claims"][0]["evaluator_coverage"]["posture"],
+            "required_complete"
+        );
+        assert_eq!(
+            retained["claims"][0]["evaluator_bindings"][0]["evaluator_state"],
+            "evaluator_output_retained"
         );
         assert!(retained["claims"][0]["non_claims"][0]
             .as_str()
@@ -1245,6 +1435,10 @@ mod tests {
         assert_eq!(
             omitted["claims"][0]["evidence"][0]["evidence_state"],
             "completed_output_omitted"
+        );
+        assert_eq!(
+            omitted["claims"][0]["evaluator_bindings"][0]["evaluator_state"],
+            "evaluator_output_omitted"
         );
     }
 }

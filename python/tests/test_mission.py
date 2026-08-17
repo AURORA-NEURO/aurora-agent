@@ -6,6 +6,7 @@ from prism_sdk import (
     ArgumentError,
     MissionBinding,
     MissionClaimLineage,
+    MissionClaimEvaluatorBinding,
     MissionClaimRequest,
     MissionExecutionReport,
     MissionExecutionProvenance,
@@ -60,12 +61,22 @@ class MissionPreflightTests(unittest.TestCase):
                     ["metrics"],
                     ["observe"],
                     evidence_mode="successful_tool_result",
+                    evaluator_bindings=[
+                        MissionClaimEvaluatorBinding(
+                            "metrics-evaluator",
+                            "metrics-audit-v1",
+                            "metrics",
+                            "observe",
+                            "/value",
+                        )
+                    ],
                 )
             ],
         )
         arguments = request.to_mcp_arguments()
         self.assertEqual(arguments["claim_requests"][0]["requires_steps"], ["observe"])
         self.assertEqual(arguments["claim_requests"][0]["evidence_mode"], "successful_tool_result")
+        self.assertEqual(arguments["claim_requests"][0]["evaluator_bindings"][0]["adapter_id"], "metrics-audit-v1")
         with self.assertRaises(ArgumentError):
             MissionRequest(
                 "mission-claims",
