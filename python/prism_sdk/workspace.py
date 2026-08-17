@@ -34,6 +34,8 @@ from .domain_evidence import (
     DomainEvidenceHarmonizeRequest,
 )
 from .domain_evidence_intake import (
+    DomainEvidenceIntakeCoverageReport,
+    DomainEvidenceIntakeCoverageRequest,
     DomainEvidenceIntakeReport,
     DomainEvidenceIntakeRequest,
 )
@@ -2064,6 +2066,23 @@ class Workspace:
         request: DomainEvidenceIntakeRequest | Mapping[str, Any],
     ) -> DomainEvidenceIntakeReport:
         return DomainEvidenceIntakeReport.from_wire(self.domain_evidence_intake(request))
+
+    def domain_evidence_coverage(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeCoverageRequest)
+            else DomainEvidenceIntakeCoverageRequest(**dict(request or {}))
+        )
+        return self.tool("domain_evidence_coverage", normalized.to_arguments())
+
+    def domain_evidence_coverage_report(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        return DomainEvidenceIntakeCoverageReport.from_wire(self.domain_evidence_coverage(request))
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         """Audit exact identity agreement across the bounded artifact stores."""
@@ -5400,6 +5419,23 @@ class AsyncWorkspace:
         request: DomainEvidenceIntakeRequest | Mapping[str, Any],
     ) -> DomainEvidenceIntakeReport:
         return DomainEvidenceIntakeReport.from_wire(await self.domain_evidence_intake(request))
+
+    async def domain_evidence_coverage(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeCoverageRequest)
+            else DomainEvidenceIntakeCoverageRequest(**dict(request or {}))
+        )
+        return await self.tool("domain_evidence_coverage", normalized.to_arguments())
+
+    async def domain_evidence_coverage_report(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        return DomainEvidenceIntakeCoverageReport.from_wire(await self.domain_evidence_coverage(request))
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         return ArtifactCrossStoreAuditReport.from_wire(

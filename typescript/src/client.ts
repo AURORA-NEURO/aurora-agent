@@ -38,6 +38,8 @@ import type {
   DomainEvidenceHarmonizationResult,
   DomainEvidenceIntakeArgs,
   DomainEvidenceIntakeResult,
+  DomainEvidenceIntakeCoverageOptions,
+  DomainEvidenceIntakeCoverageResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -664,6 +666,32 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceIntakeResult>> {
     return this.callTool<DomainEvidenceIntakeResult>("domain_evidence_intake", args, options);
+  }
+
+  /** Audit retained raw-intake envelopes by authoritative capability group. */
+  async domainEvidenceCoverage(
+    args: DomainEvidenceIntakeCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceIntakeCoverageResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence intake coverage arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const maxGroups = args.max_groups ?? 64;
+    if (!Number.isSafeInteger(maxGroups) || maxGroups < 1 || maxGroups > 128) throw new ArgumentError("max_groups must be 1..=128");
+    if (args.include_intake_digests !== undefined && typeof args.include_intake_digests !== "boolean") throw new ArgumentError("include_intake_digests must be a boolean");
+    const query = new URLSearchParams({ max_groups: String(maxGroups), include_intake_digests: String(args.include_intake_digests ?? false) });
+    if (args.group_id !== undefined) query.set("group_id", args.group_id);
+    if (args.domain !== undefined) query.set("domain", args.domain);
+    return this.request<DomainEvidenceIntakeCoverageResult>("GET", `/v1/domain-evidence/coverage?${query.toString()}`, undefined, options);
+  }
+
+  /** Invoke intake coverage through the REST tool dispatcher. */
+  async domainEvidenceCoverageTool(
+    args: DomainEvidenceIntakeCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceIntakeCoverageResult>> {
+    return this.callTool<DomainEvidenceIntakeCoverageResult>("domain_evidence_coverage", args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

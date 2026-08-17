@@ -15,6 +15,9 @@ use thiserror::Error;
 pub const DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-evidence-intake/0.1";
 pub const DOMAIN_EVIDENCE_INTAKE_WORKFLOW: &str = "domain_evidence_intake";
+pub const DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION: &str =
+    "bioprism-devplat-domain-evidence-intake-coverage/0.1";
+pub const DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW: &str = "domain_evidence_intake_coverage";
 pub const MAX_DOMAIN_EVIDENCE_INTAKE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_DOMAIN_EVIDENCE_INTAKE_DOMAINS: usize = 64;
 pub const MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS: usize = 128;

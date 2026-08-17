@@ -58,9 +58,13 @@ from .domain_evidence import (
     DomainEvidenceLink,
 )
 from .domain_evidence_intake import (
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
     DOMAIN_EVIDENCE_INTAKE_OUTCOMES,
     DOMAIN_EVIDENCE_INTAKE_SCHEMA,
     DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DomainEvidenceIntakeCoverageReport,
+    DomainEvidenceIntakeCoverageRequest,
     DomainEvidenceIntakeReport,
     DomainEvidenceIntakeRequest,
 )
@@ -2697,6 +2701,10 @@ __all__ = [
     "DOMAIN_EVIDENCE_INTAKE_OUTCOMES",
     "DOMAIN_EVIDENCE_INTAKE_SCHEMA",
     "DOMAIN_EVIDENCE_INTAKE_WORKFLOW",
+    "DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA",
+    "DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW",
+    "DomainEvidenceIntakeCoverageRequest",
+    "DomainEvidenceIntakeCoverageReport",
     "DomainEvidenceIntakeRequest",
     "DomainEvidenceIntakeReport",
     "INCIDENT_CLASSES",

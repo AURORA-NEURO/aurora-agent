@@ -36,6 +36,38 @@ const args = {
   claim_posture: { status: "observed", does_not_claim: ["truth"] },
 };
 
+const coverage = {
+  ok: true,
+  schema: "bioprism-devplat-domain-evidence-intake-coverage/0.1",
+  workflow: "domain_evidence_intake_coverage",
+  catalogue_digest: "e".repeat(64),
+  coverage_digest: "f".repeat(64),
+  filters: { max_groups: 64, include_intake_digests: true },
+  group_count: 1,
+  reported_group_count: 1,
+  missing_group_count: 0,
+  missing_group_ids: [],
+  complete: true,
+  groups: [{
+    id: "biological_domains",
+    domains: ["modalities"],
+    status: "active",
+    declared_tool_count: 1,
+    intake_count: 1,
+    subject_ids: ["subject-ts"],
+    source_tools: ["modality_catalog"],
+    outcomes: ["observed"],
+    reported_domains: ["modalities"],
+    intake_digests: ["c".repeat(64)],
+    coverage_state: "reported",
+  }],
+  domain_summary: { modalities: { group_count: 1, reported_group_count: 1, missing_group_count: 0, intake_count: 1 } },
+  readiness_claimed: false,
+  execution: "not_started",
+  guarantees: [],
+  does_not_claim: [],
+};
+
 test("domain evidence intake REST and tool clients preserve exact envelope metadata", async () => {
   const seen = [];
   const client = new ApiClient({
@@ -45,12 +77,17 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
       seen.push({ url, init });
       if (url.pathname === "/v1/domain-evidence/intake") return new Response(JSON.stringify(intake), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_intake") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_intake", mcp: { result: { structuredContent: intake } } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/domain-evidence/coverage") return new Response(JSON.stringify(coverage), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/tools/domain_evidence_coverage") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_coverage", mcp: { result: { structuredContent: coverage } } }), { status: 200, headers: { "content-type": "application/json" } });
       throw new Error(`unexpected path ${url.pathname}`);
     },
   });
   assert.equal((await client.domainEvidenceIntake(args)).outcome, "observed");
   assert.equal((await client.domainEvidenceIntakeTool(args)).mcp.result.structuredContent.intake_digest, "c".repeat(64));
+  assert.equal((await client.domainEvidenceCoverage({ include_intake_digests: true })).coverage_digest, "f".repeat(64));
+  assert.equal((await client.domainEvidenceCoverageTool({ group_id: "biological_domains" })).mcp.result.structuredContent.complete, true);
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");
+  assert.equal(seen[2].url.searchParams.get("include_intake_digests"), "true");
   await assert.rejects(
     client.domainEvidenceIntake({ ...args, outcome: "success" }),
     ArgumentError,

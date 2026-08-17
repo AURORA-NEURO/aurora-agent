@@ -35,6 +35,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/domain-reports/coverage?group_id=&domain=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
 | `POST /v1/domain-evidence/harmonize` | Join exact same-subject domain reports into an explicit, digest-addressed traceability artifact |
 | `POST /v1/domain-evidence/intake` | Normalize and index one supplied raw request/response envelope from any declared capability-group tool |
+| `GET /v1/domain-evidence/coverage?group_id=&domain=&max_groups=&include_intake_digests=` | Count retained raw-intake envelopes by authoritative group, outcome, source tool, subject, domain, and exact digest |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
 | `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows |
 | `GET /v1/domain-workflows/reconciliations/{reconciliation_digest}` | Fetch one digest-verified reconciliation report |
@@ -200,6 +201,11 @@ envelope is embedded in a canonical domain report, and the intake artifact is in
 declared artifact parents. Outcomes remain `observed`, `partial`, `refused`, `error`, or
 `unknown`; the route never invokes the source tool or promotes a response into truth, execution,
 provenance completeness, scientific/clinical validity, release readiness, or external effects.
+`GET /v1/domain-evidence/coverage` audits that retained intake boundary against the authoritative
+catalogue. It preserves missing groups, intake outcomes, source tools, subjects, reported domains,
+optional exact intake digests, and per-domain counts. A complete row means only that an intake
+artifact was retained for each selected group; it does not mean every declared tool ran or that
+any response is true, complete, safe, reproducible, or release-ready.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

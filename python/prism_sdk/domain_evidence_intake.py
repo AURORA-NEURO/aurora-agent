@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from typing import Any, Mapping, Sequence
-
 from .artifacts import _digest, _mapping, _text
 from .domain_reports import DOMAIN_REPORT_CLAIM_STATUSES, _bounded_text_list
 from .errors import ArgumentError
@@ -13,6 +12,8 @@ from .errors import ArgumentError
 DOMAIN_EVIDENCE_INTAKE_SCHEMA = "bioprism-devplat-domain-evidence-intake/0.1"
 DOMAIN_EVIDENCE_INTAKE_WORKFLOW = "domain_evidence_intake"
 DOMAIN_EVIDENCE_INTAKE_OUTCOMES = ("observed", "partial", "refused", "error", "unknown")
+DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA = "bioprism-devplat-domain-evidence-intake-coverage/0.1"
+DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW = "domain_evidence_intake_coverage"
 
 _MISSING = object()
 
@@ -149,3 +150,98 @@ class DomainEvidenceIntakeReport:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainEvidenceIntakeCoverageRequest:
+    group_id: str | None = None
+    domain: str | None = None
+    max_groups: int = 64
+    include_intake_digests: bool = False
+
+    def __post_init__(self) -> None:
+        if self.group_id is not None:
+            _text("domain evidence intake coverage group_id", self.group_id)
+        if self.domain is not None:
+            _text("domain evidence intake coverage domain", self.domain)
+        if isinstance(self.max_groups, bool) or not isinstance(self.max_groups, int) or not 1 <= self.max_groups <= 128:
+            raise ArgumentError("domain evidence intake coverage max_groups must be between 1 and 128")
+        if not isinstance(self.include_intake_digests, bool):
+            raise ArgumentError("domain evidence intake coverage include_intake_digests must be a boolean")
+
+    def to_query_params(self) -> dict[str, str]:
+        params = {
+            "max_groups": str(self.max_groups),
+            "include_intake_digests": str(self.include_intake_digests).lower(),
+        }
+        if self.group_id is not None:
+            params["group_id"] = self.group_id
+        if self.domain is not None:
+            params["domain"] = self.domain
+        return params
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {
+            "max_groups": self.max_groups,
+            "include_intake_digests": self.include_intake_digests,
+            **({"group_id": self.group_id} if self.group_id is not None else {}),
+            **({"domain": self.domain} if self.domain is not None else {}),
+        }
+
+
+@dataclass(frozen=True)
+class DomainEvidenceIntakeCoverageReport:
+    raw: dict[str, Any]
+    complete: bool
+    group_count: int
+    reported_group_count: int
+    missing_group_count: int
+    missing_group_ids: tuple[str, ...]
+    groups: tuple[Mapping[str, Any], ...]
+    catalogue_digest: str
+    coverage_digest: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceIntakeCoverageReport":
+        raw = dict(value)
+        if raw.get("workflow") != DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW:
+            raise ArgumentError("domain evidence intake coverage workflow is invalid")
+        if raw.get("schema") != DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA:
+            raise ArgumentError("domain evidence intake coverage schema is invalid")
+        complete = raw.get("complete")
+        if not isinstance(complete, bool):
+            raise ArgumentError("domain evidence intake coverage complete must be a boolean")
+        missing = _bounded_text_list(
+            "domain evidence intake missing_group_ids", raw.get("missing_group_ids")
+        )
+        groups = raw.get("groups", [])
+        if not isinstance(groups, Sequence) or isinstance(groups, (str, bytes)):
+            raise ArgumentError("domain evidence intake coverage groups must be an array")
+        return cls(
+            raw=raw,
+            complete=complete,
+            group_count=_count("domain evidence intake group_count", raw.get("group_count")),
+            reported_group_count=_count(
+                "domain evidence intake reported_group_count", raw.get("reported_group_count")
+            ),
+            missing_group_count=_count(
+                "domain evidence intake missing_group_count", raw.get("missing_group_count")
+            ),
+            missing_group_ids=missing,
+            groups=tuple(_mapping("domain evidence intake coverage group", group) for group in groups),
+            catalogue_digest=_digest(
+                "domain evidence intake catalogue digest", raw.get("catalogue_digest")
+            ),
+            coverage_digest=_digest(
+                "domain evidence intake coverage digest", raw.get("coverage_digest")
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def _count(name: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ArgumentError(f"{name} must be a non-negative integer")
+    return value

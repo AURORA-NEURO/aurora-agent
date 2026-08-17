@@ -39,6 +39,8 @@ from .domain_evidence import (
     DomainEvidenceHarmonizeRequest,
 )
 from .domain_evidence_intake import (
+    DomainEvidenceIntakeCoverageReport,
+    DomainEvidenceIntakeCoverageRequest,
     DomainEvidenceIntakeReport,
     DomainEvidenceIntakeRequest,
 )
@@ -867,6 +869,37 @@ class ApiClient:
         )
         return DomainEvidenceIntakeReport.from_wire(
             self.call_tool("domain_evidence_intake", normalized.to_arguments())
+        )
+
+    def domain_evidence_coverage(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        """Report retained raw-intake coverage by authoritative group over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeCoverageRequest)
+            else DomainEvidenceIntakeCoverageRequest(**dict(request or {}))
+        )
+        return DomainEvidenceIntakeCoverageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-evidence/coverage?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def domain_evidence_coverage_tool(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeCoverageRequest)
+            else DomainEvidenceIntakeCoverageRequest(**dict(request or {}))
+        )
+        return DomainEvidenceIntakeCoverageReport.from_wire(
+            self.call_tool("domain_evidence_coverage", normalized.to_arguments())
         )
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
@@ -4640,6 +4673,18 @@ class AsyncApiClient:
         request: DomainEvidenceIntakeRequest | Mapping[str, Any],
     ) -> DomainEvidenceIntakeReport:
         return await asyncio.to_thread(self.client.domain_evidence_intake_tool, request)
+
+    async def domain_evidence_coverage(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        return await asyncio.to_thread(self.client.domain_evidence_coverage, request)
+
+    async def domain_evidence_coverage_tool(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        return await asyncio.to_thread(self.client.domain_evidence_coverage_tool, request)
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

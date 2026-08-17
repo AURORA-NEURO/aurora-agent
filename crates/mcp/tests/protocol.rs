@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 195);
+    assert_eq!(tools.len(), 196);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1042,6 +1042,60 @@ fn domain_evidence_intake_replays_idempotently_and_refuses_catalogue_mismatch() 
     );
     assert_eq!(invalid["__isError"], json!(true));
     assert!(invalid["error"].as_str().unwrap().contains("not declared"));
+}
+
+#[test]
+fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() {
+    let mut server = server();
+    let intake = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "coverage-subject",
+            "source_tool": "modality_catalog",
+            "response": {"status": "bounded"},
+            "outcome": "partial",
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(intake["artifact_registry"]["indexed"], json!(true));
+    let coverage = call(
+        &mut server,
+        "domain_evidence_coverage",
+        json!({
+            "include_intake_digests": true
+        }),
+    );
+    assert_eq!(
+        coverage["workflow"],
+        json!("domain_evidence_intake_coverage")
+    );
+    assert_eq!(coverage["group_count"], json!(29));
+    assert_eq!(coverage["reported_group_count"], json!(1));
+    assert_eq!(coverage["missing_group_count"], json!(28));
+    assert_eq!(coverage["complete"], json!(false));
+    assert_eq!(
+        coverage["domain_summary"]["modalities"]["intake_count"],
+        json!(1)
+    );
+    let group = coverage["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|group| group["id"] == "biological_domains")
+        .unwrap();
+    assert_eq!(group["outcomes"], json!(["partial"]));
+    assert_eq!(group["intake_digests"].as_array().unwrap().len(), 1);
+    let filtered = call(
+        &mut server,
+        "domain_evidence_coverage",
+        json!({"group_id": "biological_domains", "domain": "MODALITIES"}),
+    );
+    assert_eq!(filtered["group_count"], json!(1));
+    assert_eq!(filtered["reported_group_count"], json!(1));
+    assert_eq!(filtered["complete"], json!(true));
 }
 
 #[test]
@@ -6436,12 +6490,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(195));
-    assert_eq!(result["advertised_tool_count"], json!(195));
+    assert_eq!(result["unique_catalog_tools"], json!(196));
+    assert_eq!(result["advertised_tool_count"], json!(196));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(195));
-    assert_eq!(result["schema_quality"]["valid"], json!(195));
+    assert_eq!(result["schema_quality"]["checked"], json!(196));
+    assert_eq!(result["schema_quality"]["valid"], json!(196));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

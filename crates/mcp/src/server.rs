@@ -140,7 +140,8 @@ use bioprism_devplat::{
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
     WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
     DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
     DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
@@ -1369,6 +1370,7 @@ impl Server {
             "domain_report_project" => self.domain_report_project(&arguments),
             "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
             "domain_evidence_intake" => self.domain_evidence_intake(&arguments),
+            "domain_evidence_coverage" => self.domain_evidence_coverage(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -3244,6 +3246,208 @@ impl Server {
                 "a refusal or partial response is silently equivalent to a successful observation"
             ]
         }))
+    }
+
+    /// Project retained intake artifacts against the authoritative catalogue without treating
+    /// presence as execution coverage. Group rows retain subjects, source tools, outcomes, and
+    /// exact artifact digests; missing groups and domain-level gaps remain explicit.
+    fn domain_evidence_coverage(&self, arguments: &Value) -> Result<Value, String> {
+        const MAX_GROUPS: usize = 128;
+        let group_filter = arguments.get("group_id").and_then(Value::as_str);
+        let domain_filter = arguments.get("domain").and_then(Value::as_str);
+        let max_groups = arguments
+            .get("max_groups")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_groups must be an integer".to_string())
+                    .and_then(|value| {
+                        usize::try_from(value).map_err(|_| "max_groups is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(64);
+        if !(1..=MAX_GROUPS).contains(&max_groups) {
+            return Err(format!("max_groups must be between 1 and {MAX_GROUPS}"));
+        }
+        let include_intake_digests = arguments
+            .get("include_intake_digests")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| "include_intake_digests must be a boolean".to_string())
+            })
+            .transpose()?
+            .unwrap_or(false);
+        if group_filter.is_some_and(str::is_empty) || domain_filter.is_some_and(str::is_empty) {
+            return Err("group_id and domain filters must be non-empty".into());
+        }
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let selected = catalogue
+            .groups()
+            .iter()
+            .filter(|group| group_filter.is_none_or(|filter| group.id == filter))
+            .filter(|group| {
+                domain_filter.is_none_or(|filter| {
+                    group
+                        .domains
+                        .iter()
+                        .any(|domain| domain.eq_ignore_ascii_case(filter))
+                })
+            })
+            .take(max_groups)
+            .collect::<Vec<_>>();
+        let selected_ids = selected
+            .iter()
+            .map(|group| group.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let records = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit();
+        let mut group_intakes: BTreeMap<String, Vec<&bioprism_devplat::ArtifactRecord>> =
+            BTreeMap::new();
+        for record in &records {
+            if record.kind != "domain_evidence_intake"
+                || record.artifact.get("schema").and_then(Value::as_str)
+                    != Some(bioprism_devplat::DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION)
+            {
+                continue;
+            }
+            let Some(group_id) = record.artifact.get("group_id").and_then(Value::as_str) else {
+                continue;
+            };
+            if selected_ids.contains(group_id) {
+                group_intakes
+                    .entry(group_id.to_string())
+                    .or_default()
+                    .push(record);
+            }
+        }
+
+        let mut groups = Vec::new();
+        let mut missing_group_ids = Vec::new();
+        let mut domain_summary: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+        for group in selected {
+            let intakes = group_intakes.get(&group.id).cloned().unwrap_or_default();
+            if intakes.is_empty() {
+                missing_group_ids.push(group.id.clone());
+            }
+            let mut subject_ids = BTreeSet::new();
+            let mut source_tools = BTreeSet::new();
+            let mut outcomes = BTreeSet::new();
+            let mut reported_domains = BTreeSet::new();
+            let mut intake_digests = BTreeSet::new();
+            for record in &intakes {
+                subject_ids.insert(record.subject_id.clone());
+                if let Some(source_tool) =
+                    record.artifact.get("source_tool").and_then(Value::as_str)
+                {
+                    source_tools.insert(source_tool.to_string());
+                }
+                if let Some(outcome) = record.artifact.get("outcome").and_then(Value::as_str) {
+                    outcomes.insert(outcome.to_string());
+                }
+                if let Some(domains) = record.artifact.get("domains").and_then(Value::as_array) {
+                    reported_domains
+                        .extend(domains.iter().filter_map(Value::as_str).map(str::to_string));
+                }
+                intake_digests.insert(record.content_digest.clone());
+            }
+            for domain in &group.domains {
+                let domain_intakes = intakes
+                    .iter()
+                    .filter(|record| {
+                        record
+                            .artifact
+                            .get("domains")
+                            .and_then(Value::as_array)
+                            .is_some_and(|domains| {
+                                domains
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .any(|candidate| candidate.eq_ignore_ascii_case(domain))
+                            })
+                    })
+                    .count();
+                let summary = domain_summary.entry(domain.clone()).or_default();
+                summary.0 += 1;
+                if domain_intakes > 0 {
+                    summary.1 += 1;
+                }
+                summary.2 += domain_intakes;
+            }
+            let mut row = json!({
+                "id": group.id,
+                "domains": group.domains,
+                "status": group.status,
+                "declared_tool_count": group.mcp_tools.len(),
+                "intake_count": intakes.len(),
+                "subject_ids": subject_ids.into_iter().collect::<Vec<_>>(),
+                "source_tools": source_tools.into_iter().collect::<Vec<_>>(),
+                "outcomes": outcomes.into_iter().collect::<Vec<_>>(),
+                "reported_domains": reported_domains.into_iter().collect::<Vec<_>>(),
+                "coverage_state": if intakes.is_empty() { "missing" } else { "reported" }
+            });
+            if include_intake_digests {
+                row["intake_digests"] = json!(intake_digests.into_iter().collect::<Vec<_>>());
+            }
+            groups.push(row);
+        }
+        let domain_summary = domain_summary
+            .into_iter()
+            .map(
+                |(domain, (group_count, reported_group_count, intake_count))| {
+                    (
+                        domain,
+                        json!({
+                            "group_count": group_count,
+                            "reported_group_count": reported_group_count,
+                            "missing_group_count": group_count.saturating_sub(reported_group_count),
+                            "intake_count": intake_count
+                        }),
+                    )
+                },
+            )
+            .collect::<serde_json::Map<_, _>>();
+        let mut result = json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "filters": {
+                "group_id": group_filter,
+                "domain": domain_filter,
+                "max_groups": max_groups,
+                "include_intake_digests": include_intake_digests
+            },
+            "group_count": groups.len(),
+            "reported_group_count": groups.iter().filter(|group| group["coverage_state"] == "reported").count(),
+            "missing_group_count": missing_group_ids.len(),
+            "missing_group_ids": missing_group_ids,
+            "complete": missing_group_ids.is_empty(),
+            "groups": groups,
+            "domain_summary": domain_summary,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "coverage counts only retained, structurally verified domain-evidence-intake artifacts",
+                "group, domain, outcome, subject, source-tool, and digest rows remain separately inspectable",
+                "missing intake remains visible instead of being inferred as absent capability"
+            ],
+            "does_not_claim": [
+                "intake presence proves that every tool was executed or that a response is true",
+                "complete local intake coverage proves scientific, clinical, causal, provenance, release, or readiness validity",
+                "missing intake proves that a capability or external source does not exist"
+            ]
+        });
+        let coverage_digest = bioprism_ids::ContentHash::of_value(&result).map_err(|error| {
+            format!("domain evidence intake coverage could not be hashed: {error}")
+        })?;
+        result["coverage_digest"] = json!(coverage_digest.to_string());
+        Ok(result)
     }
 
     fn context_compare(&self, arguments: &Value) -> Result<Value, String> {
@@ -29128,7 +29332,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_intake", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_intake", "domain_evidence_coverage", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29447,6 +29651,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional lowercase SHA-256 artifact parents already known or intentionally missing." }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "response", "outcome", "claim_posture"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_coverage",
+            "description": "Audit retained raw domain-evidence intake across the authoritative capability catalogue. The coverage rows preserve missing groups, declared domains, intake counts, subjects, source tools, outcome states, and optional exact artifact digests; complete local intake is never treated as execution coverage, scientific or clinical validity, provenance completeness, release readiness, or external-effect completion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Optional exact capability-group filter." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive declared-domain filter." },
+                    "max_groups": { "type": "integer", "minimum": 1, "maximum": 128, "description": "Maximum selected groups; defaults to 64." },
+                    "include_intake_digests": { "type": "boolean", "description": "Include exact indexed intake artifact digests in each group row." }
+                },
+                "required": []
             }
         }),
         json!({

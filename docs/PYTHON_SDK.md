@@ -49,6 +49,11 @@ JSON, explicit observed/partial/refused/error/unknown outcome, separate request/
 and the indexed `domain_evidence_intake` artifact. The client preserves request omission versus
 supplied null and does not infer execution, provenance completeness, scientific validity, or
 readiness from an intake record.
+`DomainEvidenceIntakeCoverageRequest` and `DomainEvidenceIntakeCoverageReport` expose the
+catalogue-wide intake audit through REST, the REST/MCP dispatcher, `Workspace`, and
+`AsyncWorkspace`. Coverage keeps missing groups, observed/partial/refused/error/unknown
+outcomes, source tools, subjects, reported domains, optional intake digests, and domain-level
+counts explicit; a reported envelope is not treated as executed capability or valid evidence.
 
 ## Lifecycle
 

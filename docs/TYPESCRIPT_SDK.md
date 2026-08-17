@@ -94,6 +94,10 @@ group/tool/domain membership, explicit outcome states, optional request JSON, re
 JSON, separate request/response digests, and indexed artifact posture. Request omission remains
 distinct from supplied `null`; the client does not turn intake into execution or scientific,
 clinical, causal, provenance, release, or readiness authority.
+`domainEvidenceCoverage` and `domainEvidenceCoverageTool` provide the catalogue-wide raw-intake
+audit. Their typed result keeps missing groups, outcome/source-tool/subject/domain rows, optional
+intake digests, domain summaries, and the coverage digest explicit; complete retained intake is
+not execution, scientific validity, provenance completeness, or release readiness.
 
 Convenience methods currently cover:
 
@@ -238,7 +242,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 195-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 196-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,

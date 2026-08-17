@@ -5007,6 +5007,47 @@ export interface DomainEvidenceIntakeResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface DomainEvidenceIntakeCoverageOptions extends JsonObject {
+  group_id?: string;
+  domain?: string;
+  max_groups?: number;
+  include_intake_digests?: boolean;
+}
+
+export interface DomainEvidenceIntakeCoverageGroup extends JsonObject {
+  id: string;
+  domains: string[];
+  status: string;
+  declared_tool_count: number;
+  intake_count: number;
+  subject_ids: string[];
+  source_tools: string[];
+  outcomes: DomainEvidenceIntakeOutcome[];
+  reported_domains: string[];
+  intake_digests?: string[];
+  coverage_state: "reported" | "missing";
+}
+
+export interface DomainEvidenceIntakeCoverageResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-intake-coverage/0.1";
+  workflow: "domain_evidence_intake_coverage";
+  catalogue_digest: string;
+  coverage_digest: string;
+  filters: DomainEvidenceIntakeCoverageOptions;
+  group_count: number;
+  reported_group_count: number;
+  missing_group_count: number;
+  missing_group_ids: string[];
+  complete: boolean;
+  groups: DomainEvidenceIntakeCoverageGroup[];
+  domain_summary: JsonObject;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;

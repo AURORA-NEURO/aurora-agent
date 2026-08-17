@@ -1304,6 +1304,9 @@ impl ApiRouter {
             ("POST", "/v1/domain-evidence/intake") => {
                 self.domain_evidence_intake(&request, &request_id)
             }
+            ("GET", "/v1/domain-evidence/coverage") => {
+                self.domain_evidence_coverage(&request, &request_id)
+            }
             ("GET", "/v1/artifacts") => self.query_artifacts(&request, &request_id),
             ("POST", "/v1/artifacts") => self.register_artifact(&request, &request_id),
             ("GET", "/v1/artifacts/persistence") => self.artifact_persistence_status(),
@@ -3275,6 +3278,7 @@ impl ApiRouter {
                     "domain_report_coverage": "/v1/domain-reports/coverage",
                     "domain_evidence_harmonize": "/v1/domain-evidence/harmonize",
                     "domain_evidence_intake": "/v1/domain-evidence/intake",
+                    "domain_evidence_coverage": "/v1/domain-evidence/coverage",
                     "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
@@ -3347,6 +3351,7 @@ impl ApiRouter {
                     "domain_report_coverage": true,
                     "domain_evidence_harmonization": true,
                     "domain_evidence_intake": true,
+                    "domain_evidence_coverage": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -3874,6 +3879,38 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_evidence_intake",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_coverage(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let max_groups = match query_usize(&query, "max_groups", 64) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_intake_digests = match query_bool(&query, "include_intake_digests", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("max_groups".into(), json!(max_groups));
+        arguments.insert(
+            "include_intake_digests".into(),
+            json!(include_intake_digests),
+        );
+        if let Some(group_id) = query.get("group_id") {
+            arguments.insert("group_id".into(), json!(group_id));
+        }
+        if let Some(domain) = query.get("domain") {
+            arguments.insert("domain".into(), json!(domain));
+        }
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_coverage",
             Value::Object(arguments),
         )
     }
@@ -7099,6 +7136,7 @@ impl ApiRouter {
                     "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
                     "/v1/domain-evidence/harmonize": { "post": { "responses": { "200": { "description": "digest-addressed domain evidence harmonization" }, "422": { "description": "report identity, catalogue, or traceability input was refused" } } } },
                     "/v1/domain-evidence/intake": { "post": { "responses": { "200": { "description": "exact-digest raw domain evidence intake" }, "422": { "description": "envelope, outcome, or catalogue input was refused" } } } },
+                    "/v1/domain-evidence/coverage": { "get": { "responses": { "200": { "description": "catalogue-wide retained domain evidence intake coverage" }, "400": { "description": "coverage filter was invalid" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/persistence": { "get": { "responses": { "200": { "description": "restart-aware mission snapshot status" } } } },
@@ -11432,6 +11470,38 @@ mod tests {
         assert_eq!(artifacts.status, 200);
         let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
         assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
+        let coverage = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/coverage?include_intake_digests=true",
+            json!({}),
+        ));
+        assert_eq!(coverage.status, 200);
+        let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
+        assert_eq!(coverage["workflow"], "domain_evidence_intake_coverage");
+        assert_eq!(coverage["group_count"], 29);
+        assert_eq!(coverage["reported_group_count"], 1);
+        assert_eq!(coverage["missing_group_count"], 28);
+        assert_eq!(coverage["complete"], false);
+        let reported_group = coverage["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap();
+        assert_eq!(
+            reported_group["intake_digests"].as_array().unwrap().len(),
+            1
+        );
+        let filtered = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/coverage?group_id=biological_domains&domain=MODALITIES",
+            json!({}),
+        ));
+        assert_eq!(filtered.status, 200);
+        let filtered: Value = serde_json::from_slice(&filtered.body).unwrap();
+        assert_eq!(filtered["group_count"], 1);
+        assert_eq!(filtered["reported_group_count"], 1);
+        assert_eq!(filtered["complete"], true);
         let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
         let restored_artifacts = restored.handle(request(
             "GET",
