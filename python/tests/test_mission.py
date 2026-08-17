@@ -91,12 +91,13 @@ class MissionPreflightTests(unittest.TestCase):
                 "schema": "bioprism-mission-claim-lineage-response/0.1",
                 "mission_id": "mission-claims",
                 "claim_lineage": {
-                    "claims": [{"id": "observed", "claimable": True}],
+                    "claims": [{"id": "observed", "claimable": True, "evaluator_coverage": {"disagreement_posture": "disagreement"}}],
                     "readiness_claimed": False,
                 },
             }
         )
-        self.assertTrue(lineage.claim_lineage["claims"][0]["claimable"])
+        self.assertTrue(lineage.claims[0]["claimable"])
+        self.assertEqual(lineage.disagreement_postures, ("disagreement",))
 
     def test_execution_provenance_preserves_replay_correlation(self) -> None:
         provenance = MissionExecutionProvenance.from_wire(

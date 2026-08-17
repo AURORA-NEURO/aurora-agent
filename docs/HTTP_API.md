@@ -220,8 +220,10 @@ false. The projection never establishes scientific, clinical, causal, operationa
 release truth, and a 409/410 response makes live-vs-omitted result state explicit.
 Evaluator rows add `evaluator_coverage` with required/retained counts and a
 `required_incomplete` posture when a declared evaluator output is missing, refused, omitted, or
-does not contain the requested pointer. This lets domain adapters remain heterogeneous while the
-mission layer keeps one auditable cross-domain envelope.
+does not contain the requested pointer. When multiple outputs are retained, canonical output
+digests additionally expose `single_observation`, `unanimous_digest`, `disagreement`, or `partial`
+posture. This is a transport-level disagreement witness, not a semantic adjudication. Domain
+adapters remain heterogeneous while the mission layer keeps one auditable cross-domain envelope.
 
 ## Asynchronous missions
 

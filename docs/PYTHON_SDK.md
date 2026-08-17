@@ -591,11 +591,6 @@ invent defaults:
   non-claim posture. `MissionClaimEvaluatorBinding` adds explicit adapter/domain/output-pointer
   coverage with required-retention counts. `claimable` only means the requested transport evidence
   was retained; it is never a truth, safety, or release verdict.
-  `MissionClaimRequest` lets callers attach bounded, explicit claim-to-step requirements to a
-  `MissionRequest`. The terminal `MissionExecutionReport.claim_lineage` property and
-  `mission_claim_lineage(...)`/async helper expose retained result digests, omission states, and
-  non-claim posture. `claimable` only means the requested transport evidence was retained; it is
-  never a truth, safety, or release verdict.
   `rebind_subscription(...)` supplies a secret in memory,
   re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

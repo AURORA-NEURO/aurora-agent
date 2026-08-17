@@ -1201,6 +1201,29 @@ class MissionClaimLineage:
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
 
+    @property
+    def claims(self) -> tuple[Mapping[str, Any], ...]:
+        """Return bounded claim rows while preserving their domain-owned nested evidence."""
+
+        values = self.claim_lineage.get("claims", [])
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ArgumentError("mission claim lineage claims must be an array")
+        return tuple(_mapping("mission claim lineage row", value) for value in values)
+
+    @property
+    def disagreement_postures(self) -> tuple[str, ...]:
+        """Return explicit evaluator disagreement labels without resolving them semantically."""
+
+        postures: list[str] = []
+        for claim in self.claims:
+            coverage = claim.get("evaluator_coverage", {})
+            if not isinstance(coverage, Mapping):
+                raise ArgumentError("mission claim evaluator_coverage must be an object")
+            posture = coverage.get("disagreement_posture", "not_requested")
+            _text("mission claim disagreement_posture", posture)
+            postures.append(posture)
+        return tuple(postures)
+
 
 @dataclass(frozen=True)
 class MissionJob:

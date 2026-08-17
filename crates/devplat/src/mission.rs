@@ -864,6 +864,31 @@ pub fn mission_claim_lineage(
             })
             .count();
         let evaluator_required_complete = evaluator_required_total == evaluator_required_retained;
+        let evaluator_retained = evaluator_rows
+            .iter()
+            .filter(|row| {
+                row.get("evaluator_state").and_then(Value::as_str)
+                    == Some("evaluator_output_retained")
+            })
+            .count();
+        let evaluator_output_digests = evaluator_rows
+            .iter()
+            .filter_map(|row| row.get("output_digest").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>();
+        let evaluator_disagreement_posture = if claim.evaluator_bindings.is_empty() {
+            "not_requested"
+        } else if evaluator_retained == 0 {
+            "unavailable"
+        } else if evaluator_retained < evaluator_rows.len() {
+            "partial"
+        } else if evaluator_retained == 1 {
+            "single_observation"
+        } else if evaluator_output_digests.len() == 1 {
+            "unanimous_digest"
+        } else {
+            "disagreement"
+        };
         let evaluator_coverage = json!({
             "requested": claim.evaluator_bindings.len(),
             "returned": evaluator_rows.len(),
@@ -871,6 +896,9 @@ pub fn mission_claim_lineage(
             "required": evaluator_required_total,
             "required_retained": evaluator_required_retained,
             "required_complete": evaluator_required_complete,
+            "retained": evaluator_retained,
+            "distinct_output_digests": evaluator_output_digests.len(),
+            "disagreement_posture": evaluator_disagreement_posture,
             "posture": if claim.evaluator_bindings.is_empty() {
                 "not_requested"
             } else if evaluator_required_complete {
@@ -1358,6 +1386,14 @@ mod tests {
                 step_id: "observe".into(),
                 output_pointer: "/value".into(),
                 required: true,
+            },
+            MissionClaimEvaluatorBinding {
+                id: "evaluation-evaluator".into(),
+                adapter_id: "evaluation-audit-v1".into(),
+                domain: "evaluation".into(),
+                step_id: "observe".into(),
+                output_pointer: "/ok".into(),
+                required: true,
             }],
         }];
         assert!(plan_mission(&value).is_ok());
@@ -1381,6 +1417,14 @@ mod tests {
                 domain: "metrics".into(),
                 step_id: "observe".into(),
                 output_pointer: "/value".into(),
+                required: true,
+            },
+            MissionClaimEvaluatorBinding {
+                id: "evaluation-evaluator".into(),
+                adapter_id: "evaluation-audit-v1".into(),
+                domain: "evaluation".into(),
+                step_id: "observe".into(),
+                output_pointer: "/ok".into(),
                 required: true,
             }],
         };
@@ -1411,6 +1455,10 @@ mod tests {
         assert_eq!(
             retained["claims"][0]["evaluator_bindings"][0]["evaluator_state"],
             "evaluator_output_retained"
+        );
+        assert_eq!(
+            retained["claims"][0]["evaluator_coverage"]["disagreement_posture"],
+            "disagreement"
         );
         assert!(retained["claims"][0]["non_claims"][0]
             .as_str()

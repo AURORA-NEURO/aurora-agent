@@ -7076,11 +7076,76 @@ export interface MissionExecutionProvenanceResponse extends JsonObject {
   readiness_claimed: false;
 }
 
+export type MissionEvaluatorDisagreementPosture =
+  | "not_requested"
+  | "unavailable"
+  | "partial"
+  | "single_observation"
+  | "unanimous_digest"
+  | "disagreement";
+
+export interface MissionClaimEvaluatorEvidence extends JsonObject {
+  id: string;
+  adapter_id: string;
+  domain: string;
+  step_id: string;
+  output_pointer: string;
+  required: boolean;
+  output_digest?: string | null;
+  evaluator_state:
+    | "missing_step_result"
+    | "step_not_successful"
+    | "evaluator_output_omitted"
+    | "evaluator_pointer_missing"
+    | "evaluator_output_retained";
+}
+
+export interface MissionClaimEvaluatorCoverage extends JsonObject {
+  requested: number;
+  returned: number;
+  omitted: number;
+  required: number;
+  required_retained: number;
+  required_complete: boolean;
+  retained: number;
+  distinct_output_digests: number;
+  disagreement_posture: MissionEvaluatorDisagreementPosture;
+  posture: "not_requested" | "required_complete" | "required_incomplete";
+}
+
+export interface MissionClaimLineageRow extends JsonObject {
+  id: string;
+  claim: string;
+  domains: string[];
+  level: "observation" | "evaluation" | "operational" | "release";
+  evidence_mode: "completed_step" | "successful_tool_result";
+  requires_steps: string[];
+  evidence_state: string;
+  evidence: JsonObject[];
+  evaluator_bindings: MissionClaimEvaluatorEvidence[];
+  evaluator_coverage: MissionClaimEvaluatorCoverage;
+  claim_status: "unreviewed";
+  claimable: boolean;
+  readiness_claimed: false;
+  lineage_digest?: string;
+}
+
+export interface MissionClaimLineageProjection extends JsonObject {
+  schema: "bioprism-devplat-mission-claim-lineage/0.1";
+  claims: MissionClaimLineageRow[];
+  requested: number;
+  returned: number;
+  omitted: number;
+  claim_status: "unreviewed";
+  readiness_claimed: false;
+  lineage_digest?: string;
+}
+
 export interface MissionClaimLineageResponse extends JsonObject {
   ok: boolean;
   schema: "bioprism-mission-claim-lineage-response/0.1";
   mission_id: string;
-  claim_lineage: JsonObject;
+  claim_lineage: MissionClaimLineageProjection;
 }
 
 export interface MissionJob extends JsonObject {
