@@ -3936,3 +3936,51 @@ test("client exposes contextual-integrity verdicts and Pareto safety posture", a
   assert.equal(result.mcp.result.structuredContent.boundary.violation_count, 3);
   assert.equal(result.mcp.result.structuredContent.composite.status, "refused");
 });
+
+test("client exposes durable evaluator replay query retention semantics", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/missions/mission-ts/evaluator-replay");
+      assert.equal(url.searchParams.get("include_fixtures"), "false");
+      assert.equal(url.searchParams.get("max_items"), "64");
+      return jsonResponse({
+        ok: true,
+        schema: "bioprism-api/mission-evaluator-replay-query/0.1",
+        workflow: "mission_evaluator_replay_query",
+        mission_id: "mission-ts",
+        query: { include_fixtures: false, max_items: 64 },
+        retention: {
+          mode: "summary_only",
+          result_retained: false,
+          summary_retained: true,
+          result_omitted: { bytes: 300000, sha256: "r".repeat(64) },
+        },
+        replay: {
+          schema: "bioprism-devplat-mission-evaluator-replay-summary/0.1",
+          workflow: "mission_evaluator_replay_summary",
+          mission_id: "mission-ts",
+          coverage: { catalogue_group_count: 29, replayed_group_count: 1, complete: false },
+          execution: "not_started",
+        },
+        execution: "not_started",
+        guarantees: ["summary is structural and non-executing"],
+        limitations: ["raw mission output was omitted"],
+        links: {
+          mission: "/v1/missions/mission-ts",
+          claims: "/v1/missions/mission-ts/claims",
+          replay: "/v1/missions/mission-ts/evaluator-replay",
+        },
+      });
+    },
+  });
+  const result = await client.missionEvaluatorReplayQuery("mission-ts", {
+    include_fixtures: false,
+    max_items: 64,
+  });
+  assert.equal(result.workflow, "mission_evaluator_replay_query");
+  assert.equal(result.retention.mode, "summary_only");
+  assert.equal(result.retention.result_retained, false);
+  assert.equal(result.replay.workflow, "mission_evaluator_replay_summary");
+});

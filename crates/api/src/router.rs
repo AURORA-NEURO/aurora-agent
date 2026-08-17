@@ -10,6 +10,7 @@ use crate::events::{
     MAX_EVENT_STATE_FILE_BYTES, MAX_FILTERS,
 };
 use crate::http::{HttpRequest, HttpResponse};
+use bioprism_devplat::{MissionEvaluatorCatalogue, MissionEvaluatorReplayRequest};
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -239,6 +240,7 @@ struct MissionJobState {
     cancel_reason: Option<String>,
     result: Option<Value>,
     result_omitted: Option<Value>,
+    evaluator_replay_summary: Option<Value>,
     error: Option<String>,
     recovered_after_restart: bool,
     execution_provenance: Option<Value>,
@@ -530,6 +532,11 @@ impl ApiRouter {
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/provenance") => {
                 self.mission_provenance(&request, &request_id)
+            }
+            ("GET", path)
+                if path.starts_with("/v1/missions/") && path.ends_with("/evaluator-replay") =>
+            {
+                self.mission_evaluator_replay(&request, &request_id)
             }
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/claims") => {
                 self.mission_claims(&request, &request_id)
@@ -977,6 +984,7 @@ impl ApiRouter {
                     "mission_inventory": true,
                     "mission_execution_provenance": true,
                     "mission_claim_lineage": true,
+                    "mission_evaluator_replay_query": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -1007,6 +1015,7 @@ impl ApiRouter {
                     "event_persistence": "/v1/events/persistence",
                     "mission_provenance": "/v1/missions/{mission_id}/provenance",
                     "mission_claims": "/v1/missions/{mission_id}/claims",
+                    "mission_evaluator_replay": "/v1/missions/{mission_id}/evaluator-replay",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -2114,8 +2123,9 @@ impl ApiRouter {
                     "operations_handoff": "/v1/operations/handoff",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
-                    "mission_provenance": "/v1/missions/{mission_id}/provenance",
-                    "mission_claims": "/v1/missions/{mission_id}/claims",
+                     "mission_provenance": "/v1/missions/{mission_id}/provenance",
+                     "mission_claims": "/v1/missions/{mission_id}/claims",
+                     "mission_evaluator_replay": "/v1/missions/{mission_id}/evaluator-replay",
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
@@ -2646,6 +2656,7 @@ impl ApiRouter {
             cancel_reason: None,
             result: None,
             result_omitted: None,
+            evaluator_replay_summary: None,
             error: None,
             recovered_after_restart: false,
             execution_provenance: execution_provenance.clone(),
@@ -2774,6 +2785,7 @@ impl ApiRouter {
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
         let worker_persistence = Arc::clone(&self.mission_persistence);
         let worker_id = mission_id.clone();
+        let worker_mission_id = mission_id.clone();
         let worker_arguments = arguments;
         let spawn = thread::Builder::new()
             .name(format!("mission-{worker_id}"))
@@ -2794,6 +2806,8 @@ impl ApiRouter {
                                 .and_then(Value::as_str)
                                 .unwrap_or("succeeded")
                                 .into();
+                            current.evaluator_replay_summary =
+                                evaluator_replay_summary(&result, &worker_mission_id);
                             current.result = Some(result);
                             current.result_omitted = None;
                         }
@@ -3070,6 +3084,183 @@ impl ApiRouter {
                     "mission_trace": format!("/v1/missions/{mission_id}/trace"),
                     "operations_gates": "/v1/operations/gates?after=0&limit=256",
                     "events": "/v1/events?after=0&limit=256"
+                }
+            }),
+        )
+    }
+
+    fn mission_evaluator_replay(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), Some("evaluator-replay"))
+        else {
+            return self.error(
+                404,
+                "not_found",
+                "mission evaluator replay route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if key != "include_fixtures" && key != "max_items" {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "mission evaluator replay accepts only include_fixtures and max_items",
+                    request_id,
+                );
+            }
+        }
+        let include_fixtures = match query_bool(&query, "include_fixtures", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let max_items = match query_usize(&query, "max_items", 128) {
+            Ok(value) if (1..=512).contains(&value) => value,
+            Ok(_) | Err(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "max_items must be between 1 and 512",
+                    request_id,
+                )
+            }
+        };
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let query_value = json!({
+            "include_fixtures": include_fixtures,
+            "max_items": max_items
+        });
+        let retention = json!({
+            "mode": "full",
+            "result_retained": state.result.is_some(),
+            "summary_retained": state.evaluator_replay_summary.is_some(),
+            "result_omitted": state.result_omitted.clone()
+        });
+        let replay = if let Some(result) = state.result.clone() {
+            let replay_request = MissionEvaluatorReplayRequest {
+                mission: result,
+                include_fixtures,
+                max_items,
+            };
+            match MissionEvaluatorCatalogue::standard().replay(&replay_request) {
+                Ok(mut replay) => {
+                    if let Some(object) = replay.as_object_mut() {
+                        object.insert("source".into(), json!("durable_mission_result"));
+                        object.insert("query".into(), query_value.clone());
+                    }
+                    replay
+                }
+                Err(error) => {
+                    return self.error(
+                        422,
+                        "evaluator_replay_invalid",
+                        &error.to_string(),
+                        request_id,
+                    )
+                }
+            }
+        } else if let Some(summary) = state.evaluator_replay_summary.clone() {
+            return HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "schema": "bioprism-api/mission-evaluator-replay-query/0.1",
+                    "workflow": "mission_evaluator_replay_query",
+                    "mission_id": mission_id,
+                    "query": query_value,
+                    "retention": {
+                        "mode": "summary_only",
+                        "result_retained": false,
+                        "summary_retained": true,
+                        "result_omitted": state.result_omitted.clone()
+                    },
+                    "replay": summary,
+                    "execution": "not_started",
+                    "guarantees": [
+                        "the compact evaluator summary is restored from the mission checkpoint",
+                        "result omission remains explicit and is never represented as replay success",
+                        "no evaluator or domain tool is executed by this query"
+                    ],
+                    "limitations": [
+                        "full bindings, retained outputs, and fixture rows require the original mission result",
+                        "summary-only replay cannot revalidate omitted raw output against a changed catalogue"
+                    ],
+                    "links": {
+                        "mission": format!("/v1/missions/{mission_id}"),
+                        "claims": format!("/v1/missions/{mission_id}/claims"),
+                        "replay": format!("/v1/missions/{mission_id}/evaluator-replay")
+                    }
+                }),
+            );
+        } else if let Some(omitted) = state.result_omitted.clone() {
+            return self.error(
+                410,
+                "mission_evaluator_replay_omitted",
+                &format!(
+                    "mission result and evaluator replay summary were omitted from the bounded registry snapshot ({} bytes, sha256 {})",
+                    omitted["bytes"], omitted["sha256"]
+                ),
+                request_id,
+            );
+        } else {
+            return self.error(
+                409,
+                "evaluator_replay_unavailable",
+                "mission evaluator replay is available after a terminal mission report is retained",
+                request_id,
+            );
+        };
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "schema": "bioprism-api/mission-evaluator-replay-query/0.1",
+                "workflow": "mission_evaluator_replay_query",
+                "mission_id": mission_id,
+                "query": query_value,
+                "retention": retention,
+                "replay": replay,
+                "execution": "not_started",
+                "guarantees": [
+                    "the replay input is read from the bounded durable mission registry",
+                    "full replay rechecks the current evaluator catalogue without dispatch",
+                    "the retention mode and omitted-result metadata remain explicit"
+                ],
+                "limitations": [
+                    "replay does not rerun an evaluator or validate domain semantics",
+                    "a summary-only response cannot expose omitted raw evaluator output"
+                ],
+                "links": {
+                    "mission": format!("/v1/missions/{mission_id}"),
+                    "claims": format!("/v1/missions/{mission_id}/claims"),
+                    "replay": format!("/v1/missions/{mission_id}/evaluator-replay")
                 }
             }),
         )
@@ -3970,7 +4161,8 @@ impl ApiRouter {
                     "/v1/missions/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded mission snapshot checkpoint" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
                     "/v1/missions/{mission_id}/provenance": { "get": { "responses": { "200": { "description": "retained execution gate, review, evaluator, and dispatch provenance" } } } },
-                    "/v1/missions/{mission_id}/claims": { "get": { "responses": { "200": { "description": "bounded claim-to-step evidence lineage projection" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "terminal report was omitted from the bounded registry" } } } },
+                     "/v1/missions/{mission_id}/claims": { "get": { "responses": { "200": { "description": "bounded claim-to-step evidence lineage projection" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "terminal report was omitted from the bounded registry" } } } },
+                     "/v1/missions/{mission_id}/evaluator-replay": { "get": { "parameters": [{ "name": "include_fixtures", "in": "query" }, { "name": "max_items", "in": "query" }], "responses": { "200": { "description": "durable full or summary-only evaluator replay query" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "mission result and replay summary were omitted" } } } },
                     "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
@@ -5138,6 +5330,10 @@ fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<Mission
                 .filter(|value| !value.is_null())
                 .cloned(),
             result_omitted: object.get("result_omitted").cloned(),
+            evaluator_replay_summary: object
+                .get("evaluator_replay_summary")
+                .filter(|value| value.is_object())
+                .cloned(),
             error: object
                 .get("error")
                 .and_then(Value::as_str)
@@ -5209,6 +5405,7 @@ fn durable_mission_state_json(mission_id: &str, state: &MissionJobState) -> Valu
         "trace": persisted_trace,
         "result": result,
         "result_omitted": state.result_omitted.clone().or(generated_omission),
+        "evaluator_replay_summary": state.evaluator_replay_summary.clone(),
         "execution_provenance": execution_provenance,
         "execution_provenance_omitted": generated_provenance_omission,
         "error": state.error,
@@ -5235,6 +5432,73 @@ fn durable_trace_event(event: &Value) -> Value {
         "detail": Value::Null,
         "detail_omitted": value_omission(&bytes),
     })
+}
+
+/// Retain a compact evaluator replay index independently of the full terminal report. The index is
+/// intentionally non-executing and non-semantic: it preserves enough accounting to explain what
+/// remains queryable after the bounded mission result itself has been omitted from a checkpoint.
+fn evaluator_replay_summary(report: &Value, mission_id: &str) -> Option<Value> {
+    if report.get("workflow").and_then(Value::as_str) != Some("agent_mission") {
+        return None;
+    }
+    let result_bytes = serde_json::to_vec(report).ok()?;
+    let result_digest = hex_digest(&Sha256::digest(&result_bytes));
+    let request = MissionEvaluatorReplayRequest {
+        mission: report.clone(),
+        include_fixtures: false,
+        max_items: 512,
+    };
+    let replay = MissionEvaluatorCatalogue::standard()
+        .replay(&request)
+        .ok()?;
+    let claims = replay
+        .get("claims")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    Some(json!({
+                        "claim_id": row.get("claim_id")?,
+                        "binding_count": row.get("binding_count")?,
+                        "returned_binding_count": row.get("returned_binding_count")?,
+                        "outcome_counts": row.get("outcome_counts")?,
+                        "distinct_output_digests": row.get("distinct_output_digests")?,
+                        "disagreement_posture": row.get("disagreement_posture")?,
+                        "replayed_disagreement_posture": row.get("replayed_disagreement_posture")?
+                    }))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Some(json!({
+        "schema": "bioprism-devplat-mission-evaluator-replay-summary/0.1",
+        "workflow": "mission_evaluator_replay_summary",
+        "mission_id": mission_id,
+        "mission_digest": replay.get("mission_digest")?,
+        "mission_status": replay.get("mission_status").cloned().unwrap_or(Value::Null),
+        "catalog_digest": replay.get("catalog_digest")?,
+        "binding_count": replay.get("binding_count")?,
+        "omitted_bindings": replay.get("omitted_bindings")?,
+        "state_counts": replay.get("state_counts")?,
+        "claim_count": claims.len(),
+        "claims": claims,
+        "coverage": replay.get("coverage")?,
+        "findings": replay.get("findings")?,
+        "replay_status": replay.get("replay_status")?,
+        "execution": "not_started",
+        "result_retained": true,
+        "result_bytes": result_bytes.len(),
+        "result_digest": result_digest,
+        "guarantees": [
+            "the summary is derived from the retained terminal mission report",
+            "the summary remains persisted when the full report exceeds the result retention bound",
+            "no evaluator or domain tool is executed while building the summary"
+        ],
+        "limitations": [
+            "summary-only recovery cannot expose omitted raw evaluator output or rerun replay against it",
+            "the summary is structural evidence and not scientific, clinical, causal, or release truth"
+        ]
+    }))
 }
 
 fn value_omission(bytes: &[u8]) -> Value {
@@ -5528,6 +5792,21 @@ fn query_usize(
         .unwrap_or(Ok(default))
 }
 
+fn query_bool(
+    query: &std::collections::BTreeMap<String, String>,
+    name: &str,
+    default: bool,
+) -> Result<bool, String> {
+    query
+        .get(name)
+        .map(|value| match value.as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(format!("{name} must be true or false")),
+        })
+        .unwrap_or(Ok(default))
+}
+
 fn response_status(wire: &Value) -> u16 {
     wire.get("error")
         .and_then(|error| error.get("code"))
@@ -5750,6 +6029,69 @@ mod tests {
     }
 
     #[test]
+    fn durable_evaluator_replay_summary_survives_result_omission() {
+        let path = test_state_path("evaluator-replay-summary");
+        let config = ApiConfig {
+            mission_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let report = json!({
+            "workflow": "agent_mission",
+            "plan": {"mission_id": "summary-only"},
+            "mission_status": "succeeded",
+            "claim_lineage": {"claims": []}
+        });
+        let summary = evaluator_replay_summary(&report, "summary-only").expect("replay summary");
+        router.mission_jobs.lock().unwrap().insert(
+            "summary-only".into(),
+            Arc::new(MissionJob {
+                cancellation: Arc::new(AtomicBool::new(false)),
+                state: Arc::new(Mutex::new(MissionJobState {
+                    total_steps: 0,
+                    trace: Vec::new(),
+                    progress: MissionProgressState::new(0),
+                    status: "succeeded".into(),
+                    cancel_requested: false,
+                    cancel_reason: None,
+                    result: None,
+                    result_omitted: Some(json!({"bytes": 300_000, "sha256": "a".repeat(64)})),
+                    evaluator_replay_summary: Some(summary),
+                    error: None,
+                    recovered_after_restart: false,
+                    execution_provenance: None,
+                })),
+            }),
+        );
+        router.persist_mission_registry().unwrap();
+
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let response = restored.handle(request(
+            "GET",
+            "/v1/missions/summary-only/evaluator-replay?include_fixtures=false&max_items=32",
+            json!({}),
+        ));
+        assert_eq!(response.status, 200);
+        let value: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(value["workflow"], "mission_evaluator_replay_query");
+        assert_eq!(value["retention"]["mode"], "summary_only");
+        assert_eq!(value["retention"]["result_retained"], false);
+        assert_eq!(value["retention"]["summary_retained"], true);
+        assert_eq!(
+            value["replay"]["workflow"],
+            "mission_evaluator_replay_summary"
+        );
+        assert_eq!(value["replay"]["coverage"]["catalogue_group_count"], 29);
+        let invalid = restored.handle(request(
+            "GET",
+            "/v1/missions/summary-only/evaluator-replay?max_items=513",
+            json!({}),
+        ));
+        assert_eq!(invalid.status, 422);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn durable_mission_state_omits_large_results_with_digest_metadata() {
         let state = MissionJobState {
             total_steps: 0,
@@ -5762,6 +6104,7 @@ mod tests {
                 "x".repeat(MAX_PERSISTED_MISSION_RESULT_BYTES + 1),
             )),
             result_omitted: None,
+            evaluator_replay_summary: None,
             error: None,
             recovered_after_restart: false,
             execution_provenance: None,
@@ -6736,6 +7079,24 @@ mod tests {
             "bioprism-mission-claim-lineage-response/0.1"
         );
         assert_eq!(claims["claim_lineage"]["claims"][0]["claimable"], false);
+        let replay = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evaluator-replay?include_fixtures=false&max_items=64",
+            json!({}),
+        ));
+        assert_eq!(replay.status, 200);
+        let replay: Value = serde_json::from_slice(&replay.body).unwrap();
+        assert_eq!(replay["workflow"], "mission_evaluator_replay_query");
+        assert_eq!(replay["retention"]["mode"], "full");
+        assert_eq!(replay["replay"]["workflow"], "mission_evaluator_replay");
+        assert_eq!(replay["replay"]["fixtures"], json!([]));
+        assert_eq!(replay["replay"]["omitted_fixtures"], 29);
+        let invalid_replay_query = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evaluator-replay?include_fixtures=maybe",
+            json!({}),
+        ));
+        assert_eq!(invalid_replay_query.status, 422);
         let trace = router.handle(request(
             "GET",
             "/v1/missions/api-async-1/trace?after=0&limit=64",

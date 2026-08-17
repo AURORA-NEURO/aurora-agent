@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 import sys
@@ -15,7 +16,9 @@ from prism_sdk import (
     AdapterRegistry,
     AnalyticsDirection,
     AnalyticsEvidence,
+    ApiClient,
     AsyncClient,
+    AsyncApiClient,
     AsyncWorkspace,
     CalibrationObservation,
     CapabilityAuditGroupReport,
@@ -30,6 +33,8 @@ from prism_sdk import (
     MissionEvaluatorQuery,
     MissionEvaluatorReplayReport,
     MissionEvaluatorReplayRequest,
+    MissionEvaluatorReplayQueryReport,
+    MissionEvaluatorReplayQueryRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -75,6 +80,7 @@ from prism_sdk import (
     capability_route_review_report,
     mission_evaluator_discover_report,
     mission_evaluator_replay_report,
+    mission_evaluator_replay_query_report,
     adapter_plan_report,
     Client,
     MetricObservation,
@@ -385,6 +391,55 @@ def mission_evaluator_replay_payload() -> dict:
         }],
         "guarantees": ["no evaluator or domain tool was executed"],
         "limitations": ["catalogue coverage is structural"],
+    }
+
+
+def mission_evaluator_replay_query_payload(*, summary_only: bool = False) -> dict:
+    replay = mission_evaluator_replay_payload()
+    if summary_only:
+        replay = {
+            "schema": "bioprism-devplat-mission-evaluator-replay-summary/0.1",
+            "workflow": "mission_evaluator_replay_summary",
+            "mission_id": "mission-python",
+            "mission_digest": "m" * 64,
+            "mission_status": "succeeded",
+            "catalog_digest": "e" * 64,
+            "binding_count": 1,
+            "omitted_bindings": 0,
+            "state_counts": {"retained": 1},
+            "claim_count": 1,
+            "claims": [],
+            "coverage": {"catalogue_group_count": 29, "replayed_group_count": 1, "complete": False},
+            "findings": [],
+            "replay_status": "ready",
+            "execution": "not_started",
+            "result_retained": False,
+            "result_bytes": 300_000,
+            "result_digest": "r" * 64,
+            "guarantees": ["summary is structural and non-executing"],
+            "limitations": ["raw mission output was omitted"],
+        }
+    return {
+        "ok": True,
+        "schema": "bioprism-api/mission-evaluator-replay-query/0.1",
+        "workflow": "mission_evaluator_replay_query",
+        "mission_id": "mission-python",
+        "query": {"include_fixtures": False, "max_items": 64},
+        "retention": {
+            "mode": "summary_only" if summary_only else "full",
+            "result_retained": not summary_only,
+            "summary_retained": True,
+            "result_omitted": {"bytes": 300_000, "sha256": "r" * 64} if summary_only else None,
+        },
+        "replay": replay,
+        "execution": "not_started",
+        "guarantees": ["evaluator and domain execution did not occur"],
+        "limitations": ["replay is structural rather than semantic"],
+        "links": {
+            "mission": "/v1/missions/mission-python",
+            "claims": "/v1/missions/mission-python/claims",
+            "replay": "/v1/missions/mission-python/evaluator-replay",
+        },
     }
 
 
@@ -1465,6 +1520,52 @@ class AnalyticsModelTests(unittest.TestCase):
             MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, max_items=0)
         with self.assertRaises(ArgumentError):
             MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, include_fixtures=1)  # type: ignore[arg-type]
+
+    def test_mission_evaluator_replay_query_preserves_summary_only_retention(self) -> None:
+        request = MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=False, max_items=64)
+        self.assertEqual(request.to_query_params(), {"include_fixtures": "false", "max_items": "64"})
+        report = MissionEvaluatorReplayQueryReport.from_wire(mission_evaluator_replay_query_payload(summary_only=True))
+        self.assertTrue(report.summary_only)
+        self.assertFalse(report.full_result_retained)
+        self.assertEqual(report.replay["workflow"], "mission_evaluator_replay_summary")
+        self.assertEqual(
+            mission_evaluator_replay_query_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evaluator_replay_query_payload()}}}
+            ).retention["mode"],
+            "full",
+        )
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayQueryRequest("mission-python", max_items=513)
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=1)  # type: ignore[arg-type]
+
+    def test_sync_http_mission_evaluator_replay_query_uses_bounded_route(self) -> None:
+        payload = mission_evaluator_replay_query_payload(summary_only=True)
+        with patch.object(ApiClient, "request", return_value=payload) as request:
+            report = ApiClient("http://127.0.0.1:8787").mission_evaluator_replay_query_report(
+                MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=False, max_items=64)
+            )
+        self.assertTrue(report.summary_only)
+        request.assert_called_once_with(
+            "GET",
+            "/v1/missions/mission-python/evaluator-replay?include_fixtures=false&max_items=64",
+        )
+
+    def test_async_http_mission_evaluator_replay_query_delegates_to_sync_transport(self) -> None:
+        payload = mission_evaluator_replay_query_payload()
+        async def exercise() -> MissionEvaluatorReplayQueryReport:
+            with patch.object(ApiClient, "request", return_value=payload) as request:
+                report = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).mission_evaluator_replay_query_report(
+                    MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=False, max_items=64)
+                )
+                request.assert_called_once_with(
+                    "GET",
+                    "/v1/missions/mission-python/evaluator-replay?include_fixtures=false&max_items=64",
+                )
+                return report
+        report = asyncio.run(exercise())
+        self.assertFalse(report.summary_only)
+        self.assertEqual(report.query["max_items"], 64)
 
     def test_mission_evaluator_review_request_rejects_duplicate_ids(self) -> None:
         with self.assertRaises(ArgumentError):

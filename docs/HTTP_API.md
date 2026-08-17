@@ -32,6 +32,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/missions/{mission_id}` | Poll job state and retrieve the authoritative mission report |
 | `GET /v1/missions/{mission_id}/provenance` | Retrieve retained gate, review, domain-evaluator, and accepted-dispatch evidence |
 | `GET /v1/missions/{mission_id}/claims` | Retrieve the bounded claim-to-step evidence-lineage projection |
+| `GET /v1/missions/{mission_id}/evaluator-replay` | Retrieve durable full or summary-only evaluator replay evidence |
 | `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
@@ -72,8 +73,9 @@ event, subscription, and delivery state remains independently bounded and synchr
 Pass `--mission-state <file>` to enable an optional, atomically replaced JSON checkpoint for the
 asynchronous mission registry. The snapshot is bounded to 64 MiB, keeps at most 4,096 missions and
 4,096 trace rows per mission, and omits terminal result bodies larger than 256 KiB in favour of
-byte-count and SHA-256 metadata. This makes operator restarts inspectable without turning a local
-gateway into an unbounded database.
+byte-count, SHA-256 metadata, and a compact evaluator replay summary when the report is an
+`agent_mission`. This makes operator restarts inspectable without turning a local gateway into an
+unbounded database.
 
 On startup, terminal jobs are restored with their retained progress, trace, error, and (when within
 the result bound) authoritative report. A queued or running job is never falsely resumed: it is
@@ -90,6 +92,10 @@ any job; status also reports `integrity_verified`. Schema 1 snapshots remain rea
 migration inputs and are upgraded on the next successful checkpoint. The authenticated
 `POST /v1/missions/persistence/flush` route gives operators an explicit write/readiness check;
 it returns `409` when no state path was configured and `503` when the checkpoint cannot be written.
+
+When a terminal mission result is omitted, `GET /v1/missions/{mission_id}/evaluator-replay` can
+still return a bounded structural `mission_evaluator_replay_summary` through
+`retention.mode: "summary_only"`; it never reconstructs raw output or executes an evaluator.
 
 Pass `--event-state <file>` to checkpoint the retained event cursor plus bounded subscription and
 outbox metadata as a separate JSON document. It restores event IDs, retention-gap accounting,
@@ -224,6 +230,24 @@ does not contain the requested pointer. When multiple outputs are retained, cano
 digests additionally expose `single_observation`, `unanimous_digest`, `disagreement`, or `partial`
 posture. This is a transport-level disagreement witness, not a semantic adjudication. Domain
 adapters remain heterogeneous while the mission layer keeps one auditable cross-domain envelope.
+
+### Durable evaluator replay query
+
+`GET /v1/missions/{mission_id}/evaluator-replay` accepts two bounded query parameters:
+`include_fixtures=false|true` (default `false`) and `max_items=1..512` (default `128`). When the
+terminal mission report is retained, the response has `retention.mode: "full"` and embeds the
+same non-executing `mission_evaluator_replay` projection available through MCP. When the report
+was omitted by the 256 KiB checkpoint bound, the response has `retention.mode: "summary_only"` and
+embeds a compact `mission_evaluator_replay_summary` with mission/result/catalogue digests,
+outcome counts, claim-level counts, coverage, findings, and replay posture. The summary is
+content-addressed evidence of what was retained, not a substitute for raw output.
+
+The route returns `409` while no terminal evaluator evidence is available and `410` when the
+mission result was omitted without a recoverable evaluator summary. Both responses preserve an
+explicit refusal code rather than returning an empty successful replay. `execution` remains
+`"not_started"` for both modes: this route audits stored evidence and never dispatches domain or
+evaluator tools. The Python `ApiClient`/`AsyncApiClient` and TypeScript `ApiClient` expose the same
+bounded query, while typed reports preserve retention mode, links, guarantees, and limitations.
 
 ## Asynchronous missions
 

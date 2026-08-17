@@ -491,6 +491,12 @@ invent defaults:
   retained/refused/omitted/disagreement fixtures for every standard adapter. `ready` only means the
   structural audit found no findings; it is not semantic, scientific, clinical, causal, or release
   validation.
+- `ApiClient.mission_evaluator_replay_query(...)` and its async counterpart query the durable
+  mission checkpoint by ID. `MissionEvaluatorReplayQueryRequest` bounds `include_fixtures` and
+  `max_items`; `MissionEvaluatorReplayQueryReport.summary_only` distinguishes a full retained
+  replay from the compact digest/count/coverage summary preserved after large-result omission.
+  Summary-only evidence never reconstructs raw output or executes an evaluator, and the typed
+  report keeps retention metadata, links, guarantees, and limitations intact.
 - `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
   `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
   ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool

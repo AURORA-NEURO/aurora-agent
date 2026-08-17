@@ -30,6 +30,8 @@ from .capability import (
     MissionEvaluatorQuery,
     MissionEvaluatorReplayReport,
     MissionEvaluatorReplayRequest,
+    MissionEvaluatorReplayQueryReport,
+    MissionEvaluatorReplayQueryRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -40,6 +42,7 @@ from .capability import (
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
     mission_evaluator_replay_report,
+    mission_evaluator_replay_query_report,
 )
 from .capability_dashboard import CapabilityDashboardQueryArgs, CapabilityDashboardReport, capability_dashboard_report
 from .ci_evidence import CiExecutionEvidenceReport, CiExecutionEvidenceRequest, ci_execution_evidence_report
@@ -638,6 +641,35 @@ class ApiClient:
         return MissionClaimLineage.from_wire(
             self.request("GET", f"/v1/missions/{mission_id}/claims")
         )
+
+    def mission_evaluator_replay_query(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Read durable full or summary-only evaluator replay evidence for one mission."""
+
+        if isinstance(request, MissionEvaluatorReplayQueryRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvaluatorReplayQueryRequest(request)
+        elif isinstance(request, Mapping):
+            normalized = MissionEvaluatorReplayQueryRequest(**dict(request))
+        else:
+            raise ArgumentError("mission evaluator replay query must be a request, mapping, or mission id")
+        self._mission_id(normalized.mission_id)
+        query = urlencode(normalized.to_query_params())
+        return self.request(
+            "GET",
+            f"/v1/missions/{quote(normalized.mission_id, safe='')}/evaluator-replay?{query}",
+        )
+
+    def mission_evaluator_replay_query_report(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> MissionEvaluatorReplayQueryReport:
+        """Return the typed durable evaluator replay query projection."""
+
+        return mission_evaluator_replay_query_report(self.mission_evaluator_replay_query(request))
 
     def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Read a bounded cursor page from the authoritative clock-free mission trace."""
@@ -3760,6 +3792,22 @@ class AsyncApiClient:
         """Async read of the bounded claim-to-step evidence projection."""
 
         return await asyncio.to_thread(self.client.mission_claim_lineage, mission_id)
+
+    async def mission_evaluator_replay_query(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Async read of durable full or summary-only evaluator replay evidence."""
+
+        return await asyncio.to_thread(self.client.mission_evaluator_replay_query, request)
+
+    async def mission_evaluator_replay_query_report(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> MissionEvaluatorReplayQueryReport:
+        """Return the typed async durable evaluator replay query projection."""
+
+        return mission_evaluator_replay_query_report(await self.mission_evaluator_replay_query(request))
 
     async def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Async bounded cursor page over the authoritative mission trace."""

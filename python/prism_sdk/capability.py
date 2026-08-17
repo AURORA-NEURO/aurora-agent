@@ -1138,6 +1138,81 @@ def mission_evaluator_replay_report(value: Mapping[str, Any]) -> MissionEvaluato
 
 
 @dataclass(frozen=True)
+class MissionEvaluatorReplayQueryRequest:
+    """Bounded REST query for durable full or summary-only evaluator replay evidence."""
+
+    mission_id: str
+    include_fixtures: bool = False
+    max_items: int = 128
+
+    def __post_init__(self) -> None:
+        _route_text("mission evaluator replay query mission id", self.mission_id)
+        if not isinstance(self.include_fixtures, bool):
+            raise ArgumentError("mission evaluator replay query include_fixtures must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 512:
+            raise ArgumentError("mission evaluator replay query max_items must be between 1 and 512")
+
+    def to_query_params(self) -> dict[str, str]:
+        return {
+            "include_fixtures": "true" if self.include_fixtures else "false",
+            "max_items": str(self.max_items),
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayQueryReport:
+    """Typed durable REST projection that distinguishes full and summary-only replay."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    query: Mapping[str, Any]
+    retention: Mapping[str, Any]
+    replay: Mapping[str, Any]
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+    links: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorReplayQueryReport":
+        raw = _tool_payload(value, "mission_evaluator_replay_query")
+        query = _route_mapping("mission evaluator replay query", raw.get("query"))
+        retention = _route_mapping("mission evaluator replay retention", raw.get("retention"))
+        replay = _route_mapping("mission evaluator replay query payload", raw.get("replay"))
+        mode = _route_text("mission evaluator replay retention mode", retention.get("mode"))
+        if mode not in {"full", "summary_only"}:
+            raise ArgumentError(f"unknown mission evaluator replay retention mode: {mode}")
+        return cls(
+            raw=raw,
+            mission_id=_route_text("mission evaluator replay query mission id", raw.get("mission_id")),
+            query=query,
+            retention=retention,
+            replay=replay,
+            execution=_route_text("mission evaluator replay query execution", raw.get("execution")),
+            guarantees=_route_strings("mission evaluator replay query guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("mission evaluator replay query limitations", raw.get("limitations", [])),
+            links=_route_mapping("mission evaluator replay query links", raw.get("links", {})),
+        )
+
+    @property
+    def summary_only(self) -> bool:
+        return self.retention.get("mode") == "summary_only"
+
+    @property
+    def full_result_retained(self) -> bool:
+        return self.retention.get("result_retained") is True
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evaluator_replay_query_report(value: Mapping[str, Any]) -> MissionEvaluatorReplayQueryReport:
+    """Parse the durable REST evaluator replay query response."""
+
+    return MissionEvaluatorReplayQueryReport.from_wire(value)
+
+
+@dataclass(frozen=True)
 class MissionEvaluatorAdapterReport:
     """One typed candidate row from mission evaluator discovery."""
 
@@ -1296,6 +1371,8 @@ __all__ = [
     "MissionEvaluatorReviewReport",
     "MissionEvaluatorReplayRequest",
     "MissionEvaluatorReplayReport",
+    "MissionEvaluatorReplayQueryRequest",
+    "MissionEvaluatorReplayQueryReport",
     "MissionEvaluatorAdapterReport",
     "MissionEvaluatorMatchReport",
     "MissionEvaluatorCoverageReport",
@@ -1307,4 +1384,5 @@ __all__ = [
     "mission_evaluator_discover_report",
     "mission_evaluator_review_report",
     "mission_evaluator_replay_report",
+    "mission_evaluator_replay_query_report",
 ]

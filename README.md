@@ -773,6 +773,11 @@ adapter/domain rows, output-digest shape, outcome counts, disagreement posture, 
 states, and structural coverage against all 29 evaluator groups. It can emit four non-semantic fixture
 variants for every adapter, while preserving `execution: "not_started"`; replay is an audit and
 coverage instrument, not evaluator execution or a scientific/clinical/release verdict.
+The durable HTTP route `/v1/missions/{mission_id}/evaluator-replay` adds bounded restart-aware
+querying: `retention.mode: "full"` exposes the retained replay, while `"summary_only"` exposes
+digest, count, coverage, finding, and omission evidence after a large report body is trimmed.
+Python and TypeScript clients preserve this distinction in typed query helpers; neither mode
+reconstructs raw output or dispatches an evaluator.
 `capability_dashboard` provides the bounded operator view beneath those routes: it binds the live
 catalogue to authoritative MCP schemas, reports callable/partial/declared-only groups, keeps
 crate/CLI/Python/MCP surface counts separate, and labels missing transports without pretending a

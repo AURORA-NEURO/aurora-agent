@@ -712,6 +712,12 @@ catalogue groups, and can return four explicit retained/refused/omitted/disagree
 for every standard adapter. `execution: "not_started"` and the structural-only guarantees remain
 explicit: replay does not rerun an evaluator or establish scientific, clinical, causal, or release truth.
 
+`missionEvaluatorReplayQuery(missionId, { include_fixtures, max_items })` reads the durable REST
+projection after mission completion. Its `retention.mode` is `"full"` when the report body remains
+within the checkpoint bound and `"summary_only"` when only the digest/count/coverage summary was
+retained; both modes preserve `execution: "not_started"`, explicit limitations, and navigable
+mission/claims/replay links.
+
 ```typescript
 const page = await api.events(0, 100);
 const operations = await api.operationsSnapshot(page.page.next_after, 100);

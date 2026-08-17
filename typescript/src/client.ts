@@ -264,6 +264,8 @@ import type {
   MissionEvaluatorDiscoverResult,
   MissionEvaluatorReplayArgs,
   MissionEvaluatorReplayResult,
+  MissionEvaluatorReplayQueryOptions,
+  MissionEvaluatorReplayQueryResult,
   MissionEvaluatorReviewArgs,
   MissionEvaluatorReviewResult,
   MissionExecutionProvenanceResponse,
@@ -1235,6 +1237,32 @@ export class ApiClient {
     return this.request<MissionClaimLineageResponse>(
       "GET",
       `/v1/missions/${encodeURIComponent(id)}/claims`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Read durable full or summary-only evaluator replay evidence for one mission. */
+  async missionEvaluatorReplayQuery(
+    missionId: string,
+    queryOptions: MissionEvaluatorReplayQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<MissionEvaluatorReplayQueryResult> {
+    const id = pathSegment(missionId, "mission id");
+    if (queryOptions.include_fixtures !== undefined && typeof queryOptions.include_fixtures !== "boolean") {
+      throw new ArgumentError("include_fixtures must be a boolean");
+    }
+    const maxItems = queryOptions.max_items ?? 128;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 512) {
+      throw new ArgumentError("max_items must be 1..=512");
+    }
+    const query = new URLSearchParams({
+      include_fixtures: String(queryOptions.include_fixtures ?? false),
+      max_items: String(maxItems),
+    });
+    return this.request<MissionEvaluatorReplayQueryResult>(
+      "GET",
+      `/v1/missions/${encodeURIComponent(id)}/evaluator-replay?${query.toString()}`,
       undefined,
       options,
     );

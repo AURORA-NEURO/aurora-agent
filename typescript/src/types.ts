@@ -7356,6 +7356,32 @@ export interface MissionClaimLineageResponse extends JsonObject {
   claim_lineage: MissionClaimLineageProjection;
 }
 
+export interface MissionEvaluatorReplayQueryOptions extends JsonObject {
+  include_fixtures?: boolean;
+  max_items?: number;
+}
+
+export interface MissionEvaluatorReplayRetention extends JsonObject {
+  mode: "full" | "summary_only" | string;
+  result_retained: boolean;
+  summary_retained: boolean;
+  result_omitted: JsonValue;
+}
+
+export interface MissionEvaluatorReplayQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-api/mission-evaluator-replay-query/0.1";
+  workflow: "mission_evaluator_replay_query";
+  mission_id: string;
+  query: MissionEvaluatorReplayQueryOptions;
+  retention: MissionEvaluatorReplayRetention;
+  replay: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+  links: JsonObject;
+}
+
 export interface MissionJob extends JsonObject {
   ok: boolean;
   mission_id: string;
