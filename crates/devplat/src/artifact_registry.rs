@@ -18,6 +18,7 @@ use crate::domain_evidence_intake::{
     validate_domain_evidence_intake, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
 };
 use crate::domain_evidence_provider::DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA;
+use crate::domain_evidence_provider_external::DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA;
 use crate::domain_evidence_provider_external::DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA;
 use crate::domain_evidence_provider_handoff::DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA;
 use crate::domain_evidence_source::{
@@ -56,6 +57,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_evidence_provider_replay",
     "domain_evidence_provider_handoff",
     "domain_evidence_provider_external_payload",
+    "domain_evidence_provider_external_payload_replay",
     "domain_evidence_source_plan",
     "external_reference",
 ];
@@ -773,6 +775,40 @@ fn verify_known_artifact(
                 }),
             ))
         }
+        "domain_evidence_provider_external_payload_replay" => {
+            let object = artifact.as_object().ok_or_else(|| {
+                ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider external payload replay must be an object".into(),
+                )
+            })?;
+            if object.get("schema").and_then(Value::as_str)
+                != Some(DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA)
+            {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider external payload replay schema is unsupported".into(),
+                ));
+            }
+            let declared = required_digest(object, "replay_digest")?;
+            let mut unsigned = artifact.clone();
+            unsigned
+                .as_object_mut()
+                .expect("external payload replay object was checked above")
+                .remove("replay_digest");
+            let recomputed = content_digest(&unsigned)?;
+            if declared != recomputed {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "external payload replay_digest does not match the record contents".into(),
+                ));
+            }
+            Ok((
+                Some(declared.clone()),
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_evidence_provider_external_payload_replay_digest",
+                    "replay_digest": declared
+                }),
+            ))
+        }
         "domain_evidence_source_plan"
             if artifact.get("schema").and_then(Value::as_str)
                 == Some(DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION) =>
@@ -1137,6 +1173,33 @@ mod tests {
             "domain_evidence_provider_external_payload",
             "provider-1",
             receipt,
+        );
+        request["declared_digest"] = json!(digest);
+        let mut registry = ArtifactRegistry::new();
+        assert_eq!(registry.register(&request).unwrap()["created"], true);
+        let restored = ArtifactRegistry::from_snapshot(&registry.snapshot().unwrap()).unwrap();
+        assert_eq!(restored.len(), 1);
+    }
+
+    #[test]
+    fn external_payload_replays_reverify_their_declared_digest_on_restore() {
+        let mut replay = json!({
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+            "workflow": "domain_evidence_provider_external_payload_replay_verify",
+            "replay_status": "mismatch",
+            "matched": false,
+            "replay_digest": ""
+        });
+        let digest = {
+            let mut unsigned = replay.clone();
+            unsigned.as_object_mut().unwrap().remove("replay_digest");
+            ContentHash::of_value(&unsigned).unwrap().to_string()
+        };
+        replay["replay_digest"] = json!(digest.clone());
+        let mut request = artifact(
+            "domain_evidence_provider_external_payload_replay",
+            "provider-1",
+            replay,
         );
         request["declared_digest"] = json!(digest);
         let mut registry = ArtifactRegistry::new();

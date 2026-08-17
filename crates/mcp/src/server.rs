@@ -132,23 +132,26 @@ use bioprism_devplat::{
     normalize_domain_evidence_provider, plan_domain_evidence_source, plan_mission,
     reconcile_domain_workflow, record_domain_evidence_provider_external_payload, run_workbench,
     scaffold_domain_workflow, standard_walkthroughs, verify_delivery_receipt,
+    verify_domain_evidence_provider_external_payload_replay,
     verify_domain_evidence_provider_replay, verify_mission_evidence_bundle, ArtifactRegistry,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
     CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
     DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
     DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadReceiptRequest,
-    DomainEvidenceProviderHandoffRequest, DomainEvidenceProviderNormalizationRequest,
-    DomainEvidenceProviderReplayRequest, DomainWorkflowReconciliationRegistry, EngineeringManifest,
-    EngineeringPlanRequest, EvidenceBundleRegistry, ExecutionProvenanceRequest,
-    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest,
-    MissionEvaluatorReplayRequest, MissionEvaluatorReviewRequest, MissionReport, MissionRequest,
-    MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
-    OperationalReadinessManifest, ReleasePipelineManifest, SandboxManifest, SandboxRuntimeManifest,
-    SecurityPrivacyManifest, SecurityProgramManifest, WorkbenchRequest, CAPABILITY_SCHEMA_VERSION,
-    DOMAIN_ACQUISITION_SCHEMA_VERSION, DOMAIN_ACQUISITION_WORKFLOW,
-    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
-    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DomainEvidenceProviderExternalPayloadReplayRequest, DomainEvidenceProviderHandoffRequest,
+    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
+    DomainWorkflowReconciliationRegistry, EngineeringManifest, EngineeringPlanRequest,
+    EvidenceBundleRegistry, ExecutionProvenanceRequest, MissionEvaluatorCatalogue,
+    MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
+    MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
+    SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
+    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
@@ -1397,6 +1400,9 @@ impl Server {
             }
             "domain_evidence_provider_external_payload_receipt" => {
                 self.domain_evidence_provider_external_payload_receipt(&arguments)
+            }
+            "domain_evidence_provider_external_payload_replay_verify" => {
+                self.domain_evidence_provider_external_payload_replay_verify(&arguments)
             }
             "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
@@ -3636,6 +3642,63 @@ impl Server {
                 "store accessibility, retention, payload availability, or transfer completion beyond caller status",
                 "payload authenticity, provider authenticity, decryption, or independent byte inspection",
                 "scientific, clinical, causal, provenance, regulatory, or release validity"
+            ]
+        }))
+    }
+
+    /// Verify an out-of-line payload receipt against retained metadata identities. This route
+    /// never dereferences the locator, reads bytes, or contacts the provider/store.
+    fn domain_evidence_provider_external_payload_replay_verify(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode external payload replay input: {error}"))?;
+        if encoded.len() > 2_000_000 {
+            return Err(
+                "external payload replay input exceeds the 2000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadReplayRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid external payload replay input: {error}"))?;
+        let verification = verify_domain_evidence_provider_external_payload_replay(&request)
+            .map_err(|error| format!("external payload replay refused: {error}"))?;
+        let artifact = serde_json::to_value(&verification)
+            .map_err(|error| format!("cannot encode external payload replay artifact: {error}"))?;
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload_replay",
+                "subject_id": verification.subject_id,
+                "domains": verification.domains,
+                "parent_digests": [
+                    verification.receipt.receipt_digest,
+                    verification.observed_handoff_digest
+                ],
+                "declared_digest": verification.replay_digest,
+                "artifact": artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
+            "replay": verification,
+            "matched": artifact["matched"],
+            "replay_status": artifact["replay_status"],
+            "replay_digest": artifact["replay_digest"],
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "external receipt identities are compared without opening the caller locator",
+                "digest, handoff, payload, and byte-length drift remain individually visible",
+                "the value-free replay verification is retained idempotently"
+            ],
+            "does_not_claim": [
+                "external-store accessibility, byte re-reading, decryption, or provider contact",
+                "payload or provider authenticity, retention, scientific, clinical, provenance, or release validity"
             ]
         }))
     }
@@ -30131,6 +30194,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_provider_replay_verify",
         "domain_evidence_provider_connector_handoff",
         "domain_evidence_provider_external_payload_receipt",
+        "domain_evidence_provider_external_payload_replay_verify",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -30580,6 +30644,41 @@ pub fn tool_definitions() -> Vec<Value> {
                     "attempt_id": { "type": ["string", "null"] }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_replay_verify",
+            "description": "Replay an external payload receipt's metadata contract without opening its locator. It compares expected receipt, connector-handoff, payload, and byte-length identities, returns matched/mismatch dimensions, and retains only the value-free replay verification artifact.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string" },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string" },
+                    "transfer_id": { "type": "string" },
+                    "payload_digest": { "type": "string" },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string" },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"] },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"] },
+                    "attempt_id": { "type": ["string", "null"] },
+                    "expected_receipt_digest": { "type": "string", "description": "Retained receipt digest to compare." },
+                    "expected_handoff_digest": { "type": "string", "description": "Retained connector-handoff digest to compare." },
+                    "expected_payload_digest": { "type": "string", "description": "Retained external payload digest to compare." },
+                    "expected_byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator", "expected_receipt_digest", "expected_handoff_digest", "expected_payload_digest", "expected_byte_length"]
             }
         }),
         json!({

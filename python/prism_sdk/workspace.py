@@ -73,7 +73,10 @@ from .domain_evidence_provider_handoff import (
 from .domain_evidence_provider_external import (
     DomainEvidenceProviderExternalPayloadReceiptReport,
     DomainEvidenceProviderExternalPayloadReceiptRequest,
+    DomainEvidenceProviderExternalPayloadReplayRequest,
+    DomainEvidenceProviderExternalPayloadReplayVerificationReport,
     domain_evidence_provider_external_payload_receipt_report,
+    domain_evidence_provider_external_payload_replay_verification_report,
 )
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
@@ -2279,6 +2282,27 @@ class Workspace:
     ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
         return domain_evidence_provider_external_payload_receipt_report(
             self.domain_evidence_provider_external_payload_receipt(request)
+        )
+
+    def domain_evidence_provider_external_payload_replay_verify(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReplayRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadReplayRequest)
+            else DomainEvidenceProviderExternalPayloadReplayRequest.from_wire(request)
+        )
+        return self.tool(
+            "domain_evidence_provider_external_payload_replay_verify", normalized.to_mcp_arguments()
+        )
+
+    def domain_evidence_provider_external_payload_replay_verify_report(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReplayVerificationReport:
+        return domain_evidence_provider_external_payload_replay_verification_report(
+            self.domain_evidence_provider_external_payload_replay_verify(request)
         )
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
@@ -5821,6 +5845,27 @@ class AsyncWorkspace:
     ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
         return domain_evidence_provider_external_payload_receipt_report(
             await self.domain_evidence_provider_external_payload_receipt(request)
+        )
+
+    async def domain_evidence_provider_external_payload_replay_verify(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReplayRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadReplayRequest)
+            else DomainEvidenceProviderExternalPayloadReplayRequest.from_wire(request)
+        )
+        return await self.tool(
+            "domain_evidence_provider_external_payload_replay_verify", normalized.to_mcp_arguments()
+        )
+
+    async def domain_evidence_provider_external_payload_replay_verify_report(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReplayVerificationReport:
+        return domain_evidence_provider_external_payload_replay_verification_report(
+            await self.domain_evidence_provider_external_payload_replay_verify(request)
         )
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:

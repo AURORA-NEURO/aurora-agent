@@ -118,6 +118,10 @@ provider results. They carry only a caller locator/reference, exact lowercase pa
 byte length, transfer id, storage/retention/availability metadata, and handoff parent. REST,
 MCP-tool, sync, async, and workspace helpers reject embedded credentials and payload material;
 the receipt does not prove that the external object can be fetched or decrypted.
+`DomainEvidenceProviderExternalPayloadReplayRequest` and
+`DomainEvidenceProviderExternalPayloadReplayVerificationReport` add a metadata-only replay
+check for the receipt digest, handoff digest, payload digest, and byte length. Matching and drift
+remain explicit, and the helper never fetches or inspects caller-managed storage.
 
 ## Lifecycle
 

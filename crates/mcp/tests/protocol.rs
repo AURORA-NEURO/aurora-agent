@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 203);
+    assert_eq!(tools.len(), 204);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1611,6 +1611,94 @@ fn domain_evidence_provider_external_payload_receipt_is_out_of_line_and_restart_
         }),
     );
     assert_eq!(refused["__isError"], json!(true));
+}
+
+#[test]
+fn domain_evidence_provider_external_payload_replay_is_metadata_only_and_idempotent() {
+    let mut server = server();
+    let receipt = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "external-provider-subject",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "a".repeat(64),
+        "transfer_id": "export-2026-08-17-replay-1",
+        "payload_digest": "b".repeat(64),
+        "byte_length": 4096,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/pubmed/objects/1",
+        "availability": "available",
+        "retention": "durable"
+    });
+    let recorded = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        receipt.clone(),
+    );
+    let replay_request = json!({
+        "expected_receipt_digest": recorded["receipt_digest"],
+        "expected_handoff_digest": "a".repeat(64),
+        "expected_payload_digest": "b".repeat(64),
+        "expected_byte_length": 4096,
+        "group_id": receipt["group_id"],
+        "domains": receipt["domains"],
+        "subject_id": receipt["subject_id"],
+        "source_tool": receipt["source_tool"],
+        "provider": receipt["provider"],
+        "connector_kind": receipt["connector_kind"],
+        "handoff_digest": receipt["handoff_digest"],
+        "transfer_id": receipt["transfer_id"],
+        "payload_digest": receipt["payload_digest"],
+        "byte_length": receipt["byte_length"],
+        "storage_backend": receipt["storage_backend"],
+        "locator_kind": receipt["locator_kind"],
+        "locator": receipt["locator"],
+        "availability": receipt["availability"],
+        "retention": receipt["retention"]
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_replay_verify",
+        replay_request.clone(),
+    );
+    assert_eq!(first["replay_status"], json!("matched"));
+    assert_eq!(first["matched"], json!(true));
+    assert_eq!(first["replay"]["matches"]["receipt_digest"], json!(true));
+    assert_eq!(first["artifact_registry"]["created"], json!(true));
+    assert!(first["replay"]["receipt"].get("records").is_none());
+    assert!(first["replay"]["receipt"]
+        .get("credential_material")
+        .is_none());
+    let second = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_replay_verify",
+        replay_request,
+    );
+    assert_eq!(second["replay_digest"], first["replay_digest"]);
+    assert_eq!(second["artifact_registry"]["created"], json!(false));
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+
+    let mut mismatch_request = receipt;
+    mismatch_request["byte_length"] = json!(8192);
+    mismatch_request["expected_receipt_digest"] =
+        first["replay"]["expected_receipt_digest"].clone();
+    mismatch_request["expected_handoff_digest"] = json!("a".repeat(64));
+    mismatch_request["expected_payload_digest"] = json!("b".repeat(64));
+    mismatch_request["expected_byte_length"] = json!(4096);
+    let mismatch = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_replay_verify",
+        mismatch_request,
+    );
+    assert_eq!(mismatch["replay_status"], json!("mismatch"));
+    assert_eq!(mismatch["matched"], json!(false));
+    assert_eq!(
+        mismatch["replay"]["differences"],
+        json!(["byte_length", "receipt_digest"])
+    );
 }
 
 #[test]
@@ -7044,6 +7132,11 @@ fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
                 .unwrap()
                 .iter()
                 .any(|tool| tool == "domain_evidence_provider_external_payload_receipt")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_external_payload_replay_verify")
             && route["interpretation"]["status"].is_string()
             && route["limitations"].as_array().is_some()
     }));
@@ -7079,12 +7172,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(203));
-    assert_eq!(result["advertised_tool_count"], json!(203));
+    assert_eq!(result["unique_catalog_tools"], json!(204));
+    assert_eq!(result["advertised_tool_count"], json!(204));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(203));
-    assert_eq!(result["schema_quality"]["valid"], json!(203));
+    assert_eq!(result["schema_quality"]["checked"], json!(204));
+    assert_eq!(result["schema_quality"]["valid"], json!(204));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

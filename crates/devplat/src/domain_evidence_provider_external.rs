@@ -8,13 +8,17 @@
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA: &str =
     "bioprism-devplat-domain-evidence-provider-external-payload-receipt/0.1";
 pub const DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW: &str =
     "domain_evidence_provider_external_payload_receipt";
+pub const DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA: &str =
+    "bioprism-devplat-domain-evidence-provider-external-payload-replay/0.1";
+pub const DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW: &str =
+    "domain_evidence_provider_external_payload_replay_verify";
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_BYTES: usize = 256 * 1024;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_TEXT_BYTES: usize = 512;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_DOMAINS: usize = 64;
@@ -99,6 +103,47 @@ pub struct DomainEvidenceProviderExternalPayloadReceipt {
     pub receipt_digest: String,
     pub execution: String,
     pub readiness_claimed: bool,
+    pub guarantees: Vec<String>,
+    pub limitations: Vec<String>,
+}
+
+/// Re-check the identity metadata of a caller-owned external payload without contacting its
+/// storage backend. The flattened receipt request contains no payload field by construction.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DomainEvidenceProviderExternalPayloadReplayRequest {
+    #[serde(flatten)]
+    pub receipt: DomainEvidenceProviderExternalPayloadReceiptRequest,
+    pub expected_receipt_digest: String,
+    pub expected_handoff_digest: String,
+    pub expected_payload_digest: String,
+    pub expected_byte_length: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DomainEvidenceProviderExternalPayloadReplayVerification {
+    pub schema: String,
+    pub workflow: String,
+    pub replay_status: String,
+    pub matched: bool,
+    pub group_id: String,
+    pub domains: Vec<String>,
+    pub subject_id: String,
+    pub source_tool: String,
+    pub provider: String,
+    pub connector_kind: String,
+    pub expected_receipt_digest: String,
+    pub observed_receipt_digest: String,
+    pub expected_handoff_digest: String,
+    pub observed_handoff_digest: String,
+    pub expected_payload_digest: String,
+    pub observed_payload_digest: String,
+    pub expected_byte_length: u64,
+    pub observed_byte_length: u64,
+    pub matches: std::collections::BTreeMap<String, bool>,
+    pub differences: Vec<String>,
+    pub receipt: DomainEvidenceProviderExternalPayloadReceipt,
+    pub replay_digest: String,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
 }
@@ -330,6 +375,91 @@ pub fn record_domain_evidence_provider_external_payload(
     Ok(receipt)
 }
 
+/// Replay the receipt identity contract locally. This is intentionally metadata-only: it does
+/// not fetch, decrypt, checksum, or otherwise inspect the bytes behind the caller locator.
+pub fn verify_domain_evidence_provider_external_payload_replay(
+    request: &DomainEvidenceProviderExternalPayloadReplayRequest,
+) -> Result<
+    DomainEvidenceProviderExternalPayloadReplayVerification,
+    DomainEvidenceProviderExternalPayloadError,
+> {
+    let receipt = record_domain_evidence_provider_external_payload(&request.receipt)?;
+    let expected_receipt_digest =
+        digest("expected_receipt_digest", &request.expected_receipt_digest)?;
+    let expected_handoff_digest =
+        digest("expected_handoff_digest", &request.expected_handoff_digest)?;
+    let expected_payload_digest =
+        digest("expected_payload_digest", &request.expected_payload_digest)?;
+    if !(1..=MAX_EXTERNAL_PAYLOAD_BYTES).contains(&request.expected_byte_length) {
+        return Err(
+            DomainEvidenceProviderExternalPayloadError::InvalidByteLength {
+                byte_length: request.expected_byte_length,
+            },
+        );
+    }
+    let mut matches: BTreeMap<String, bool> = BTreeMap::new();
+    matches.insert(
+        "receipt_digest".into(),
+        receipt.receipt_digest == expected_receipt_digest,
+    );
+    matches.insert(
+        "handoff_digest".into(),
+        receipt.handoff_digest == expected_handoff_digest,
+    );
+    matches.insert(
+        "payload_digest".into(),
+        receipt.payload_digest == expected_payload_digest,
+    );
+    matches.insert(
+        "byte_length".into(),
+        receipt.byte_length == request.expected_byte_length,
+    );
+    let differences = matches
+        .iter()
+        .filter(|(_, matched)| !*matched)
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let matched = differences.is_empty();
+    let replay_status = if matched { "matched" } else { "mismatch" };
+    let mut unsigned = json!({
+        "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+        "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
+        "replay_status": replay_status,
+        "matched": matched,
+        "group_id": receipt.group_id,
+        "domains": receipt.domains,
+        "subject_id": receipt.subject_id,
+        "source_tool": receipt.source_tool,
+        "provider": receipt.provider,
+        "connector_kind": receipt.connector_kind,
+        "expected_receipt_digest": expected_receipt_digest,
+        "observed_receipt_digest": receipt.receipt_digest,
+        "expected_handoff_digest": expected_handoff_digest,
+        "observed_handoff_digest": receipt.handoff_digest,
+        "expected_payload_digest": expected_payload_digest,
+        "observed_payload_digest": receipt.payload_digest,
+        "expected_byte_length": request.expected_byte_length,
+        "observed_byte_length": receipt.byte_length,
+        "matches": matches,
+        "differences": differences,
+        "receipt": receipt,
+        "guarantees": [
+            "receipt identity, handoff identity, payload identity, and byte length are compared deterministically",
+            "replay performs no external-store or provider operation",
+            "the replay artifact can be retained independently of the payload bytes"
+        ],
+        "limitations": [
+            "a matching receipt does not prove that the locator still resolves to the bytes",
+            "the core does not independently recompute the payload digest or verify storage retention",
+            "payload and provider authenticity, scientific, clinical, provenance, and release validity remain unclaimed"
+        ]
+    });
+    let replay_digest = canonical_digest(&unsigned)?;
+    unsigned["replay_digest"] = json!(replay_digest);
+    serde_json::from_value(unsigned)
+        .map_err(|error| DomainEvidenceProviderExternalPayloadError::Canonical(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,5 +542,36 @@ mod tests {
         changed.transfer_id = "transfer-2".into();
         let second = record_domain_evidence_provider_external_payload(&changed).unwrap();
         assert_ne!(first.receipt_digest, second.receipt_digest);
+    }
+
+    #[test]
+    fn replay_matches_metadata_and_reports_digest_or_size_drift() {
+        let receipt = record_domain_evidence_provider_external_payload(&request()).unwrap();
+        let replay = verify_domain_evidence_provider_external_payload_replay(
+            &DomainEvidenceProviderExternalPayloadReplayRequest {
+                receipt: request(),
+                expected_receipt_digest: receipt.receipt_digest.clone(),
+                expected_handoff_digest: "a".repeat(64),
+                expected_payload_digest: "b".repeat(64),
+                expected_byte_length: 4096,
+            },
+        )
+        .unwrap();
+        assert!(replay.matched);
+        assert_eq!(replay.replay_status, "matched");
+        let mut changed = request();
+        changed.byte_length = 8192;
+        let drift = verify_domain_evidence_provider_external_payload_replay(
+            &DomainEvidenceProviderExternalPayloadReplayRequest {
+                receipt: changed,
+                expected_receipt_digest: receipt.receipt_digest,
+                expected_handoff_digest: "a".repeat(64),
+                expected_payload_digest: "b".repeat(64),
+                expected_byte_length: 4096,
+            },
+        )
+        .unwrap();
+        assert!(!drift.matched);
+        assert_eq!(drift.differences, vec!["byte_length", "receipt_digest"]);
     }
 }

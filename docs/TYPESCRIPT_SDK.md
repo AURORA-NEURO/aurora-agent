@@ -14,6 +14,9 @@ authentication, network access, and provider validity remain caller responsibili
 only the payload digest, byte length, transfer identity, storage/locator metadata, and handoff
 parent cross the API boundary. Payload bytes, credentials, and fetch authority remain outside the
 core, while `available`, `durable`, and `not_started` stay explicitly typed.
+`domainEvidenceProviderExternalPayloadReplayVerify()` compares the retained receipt digest,
+handoff digest, payload digest, and byte length without opening the caller locator; its typed
+result exposes each match dimension and preserves the mismatch/non-readiness boundary.
 
 The repository ships `typescript/`, a small ESM package for clients that can use the standard
 Fetch API. It is intentionally an integration layer over `bioprism-api`, not a second domain

@@ -5219,6 +5219,55 @@ export interface DomainEvidenceProviderExternalPayloadReceiptResult extends Json
   does_not_claim: string[];
 }
 
+export interface DomainEvidenceProviderExternalPayloadReplayVerifyArgs extends DomainEvidenceProviderExternalPayloadReceiptArgs {
+  expected_receipt_digest: string;
+  expected_handoff_digest: string;
+  expected_payload_digest: string;
+  expected_byte_length: number;
+}
+
+export interface DomainEvidenceProviderExternalPayloadReplayVerification extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-replay/0.1";
+  workflow: "domain_evidence_provider_external_payload_replay_verify";
+  replay_status: "matched" | "mismatch";
+  matched: boolean;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  expected_receipt_digest: string;
+  observed_receipt_digest: string;
+  expected_handoff_digest: string;
+  observed_handoff_digest: string;
+  expected_payload_digest: string;
+  observed_payload_digest: string;
+  expected_byte_length: number;
+  observed_byte_length: number;
+  matches: Record<string, boolean>;
+  differences: string[];
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  replay_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadReplayVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-replay/0.1";
+  workflow: "domain_evidence_provider_external_payload_replay_verify";
+  replay: DomainEvidenceProviderExternalPayloadReplayVerification;
+  matched: boolean;
+  replay_status: "matched" | "mismatch";
+  replay_digest: string;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
   candidate_fields: string[];
   present_record_count: number;

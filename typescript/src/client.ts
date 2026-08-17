@@ -50,6 +50,8 @@ import type {
   DomainEvidenceProviderHandoffResult,
   DomainEvidenceProviderExternalPayloadReceiptArgs,
   DomainEvidenceProviderExternalPayloadReceiptResult,
+  DomainEvidenceProviderExternalPayloadReplayVerifyArgs,
+  DomainEvidenceProviderExternalPayloadReplayVerifyResult,
   DomainEvidenceProviderReplayVerifyArgs,
   DomainEvidenceProviderReplayVerifyResult,
   AdapterPlanArgs,
@@ -922,6 +924,44 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadReceiptResult>> {
     return this.domainEvidenceProviderExternalPayloadReceipt(args, options);
+  }
+
+  /** Verify retained external payload identities without opening the caller-owned locator. */
+  async domainEvidenceProviderExternalPayloadReplayVerify(
+    args: DomainEvidenceProviderExternalPayloadReplayVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadReplayVerifyResult>> {
+    if (!isObject(args)) throw new ArgumentError("external provider payload replay arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider], ["handoff_digest", args.handoff_digest], ["transfer_id", args.transfer_id], ["payload_digest", args.payload_digest], ["locator", args.locator], ["expected_receipt_digest", args.expected_receipt_digest], ["expected_handoff_digest", args.expected_handoff_digest], ["expected_payload_digest", args.expected_payload_digest]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const connectors = ["literature", "clinical_trial", "fhir", "object_store", "provider_api"];
+    if (!connectors.includes(args.connector_kind)) throw new ArgumentError("connector_kind is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    for (const [name, value] of [["handoff_digest", args.handoff_digest], ["payload_digest", args.payload_digest], ["request_digest", args.request_digest], ["expected_receipt_digest", args.expected_receipt_digest], ["expected_handoff_digest", args.expected_handoff_digest], ["expected_payload_digest", args.expected_payload_digest]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
+    }
+    if (!Number.isSafeInteger(args.byte_length) || args.byte_length < 1 || args.byte_length > 68719476736) throw new ArgumentError("byte_length must be 1..=68719476736");
+    if (!Number.isSafeInteger(args.expected_byte_length) || args.expected_byte_length < 1 || args.expected_byte_length > 68719476736) throw new ArgumentError("expected_byte_length must be 1..=68719476736");
+    if (!(args.storage_backend === "object_store" || args.storage_backend === "file" || args.storage_backend === "database" || args.storage_backend === "caller_managed")) throw new ArgumentError("storage_backend is invalid");
+    if (!(args.locator_kind === "opaque" || args.locator_kind === "uri" || args.locator_kind === "path")) throw new ArgumentError("locator_kind is invalid");
+    if (args.locator.includes("\r") || args.locator.includes("\n")) throw new ArgumentError("locator must not contain control line breaks");
+    const authority = args.locator.split("://")[1]?.split(/[/?#]/, 1)[0];
+    if (authority?.includes("@")) throw new ArgumentError("locator must not contain embedded credentials");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.availability !== undefined && !(args.availability === "available" || args.availability === "partial" || args.availability === "missing" || args.availability === "unknown")) throw new ArgumentError("availability is invalid");
+    if (args.retention !== undefined && !(args.retention === "ephemeral" || args.retention === "durable" || args.retention === "unknown")) throw new ArgumentError("retention is invalid");
+    if (args.attempt_id !== undefined && args.attempt_id !== null && (typeof args.attempt_id !== "string" || args.attempt_id.trim().length === 0)) throw new ArgumentError("attempt_id must be a non-empty string or null");
+    if ("payload" in args || "credential_material" in args || "credentials" in args) throw new ArgumentError("payload and credential material are not accepted by the external replay boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadReplayVerifyResult>("domain_evidence_provider_external_payload_replay_verify", { ...args, availability: args.availability ?? "unknown", retention: args.retention ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the external payload replay MCP tool. */
+  async domainEvidenceProviderExternalPayloadReplayVerifyTool(
+    args: DomainEvidenceProviderExternalPayloadReplayVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadReplayVerifyResult>> {
+    return this.domainEvidenceProviderExternalPayloadReplayVerify(args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

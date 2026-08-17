@@ -282,6 +282,11 @@ digest, byte length, transfer identity, storage backend, locator class/reference
 availability, retention, and the connector-handoff parent. The receipt is durably indexed and
 snapshot-verified, but the core never opens the locator, fetches, decrypts, or inspects the bytes;
 `available` and `durable` remain caller assertions until an external executor proves otherwise.
+`POST /v1/tools/domain_evidence_provider_external_payload_replay_verify` re-checks the retained
+receipt's handoff digest, payload digest, byte length, and canonical receipt digest against
+caller-supplied expectations. It is metadata-only, never opens the locator, and records both a
+matching and a mismatch as a value-free, idempotent artifact; a match still does not prove that
+the external object resolves or that its bytes remain authentic.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

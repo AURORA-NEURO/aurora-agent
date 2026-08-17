@@ -328,9 +328,14 @@ pub use domain_evidence_provider::{
     MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES,
 };
 pub use domain_evidence_provider_external::{
-    record_domain_evidence_provider_external_payload, DomainEvidenceProviderExternalPayloadError,
-    DomainEvidenceProviderExternalPayloadReceipt,
+    record_domain_evidence_provider_external_payload,
+    verify_domain_evidence_provider_external_payload_replay,
+    DomainEvidenceProviderExternalPayloadError, DomainEvidenceProviderExternalPayloadReceipt,
     DomainEvidenceProviderExternalPayloadReceiptRequest,
+    DomainEvidenceProviderExternalPayloadReplayRequest,
+    DomainEvidenceProviderExternalPayloadReplayVerification,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW,
     MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_BYTES,
