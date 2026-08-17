@@ -316,8 +316,11 @@ It exposes the exact MCP tool catalogue through REST and JSON-RPC, bounded healt
 routes, cursor-addressable event pages/SSE snapshots, receipt-correlated event queries, signed webhook outbox registration, retry,
 and acknowledgement. `--mission-state` adds an optional bounded, atomic checkpoint for mission
 status, progress, traces, and size-limited result metadata; interrupted queued/running missions
-are marked failed after restart instead of being falsely resumed. `--event-state` checkpoints
-retained events, subscription metadata, and signed pending outbox rows while never persisting
+are marked failed after restart instead of being falsely resumed. Mission checkpoints emit schema
+2 with a content SHA-256 `state_digest`; schema-1 snapshots are
+accepted for migration and rewritten after startup, while tampered schema-2 state is rejected.
+Persistence status reports both the digest and observation-time `integrity_verified` state.
+`--event-state` checkpoints retained events, subscription metadata, and signed pending outbox rows while never persisting
 webhook secrets; the current schema-3 checkpoint is content-addressed with a SHA-256
 `state_digest`, and startup rejects tampering before restoring rows. Schema-1 and schema-2
 checkpoints remain readable for migration and are upgraded on the next flush. Restored

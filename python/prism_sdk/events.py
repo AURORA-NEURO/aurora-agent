@@ -211,6 +211,7 @@ class EventPersistenceStatus:
     file_bytes: int | None
     schema_version: int
     state_digest: str | None
+    integrity_verified: bool | None
     max_file_bytes: int
     retained_events: int
     next_event_id: int
@@ -243,6 +244,9 @@ class EventPersistenceStatus:
             raise ArgumentError(
                 "event persistence state_digest must be 64 lowercase hexadecimal characters"
             )
+        integrity_verified = raw.get("integrity_verified")
+        if integrity_verified is not None and not isinstance(integrity_verified, bool):
+            raise ArgumentError("event persistence integrity_verified must be a boolean or null")
         subscriptions_durable = raw.get("subscriptions_durable")
         webhook_deliveries_durable = raw.get("webhook_deliveries_durable")
         secrets_persisted = raw.get("secrets_persisted", False)
@@ -260,6 +264,7 @@ class EventPersistenceStatus:
             file_bytes,
             non_negative("schema_version"),
             state_digest,
+            integrity_verified,
             non_negative("max_file_bytes"),
             non_negative("retained_events"),
             non_negative("next_event_id"),
@@ -284,6 +289,7 @@ class RecoveryBoundary:
     checkpoint_present: bool
     schema_version: int | None
     state_digest: str | None
+    integrity_verified: bool | None
     restores: tuple[str, ...]
     does_not_restore: tuple[str, ...]
     operator_action: str
@@ -308,6 +314,9 @@ class RecoveryBoundary:
             raise ArgumentError(
                 "recovery boundary state_digest must be 64 lowercase hexadecimal characters"
             )
+        integrity_verified = raw.get("integrity_verified")
+        if integrity_verified is not None and not isinstance(integrity_verified, bool):
+            raise ArgumentError("recovery boundary integrity_verified must be a boolean or null")
         return cls(
             raw=raw,
             id=boundary_id,
@@ -315,6 +324,7 @@ class RecoveryBoundary:
             checkpoint_present=checkpoint_present,
             schema_version=schema_version,
             state_digest=state_digest,
+            integrity_verified=integrity_verified,
             restores=_texts("recovery boundary restores", raw.get("restores")),
             does_not_restore=_texts(
                 "recovery boundary does_not_restore", raw.get("does_not_restore")

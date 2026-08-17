@@ -26,7 +26,8 @@ pub const DEFAULT_EVENT_CAPACITY: usize = 4096;
 pub const MAX_MISSION_JOBS: usize = 4096;
 pub const MAX_MISSION_LIST_LIMIT: usize = 256;
 pub const MAX_MISSION_TRACE_EVENTS: usize = 4096;
-pub const MISSION_STATE_SCHEMA_VERSION: u64 = 1;
+pub const MISSION_STATE_SCHEMA_VERSION: u64 = 2;
+const LEGACY_MISSION_STATE_SCHEMA_VERSION: u64 = 1;
 pub const MAX_MISSION_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PERSISTED_MISSION_RESULT_BYTES: usize = 256 * 1024;
 pub const MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES: usize = 64 * 1024;
@@ -42,7 +43,8 @@ pub struct ApiConfig {
     /// Event cursors remain process-local; this path only restores mission status, bounded
     /// trace rows, progress, and size-bounded result metadata after an API restart.
     pub mission_state_path: Option<PathBuf>,
-    /// Optional atomic JSON checkpoint for the bounded event cursor only.
+    /// Optional atomic JSON checkpoint for the bounded event cursor, subscription metadata, and
+    /// signed pending webhook outbox.
     pub event_state_path: Option<PathBuf>,
 }
 
@@ -163,7 +165,7 @@ impl MissionPersistence {
                 .collect::<Result<Vec<_>, String>>()?
         };
         trim_mission_snapshot_to_bound(&mut missions)?;
-        let document = json!({
+        let mut document = json!({
             "schema_version": MISSION_STATE_SCHEMA_VERSION,
             "missions": missions,
             "guarantees": [
@@ -172,6 +174,11 @@ impl MissionPersistence {
                 "event cursors and webhook deliveries remain process-local"
             ]
         });
+        let state_digest = mission_checkpoint_digest(&document)?;
+        document
+            .as_object_mut()
+            .expect("mission checkpoint document is an object")
+            .insert("state_digest".into(), Value::String(state_digest));
         let bytes = serde_json::to_vec_pretty(&document)
             .map_err(|error| format!("mission state could not be serialized: {error}"))?;
         if bytes.len() > MAX_MISSION_STATE_FILE_BYTES {
@@ -575,6 +582,11 @@ impl ApiRouter {
             .as_deref()
             .and_then(|path| std::fs::metadata(path).ok())
             .map(|metadata| metadata.len());
+        let state_digest = checkpoint_digest_from_path(self.config.mission_state_path.as_deref());
+        let integrity_verified = checkpoint_integrity_from_path(
+            self.config.mission_state_path.as_deref(),
+            MISSION_STATE_SCHEMA_VERSION,
+        );
         let registry_size = self.mission_jobs.lock().map(|jobs| jobs.len()).unwrap_or(0);
         HttpResponse::json(
             200,
@@ -584,6 +596,8 @@ impl ApiRouter {
                 "file_present": file_bytes.is_some(),
                 "file_bytes": file_bytes,
                 "schema_version": MISSION_STATE_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
                 "max_file_bytes": MAX_MISSION_STATE_FILE_BYTES,
                 "max_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
                 "registry_size": registry_size,
@@ -604,18 +618,11 @@ impl ApiRouter {
             .and_then(|path| std::fs::metadata(path).ok())
             .map(|metadata| metadata.len());
         let metrics = self.event_metrics();
-        let state_digest = self
-            .config
-            .event_state_path
-            .as_deref()
-            .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .and_then(|document| {
-                document
-                    .get("state_digest")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            });
+        let state_digest = checkpoint_digest_from_path(self.config.event_state_path.as_deref());
+        let integrity_verified = checkpoint_integrity_from_path(
+            self.config.event_state_path.as_deref(),
+            EVENT_STATE_SCHEMA_VERSION,
+        );
         HttpResponse::json(
             200,
             &json!({
@@ -625,6 +632,7 @@ impl ApiRouter {
                 "file_bytes": file_bytes,
                 "schema_version": EVENT_STATE_SCHEMA_VERSION,
                 "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
                 "max_file_bytes": MAX_EVENT_STATE_FILE_BYTES,
                 "retained_events": metrics.retained_events,
                 "next_event_id": metrics.next_event_id,
@@ -653,19 +661,18 @@ impl ApiRouter {
             .as_deref()
             .and_then(|path| std::fs::metadata(path).ok())
             .is_some();
+        let mission_state_digest =
+            checkpoint_digest_from_path(self.config.mission_state_path.as_deref());
+        let mission_integrity_verified = checkpoint_integrity_from_path(
+            self.config.mission_state_path.as_deref(),
+            MISSION_STATE_SCHEMA_VERSION,
+        );
         let metrics = self.event_metrics();
-        let state_digest = self
-            .config
-            .event_state_path
-            .as_deref()
-            .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .and_then(|document| {
-                document
-                    .get("state_digest")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            });
+        let state_digest = checkpoint_digest_from_path(self.config.event_state_path.as_deref());
+        let event_integrity_verified = checkpoint_integrity_from_path(
+            self.config.event_state_path.as_deref(),
+            EVENT_STATE_SCHEMA_VERSION,
+        );
         HttpResponse::json(
             200,
             &json!({
@@ -680,7 +687,8 @@ impl ApiRouter {
                         "configured": mission_enabled,
                         "checkpoint_present": mission_checkpoint_present,
                         "schema_version": MISSION_STATE_SCHEMA_VERSION,
-                        "state_digest": Value::Null,
+                        "state_digest": mission_state_digest,
+                        "integrity_verified": mission_integrity_verified,
                         "restores": [
                             "terminal mission status, bounded progress, retained trace, and size-limited result metadata"
                         ],
@@ -697,6 +705,7 @@ impl ApiRouter {
                         "checkpoint_present": event_checkpoint_present,
                         "schema_version": EVENT_STATE_SCHEMA_VERSION,
                         "state_digest": state_digest,
+                        "integrity_verified": event_integrity_verified,
                         "restores": [
                             "retained sequence-addressed event rows",
                             "next cursor and retention-gap accounting"
@@ -712,6 +721,7 @@ impl ApiRouter {
                         "checkpoint_present": event_checkpoint_present,
                         "schema_version": EVENT_STATE_SCHEMA_VERSION,
                         "state_digest": state_digest,
+                        "integrity_verified": event_integrity_verified,
                         "restores": [
                             "subscription id, endpoint, event filters, and creation sequence"
                         ],
@@ -727,6 +737,7 @@ impl ApiRouter {
                         "checkpoint_present": event_checkpoint_present,
                         "schema_version": EVENT_STATE_SCHEMA_VERSION,
                         "state_digest": state_digest,
+                        "integrity_verified": event_integrity_verified,
                         "restores": [
                             "pending delivery ids, attempts, signed envelope evidence, and bounded failure metadata"
                         ],
@@ -742,6 +753,7 @@ impl ApiRouter {
                         "checkpoint_present": false,
                         "schema_version": Value::Null,
                         "state_digest": Value::Null,
+                        "integrity_verified": Value::Null,
                         "restores": [],
                         "does_not_restore": [
                             "all signing secrets; they remain process-local by policy"
@@ -754,6 +766,7 @@ impl ApiRouter {
                         "checkpoint_present": false,
                         "schema_version": Value::Null,
                         "state_digest": Value::Null,
+                        "integrity_verified": Value::Null,
                         "restores": [],
                         "does_not_restore": [
                             "network transport, TLS termination, receiver state, and external side effects"
@@ -2366,6 +2379,85 @@ fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
     job.state.lock().map(|state| state.clone()).map_err(|_| ())
 }
 
+fn mission_checkpoint_digest(document: &Value) -> Result<String, String> {
+    let bytes = serde_json::to_vec(document)
+        .map_err(|error| format!("mission state digest could not be serialized: {error}"))?;
+    Ok(hex_digest(&Sha256::digest(&bytes)))
+}
+
+fn verify_mission_checkpoint_digest(document: &Value) -> Result<(), String> {
+    let stored = document
+        .get("state_digest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "mission state schema 2 requires state_digest".to_string())?;
+    if stored.len() != 64
+        || !stored
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(
+            "mission state state_digest must be 64 lowercase hexadecimal characters".into(),
+        );
+    }
+    let mut unsigned = document.clone();
+    unsigned
+        .as_object_mut()
+        .ok_or_else(|| "mission state snapshot must be a JSON object".to_string())?
+        .remove("state_digest");
+    let computed = mission_checkpoint_digest(&unsigned)?;
+    if computed != stored {
+        return Err(format!(
+            "mission state state_digest mismatch: expected {stored}, computed {computed}"
+        ));
+    }
+    Ok(())
+}
+
+fn checkpoint_digest_from_path(path: Option<&Path>) -> Option<String> {
+    path.and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|document| {
+            document
+                .get("state_digest")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+}
+
+fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> Option<bool> {
+    let bytes = match path.and_then(|path| std::fs::read(path).ok()) {
+        Some(bytes) => bytes,
+        None => return None,
+    };
+    let document: Value = match serde_json::from_slice(&bytes) {
+        Ok(document) => document,
+        Err(_) => return Some(false),
+    };
+    let schema_version = match document.get("schema_version").and_then(Value::as_u64) {
+        Some(schema_version) => schema_version,
+        None => return Some(false),
+    };
+    if schema_version != expected_schema {
+        return None;
+    }
+    let stored = match document.get("state_digest").and_then(Value::as_str) {
+        Some(stored) => stored,
+        None => return Some(false),
+    };
+    let mut unsigned = match document.as_object() {
+        Some(object) => Value::Object(object.clone()),
+        None => return Some(false),
+    };
+    unsigned
+        .as_object_mut()
+        .expect("checkpoint object was cloned from an object")
+        .remove("state_digest");
+    let Ok(computed) = mission_checkpoint_digest(&unsigned) else {
+        return Some(false);
+    };
+    Some(computed == stored)
+}
+
 fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
     let Some(path) = path else {
         return Ok(BTreeMap::new());
@@ -2388,10 +2480,15 @@ fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<Mission
         .get("schema_version")
         .and_then(Value::as_u64)
         .ok_or_else(|| "mission state snapshot has no schema_version".to_string())?;
-    if schema_version != MISSION_STATE_SCHEMA_VERSION {
+    if schema_version != MISSION_STATE_SCHEMA_VERSION
+        && schema_version != LEGACY_MISSION_STATE_SCHEMA_VERSION
+    {
         return Err(format!(
-            "unsupported mission state schema version {schema_version}; expected {MISSION_STATE_SCHEMA_VERSION}"
+            "unsupported mission state schema version {schema_version}; expected {LEGACY_MISSION_STATE_SCHEMA_VERSION} or {MISSION_STATE_SCHEMA_VERSION}"
         ));
+    }
+    if schema_version == MISSION_STATE_SCHEMA_VERSION {
+        verify_mission_checkpoint_digest(&document)?;
     }
     let missions = document
         .get("missions")
@@ -2547,12 +2644,23 @@ fn value_omission(bytes: &[u8]) -> Value {
 
 fn trim_mission_snapshot_to_bound(missions: &mut [Value]) -> Result<(), String> {
     loop {
-        let size = serde_json::to_vec(&json!({
+        let mut document = json!({
             "schema_version": MISSION_STATE_SCHEMA_VERSION,
             "missions": missions,
-        }))
-        .map_err(|error| format!("mission state could not be sized: {error}"))?
-        .len();
+            "guarantees": [
+                "terminal reports are restored only when their bounded JSON was retained",
+                "queued and running jobs are marked failed after a process restart",
+                "event cursors and webhook deliveries remain process-local"
+            ]
+        });
+        let state_digest = mission_checkpoint_digest(&document)?;
+        document
+            .as_object_mut()
+            .expect("mission checkpoint document is an object")
+            .insert("state_digest".into(), Value::String(state_digest));
+        let size = serde_json::to_vec(&document)
+            .map_err(|error| format!("mission state could not be sized: {error}"))?
+            .len();
         if size <= MAX_MISSION_STATE_FILE_BYTES {
             return Ok(());
         }
@@ -2918,7 +3026,7 @@ mod tests {
         std::fs::write(
             &path,
             serde_json::to_vec(&json!({
-                "schema_version": MISSION_STATE_SCHEMA_VERSION,
+                "schema_version": LEGACY_MISSION_STATE_SCHEMA_VERSION,
                 "missions": [
                     {
                         "mission_id": "active-before-restart",
@@ -2963,6 +3071,8 @@ mod tests {
         let persistence = router.handle(request("GET", "/v1/missions/persistence", json!({})));
         let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
         assert_eq!(persistence["enabled"], true);
+        assert_eq!(persistence["state_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(persistence["integrity_verified"], true);
         assert_eq!(persistence["event_log_durable"], false);
         assert_eq!(
             router
@@ -2991,6 +3101,8 @@ mod tests {
         assert_eq!(terminal["result"]["mission_status"], "succeeded");
 
         let persisted: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(persisted["schema_version"], MISSION_STATE_SCHEMA_VERSION);
+        assert_eq!(persisted["state_digest"].as_str().unwrap().len(), 64);
         let persisted_active = persisted["missions"]
             .as_array()
             .unwrap()
@@ -2999,6 +3111,23 @@ mod tests {
             .unwrap();
         assert_eq!(persisted_active["status"], "failed");
         assert_eq!(persisted_active["recovered_after_restart"], true);
+        let mut tampered = persisted;
+        tampered["missions"][0]["status"] = json!("succeeded");
+        std::fs::write(&path, serde_json::to_vec_pretty(&tampered).unwrap()).unwrap();
+        let observed = router.handle(request("GET", "/v1/missions/persistence", json!({})));
+        let observed: Value = serde_json::from_slice(&observed.body).unwrap();
+        assert_eq!(observed["file_present"], true);
+        assert_eq!(observed["integrity_verified"], false);
+        let error = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_state_path: Some(path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .err()
+        .expect("tampered mission checkpoint must be rejected");
+        assert!(error.contains("state_digest"));
         let _ = std::fs::remove_file(path);
     }
 
@@ -3047,6 +3176,13 @@ mod tests {
         assert_eq!(matrix["automatic_resume"], false);
         assert_eq!(matrix["automatic_external_delivery"], false);
         let boundaries = matrix["boundaries"].as_array().unwrap();
+        let mission_jobs = boundaries
+            .iter()
+            .find(|boundary| boundary["id"] == "mission_jobs")
+            .unwrap();
+        assert_eq!(mission_jobs["checkpoint_present"], true);
+        assert_eq!(mission_jobs["state_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(mission_jobs["integrity_verified"], true);
         let event_rows = boundaries
             .iter()
             .find(|boundary| boundary["id"] == "event_rows")
@@ -3054,6 +3190,7 @@ mod tests {
         assert_eq!(event_rows["configured"], true);
         assert_eq!(event_rows["checkpoint_present"], true);
         assert_eq!(event_rows["state_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(event_rows["integrity_verified"], true);
         let secrets = boundaries
             .iter()
             .find(|boundary| boundary["id"] == "webhook_signing_secrets")
@@ -3102,6 +3239,7 @@ mod tests {
         assert_eq!(persistence["enabled"], true);
         assert_eq!(persistence["schema_version"], EVENT_STATE_SCHEMA_VERSION);
         assert_eq!(persistence["state_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(persistence["integrity_verified"], true);
         assert_eq!(persistence["subscriptions_durable"], true);
         assert_eq!(persistence["webhook_deliveries_durable"], true);
         assert_eq!(persistence["secrets_persisted"], false);
@@ -3186,6 +3324,10 @@ mod tests {
         let mut checkpoint: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         checkpoint["dropped_events"] = json!(checkpoint["dropped_events"].as_u64().unwrap() + 1);
         std::fs::write(&path, serde_json::to_vec_pretty(&checkpoint).unwrap()).unwrap();
+        let observed = router.handle(request("GET", "/v1/events/persistence", json!({})));
+        let observed: Value = serde_json::from_slice(&observed.body).unwrap();
+        assert_eq!(observed["file_present"], true);
+        assert_eq!(observed["integrity_verified"], false);
 
         let error = ApiRouter::new(
             std::env::current_dir().unwrap(),

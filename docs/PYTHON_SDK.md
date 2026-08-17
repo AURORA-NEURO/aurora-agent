@@ -543,13 +543,17 @@ invent defaults:
   `delete_mission(mission_id)` removes a terminal job when the caller has consumed its report;
   active jobs are refused so cleanup cannot discard in-flight work.
   `mission_persistence()` and `flush_mission_persistence()` provide typed operator checks for
-  the optional mission checkpoint without implying durable mission scheduling or effect rollback.
+  the optional mission checkpoint, including its content `state_digest`, without implying durable
+  mission scheduling or effect rollback. Schema-1 migration inputs report no digest before the
+  gateway rewrites them as schema 2; `integrity_verified` reports whether the observed current
+  file matches that digest.
   `recovery_matrix()` and its async counterpart provide one typed matrix that keeps mission,
   event, subscription, outbox, secret, and external-effect recovery boundaries separate.
   `event_persistence()` and `flush_event_persistence()` provide the corresponding typed event
   and outbox checkpoint checks; endpoint/filter metadata and signed pending envelopes can restore,
   while secrets remain non-durable. They expose the current checkpoint's optional `state_digest`
-  for operator correlation; schema-1/2 migration files legitimately report no digest.
+  for operator correlation and `integrity_verified` for the observed current file; schema-1/2
+  migration files legitimately report no digest before rewrite.
   `rebind_subscription(...)` supplies a secret in memory,
   re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

@@ -1101,6 +1101,8 @@ class MissionPersistenceStatus:
     file_present: bool
     file_bytes: int | None
     schema_version: int
+    state_digest: str | None
+    integrity_verified: bool | None
     max_file_bytes: int
     max_result_bytes: int
     registry_size: int
@@ -1126,6 +1128,18 @@ class MissionPersistenceStatus:
         ):
             raise ArgumentError("mission persistence file_bytes must be a non-negative integer or null")
         schema_version = non_negative("schema_version")
+        state_digest = raw.get("state_digest")
+        if state_digest is not None and (
+            not isinstance(state_digest, str)
+            or len(state_digest) != 64
+            or any(character not in "0123456789abcdef" for character in state_digest)
+        ):
+            raise ArgumentError(
+                "mission persistence state_digest must be 64 lowercase hexadecimal characters"
+            )
+        integrity_verified = raw.get("integrity_verified")
+        if integrity_verified is not None and not isinstance(integrity_verified, bool):
+            raise ArgumentError("mission persistence integrity_verified must be a boolean or null")
         max_file_bytes = non_negative("max_file_bytes")
         max_result_bytes = non_negative("max_result_bytes")
         registry_size = non_negative("registry_size")
@@ -1139,6 +1153,8 @@ class MissionPersistenceStatus:
             file_present,
             file_bytes,
             schema_version,
+            state_digest,
+            integrity_verified,
             max_file_bytes,
             max_result_bytes,
             registry_size,

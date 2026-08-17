@@ -149,6 +149,10 @@ checkpoint. Terminal jobs restore their retained progress, traces, and size-limi
 queued/running jobs become explicit `failed` records with `recovered_after_restart` after a
 restart, never falsely claiming that interrupted work resumed. This is restart-aware mission
 inspection, not durable event storage, distributed scheduling, or effect rollback.
+Mission-state schema 2 now carries a content SHA-256 digest and rejects tampered snapshots before
+restoration; schema 1 remains a migration input and is rewritten with a digest after startup.
+Mission and event persistence status now expose both the digest and an observation-time
+`integrity_verified` result, keeping file presence distinct from verified content.
 An independent optional `--event-state` path now checkpoints retained event rows, subscription
 metadata, and signed pending outbox envelopes under the same 64 MiB bound. It intentionally
 excludes webhook secrets: restored subscriptions pause with `secret_rebind_required` delivery

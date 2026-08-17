@@ -76,7 +76,10 @@ completion, and deletion; a write failure rejects new acceptance and leaves exis
 intact. The snapshot is not a distributed queue: it restores bounded event rows, subscription
 metadata, and signed pending outbox envelopes, but signing secrets remain process-local.
 `GET /v1/missions/persistence` reports whether checkpointing is enabled, the current file size,
-registry size, bounds, and the non-durable event/delivery distinction. The authenticated
+registry size, bounds, content `state_digest`, and the non-durable event/delivery distinction.
+The writer emits mission-state schema 2 and verifies its lowercase SHA-256 digest before restoring
+any job; status also reports `integrity_verified`. Schema 1 snapshots remain readable as
+migration inputs and are upgraded on the next successful checkpoint. The authenticated
 `POST /v1/missions/persistence/flush` route gives operators an explicit write/readiness check;
 it returns `409` when no state path was configured and `503` when the checkpoint cannot be written.
 
@@ -88,6 +91,9 @@ report `secret_rebind_required` until `POST /v1/webhooks/subscriptions/{id}/rebi
 fresh secret in memory; rebind re-signs pending envelopes and reactivates that subscription.
 `GET /v1/events/persistence` and its authenticated `POST /v1/events/persistence/flush` counterpart
 expose the file bound, cursor metrics, durability fields, and explicit secret policy.
+Both persistence status responses include `integrity_verified`: `true` means the current-schema
+file digest matches at observation time, `false` means a present current-schema file is malformed
+or tampered, and `null` means no file or a legacy schema without a digest.
 The writer currently emits event-state schema 3, which binds every persisted field except the
 digest itself to a lowercase SHA-256 `state_digest`; startup rejects a modified, truncated, or
 partially rewritten schema-3 document before restoring any rows. Schema 1 and schema 2 snapshots
@@ -99,7 +105,7 @@ enable either, both, or neither.
 `boundaries` rows separately identify mission jobs, event rows, subscription metadata, webhook
 outbox rows, signing secrets, and external delivery effects. Each row reports whether the
 boundary is configured, whether a checkpoint is present, what is restored, what is explicitly not
-restored, and the required operator action. `automatic_resume` and
+restored, whether the observed digest was verified, and the required operator action. `automatic_resume` and
 `automatic_external_delivery` are always false for this gateway. The matrix is an operational
 decision surface, not a distributed coordination protocol.
 

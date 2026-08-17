@@ -652,6 +652,9 @@ metadata, not a replacement for `developer_delivery_receipt_verify`.
 recovery. Its boundary rows distinguish terminal mission restoration, retained event rows,
 subscription metadata, pending outbox evidence, process-local secrets, and external delivery
 effects; `automatic_resume` and `automatic_external_delivery` are explicit `false` values.
+`missionPersistence()` and `eventPersistence()` separately expose their checkpoint schema and
+optional content digests plus `integrity_verified`; a digest is an integrity correlation, not a
+claim of distributed consensus.
 
 ```typescript
 const page = await api.events(0, 100);

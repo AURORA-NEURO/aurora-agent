@@ -7068,6 +7068,8 @@ export interface MissionPersistenceStatus extends JsonObject {
   file_present: boolean;
   file_bytes: number | null;
   schema_version: number;
+  state_digest: string | null;
+  integrity_verified: boolean | null;
   max_file_bytes: number;
   max_result_bytes: number;
   registry_size: number;
@@ -7084,6 +7086,7 @@ export interface EventPersistenceStatus extends JsonObject {
   file_bytes: number | null;
   schema_version: number;
   state_digest: string | null;
+  integrity_verified: boolean | null;
   max_file_bytes: number;
   retained_events: number;
   next_event_id: number;
@@ -7101,6 +7104,7 @@ export interface RecoveryBoundary extends JsonObject {
   checkpoint_present: boolean;
   schema_version: number | null;
   state_digest: string | null;
+  integrity_verified: boolean | null;
   restores: string[];
   does_not_restore: string[];
   operator_action: string;
