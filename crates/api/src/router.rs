@@ -495,6 +495,12 @@ impl ApiRouter {
                 self.operations_domain_activity(&request, &request_id)
             }
             ("GET", "/v1/operations/gates") => self.operations_domain_gates(&request, &request_id),
+            ("GET", "/v1/operations/gate-reviews") => {
+                self.operations_gate_reviews(&request, &request_id)
+            }
+            ("POST", "/v1/operations/gate-reviews") => {
+                self.create_operations_gate_review(&request, &request_id)
+            }
             ("POST", "/v1/operations/handoff") => self.operations_handoff(&request, &request_id),
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
@@ -964,6 +970,7 @@ impl ApiRouter {
                     "domain_coverage": true,
                     "operations_domains": true,
                     "operations_gates": true,
+                    "operations_gate_reviews": true,
                     "operations_handoff": true,
                     "delivery_attempt_provenance": true,
                     "external_delivery_worker": false
@@ -1207,6 +1214,7 @@ impl ApiRouter {
                     "operations_snapshot": "/v1/operations/snapshot",
                     "operations_domains": "/v1/operations/domains",
                     "operations_gates": "/v1/operations/gates",
+                    "operations_gate_reviews": "/v1/operations/gate-reviews",
                     "operations_handoff": "/v1/operations/handoff",
                     "events": "/v1/events",
                     "capabilities": "/v1/capabilities"
@@ -1496,21 +1504,49 @@ impl ApiRouter {
                 "operations_snapshot": "/v1/operations/snapshot",
                 "operations_domains": "/v1/operations/domains",
                 "operations_gates": "/v1/operations/gates",
+                "operations_gate_reviews": "/v1/operations/gate-reviews",
                 "operations_handoff": "/v1/operations/handoff",
                 "events": "/v1/events",
                 "capabilities": "/v1/capabilities"
             }
         });
-        let gate_digest = serde_json::to_vec(&body)
+        let mut digest_body = body.clone();
+        if let Some(cursor) = digest_body
+            .get_mut("event_cursor")
+            .and_then(Value::as_object_mut)
+        {
+            cursor.insert(
+                "oldest".into(),
+                tool_events
+                    .first()
+                    .map(|(event, _)| json!(event.id))
+                    .unwrap_or(Value::Null),
+            );
+            cursor.insert(
+                "newest".into(),
+                tool_events
+                    .last()
+                    .map(|(event, _)| json!(event.id))
+                    .unwrap_or(Value::Null),
+            );
+            cursor.insert(
+                "next_after".into(),
+                tool_events
+                    .last()
+                    .map(|(event, _)| json!(event.id))
+                    .unwrap_or_else(|| json!(page.after)),
+            );
+            cursor.insert("returned_events".into(), json!(tool_events_scanned));
+        }
+        let gate_digest = serde_json::to_vec(&digest_body)
             .map(|bytes| hex_digest(&Sha256::digest(&bytes)))
             .unwrap_or_default();
         body["gate_digest"] = json!(gate_digest);
-        body["gate_digest_scope"] = json!("response_without_gate_digest");
+        body["gate_digest_scope"] = json!("tool_evidence_projection_without_gate_digest");
         HttpResponse::json(200, &body)
     }
 
-    fn operations_gate_projection(&self, arguments: &Value) -> Value {
-        let requirements = mission_domain_group_requirements(arguments);
+    fn operations_gate_snapshot(&self) -> Value {
         let gate_request = HttpRequest {
             method: "GET".into(),
             target: "/v1/operations/gates?after=0&limit=256".into(),
@@ -1518,9 +1554,260 @@ impl ApiRouter {
             headers: BTreeMap::new(),
             body: Vec::new(),
         };
-        let snapshot = response_value(
-            self.operations_domain_gates(&gate_request, "internal-operations-gates"),
-        );
+        response_value(self.operations_domain_gates(&gate_request, "internal-operations-gates"))
+    }
+
+    fn operations_gate_reviews(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(key.as_str(), "after" | "limit" | "review_id") {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "operations gate reviews accepts only after, limit, and review_id",
+                    request_id,
+                );
+            }
+        }
+        let after = match query_u64(&query, "after", 0) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let limit = match query_usize(&query, "limit", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let review_id = query.get("review_id").map(String::as_str);
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let page = match events.operations_gate_reviews(after, limit, review_id) {
+            Ok(page) => page,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let reviews = page
+            .events
+            .iter()
+            .filter_map(|event| {
+                let payload = event.payload.as_object()?;
+                let review_id = payload.get("review_id")?.as_str()?;
+                Some(json!({
+                    "review_id": review_id,
+                    "event_id": event.id,
+                    "request_id": event.request_id,
+                    "acceptance": payload.get("acceptance").cloned().unwrap_or_else(|| json!({})),
+                    "gate_digest": payload.get("gate_digest").cloned().unwrap_or(Value::Null),
+                    "group_ids": payload.get("group_ids").cloned().unwrap_or_else(|| json!([])),
+                    "evidence": payload.get("evidence").cloned().unwrap_or_else(|| json!([])),
+                    "replay": format!("/v1/operations/gate-reviews?review_id={review_id}"),
+                    "readiness_claimed": false
+                }))
+            })
+            .collect::<Vec<_>>();
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "workflow": "operations_gate_reviews",
+                "schema": "bioprism-operations-gate-reviews/0.1",
+                "review_id": review_id,
+                "found": !reviews.is_empty(),
+                "page": page,
+                "reviews": reviews,
+                "review_count": reviews.len(),
+                "durability": {
+                    "event_checkpoint_configured": self.config.event_state_path.is_some(),
+                    "durable_across_restart": self.config.event_state_path.is_some(),
+                    "persistence_endpoint": "/v1/events/persistence"
+                },
+                "readiness_claimed": false,
+                "guarantees": [
+                    "review records are read from the bounded retained event log",
+                    "content-addressed review IDs and event cursors make the acceptance replayable",
+                    "retention gaps remain visible instead of being presented as complete history",
+                    "cross-restart durability is true only when the event checkpoint is configured"
+                ],
+                "non_claims": [
+                    "a retained operator review is not scientific, clinical, regulatory, or deployment approval"
+                ]
+            }),
+        )
+    }
+
+    fn create_operations_gate_review(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let object = match self.json_object(request) {
+            Ok(object) => object,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let acceptance = Value::Object(object.clone());
+        if let Err(error) = validate_operations_gate_acceptance_value(&acceptance, false) {
+            return self.error(422, "invalid_operations_gate_review", &error, request_id);
+        }
+        let snapshot = self.operations_gate_snapshot();
+        let group_ids = object
+            .get("group_ids")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let rows = operations_gate_review_rows(&snapshot, &group_ids);
+        if rows.len() != group_ids.len() {
+            return self.error(
+                422,
+                "operations_gate_review_unresolved_group",
+                "every reviewed group_id must exist in the current operations gate catalogue",
+                request_id,
+            );
+        }
+        let gate_digest = snapshot.get("gate_digest").cloned().unwrap_or(Value::Null);
+        let match_arguments = json!({ "operations_gate_acceptance": acceptance.clone() });
+        if !operations_gate_acceptance_matches(&match_arguments, &group_ids, &gate_digest, &rows) {
+            return self.error(
+                422,
+                "operations_gate_review_not_ready",
+                "a review requires a current gate digest and every selected group to be review_required with all six accepted gates",
+                request_id,
+            );
+        }
+        let canonical = operations_gate_acceptance_canonical(&acceptance)
+            .ok_or_else(|| "operations gate review could not be canonicalized".to_string());
+        let canonical = match canonical {
+            Ok(value) => value,
+            Err(error) => return self.error(500, "review_digest_failed", &error, request_id),
+        };
+        let canonical_bytes = match serde_json::to_vec(&canonical) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return self.error(
+                    500,
+                    "review_digest_failed",
+                    &format!("operations gate review could not be digested: {error}"),
+                    request_id,
+                )
+            }
+        };
+        let review_id = hex_digest(&Sha256::digest(&canonical_bytes));
+        let mut recorded_acceptance = object;
+        recorded_acceptance.insert("review_id".into(), json!(review_id));
+        let payload = json!({
+            "workflow": "operations_gate_review",
+            "schema": "bioprism-operations-gate-review/0.1",
+            "review_id": review_id,
+            "acceptance": recorded_acceptance,
+            "gate_digest": gate_digest,
+            "group_ids": group_ids,
+            "evidence": rows,
+            "readiness_claimed": false
+        });
+        let event = {
+            let mut events = match self.events.lock() {
+                Ok(events) => events,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "event_log_unavailable",
+                        "event log is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            match events.emit(
+                "operations.gate_review.accepted",
+                "operations_gate_review",
+                request_id,
+                payload.clone(),
+            ) {
+                Ok(event) => event,
+                Err(error) => return self.error(500, "event_emit_failed", &error, request_id),
+            }
+        };
+        if let Err(error) = self.event_persistence.persist() {
+            return self.error(503, "event_persistence_unavailable", &error, request_id);
+        }
+        HttpResponse::json(
+            201,
+            &json!({
+                "ok": true,
+                "workflow": "operations_gate_review",
+                "schema": "bioprism-operations-gate-review/0.1",
+                "review_id": review_id,
+                "event_id": event.id,
+                "request_id": request_id,
+                "acceptance": payload["acceptance"],
+                "gate_digest": payload["gate_digest"],
+                "group_ids": payload["group_ids"],
+                "evidence": payload["evidence"],
+                "replay": format!("/v1/operations/gate-reviews?review_id={review_id}"),
+                "durability": {
+                    "event_checkpoint_configured": self.config.event_state_path.is_some(),
+                    "durable_across_restart": self.config.event_state_path.is_some(),
+                    "persistence_endpoint": "/v1/events/persistence"
+                },
+                "readiness_claimed": false,
+                "guarantees": [
+                    "the acceptance is appended to the retained event log before the success response",
+                    "the review ID is a content hash of the normalized acceptance",
+                    "missions must present this retained review ID and matching acceptance before execution",
+                    "cross-restart durability is true only when the event checkpoint is configured"
+                ],
+                "non_claims": [
+                    "the review is not scientific, clinical, regulatory, or deployment approval"
+                ]
+            }),
+        )
+    }
+
+    fn operations_gate_review_matches(&self, arguments: &Value, gate_digest: &Value) -> bool {
+        let Some(acceptance) = arguments
+            .get("operations_gate_acceptance")
+            .and_then(Value::as_object)
+        else {
+            return false;
+        };
+        let Some(review_id) = acceptance.get("review_id").and_then(Value::as_str) else {
+            return false;
+        };
+        let Some(current_fingerprint) =
+            operations_gate_acceptance_canonical(&Value::Object(acceptance.clone()))
+        else {
+            return false;
+        };
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => return false,
+        };
+        let page = match events.events_for_operations_gate_review(0, 1000, review_id) {
+            Ok(page) => page,
+            Err(_) => return false,
+        };
+        page.events.iter().any(|event| {
+            event.payload.get("review_id").and_then(Value::as_str) == Some(review_id)
+                && event.payload.get("gate_digest") == Some(gate_digest)
+                && event
+                    .payload
+                    .get("acceptance")
+                    .and_then(operations_gate_acceptance_canonical)
+                    .is_some_and(|fingerprint| fingerprint == current_fingerprint)
+        })
+    }
+
+    fn operations_gate_projection(&self, arguments: &Value) -> Value {
+        let requirements = mission_domain_group_requirements(arguments);
+        let snapshot = self.operations_gate_snapshot();
         let group_ids = requirements
             .get("group_ids")
             .and_then(Value::as_array)
@@ -1603,12 +1890,14 @@ impl ApiRouter {
             "review_required"
         };
         let gate_digest = snapshot.get("gate_digest").cloned().unwrap_or(Value::Null);
-        let acceptance_valid = all_review_required
-            && operations_gate_acceptance_matches(arguments, &group_ids, &gate_digest, &rows);
+        let acceptance_matches =
+            operations_gate_acceptance_matches(arguments, &group_ids, &gate_digest, &rows);
+        let review_present = self.operations_gate_review_matches(arguments, &gate_digest);
+        let acceptance_valid = all_review_required && acceptance_matches && review_present;
         json!({
             "schema": "bioprism-operations-preflight-evidence/0.1",
             "gate_digest": gate_digest,
-            "gate_digest_scope": "response_without_gate_digest",
+            "gate_digest_scope": "tool_evidence_projection_without_gate_digest",
             "group_ids": group_ids,
             "groups": rows,
             "unresolved_steps": unresolved_steps,
@@ -1616,14 +1905,17 @@ impl ApiRouter {
             "decision": decision,
             "acceptance_required": mission_execution_requested(arguments),
             "acceptance_present": arguments.get("operations_gate_acceptance").is_some(),
+            "review_present": review_present,
+            "acceptance_matches_current_gates": acceptance_matches,
             "acceptance_valid": acceptance_valid,
             "dispatch_prerequisite": if acceptance_valid { "satisfied" } else { "acceptance_required" },
             "gate_endpoint": "/v1/operations/gates?after=0&limit=256",
+            "review_endpoint": "/v1/operations/gate-reviews",
             "readiness_claimed": false,
             "guarantees": [
                 "mission steps are mapped to every matching workspace capability group by exact tool name",
                 "all six evidence channels remain separate from the mission execution policy",
-                "execution acceptance is bound to the current gate digest and selected group set"
+                "execution acceptance is bound to the current gate digest, selected group set, and retained review event"
             ],
             "non_claims": [
                 "scientific validity, clinical safety, or deployment authorization",
@@ -1753,6 +2045,7 @@ impl ApiRouter {
                     "operations_snapshot": "/v1/operations/snapshot",
                     "operations_domains": "/v1/operations/domains",
                     "operations_gates": "/v1/operations/gates",
+                    "operations_gate_reviews": "/v1/operations/gate-reviews",
                     "operations_handoff": "/v1/operations/handoff",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
@@ -1796,6 +2089,7 @@ impl ApiRouter {
                     "domain_coverage": true,
                     "operations_domains": true,
                     "operations_gates": true,
+                    "operations_gate_reviews": true,
                     "operations_handoff": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
@@ -3335,6 +3629,7 @@ impl ApiRouter {
                     "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
                     "/v1/operations/domains": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain observed activity projection" } } } },
                     "/v1/operations/gates": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain evidence gate projection without readiness claims" } } } },
+                    "/v1/operations/gate-reviews": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }], "responses": { "200": { "description": "durable cursor page of replayable operations gate reviews" } } }, "post": { "responses": { "201": { "description": "content-addressed operations gate review record" } } } },
                     "/v1/operations/handoff": { "post": { "responses": { "200": { "description": "content-addressed, non-executing domain routing handoff" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
@@ -3730,6 +4025,7 @@ fn operations_handoff_value(arguments: &serde_json::Map<String, Value>) -> Resul
             "group_id": id,
             "required_gates": operations_required_gates(),
             "gate_endpoint": "/v1/operations/gates?after=0&limit=256",
+            "review_endpoint": "/v1/operations/gate-reviews",
             "acceptance_field": "operations_gate_acceptance",
             "review_required_before_dispatch": true
         });
@@ -3844,6 +4140,7 @@ fn operations_handoff_value(arguments: &serde_json::Map<String, Value>) -> Resul
             "group_ids": selected_group_ids,
             "required_gates": operations_required_gates(),
             "gate_endpoint": "/v1/operations/gates?after=0&limit=256",
+            "review_endpoint": "/v1/operations/gate-reviews",
             "acceptance_field": "operations_gate_acceptance",
             "review_required_before_dispatch": true,
             "readiness_claimed": false
@@ -3854,7 +4151,7 @@ fn operations_handoff_value(arguments: &serde_json::Map<String, Value>) -> Resul
             "inspect exact missing tool names and run capability_audit when handoff_status requires_catalogue_review",
             "submit route_request to capability_route for ranked candidates",
             "review caller-selected tools with capability_route_review before mission_preflight",
-            "fetch operations_gates and attach an explicit operations_gate_acceptance review to execution",
+            "create and replay an operations_gate_review, then attach its retained acceptance to execution",
             "execute only after the returned mission plan and domain-specific evidence are accepted"
         ],
         "guarantees": [
@@ -3958,18 +4255,44 @@ fn validate_operations_gate_acceptance(arguments: &Value) -> Result<(), String> 
     let Some(value) = arguments.get("operations_gate_acceptance") else {
         return Ok(());
     };
+    validate_operations_gate_acceptance_value(value, true)
+}
+
+fn validate_operations_gate_acceptance_value(
+    value: &Value,
+    require_review_id: bool,
+) -> Result<(), String> {
     let object = value
         .as_object()
         .ok_or_else(|| "operations_gate_acceptance must be an object".to_string())?;
     for key in object.keys() {
         if !matches!(
             key.as_str(),
-            "gate_digest" | "reviewer" | "rationale" | "group_ids" | "accepted_gates"
+            "gate_digest" | "reviewer" | "rationale" | "group_ids" | "accepted_gates" | "review_id"
         ) {
             return Err(format!(
                 "operations_gate_acceptance does not accept the {key:?} field"
             ));
         }
+    }
+    if require_review_id {
+        let review_id = object
+            .get("review_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                "operations_gate_acceptance.review_id must be a 64-character digest".to_string()
+            })?;
+        if review_id.len() != 64
+            || !review_id
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(
+                "operations_gate_acceptance.review_id must be lowercase hexadecimal".into(),
+            );
+        }
+    } else if object.contains_key("review_id") {
+        return Err("operations gate review requests must not provide review_id".into());
     }
     let gate_digest = object
         .get("gate_digest")
@@ -4045,6 +4368,80 @@ fn validate_operations_gate_acceptance(arguments: &Value) -> Result<(), String> 
         }
     }
     Ok(())
+}
+
+fn operations_gate_acceptance_canonical(value: &Value) -> Option<Value> {
+    let object = value.as_object()?;
+    let mut group_ids = object
+        .get("group_ids")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    group_ids.sort();
+    let mut accepted_gates = BTreeMap::new();
+    for (group_id, gates) in object.get("accepted_gates")?.as_object()? {
+        let mut gates = gates
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        gates.sort();
+        accepted_gates.insert(group_id.clone(), json!(gates));
+    }
+    Some(json!({
+        "gate_digest": object.get("gate_digest")?,
+        "reviewer": object.get("reviewer")?,
+        "rationale": object.get("rationale")?,
+        "group_ids": group_ids,
+        "accepted_gates": accepted_gates
+    }))
+}
+
+fn operations_gate_review_rows(snapshot: &Value, group_ids: &[Value]) -> Vec<Value> {
+    group_ids
+        .iter()
+        .filter_map(Value::as_str)
+        .filter_map(|group_id| {
+            snapshot
+                .get("groups")
+                .and_then(Value::as_array)
+                .and_then(|groups| {
+                    groups
+                        .iter()
+                        .find(|group| group.get("id").and_then(Value::as_str) == Some(group_id))
+                })
+                .map(|group| {
+                    let gates = group.get("gates").and_then(Value::as_object);
+                    let missing_gates = operations_required_gates()
+                        .iter()
+                        .filter(|gate| {
+                            let expected = if **gate == "catalogue" {
+                                "pass"
+                            } else {
+                                "observed"
+                            };
+                            gates
+                                .and_then(|gates| gates.get(**gate))
+                                .and_then(|gate| gate.get("state"))
+                                .and_then(Value::as_str)
+                                != Some(expected)
+                        })
+                        .map(|gate| (*gate).to_string())
+                        .collect::<Vec<_>>();
+                    json!({
+                        "group_id": group_id,
+                        "gate_state": group.get("gate_state").cloned().unwrap_or_else(|| json!("insufficient_evidence")),
+                        "missing_gates": missing_gates,
+                        "gates": group.get("gates").cloned().unwrap_or_else(|| json!({})),
+                        "last_event_id": group.get("last_event_id").cloned().unwrap_or(Value::Null),
+                        "readiness_claimed": false
+                    })
+                })
+        })
+        .collect()
 }
 
 fn operations_gate_acceptance_matches(
@@ -5156,7 +5553,10 @@ mod tests {
         assert_eq!(gates["summary"]["readiness_claimed"], false);
         assert_eq!(gates["gate_policy"]["readiness_claimed"], false);
         assert_eq!(gates["gate_digest"].as_str().unwrap().len(), 64);
-        assert_eq!(gates["gate_digest_scope"], "response_without_gate_digest");
+        assert_eq!(
+            gates["gate_digest_scope"],
+            "tool_evidence_projection_without_gate_digest"
+        );
         let biological = gates["groups"]
             .as_array()
             .unwrap()
@@ -5185,6 +5585,88 @@ mod tests {
 
         let invalid = router.handle(request("GET", "/v1/operations/gates?limit=257", json!({})));
         assert_eq!(invalid.status, 422);
+    }
+
+    #[test]
+    fn operations_gate_reviews_are_content_addressed_replayable_and_restart_aware() {
+        let path = test_state_path("gate-reviews");
+        let config = ApiConfig {
+            event_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let completed = json!({
+            "result": {
+                "isError": false,
+                "content": [{"type": "text", "text": "{}"}]
+            }
+        });
+        router.record_tool_event("review-gate-1", "modality_catalog", &completed);
+        router.record_tool_event("review-gate-2", "bioeval_reference_audit", &completed);
+        router.record_tool_event("review-gate-3", "safety_release_gate", &completed);
+        let gates = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=256",
+            json!({}),
+        ));
+        let gates: Value = serde_json::from_slice(&gates.body).unwrap();
+        let review = router.handle(request(
+            "POST",
+            "/v1/operations/gate-reviews",
+            json!({
+                "gate_digest": gates["gate_digest"],
+                "reviewer": "operator-1",
+                "rationale": "reviewed bounded evidence page",
+                "group_ids": ["biological_domains"],
+                "accepted_gates": {
+                    "biological_domains": operations_required_gates()
+                }
+            }),
+        ));
+        assert_eq!(review.status, 201);
+        let review: Value = serde_json::from_slice(&review.body).unwrap();
+        let review_id = review["review_id"].as_str().unwrap().to_string();
+        assert_eq!(review_id.len(), 64);
+        assert_eq!(review["acceptance"]["review_id"], review["review_id"]);
+
+        let replay = router.handle(request(
+            "GET",
+            &format!("/v1/operations/gate-reviews?review_id={review_id}"),
+            json!({}),
+        ));
+        assert_eq!(replay.status, 200);
+        let replay: Value = serde_json::from_slice(&replay.body).unwrap();
+        assert_eq!(replay["found"], true);
+        assert_eq!(replay["review_count"], 1);
+
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let preflight = restored.handle(request(
+            "POST",
+            "/v1/missions/preflight",
+            json!({
+                "mission_id": "review-bound-mission",
+                "goal": "preview reviewed biological route",
+                "steps": [{
+                    "id": "catalog",
+                    "domain": "biological",
+                    "capability": "catalogue",
+                    "objective": "inspect modality support",
+                    "tool": "modality_catalog"
+                }],
+                "policy": {"execute": true, "allowed_tools": ["modality_catalog"]},
+                "operations_gate_acceptance": review["acceptance"]
+            }),
+        ));
+        assert_eq!(preflight.status, 200);
+        let preflight: Value = serde_json::from_slice(&preflight.body).unwrap();
+        assert_eq!(preflight["operations_evidence"]["review_present"], true);
+        assert_eq!(preflight["operations_evidence"]["acceptance_valid"], true);
+        assert_eq!(
+            preflight["operations_evidence"]["decision"],
+            "review_required"
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

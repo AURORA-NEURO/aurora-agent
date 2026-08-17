@@ -673,9 +673,11 @@ separate; its `observation_policy` explicitly does not claim readiness.
 transport completion, evaluation, safety, and release channels. Its group state is explicitly
 `catalogue_blocked`, `insufficient_evidence`, or `review_required`; the type contract preserves
 `readiness_claimed: false` even when all locally observed channels are present.
-`AgentMissionArgs.operations_gate_acceptance` carries the matching `gate_digest`, reviewer,
-rationale, exact group IDs, and accepted gate names. The HTTP API revalidates that attestation
-against the current retained evidence before accepting an executable mission.
+`createOperationsGateReview()` persists a current review and `operationsGateReviews()` replays it
+by cursor or content-addressed `review_id`. `AgentMissionArgs.operations_gate_acceptance` then
+carries that retained `review_id`, matching `gate_digest`, reviewer, rationale, exact group IDs,
+and accepted gate names. The HTTP API revalidates the retained review against current evidence
+before accepting an executable mission.
 
 ```typescript
 const page = await api.events(0, 100);

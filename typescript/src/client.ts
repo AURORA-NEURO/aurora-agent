@@ -32,6 +32,9 @@ import type {
   OperationsHandoffArgs,
   OperationsDomainActivity,
   OperationsDomainGates,
+  OperationsGateReview,
+  OperationsGateReviewRequest,
+  OperationsGateReviews,
   SafetyReleaseGateArgs,
   SafetyReleaseGateResult,
   MedicalBoundaryArgs,
@@ -498,6 +501,43 @@ export class ApiClient {
       undefined,
       options,
     );
+  }
+
+  /** Replay durable operations gate reviews with explicit cursor and retention evidence. */
+  async operationsGateReviews(
+    after = 0,
+    limit = 100,
+    reviewId?: string,
+    options?: ClientRequestOptions,
+  ): Promise<OperationsGateReviews> {
+    cursor(after, "after");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) {
+      throw new ArgumentError("limit must be 1..=256");
+    }
+    if (reviewId !== undefined) validateReviewId(reviewId);
+    const suffix = reviewId === undefined ? "" : `&review_id=${encodeURIComponent(reviewId)}`;
+    return this.request<OperationsGateReviews>(
+      "GET",
+      `/v1/operations/gate-reviews?after=${after}&limit=${limit}${suffix}`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Persist a current operations gate review before binding it to executable mission arguments. */
+  async createOperationsGateReview(
+    args: OperationsGateReviewRequest,
+    options?: ClientRequestOptions,
+  ): Promise<OperationsGateReview> {
+    if (!isObject(args)) throw new ArgumentError("operations gate review arguments must be an object");
+    validateReviewId(args.gate_digest);
+    visible(args.reviewer, "reviewer", 256);
+    visible(args.rationale, "rationale", 2048);
+    if (!Array.isArray(args.group_ids) || args.group_ids.length < 1 || args.group_ids.length > 64 || args.group_ids.some((value) => typeof value !== "string" || value.trim().length === 0 || value.length > 128)) {
+      throw new ArgumentError("group_ids must contain 1..=64 visible strings");
+    }
+    if (!isObject(args.accepted_gates)) throw new ArgumentError("accepted_gates must be an object");
+    return this.request<OperationsGateReview>("POST", "/v1/operations/gate-reviews", args, options);
   }
 
   async tools(options?: ClientRequestOptions): Promise<ToolsResponse["tools"]> {

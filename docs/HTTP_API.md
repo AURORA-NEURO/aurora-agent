@@ -172,13 +172,19 @@ requested bounded event page and then shown on each matched domain group; catalo
 activity, and transport completion remain group-specific. This is an evidence-shaping rule, not
 proof that a domain-specific scientific or safety claim has been established.
 
-The gate response includes a `gate_digest` over the response without the digest field. A handoff
-copies the required gate names and the `operations_gate_acceptance` field into each execution
-prerequisite. `/v1/missions/preflight` returns `operations_evidence` for the mission’s exact tool
-and domain groups. A real HTTP mission with `policy.execute: true` must supply a visible `reviewer`,
-`rationale`, matching `gate_digest`, exact group IDs, and all six accepted gates per group; otherwise
-the API refuses it before queueing or dispatching any tool. This is an operator attestation boundary,
-not scientific, clinical, regulatory, or deployment approval.
+The gate response includes a `gate_digest` over the normalized tool-evidence projection without the
+digest field; non-tool review events do not change that digest, while retention changes remain
+visible. `POST /v1/operations/gate-reviews` records a current acceptance as a content-addressed
+retained event, and `GET /v1/operations/gate-reviews?review_id=...` replays it with its event
+cursor. It is durable across restart only when `event_state_path` is configured; the response
+exposes that boundary explicitly.
+A handoff copies the required gate names and the `operations_gate_acceptance` field into each
+execution prerequisite. `/v1/missions/preflight` returns `operations_evidence` for the mission’s
+exact tool and domain groups. A real HTTP mission with `policy.execute: true` must supply a retained
+`review_id`, visible `reviewer` and `rationale`, matching `gate_digest`, exact group IDs, and all
+six accepted gates per group; otherwise the API refuses it before queueing or dispatching any tool.
+This is an operator attestation boundary, not scientific, clinical, regulatory, or deployment
+approval.
 
 ## Asynchronous missions
 

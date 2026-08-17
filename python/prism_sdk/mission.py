@@ -260,8 +260,8 @@ def _step(value: MissionStep | Mapping[str, Any]) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
-class OperationsGateAcceptance:
-    """Operator attestation binding an executable mission to observed gate evidence."""
+class OperationsGateReviewRequest:
+    """Request a durable operator review for the current operations gate digest."""
 
     gate_digest: str
     reviewer: str
@@ -315,6 +315,25 @@ class OperationsGateAcceptance:
                 group_id: list(gates) for group_id, gates in self.accepted_gates.items()
             },
         }
+
+
+@dataclass(frozen=True)
+class OperationsGateAcceptance(OperationsGateReviewRequest):
+    """Retained operator review binding an executable mission to observed gate evidence."""
+
+    review_id: str
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if (
+            not isinstance(self.review_id, str)
+            or len(self.review_id) != 64
+            or any(character not in "0123456789abcdef" for character in self.review_id)
+        ):
+            raise ArgumentError("review_id must be 64 lowercase hexadecimal characters")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**super().to_dict(), "review_id": self.review_id}
 
 
 @dataclass(frozen=True)
@@ -1486,6 +1505,7 @@ __all__ = [
     "MissionBinding",
     "MissionAssembly",
     "MissionPolicy",
+    "OperationsGateReviewRequest",
     "OperationsGateAcceptance",
     "MissionPreflight",
     "MissionExecutionReport",

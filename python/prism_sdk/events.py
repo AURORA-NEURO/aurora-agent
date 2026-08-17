@@ -906,7 +906,7 @@ class OperationsDomainGates:
         gate_digest_scope = _text(
             "operations domain gates gate_digest_scope", raw.get("gate_digest_scope")
         )
-        if gate_digest_scope != "response_without_gate_digest":
+        if gate_digest_scope != "tool_evidence_projection_without_gate_digest":
             raise ArgumentError("operations domain gates digest scope is invalid")
         event_cursor = _mapping("operations domain gates event_cursor", raw.get("event_cursor"))
         for name in ("after", "next_after", "returned_events", "dropped_events"):
@@ -964,6 +964,105 @@ class OperationsDomainGates:
             guarantees=_texts("operations domain gates guarantees", raw.get("guarantees")),
             non_claims=_texts("operations domain gates non_claims", raw.get("non_claims")),
             links=links,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class OperationsGateReview:
+    """One durable, content-addressed operator review of bounded gate evidence."""
+
+    raw: dict[str, Any]
+    review_id: str
+    event_id: int
+    request_id: str
+    acceptance: dict[str, Any]
+    gate_digest: str
+    group_ids: tuple[str, ...]
+    evidence: tuple[dict[str, Any], ...]
+    replay: str
+    readiness_claimed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsGateReview":
+        raw = _mapping("operations gate review", value)
+        review_id = _review_id("operations gate review review_id", raw.get("review_id"))
+        acceptance = _mapping("operations gate review acceptance", raw.get("acceptance"))
+        if acceptance.get("review_id") != review_id:
+            raise ArgumentError("operations gate review acceptance review_id must match")
+        evidence_raw = raw.get("evidence")
+        if not isinstance(evidence_raw, Sequence) or isinstance(evidence_raw, (str, bytes)):
+            raise ArgumentError("operations gate review evidence must be an array")
+        if raw.get("readiness_claimed") is not False:
+            raise ArgumentError("operations gate review must not claim readiness")
+        return cls(
+            raw=raw,
+            review_id=review_id,
+            event_id=_non_negative("operations gate review event_id", raw.get("event_id")),
+            request_id=_text("operations gate review request_id", raw.get("request_id")),
+            acceptance=acceptance,
+            gate_digest=_review_id("operations gate review gate_digest", raw.get("gate_digest")),
+            group_ids=_texts("operations gate review group_ids", raw.get("group_ids")),
+            evidence=tuple(_mapping("operations gate review evidence row", item) for item in evidence_raw),
+            replay=_text("operations gate review replay", raw.get("replay")),
+            readiness_claimed=False,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class OperationsGateReviews:
+    """Cursor page of durable operations gate-review records with retention evidence."""
+
+    raw: dict[str, Any]
+    workflow: str
+    schema: str
+    review_id: str | None
+    found: bool
+    page: EventPage
+    reviews: tuple[OperationsGateReview, ...]
+    review_count: int
+    readiness_claimed: bool
+    guarantees: tuple[str, ...]
+    non_claims: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsGateReviews":
+        raw = _mapping("operations gate reviews", value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("operations gate reviews must be successful")
+        if raw.get("workflow") != "operations_gate_reviews":
+            raise ArgumentError("operations gate reviews workflow is invalid")
+        if raw.get("schema") != "bioprism-operations-gate-reviews/0.1":
+            raise ArgumentError("operations gate reviews schema is invalid")
+        review_id = raw.get("review_id")
+        if review_id is not None:
+            review_id = _review_id("operations gate reviews review_id", review_id)
+        reviews_value = raw.get("reviews")
+        if not isinstance(reviews_value, Sequence) or isinstance(reviews_value, (str, bytes)):
+            raise ArgumentError("operations gate reviews reviews must be an array")
+        reviews = tuple(OperationsGateReview.from_wire(item) for item in reviews_value)
+        review_count = _non_negative("operations gate reviews review_count", raw.get("review_count"))
+        if review_count != len(reviews) or raw.get("found") is not (len(reviews) > 0):
+            raise ArgumentError("operations gate reviews count and found flag must reconcile")
+        if raw.get("readiness_claimed") is not False:
+            raise ArgumentError("operations gate reviews must not claim readiness")
+        return cls(
+            raw=raw,
+            workflow="operations_gate_reviews",
+            schema="bioprism-operations-gate-reviews/0.1",
+            review_id=review_id,
+            found=len(reviews) > 0,
+            page=EventPage.from_wire(raw.get("page")),
+            reviews=reviews,
+            review_count=review_count,
+            readiness_claimed=False,
+            guarantees=_texts("operations gate reviews guarantees", raw.get("guarantees")),
+            non_claims=_texts("operations gate reviews non_claims", raw.get("non_claims")),
         )
 
     def to_dict(self) -> dict[str, Any]:

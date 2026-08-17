@@ -83,6 +83,8 @@ from .events import (
     OperationsHandoff,
     OperationsDomainActivity,
     OperationsDomainGates,
+    OperationsGateReview,
+    OperationsGateReviews,
     RecoveryMatrix,
     RouteReviewEvidence,
     SseSnapshot,
@@ -119,6 +121,7 @@ from .mission import (
     MissionPolicy,
     MissionPreflight,
     MissionRequest,
+    OperationsGateReviewRequest,
     MissionRouteSelection,
     MissionTracePage,
     mission_from_route as assemble_mission_from_route,
@@ -3497,6 +3500,41 @@ class ApiClient:
             self.request("GET", f"/v1/operations/gates?after={after}&limit={limit}")
         )
 
+    def operations_gate_reviews(
+        self, *, after: int = 0, limit: int = 100, review_id: str | None = None
+    ) -> OperationsGateReviews:
+        """Replay durable operations gate reviews with explicit cursor and retention evidence."""
+
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= MAX_OPERATIONS_SNAPSHOT_LIMIT
+        ):
+            raise ArgumentError(
+                f"limit must be between 1 and {MAX_OPERATIONS_SNAPSHOT_LIMIT}"
+            )
+        query = f"/v1/operations/gate-reviews?after={after}&limit={limit}"
+        if review_id is not None:
+            query += f"&review_id={quote(validate_review_id(review_id), safe='')}"
+        return OperationsGateReviews.from_wire(self.request("GET", query))
+
+    def create_operations_gate_review(
+        self, review: OperationsGateReviewRequest | Mapping[str, Any]
+    ) -> OperationsGateReview:
+        """Persist a current, content-addressed operator review before mission execution."""
+
+        if isinstance(review, OperationsGateReviewRequest):
+            payload = review.to_dict()
+        elif isinstance(review, Mapping):
+            payload = dict(review)
+        else:
+            raise ArgumentError("review must be an OperationsGateReviewRequest or mapping")
+        return OperationsGateReview.from_wire(
+            self.request("POST", "/v1/operations/gate-reviews", payload)
+        )
+
     def flush_event_persistence(self) -> EventPersistenceStatus:
         """Force an event cursor checkpoint and return typed bounded status."""
 
@@ -3840,6 +3878,25 @@ class AsyncApiClient:
         return await asyncio.to_thread(
             self.client.operations_domain_gates, after=after, limit=limit
         )
+
+    async def operations_gate_reviews(
+        self, *, after: int = 0, limit: int = 100, review_id: str | None = None
+    ) -> OperationsGateReviews:
+        """Async replay of durable operations gate reviews."""
+
+        return await asyncio.to_thread(
+            self.client.operations_gate_reviews,
+            after=after,
+            limit=limit,
+            review_id=review_id,
+        )
+
+    async def create_operations_gate_review(
+        self, review: OperationsGateReviewRequest | Mapping[str, Any]
+    ) -> OperationsGateReview:
+        """Async persistence of one current operations gate review."""
+
+        return await asyncio.to_thread(self.client.create_operations_gate_review, review)
 
     async def flush_event_persistence(self) -> EventPersistenceStatus:
         """Async forced event cursor checkpoint with typed bounded status."""

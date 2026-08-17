@@ -770,6 +770,42 @@ impl EventLog {
         })
     }
 
+    /// Return retained operations gate-review events for one content-addressed review ID.
+    /// Review records live in the same durable event log as tool evidence so replay exposes the
+    /// exact cursor, retention gap, and checkpoint semantics used by the rest of the API.
+    pub fn events_for_operations_gate_review(
+        &self,
+        after: u64,
+        limit: usize,
+        review_id: &str,
+    ) -> Result<EventPage, String> {
+        validate_review_id(review_id)?;
+        self.events_matching(after, limit, |event| {
+            event.subject == "operations_gate_review"
+                && event
+                    .payload
+                    .get("review_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == review_id)
+        })
+    }
+
+    /// Return retained operations gate-review events with an optional exact content-addressed
+    /// filter. The unfiltered form is bounded by the same event cursor and retention window.
+    pub fn operations_gate_reviews(
+        &self,
+        after: u64,
+        limit: usize,
+        review_id: Option<&str>,
+    ) -> Result<EventPage, String> {
+        if let Some(review_id) = review_id {
+            return self.events_for_operations_gate_review(after, limit, review_id);
+        }
+        self.events_matching(after, limit, |event| {
+            event.subject == "operations_gate_review"
+        })
+    }
+
     /// Return retained delivery-receipt tool events for one caller-supplied receipt identifier.
     ///
     /// The event log deliberately keeps this as a projection query rather than a second mutable

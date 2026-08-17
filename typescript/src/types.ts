@@ -6961,6 +6961,7 @@ export interface AgentMissionPolicy extends JsonObject {
 }
 
 export interface OperationsGateAcceptance extends JsonObject {
+  review_id: string;
   gate_digest: string;
   reviewer: string;
   rationale: string;
@@ -7338,7 +7339,7 @@ export interface OperationsDomainGates extends JsonObject {
   workflow: "operations_domain_gates";
   schema: "bioprism-operations-domain-gates/0.1";
   gate_digest: string;
-  gate_digest_scope: "response_without_gate_digest";
+  gate_digest_scope: "tool_evidence_projection_without_gate_digest";
   event_cursor: {
     after: number;
     next_after: number;
@@ -7369,6 +7370,40 @@ export interface OperationsDomainGates extends JsonObject {
   guarantees: string[];
   non_claims: string[];
   links: Record<string, string>;
+}
+
+export interface OperationsGateReviewRequest extends JsonObject {
+  gate_digest: string;
+  reviewer: string;
+  rationale: string;
+  group_ids: string[];
+  accepted_gates: Record<string, string[]>;
+}
+
+export interface OperationsGateReview extends JsonObject {
+  review_id: string;
+  event_id: number;
+  request_id: string;
+  acceptance: OperationsGateAcceptance;
+  gate_digest: string;
+  group_ids: string[];
+  evidence: JsonObject[];
+  replay: string;
+  readiness_claimed: false;
+}
+
+export interface OperationsGateReviews extends JsonObject {
+  ok: boolean;
+  workflow: "operations_gate_reviews";
+  schema: "bioprism-operations-gate-reviews/0.1";
+  review_id: string | null;
+  found: boolean;
+  page: EventPage;
+  reviews: OperationsGateReview[];
+  review_count: number;
+  readiness_claimed: false;
+  guarantees: string[];
+  non_claims: string[];
 }
 
 export interface OperationsSnapshot extends JsonObject {

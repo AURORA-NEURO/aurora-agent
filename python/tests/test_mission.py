@@ -136,6 +136,7 @@ class MissionPreflightTests(unittest.TestCase):
             "reviewed the current bounded gate projection",
             ("biological_domains",),
             {"biological_domains": gates},
+            "e" * 64,
         )
         request = MissionRequest(
             "mission-gated",

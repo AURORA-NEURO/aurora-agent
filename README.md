@@ -358,6 +358,9 @@ group. A completed local call is never promoted into a readiness verdict: groups
 Handoffs now carry an `operations_gate_acceptance` execution prerequisite; preflight binds the
 mission’s exact tools to matching capability groups and the current `gate_digest`, while executable
 HTTP missions are refused until an operator acceptance covers every required gate for every group.
+Operators can persist that acceptance through `POST /v1/operations/gate-reviews` and replay it by
+content-addressed `review_id`; executable missions require the retained review record to survive
+the same event checkpoint and still match current evidence.
 `GET /v1/webhooks/subscriptions/{id}/attempts` route and matching SDK helpers expose the
 provenance cursor with explicit retention gaps and dropped-row accounting. Receipt-bearing rows
 are also available through `/v1/delivery-receipts/{receipt_id}/attempts`, which joins the same

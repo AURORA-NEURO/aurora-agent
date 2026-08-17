@@ -220,7 +220,7 @@ from .errors import (
     ToolRefusal,
     TransportError,
 )
-from .events import ApiEvent, DeliveryAttempt, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, MAX_OPERATIONS_DOMAIN_GROUPS, MAX_OPERATIONS_DOMAIN_TOOLS, MAX_OPERATIONS_SNAPSHOT_LIMIT, OperationsDomainActivity, OperationsDomainActivityGroup, OperationsDomainCoverage, OperationsDomainGateGroup, OperationsDomainGates, OperationsDomainGroup, OperationsHandoff, OperationsHandoffGroup, OperationsSnapshot, RecoveryBoundary, RecoveryMatrix, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_receipt_id, validate_review_id
+from .events import ApiEvent, DeliveryAttempt, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeliveryView, EventPage, EventPersistenceStatus, MAX_EVENT_PAGE, MAX_OPERATIONS_DOMAIN_GROUPS, MAX_OPERATIONS_DOMAIN_TOOLS, MAX_OPERATIONS_SNAPSHOT_LIMIT, OperationsDomainActivity, OperationsDomainActivityGroup, OperationsDomainCoverage, OperationsDomainGateGroup, OperationsDomainGates, OperationsDomainGroup, OperationsGateReview, OperationsGateReviews, OperationsHandoff, OperationsHandoffGroup, OperationsSnapshot, RecoveryBoundary, RecoveryMatrix, RouteReviewEvidence, SseEvent, SseSnapshot, parse_sse, validate_receipt_id, validate_review_id
 from .evidence import (
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
@@ -280,6 +280,7 @@ from .mission import (
     MissionInventorySummary,
     MissionPersistenceStatus,
     MissionPolicy,
+    OperationsGateReviewRequest,
     OperationsGateAcceptance,
     MissionProgress,
     MissionPreflight,
@@ -2241,6 +2242,8 @@ __all__ = [
     "OperationsDomainActivityGroup",
     "OperationsDomainGates",
     "OperationsDomainGateGroup",
+    "OperationsGateReview",
+    "OperationsGateReviews",
     "OperationsHandoff",
     "OperationsHandoffGroup",
     "MAX_OPERATIONS_SNAPSHOT_LIMIT",
@@ -2742,6 +2745,7 @@ __all__ = [
     "MISSION_TRACE_SCHEMA_VERSION",
     "MISSION_TRACE_EVENTS",
     "MissionPolicy",
+    "OperationsGateReviewRequest",
     "OperationsGateAcceptance",
     "MissionProgress",
     "MissionPreflight",
