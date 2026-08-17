@@ -213,6 +213,7 @@ pub mod claim;
 pub mod classify;
 pub mod cross_domain_audit;
 pub mod delivery_receipt;
+pub mod domain_acquisition;
 pub mod domain_evidence;
 pub mod domain_evidence_intake;
 pub mod domain_evidence_source;
@@ -289,6 +290,13 @@ pub use delivery_receipt::{
     build_delivery_receipt, verify_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
     DeliveryReceiptFinding, DeliveryReceiptRequest, DeliveryReceiptTarget,
     DeliveryReceiptVerification, DeliveryReceiptVerificationRequest, DELIVERY_RECEIPT_SCHEMA,
+};
+pub use domain_acquisition::{
+    build_domain_acquisition_catalogue, DomainAcquisitionCatalogue, DomainAcquisitionError,
+    DomainAcquisitionGroup, DomainAcquisitionQuery, DomainAcquisitionRoute, DomainAdapterRoute,
+    DomainInterpretationRoute, DomainTransportRoute, DOMAIN_ACQUISITION_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_WORKFLOW, MAX_DOMAIN_ACQUISITION_ADAPTERS, MAX_DOMAIN_ACQUISITION_DOMAINS,
+    MAX_DOMAIN_ACQUISITION_GROUPS,
 };
 pub use domain_evidence::{
     harmonize_domain_evidence, validate_domain_evidence_harmonization, DomainEvidenceError,

@@ -126,32 +126,33 @@ use bioprism_dataops::{
 use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
     audit_execution_provenance, build_dashboard, build_delivery_receipt,
-    build_domain_workflow_catalogue, execute_domain_evidence_source, instantiate_domain_workflow,
-    mission_claim_lineage_with_review, normalize_ci_provider_payload, plan_domain_evidence_source,
-    plan_mission, reconcile_domain_workflow, run_workbench, scaffold_domain_workflow,
-    standard_walkthroughs, verify_delivery_receipt, verify_mission_evidence_bundle,
-    ArtifactRegistry, CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery,
-    CapabilityRouteRequest, CiExecutionEvidenceRequest, CiProviderEvidenceRequest,
-    CiProviderNormalizationRequest, DeliveryReceiptRequest, DeliveryReceiptVerificationRequest,
-    DevPlatReport, DomainWorkflowReconciliationRegistry, EngineeringManifest,
-    EngineeringPlanRequest, EvidenceBundleRegistry, ExecutionProvenanceRequest,
-    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest,
-    MissionEvaluatorReplayRequest, MissionEvaluatorReviewRequest, MissionReport, MissionRequest,
-    MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
-    OperationalReadinessManifest, ReleasePipelineManifest, SandboxManifest, SandboxRuntimeManifest,
-    SecurityPrivacyManifest, SecurityProgramManifest, WorkbenchRequest, CAPABILITY_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
-    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
-    DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
-    DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW,
-    DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION, DOMAIN_REPORT_COVERAGE_WORKFLOW,
-    DOMAIN_REPORT_PROJECT_SCHEMA_VERSION, DOMAIN_REPORT_PROJECT_WORKFLOW,
-    DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA,
-    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS, MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION,
-    OPERATIONAL_READINESS_AUDIT_SCHEMA, RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA,
-    SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
-    WORKBENCH_SCHEMA_VERSION,
+    build_domain_acquisition_catalogue, build_domain_workflow_catalogue,
+    execute_domain_evidence_source, instantiate_domain_workflow, mission_claim_lineage_with_review,
+    normalize_ci_provider_payload, plan_domain_evidence_source, plan_mission,
+    reconcile_domain_workflow, run_workbench, scaffold_domain_workflow, standard_walkthroughs,
+    verify_delivery_receipt, verify_mission_evidence_bundle, ArtifactRegistry, CapabilityCatalogue,
+    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
+    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
+    DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
+    DomainWorkflowReconciliationRegistry, EngineeringManifest, EngineeringPlanRequest,
+    EvidenceBundleRegistry, ExecutionProvenanceRequest, MissionEvaluatorCatalogue,
+    MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
+    MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
+    SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
+    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
+    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
+    ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
+    SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1376,6 +1377,7 @@ impl Server {
             "domain_evidence_coverage" => self.domain_evidence_coverage(&arguments),
             "domain_evidence_source_plan" => self.domain_evidence_source_plan(&arguments),
             "domain_evidence_source_execute" => self.domain_evidence_source_execute(&arguments),
+            "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -7752,6 +7754,34 @@ impl Server {
                 "optional dependency absence or uncertainty is surfaced before execution",
                 "the planner does not fetch bytes, import packages, execute adapters, or grant credentials",
             ],
+        }))
+    }
+
+    fn domain_acquisition_catalogue(&self, arguments: &Value) -> Result<Value, String> {
+        let query: DomainAcquisitionQuery = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid domain acquisition query: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let report =
+            build_domain_acquisition_catalogue(&catalogue, &AdapterRegistry::default(), &query)
+                .map_err(|error| format!("domain acquisition catalogue refused: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_ACQUISITION_SCHEMA_VERSION,
+            "workflow": DOMAIN_ACQUISITION_WORKFLOW,
+            "catalogue": report,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "transport and adapter interpretation are exposed as separate planes for every selected declared domain",
+                "the report is bound to both the authoritative workspace catalogue digest and adapter registry digest",
+                "the operation performs no I/O, source retrieval, Python import, adapter execution, or credential resolution"
+            ],
+            "does_not_claim": [
+                "scope-label overlap is ontology resolution or scientific validity",
+                "declared transport membership proves an external source was called or is authentic",
+                "a native or Python-delegated route proves source-specific conformance or dependency availability"
+            ]
         }))
     }
 
@@ -29617,7 +29647,7 @@ fn dashboard_schema_is_valid(definition: &Value) -> bool {
 }
 
 pub fn workspace_capabilities() -> Value {
-    json!([
+    let mut catalogue = json!([
         {
             "id": "world_and_ingestion",
             "domains": ["world modeling", "data ingestion", "provenance"],
@@ -29851,7 +29881,42 @@ pub fn workspace_capabilities() -> Value {
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
-    ])
+    ]);
+    // Evidence acquisition is a cross-cutting capability: every declared domain can retain a
+    // bounded source plan, execute the in-process file/HTTP subset, and bind the response to
+    // intake. Keeping these memberships explicit lets the intake handlers enforce group/domain
+    // scope instead of treating the registry-operations group as a hidden universal escape hatch.
+    let cross_domain_tools = [
+        "domain_evidence_source_plan",
+        "domain_evidence_source_execute",
+        "domain_evidence_intake",
+        "domain_evidence_coverage",
+    ];
+    if let Some(groups) = catalogue.as_array_mut() {
+        for group in groups {
+            if let Some(tools) = group.get_mut("mcp_tools").and_then(Value::as_array_mut) {
+                for tool in cross_domain_tools {
+                    if !tools
+                        .iter()
+                        .any(|candidate| candidate.as_str() == Some(tool))
+                    {
+                        tools.push(Value::String(tool.into()));
+                    }
+                }
+            }
+            if group.get("id").and_then(Value::as_str) == Some("documentation_and_knowledge") {
+                if let Some(tools) = group.get_mut("mcp_tools").and_then(Value::as_array_mut) {
+                    if !tools
+                        .iter()
+                        .any(|candidate| candidate.as_str() == Some("domain_acquisition_catalogue"))
+                    {
+                        tools.push(Value::String("domain_acquisition_catalogue".into()));
+                    }
+                }
+            }
+        }
+    }
+    catalogue
 }
 
 pub fn tool_definitions() -> Vec<Value> {
@@ -30637,6 +30702,21 @@ pub fn tool_definitions() -> Vec<Value> {
                     "available_dependencies": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional caller-checked dependency names, for example pydicom, nibabel, anndata, pysam, or zarr. Omission means unknown, not installed." }
                 },
                 "required": ["source_id", "source_kind"]
+            }
+        }),
+        json!({
+            "name": "domain_acquisition_catalogue",
+            "description": "Build a deterministic acquisition and adapter-conformance route for every selected declared domain. Keeps bounded file/HTTP transport, caller-managed connector families, native adapters, Python-delegated adapters, domain-tool-only coverage, and unmapped domains separate; scope-label matches are routing hints only and this tool never fetches, imports, executes, or grants credentials.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Optional exact or prefix capability-group filter." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive substring filter over declared domain labels." },
+                    "include_adapters": { "type": "boolean", "description": "Include full matched adapter descriptors; defaults to false." },
+                    "max_groups": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Maximum selected capability groups; defaults to 64." },
+                    "max_domains": { "type": "integer", "minimum": 1, "maximum": 512, "description": "Maximum selected domain route rows; defaults to 512." }
+                },
+                "required": []
             }
         }),
         json!({

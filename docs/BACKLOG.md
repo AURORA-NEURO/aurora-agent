@@ -386,6 +386,14 @@ The SAM route now audits bounded text alignments, headers and sequence dictionar
 consistency, CIGAR query/reference accounting, coordinate bounds, optional-tag typing, and declared
 coordinate sort order without emitting read names, reference labels, sequences, qualities, or tag
 values. Binary BAM/CRAM remains an explicit dependency-gated route.
+The `domain_acquisition_catalogue` now joins the authoritative 29-group capability catalogue to
+the adapter registry without pretending that either registry alone is execution evidence. Every
+declared domain receives separate transport and interpretation rows, bounded file/plain-HTTP and
+caller-managed connector families remain distinct, and native/Python-delegated adapter matches
+retain their declared scope-label basis. The four evidence transport/intake tools are explicitly
+cross-cutting memberships for every group, making the existing source-plan and intake scope gates
+usable across the whole catalogue. This still leaves provider authentication, ontology resolution,
+source-specific conformance, and external execution as separate follow-on contracts.
 
 
 ## §11 Developer Platform — 6 uncovered

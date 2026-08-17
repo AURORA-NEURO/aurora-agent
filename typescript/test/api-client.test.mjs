@@ -2255,6 +2255,56 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   await assert.rejects(async () => client.requireToolSuccess(await client.callTool("refuse")), ToolRefusalError);
 });
 
+test("client exposes the two-plane domain acquisition catalogue", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/domain_acquisition_catalogue");
+      return jsonResponse({
+        ok: true,
+        tool: "domain_acquisition_catalogue",
+        request_id: "acquisition-1",
+        mcp: {
+          result: {
+            structuredContent: {
+              ok: true,
+              schema: "bioprism-devplat-domain-acquisition/0.1",
+              workflow: "domain_acquisition_catalogue",
+              execution: "not_started",
+              readiness_claimed: false,
+              catalogue: {
+                schema: "bioprism-devplat-domain-acquisition/0.1",
+                workflow: "domain_acquisition_catalogue",
+                catalogue_digest: "c".repeat(64),
+                adapter_registry: "bioprism-adapter-registry/0.1",
+                adapter_registry_digest: "a".repeat(64),
+                query: { max_domains: 1 },
+                total_group_count: 29,
+                selected_group_count: 1,
+                total_domain_count: 1,
+                selected_domain_count: 1,
+                complete: true,
+                truncated: false,
+                groups: [],
+                routes: [],
+                warnings: [],
+                guarantees: [],
+                limitations: [],
+                digest: "d".repeat(64),
+              },
+              guarantees: [],
+              does_not_claim: ["scientific validity"],
+            },
+          },
+        },
+      });
+    },
+  });
+  const result = await client.domainAcquisitionCatalogue({ include_adapters: true, max_domains: 1 });
+  assert.equal(result.mcp.result.structuredContent.workflow, "domain_acquisition_catalogue");
+  assert.equal(result.mcp.result.structuredContent.catalogue.complete, true);
+});
+
 test("client exposes typed literature binding and citation refusal evidence", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",

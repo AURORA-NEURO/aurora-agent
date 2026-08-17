@@ -84,6 +84,16 @@ from .domain_evidence_source import (
     DomainEvidenceSourcePlanReport,
     DomainEvidenceSourcePlanRequest,
 )
+from .domain_acquisition import (
+    DOMAIN_ACQUISITION_SCHEMA,
+    DOMAIN_ACQUISITION_WORKFLOW,
+    MAX_DOMAIN_ACQUISITION_DOMAINS,
+    MAX_DOMAIN_ACQUISITION_GROUPS,
+    DomainAcquisitionQuery,
+    DomainAcquisitionReport,
+    DomainAcquisitionRouteReport,
+    domain_acquisition_report,
+)
 from .biological import (
     AdapterDescriptor,
     AdapterDescriptorReport,
@@ -1991,6 +2001,13 @@ __all__ = [
     "AdapterPlanProjection",
     "AdapterPlanRequest",
     "AdapterPlanReport",
+    "DOMAIN_ACQUISITION_SCHEMA",
+    "DOMAIN_ACQUISITION_WORKFLOW",
+    "MAX_DOMAIN_ACQUISITION_DOMAINS",
+    "MAX_DOMAIN_ACQUISITION_GROUPS",
+    "DomainAcquisitionQuery",
+    "DomainAcquisitionReport",
+    "DomainAcquisitionRouteReport",
     "AdapterRegistry",
     "BenchmarkObservation",
     "BidsAdapter",
@@ -3345,6 +3362,7 @@ __all__ = [
     "analytics_request",
     "adapter_plan",
     "adapter_plan_report",
+    "domain_acquisition_report",
     "conformance_run_report",
     "RELEASE_ADVISORY_ONLY_KINDS",
     "RELEASE_AUDIT_MAX_CHECKS",

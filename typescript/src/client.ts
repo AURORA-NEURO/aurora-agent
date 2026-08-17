@@ -46,6 +46,8 @@ import type {
   DomainEvidenceSourceExecutionResult,
   AdapterPlanArgs,
   AdapterPlanResult,
+  DomainAcquisitionArgs,
+  DomainAcquisitionResult,
   TabularIngestArgs,
   TabularIngestResult,
   ConformanceRunArgs,
@@ -1400,6 +1402,10 @@ export class ApiClient {
 
   async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterPlanResult>> {
     return this.callTool<AdapterPlanResult>("adapter_plan", args, options);
+  }
+
+  async domainAcquisitionCatalogue(args: DomainAcquisitionArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DomainAcquisitionResult>> {
+    return this.callTool<DomainAcquisitionResult>("domain_acquisition_catalogue", args, options);
   }
 
   async tabularIngest(args: TabularIngestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<TabularIngestResult>> {

@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 198);
+    assert_eq!(tools.len(), 199);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -6687,18 +6687,72 @@ fn adapter_plan_routes_biological_formats_without_sniffing_or_execution() {
 }
 
 #[test]
+fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
+    let mut server = server();
+    let full = call(
+        &mut server,
+        "domain_acquisition_catalogue",
+        json!({"include_adapters": true}),
+    );
+    assert_eq!(full["ok"], json!(true));
+    assert_eq!(full["workflow"], json!("domain_acquisition_catalogue"));
+    let catalogue = &full["catalogue"];
+    assert_eq!(catalogue["total_group_count"], json!(29));
+    assert_eq!(catalogue["selected_group_count"], json!(29));
+    assert_eq!(catalogue["complete"], json!(true));
+    assert_eq!(catalogue["truncated"], json!(false));
+    assert_eq!(
+        catalogue["selected_domain_count"],
+        catalogue["total_domain_count"]
+    );
+    assert_eq!(catalogue["groups"].as_array().unwrap().len(), 29);
+    assert_eq!(
+        catalogue["routes"].as_array().unwrap().len(),
+        catalogue["total_domain_count"].as_u64().unwrap() as usize
+    );
+    assert!(catalogue["routes"].as_array().unwrap().iter().all(|route| {
+        route["transport"]["status"] == "bounded_file_http"
+            && route["interpretation"]["status"].is_string()
+            && route["limitations"].as_array().is_some()
+    }));
+    assert!(catalogue["routes"].as_array().unwrap().iter().any(|route| {
+        route["adapters"]
+            .as_array()
+            .is_some_and(|adapters| !adapters.is_empty())
+    }));
+    assert_eq!(catalogue["digest"].as_str().unwrap().len(), 64);
+
+    let filtered = call(
+        &mut server,
+        "domain_acquisition_catalogue",
+        json!({"max_domains": 2}),
+    );
+    assert_eq!(filtered["ok"], json!(true));
+    assert_eq!(filtered["catalogue"]["truncated"], json!(true));
+    assert_eq!(filtered["catalogue"]["routes"].as_array().unwrap().len(), 2);
+
+    let refused = call(
+        &mut server,
+        "domain_acquisition_catalogue",
+        json!({"max_domains": 0}),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert!(refused["error"].as_str().unwrap().contains("max_domains"));
+}
+
+#[test]
 fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     let mut server = server();
     let result = call(&mut server, "capability_audit", json!({}));
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(198));
-    assert_eq!(result["advertised_tool_count"], json!(198));
+    assert_eq!(result["unique_catalog_tools"], json!(199));
+    assert_eq!(result["advertised_tool_count"], json!(199));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(198));
-    assert_eq!(result["schema_quality"]["valid"], json!(198));
+    assert_eq!(result["schema_quality"]["checked"], json!(199));
+    assert_eq!(result["schema_quality"]["valid"], json!(199));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

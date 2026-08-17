@@ -50,6 +50,12 @@ from .domain_evidence_source import (
     DomainEvidenceSourcePlanReport,
     DomainEvidenceSourcePlanRequest,
 )
+from .domain_acquisition import (
+    DOMAIN_ACQUISITION_WORKFLOW,
+    DomainAcquisitionQuery,
+    DomainAcquisitionReport,
+    domain_acquisition_report,
+)
 from .capability import (
     CapabilityAuditReport,
     CapabilitySearchReport,
@@ -2605,6 +2611,25 @@ class ApiClient:
                 available_dependencies=available_dependencies,
             )
         )
+
+    def domain_acquisition_catalogue(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> dict[str, Any]:
+        """Build the digest-bound two-plane route catalogue over all declared domains."""
+
+        normalized = query or DomainAcquisitionQuery()
+        if not isinstance(normalized, DomainAcquisitionQuery):
+            raise TypeError("query must be a DomainAcquisitionQuery")
+        return self.call_tool(DOMAIN_ACQUISITION_WORKFLOW, normalized.to_mcp_arguments())
+
+    def domain_acquisition_catalogue_report(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> DomainAcquisitionReport:
+        """Return typed acquisition routes and explicit adapter interpretation boundaries."""
+
+        return domain_acquisition_report(self.domain_acquisition_catalogue(query))
 
     def tabular_ingest(self, request: TabularIngestRequest) -> dict[str, Any]:
         """Execute the Rust CSV/TSV adapter through the HTTP gateway."""
@@ -6369,6 +6394,25 @@ class AsyncApiClient:
                 available_dependencies=available_dependencies,
             )
         )
+
+    async def domain_acquisition_catalogue(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.domain_acquisition_catalogue`."""
+
+        normalized = query or DomainAcquisitionQuery()
+        if not isinstance(normalized, DomainAcquisitionQuery):
+            raise TypeError("query must be a DomainAcquisitionQuery")
+        return await self.call_tool(DOMAIN_ACQUISITION_WORKFLOW, normalized.to_mcp_arguments())
+
+    async def domain_acquisition_catalogue_report(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> DomainAcquisitionReport:
+        """Return typed async acquisition routes and adapter boundaries."""
+
+        return domain_acquisition_report(await self.domain_acquisition_catalogue(query))
 
     async def tabular_ingest(self, request: TabularIngestRequest) -> dict[str, Any]:
         """Async counterpart to :meth:`ApiClient.tabular_ingest`."""

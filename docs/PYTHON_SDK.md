@@ -785,6 +785,13 @@ invent defaults:
   scope dimensions, declared semantic-loss kinds, and non-executing limitations. The projection
   reconciles top-level and nested `executable` state and keeps a dependency-blocked candidate
   distinguishable from an unsupported format or source shape.
+- `DomainAcquisitionQuery`, `domain_acquisition_report(...)`, and the sync/async
+  `Workspace`/`ApiClient` helpers expose the digest-bound `domain_acquisition_catalogue` route.
+  Each selected domain keeps bounded transport (`file`/plain `generic_http` versus
+  caller-managed connectors) separate from native/Python-delegated adapter interpretation,
+  includes explicit scope-match evidence and limitations, and preserves truncation and
+  completeness flags. This is cross-domain routing evidence only: it does not execute a source,
+  import a Python reader, resolve an ontology, or promote a matched adapter to conformance.
 - `TabularIngestRequest` and `tabular_ingest(...)` execute the Rust CSV/TSV adapter only after an
   explicit profile and exactly one inline string or root-confined document are supplied. The
   typed `TabularIngestReport` returned by `tabular_ingest_report(...)` preserves the source and

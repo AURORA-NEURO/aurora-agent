@@ -5197,6 +5197,95 @@ export interface AdapterPlanResult extends JsonObject {
   limitations: string[];
 }
 
+export interface DomainAcquisitionArgs extends JsonObject {
+  group_id?: string;
+  domain?: string;
+  include_adapters?: boolean;
+  max_groups?: number;
+  max_domains?: number;
+}
+
+export interface DomainAcquisitionTransportResult extends JsonObject {
+  status: "bounded_file_http" | "caller_managed_plan" | "none";
+  tools: string[];
+  bounded_connector_kinds: string[];
+  caller_managed_connector_kinds: string[];
+  limitations: string[];
+}
+
+export interface DomainAcquisitionInterpretationResult extends JsonObject {
+  status: "native" | "python_delegated" | "mixed" | "domain_tools_only" | "unmapped";
+  adapter_ids: string[];
+  match_basis: string[];
+  declared_conformance: Array<"parse" | "normalize" | "execute" | "stream" | "replay">;
+  limitations: string[];
+}
+
+export interface DomainAcquisitionAdapterResult extends JsonObject {
+  id: string;
+  execution: "native" | "python_delegated";
+  version: string;
+  accepted_formats: string[];
+  source_kinds: Array<"bytes" | "directory">;
+  conformance_level: "parse" | "normalize" | "execute" | "stream" | "replay";
+  optional_dependency: string | null;
+  scope_dimensions: string[];
+  match_basis: string[];
+}
+
+export interface DomainAcquisitionRouteResult extends JsonObject {
+  group_id: string;
+  domain: string;
+  declared_tool_count: number;
+  transport: DomainAcquisitionTransportResult;
+  interpretation: DomainAcquisitionInterpretationResult;
+  adapters?: DomainAcquisitionAdapterResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainAcquisitionGroupResult extends JsonObject {
+  id: string;
+  status: string;
+  declared_domain_count: number;
+  selected_domain_count: number;
+  declared_tool_count: number;
+  transport_status: "bounded_file_http" | "caller_managed_plan" | "none";
+  interpretation_statuses: string[];
+}
+
+export interface DomainAcquisitionCatalogueResult extends JsonObject {
+  schema: "bioprism-devplat-domain-acquisition/0.1";
+  workflow: "domain_acquisition_catalogue";
+  catalogue_digest: string;
+  adapter_registry: string;
+  adapter_registry_digest: string;
+  query: DomainAcquisitionArgs;
+  total_group_count: number;
+  selected_group_count: number;
+  total_domain_count: number;
+  selected_domain_count: number;
+  complete: boolean;
+  truncated: boolean;
+  groups: DomainAcquisitionGroupResult[];
+  routes: DomainAcquisitionRouteResult[];
+  warnings: string[];
+  guarantees: string[];
+  limitations: string[];
+  digest: string;
+}
+
+export interface DomainAcquisitionResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-acquisition/0.1";
+  workflow: "domain_acquisition_catalogue";
+  catalogue: DomainAcquisitionCatalogueResult;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface TabularIngestArgs extends JsonObject {
   source_id: string;
   profile: JsonObject;

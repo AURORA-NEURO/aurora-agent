@@ -45,6 +45,12 @@ from .domain_evidence_source import (
     DomainEvidenceSourcePlanReport,
     DomainEvidenceSourcePlanRequest,
 )
+from .domain_acquisition import (
+    DOMAIN_ACQUISITION_WORKFLOW,
+    DomainAcquisitionQuery,
+    DomainAcquisitionReport,
+    domain_acquisition_report,
+)
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
 from .bioql import BioQlCompileRequest
 from .client import Client
@@ -2233,6 +2239,25 @@ class Workspace:
                 available_dependencies=available_dependencies,
             )
         )
+
+    def domain_acquisition_catalogue(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> dict[str, Any]:
+        """Build the digest-bound acquisition and adapter route catalogue."""
+
+        normalized = query or DomainAcquisitionQuery()
+        if not isinstance(normalized, DomainAcquisitionQuery):
+            raise TypeError("query must be a DomainAcquisitionQuery")
+        return self.tool(DOMAIN_ACQUISITION_WORKFLOW, normalized.to_mcp_arguments())
+
+    def domain_acquisition_catalogue_report(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> DomainAcquisitionReport:
+        """Return typed acquisition routes with separate transport and interpretation planes."""
+
+        return domain_acquisition_report(self.domain_acquisition_catalogue(query))
 
     def tabular_ingest(self, request: TabularIngestRequest) -> dict[str, Any]:
         """Execute the Rust CSV/TSV adapter with independent conformance and loss accounting."""
@@ -5622,6 +5647,25 @@ class AsyncWorkspace:
                 available_dependencies=available_dependencies,
             )
         )
+
+    async def domain_acquisition_catalogue(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`AsyncWorkspace.domain_acquisition_catalogue`."""
+
+        normalized = query or DomainAcquisitionQuery()
+        if not isinstance(normalized, DomainAcquisitionQuery):
+            raise TypeError("query must be a DomainAcquisitionQuery")
+        return await self.tool(DOMAIN_ACQUISITION_WORKFLOW, normalized.to_mcp_arguments())
+
+    async def domain_acquisition_catalogue_report(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> DomainAcquisitionReport:
+        """Return typed async acquisition routes."""
+
+        return domain_acquisition_report(await self.domain_acquisition_catalogue(query))
 
     async def tabular_ingest(self, request: TabularIngestRequest) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.tabular_ingest`."""

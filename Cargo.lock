@@ -285,6 +285,7 @@ dependencies = [
 name = "bioprism-devplat"
 version = "0.1.0"
 dependencies = [
+ "bioprism-adapter",
  "bioprism-cookbook",
  "bioprism-devx",
  "bioprism-ids",

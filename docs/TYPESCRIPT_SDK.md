@@ -255,7 +255,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 198-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 199-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
@@ -264,6 +264,11 @@ invariant flags, duplicate memberships, and optional per-group coverage.
 declared-only readiness, separate crate/CLI/Python/MCP surface counts, schema-backed tool totals,
 explicit gap labels, query provenance, and bounded inventory warnings. Its ready flag describes
 transport coverage only and is not permission, execution, scientific, or deployment readiness.
+`domainAcquisitionCatalogue` adds a typed cross-domain route registry. Its digest-bound rows keep
+bounded file/plain-HTTP transport, caller-managed connectors, native adapter matches, and
+Python-delegated adapter matches separate for every selected declared domain, with explicit
+scope-match evidence and truncation/completeness flags. It is routing evidence only and never
+executes a source or adapter.
 `domainReportProject` and `domainReportCoverage` add typed REST access to the explicit report
 projection boundary, while `domainReportProjectTool` and `domainReportCoverageTool` preserve the
 same contract through the tool dispatcher. The project result includes catalogue membership,
