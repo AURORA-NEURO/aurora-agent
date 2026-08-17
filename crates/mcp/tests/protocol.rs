@@ -1131,7 +1131,6 @@ fn domain_evidence_source_plan_is_catalogue_bound_digest_addressed_and_non_execu
         "locator_kind": "uri",
         "locator": "https://example.org/article/1",
         "retrieval_mode": "metadata_only",
-        "expected_content_digest": "a".repeat(64),
         "retrieval_policy": {"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed"},
         "does_not_claim": ["retrieval occurred", "source is true"]
     });
@@ -1169,6 +1168,33 @@ fn domain_evidence_source_plan_is_catalogue_bound_digest_addressed_and_non_execu
         .unwrap()
         .iter()
         .any(|digest| digest == &first["plan_digest"]));
+    let mut expected_arguments = arguments.clone();
+    expected_arguments["subject_id"] = json!("source-plan-expected");
+    expected_arguments["expected_content_digest"] = json!("a".repeat(64));
+    let expected_plan = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        expected_arguments,
+    );
+    let mismatch = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-plan-expected",
+            "source_tool": "modality_catalog",
+            "response": {"status": "bounded"},
+            "outcome": "observed",
+            "source_plan_digest": expected_plan["plan_digest"].clone(),
+            "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(mismatch["__isError"], json!(true));
+    assert!(mismatch["error"]
+        .as_str()
+        .unwrap()
+        .contains("response digest differs"));
     let second = call(&mut server, "domain_evidence_source_plan", arguments);
     assert_eq!(second["artifact_registry"]["already_present"], json!(true));
     let credential_refused = call(

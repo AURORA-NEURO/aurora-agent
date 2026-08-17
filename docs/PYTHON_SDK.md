@@ -61,6 +61,8 @@ and a reported envelope is not treated as executed capability or valid evidence.
 external-source boundary through sync/async HTTP and workspace helpers. They retain connector and
 locator classes, retrieval mode, expected content digest, parent links, and bounded policy while
 keeping credentials caller-managed and retrieval `not_started`; a source plan is not provenance.
+When `expected_content_digest` is supplied, a later bound intake is accepted only when the
+canonical response digest matches it.
 
 ## Lifecycle
 

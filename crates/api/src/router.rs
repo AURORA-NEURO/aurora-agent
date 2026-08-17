@@ -11463,7 +11463,6 @@ mod tests {
                 "locator_kind": "uri",
                 "locator": "https://example.org/article/1",
                 "retrieval_mode": "metadata_only",
-                "expected_content_digest": "a".repeat(64),
                 "retrieval_policy": {"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed"},
                 "does_not_claim": ["retrieval occurred"]
             }),

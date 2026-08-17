@@ -216,7 +216,9 @@ response is true, complete, safe, reproducible, or release-ready.
 connector family, locator class, retrieval mode, bounded network/cache policy, optional expected
 content digest, and domain scope into an exact plan artifact. Credentials remain caller-managed;
 the route does not fetch a URI/path, follow redirects, resolve a provider, or claim that a later
-retrieval will be authentic, complete, or scientifically valid.
+retrieval will be authentic, complete, or scientifically valid. If an expected content digest is
+declared, a later `source_plan_digest`-bound intake is refused unless its canonical response digest
+matches that expectation.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

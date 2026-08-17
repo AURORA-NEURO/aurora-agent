@@ -105,6 +105,8 @@ not execution, scientific validity, provenance completeness, or release readines
 external-source planning boundary. The result preserves connector/locator classes, retrieval
 mode, expected digest, policy, parent links, and non-fetching posture; it does not turn a URI,
 path, or opaque reference into retrieved provenance.
+If the plan includes an expected content digest, the server compares it against the canonical
+response digest of a later bound intake before indexing.
 
 Convenience methods currently cover:
 

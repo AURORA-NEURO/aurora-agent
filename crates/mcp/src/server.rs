@@ -3249,6 +3249,7 @@ impl Server {
     /// response, a refusal, or an externally produced envelope, but this operation never calls
     /// the named source tool on their behalf.
     fn domain_evidence_intake(&self, arguments: &Value) -> Result<Value, String> {
+        let mut expected_content_digest = None;
         if let Some(source_plan_digest) =
             arguments.get("source_plan_digest").and_then(Value::as_str)
         {
@@ -3314,9 +3315,23 @@ impl Server {
                     ));
                 }
             }
+            expected_content_digest = plan
+                .artifact
+                .get("expected_content_digest")
+                .and_then(Value::as_str)
+                .map(str::to_string);
         }
         let intake = bioprism_devplat::intake_domain_evidence(arguments)
             .map_err(|error| format!("domain evidence intake refused: {error}"))?;
+        if let Some(expected_content_digest) = expected_content_digest {
+            if intake.get("response_digest").and_then(Value::as_str)
+                != Some(expected_content_digest.as_str())
+            {
+                return Err(format!(
+                    "source plan expected response digest {expected_content_digest}, but intake response digest differs"
+                ));
+            }
+        }
         let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
             .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
         let group_id = intake
