@@ -412,6 +412,10 @@ invent defaults:
   target/delivery/receipt digests, and structural receipt findings across `Workspace`,
   `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`. The receipt is a joinable handoff, not a
   signature, durable record, execution proof, or release approval.
+- `DeveloperDeliveryReceiptVerificationRequest` and `developer_delivery_receipt_verify(...)`
+  recompute a stored receipt against its completed delivery audit and preserve independent digest,
+  target, evidence, and readiness mismatch findings. A verified result establishes structural
+  consistency of supplied records only; it does not authenticate a provider or authorize release.
 - `developer_platform_status(...)` exposes the in-repository developer-platform contract through
   sync MCP, async MCP, and HTTP. `DeveloperPlatformStatusReport` types the module classification
   ledger, every walkthrough's checkable/partly-outside/entirely-outside standing, cookbook

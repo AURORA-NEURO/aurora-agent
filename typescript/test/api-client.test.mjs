@@ -650,6 +650,25 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
+      if (path === "/v1/tools/developer_delivery_receipt_verify") return jsonResponse({ ok: true, tool: "developer_delivery_receipt_verify", request_id: "r33", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "developer_delivery_receipt_verify",
+        schema: "bioprism-devplat-delivery-receipt/0.1",
+        receipt_id: "receipt-ts-1",
+        supplied_receipt_digest: "c".repeat(64),
+        recomputed_receipt_digest: "c".repeat(64),
+        delivery_digest_match: true,
+        target_digest_match: true,
+        receipt_digest_match: true,
+        targets_match: true,
+        evidence_match: true,
+        valid: true,
+        verified: true,
+        structurally_valid: true,
+        findings: [],
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/repository_catalog") return jsonResponse({ ok: true, tool: "repository_catalog", request_id: "r11", mcp: { result: { structuredContent: { workflow: "repository_catalog", prefix: "docs/" } } } });
       if (path === "/v1/tools/repository_bundle") return jsonResponse({ ok: true, tool: "repository_bundle", request_id: "r12", mcp: { result: { structuredContent: { workflow: "repository_bundle", policy: "exhaustive" } } } });
       if (path === "/v1/tools/repository_impact") return jsonResponse({ ok: true, tool: "repository_impact", request_id: "r13", mcp: { result: { structuredContent: { workflow: "repository_impact", changed: "docs/README" } } } });
@@ -1823,6 +1842,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const receiptRequest = JSON.parse(seen.at(-1).init.body);
   assert.equal(receiptRequest.receipt_id, "receipt-ts-1");
   assert.equal(receiptRequest.delivery.release_request.id, "delivery-1");
+  const verifiedReceipt = await client.developerDeliveryReceiptVerify({
+    receipt: { receipt_id: "receipt-ts-1", receipt_digest: "c".repeat(64) },
+    delivery: { workflow: "developer_delivery_audit", ok: true },
+  });
+  assert.equal(verifiedReceipt.mcp.result.structuredContent.workflow, "developer_delivery_receipt_verify");
+  assert.equal(verifiedReceipt.mcp.result.structuredContent.verified, true);
+  assert.equal(verifiedReceipt.mcp.result.structuredContent.receipt_digest_match, true);
+  const verifyRequest = JSON.parse(seen.at(-1).init.body);
+  assert.equal(verifyRequest.receipt.receipt_id, "receipt-ts-1");
   const engineering = await client.engineeringManifestAudit({
     project: { id: "aurora-agent", version: "0.1.0", repository: "github.com/AURORA-NEURO/aurora-agent" },
     baseline: { language: "Rust 2021", runtime: "cargo", api: "MCP JSON-RPC", storage: "in-memory", observability: "structured", deployment: "local" },

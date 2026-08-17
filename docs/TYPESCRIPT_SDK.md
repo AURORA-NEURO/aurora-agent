@@ -170,7 +170,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 172-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 173-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
@@ -192,6 +192,10 @@ evidence presence/readiness, and delivery/target/receipt digests. It recomputes 
 from the nested request so a receipt is a stable structural join key, not a signature, execution
 claim, durable record, deployment approval, or release authority. `bioAtlasPublicationAudit` returns typed
 `BioAtlasPublicationAuditResult` atlas aggregation, score/evidence gates, leaderboard state, and
+`developerDeliveryReceiptVerify` returns `DeveloperDeliveryReceiptVerificationResult` with
+independent digest, target, evidence, and readiness match dimensions for a stored receipt and its
+completed delivery audit. It verifies supplied structural records only and does not authenticate
+external execution or create release authority.
 `developerPlatformStatus` returns typed `DeveloperPlatformStatusResult` evidence for walkthrough
 standing, module classification, cookbook verification, declared contract surfaces, diagnostic
 findings, exit-code divergences, foreign artifacts, and optional full details. Its bounded counts

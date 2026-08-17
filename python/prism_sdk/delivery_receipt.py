@@ -45,6 +45,24 @@ class DeveloperDeliveryReceiptRequest:
 
 
 @dataclass(frozen=True)
+class DeveloperDeliveryReceiptVerificationRequest:
+    receipt: Mapping[str, Any]
+    delivery: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        _mapping("receipt", self.receipt)
+        _mapping("delivery", self.delivery)
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DeveloperDeliveryReceiptVerificationRequest":
+        raw = _mapping("developer delivery receipt verification request", value)
+        return cls(receipt=raw.get("receipt"), delivery=raw.get("delivery"))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"receipt": dict(self.receipt), "delivery": dict(self.delivery)}
+
+
+@dataclass(frozen=True)
 class DeliveryReceiptTargetReport:
     raw: dict[str, Any]
     target: str
@@ -177,6 +195,61 @@ class DeveloperDeliveryReceiptReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class DeveloperDeliveryReceiptVerificationReport:
+    raw: dict[str, Any]
+    schema: str
+    workflow: str
+    receipt_id: str
+    supplied_receipt_digest: str | None
+    recomputed_receipt_digest: str
+    delivery_digest_match: bool
+    target_digest_match: bool
+    receipt_digest_match: bool
+    targets_match: bool
+    evidence_match: bool
+    valid: bool
+    verified: bool
+    structurally_valid: bool
+    findings: tuple[DeliveryReceiptFindingReport, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DeveloperDeliveryReceiptVerificationReport":
+        raw = _tool_payload(value, "developer_delivery_receipt_verify")
+        if raw.get("ok") is not True:
+            raise ArgumentError("developer delivery receipt verification is not successful")
+        findings = raw.get("findings", [])
+        if not isinstance(findings, list):
+            raise ArgumentError("developer delivery receipt verification findings must be an array")
+        supplied = raw.get("supplied_receipt_digest")
+        if supplied is not None:
+            supplied = _digest("supplied delivery receipt digest", supplied)
+        return cls(
+            raw=raw,
+            schema=_route_text("delivery receipt verification schema", raw.get("schema")),
+            workflow=_route_text("delivery receipt verification workflow", raw.get("workflow")),
+            receipt_id=_route_text("delivery receipt verification id", raw.get("receipt_id")),
+            supplied_receipt_digest=supplied,
+            recomputed_receipt_digest=_digest("recomputed delivery receipt digest", raw.get("recomputed_receipt_digest")),
+            delivery_digest_match=_bool("delivery receipt delivery_digest_match", raw.get("delivery_digest_match")),
+            target_digest_match=_bool("delivery receipt target_digest_match", raw.get("target_digest_match")),
+            receipt_digest_match=_bool("delivery receipt receipt_digest_match", raw.get("receipt_digest_match")),
+            targets_match=_bool("delivery receipt targets_match", raw.get("targets_match")),
+            evidence_match=_bool("delivery receipt evidence_match", raw.get("evidence_match")),
+            valid=_bool("delivery receipt verification valid", raw.get("valid")),
+            verified=_bool("delivery receipt verified", raw.get("verified")),
+            structurally_valid=_bool("delivery receipt verification structurally_valid", raw.get("structurally_valid")),
+            findings=tuple(DeliveryReceiptFindingReport.from_wire(item) for item in findings),
+        )
+
+    @property
+    def blocking_findings(self) -> tuple[DeliveryReceiptFindingReport, ...]:
+        return tuple(item for item in self.findings if item.severity == "blocking")
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def _digest(name: str, value: Any) -> str:
     text = _route_text(name, value)
     if len(text) != 64 or any(character not in "0123456789abcdef" for character in text.lower()):
@@ -190,12 +263,23 @@ def developer_delivery_receipt_report(value: Mapping[str, Any]) -> DeveloperDeli
     return DeveloperDeliveryReceiptReport.from_wire(value)
 
 
+def developer_delivery_receipt_verification_report(
+    value: Mapping[str, Any],
+) -> DeveloperDeliveryReceiptVerificationReport:
+    """Parse a direct MCP result or HTTP REST receipt-verification envelope."""
+
+    return DeveloperDeliveryReceiptVerificationReport.from_wire(value)
+
+
 __all__ = [
     "DELIVERY_RECEIPT_SCHEMA",
     "DeveloperDeliveryReceiptRequest",
+    "DeveloperDeliveryReceiptVerificationRequest",
     "DeliveryReceiptTargetReport",
     "DeliveryReceiptEvidenceReport",
     "DeliveryReceiptFindingReport",
     "DeveloperDeliveryReceiptReport",
+    "DeveloperDeliveryReceiptVerificationReport",
     "developer_delivery_receipt_report",
+    "developer_delivery_receipt_verification_report",
 ]

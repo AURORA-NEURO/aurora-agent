@@ -278,7 +278,8 @@ pub use execution_provenance::{
 };
 pub use delivery_receipt::{
     build_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
-    DeliveryReceiptFinding, DeliveryReceiptRequest, DeliveryReceiptTarget,
+    verify_delivery_receipt, DeliveryReceiptFinding, DeliveryReceiptRequest,
+    DeliveryReceiptTarget, DeliveryReceiptVerification, DeliveryReceiptVerificationRequest,
     DELIVERY_RECEIPT_SCHEMA,
 };
 pub use mission::{

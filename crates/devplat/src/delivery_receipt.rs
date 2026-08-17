@@ -23,6 +23,12 @@ pub struct DeliveryReceiptRequest {
     pub delivery: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeliveryReceiptVerificationRequest {
+    pub receipt: Value,
+    pub delivery: Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeliveryReceiptTarget {
     pub target: String,
@@ -68,6 +74,25 @@ pub struct DeliveryReceiptAudit {
     pub verification: String,
     pub targets: Vec<DeliveryReceiptTarget>,
     pub evidence: Vec<DeliveryReceiptEvidence>,
+    pub findings: Vec<DeliveryReceiptFinding>,
+    pub guarantees: Vec<String>,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeliveryReceiptVerification {
+    pub schema: String,
+    pub workflow: String,
+    pub receipt_id: String,
+    pub supplied_receipt_digest: Option<String>,
+    pub recomputed_receipt_digest: String,
+    pub delivery_digest_match: bool,
+    pub target_digest_match: bool,
+    pub receipt_digest_match: bool,
+    pub targets_match: bool,
+    pub evidence_match: bool,
+    pub valid: bool,
+    pub structurally_valid: bool,
     pub findings: Vec<DeliveryReceiptFinding>,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
@@ -355,6 +380,130 @@ pub fn build_delivery_receipt(
     })
 }
 
+fn compare_value(
+    findings: &mut Vec<DeliveryReceiptFinding>,
+    code: &str,
+    subject: &str,
+    supplied: Option<&Value>,
+    expected: &Value,
+) -> bool {
+    if supplied == Some(expected) {
+        true
+    } else {
+        finding(
+            findings,
+            code,
+            subject,
+            "stored receipt content does not match the recomputed structural projection",
+        );
+        false
+    }
+}
+
+/// Recompute a receipt from a stored delivery audit and detect tampering in its projection.
+pub fn verify_delivery_receipt(
+    request: &DeliveryReceiptVerificationRequest,
+) -> Result<DeliveryReceiptVerification, String> {
+    let receipt = request
+        .receipt
+        .as_object()
+        .ok_or("receipt must be an object")?;
+    let receipt_id = receipt
+        .get("receipt_id")
+        .and_then(Value::as_str)
+        .ok_or("receipt.receipt_id must be a string")?;
+    let expected = build_delivery_receipt(&DeliveryReceiptRequest {
+        receipt_id: receipt_id.into(),
+        delivery: request.delivery.clone(),
+    })?;
+    let expected_value = serde_json::to_value(&expected)
+        .map_err(|error| format!("cannot encode recomputed delivery receipt: {error}"))?;
+    let mut findings = Vec::new();
+    let delivery_digest_match = compare_value(
+        &mut findings,
+        "delivery_digest_mismatch",
+        "delivery_digest",
+        receipt.get("delivery_digest"),
+        expected_value
+            .get("delivery_digest")
+            .expect("serialized receipt has delivery digest"),
+    );
+    let target_digest_match = compare_value(
+        &mut findings,
+        "target_digest_mismatch",
+        "target_digest",
+        receipt.get("target_digest"),
+        expected_value
+            .get("target_digest")
+            .expect("serialized receipt has target digest"),
+    );
+    let receipt_digest_match = compare_value(
+        &mut findings,
+        "receipt_digest_mismatch",
+        "receipt_digest",
+        receipt.get("receipt_digest"),
+        expected_value
+            .get("receipt_digest")
+            .expect("serialized receipt has receipt digest"),
+    );
+    let targets_match = compare_value(
+        &mut findings,
+        "targets_mismatch",
+        "targets",
+        receipt.get("targets"),
+        expected_value
+            .get("targets")
+            .expect("serialized receipt has targets"),
+    );
+    let evidence_match = compare_value(
+        &mut findings,
+        "evidence_mismatch",
+        "evidence",
+        receipt.get("evidence"),
+        expected_value
+            .get("evidence")
+            .expect("serialized receipt has evidence"),
+    );
+    compare_value(
+        &mut findings,
+        "readiness_projection_mismatch",
+        "release_candidate",
+        receipt.get("release_candidate"),
+        expected_value
+            .get("release_candidate")
+            .expect("serialized receipt has release candidate"),
+    );
+    let supplied_receipt_digest = receipt
+        .get("receipt_digest")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let valid = findings.is_empty();
+    Ok(DeliveryReceiptVerification {
+        schema: DELIVERY_RECEIPT_SCHEMA.into(),
+        workflow: "developer_delivery_receipt_verify".into(),
+        receipt_id: receipt_id.into(),
+        supplied_receipt_digest,
+        recomputed_receipt_digest: expected.receipt_digest,
+        delivery_digest_match,
+        target_digest_match,
+        receipt_digest_match,
+        targets_match,
+        evidence_match,
+        valid,
+        structurally_valid: valid && expected.structurally_valid,
+        findings,
+        guarantees: vec![
+            "the delivery audit is supplied separately and the receipt projection is recomputed before comparison".into(),
+            "digest, target, evidence, and readiness mismatches remain separately identifiable".into(),
+            "verification is deterministic and does not depend on time, network access, or provider contact".into(),
+        ],
+        limitations: vec![
+            "verification proves structural consistency with the supplied delivery audit, not the truth of external execution".into(),
+            "the route does not verify signatures, fetch logs, execute checks, or provide durable revocation".into(),
+        ],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,5 +592,37 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.code == "release_readiness_mismatch"));
+    }
+
+    #[test]
+    fn receipt_verification_recomputes_and_detects_projection_tampering() {
+        let delivery = delivery(true);
+        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-verify".into(),
+            delivery: delivery.clone(),
+        })
+        .unwrap();
+        let stored = serde_json::to_value(&receipt).unwrap();
+        let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+            receipt: stored.clone(),
+            delivery: delivery.clone(),
+        })
+        .unwrap();
+        assert!(verified.valid);
+        assert!(verified.structurally_valid);
+        assert_eq!(verified.recomputed_receipt_digest, receipt.receipt_digest);
+
+        let mut tampered = stored;
+        tampered["targets"][0]["ready"] = json!(false);
+        let rejected = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+            receipt: tampered,
+            delivery,
+        })
+        .unwrap();
+        assert!(!rejected.valid);
+        assert!(rejected
+            .findings
+            .iter()
+            .any(|finding| finding.code == "targets_mismatch"));
     }
 }

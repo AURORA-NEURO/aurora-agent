@@ -129,7 +129,10 @@ from .delivery_receipt import (
     DeliveryReceiptTargetReport,
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
+    DeveloperDeliveryReceiptVerificationReport,
+    DeveloperDeliveryReceiptVerificationRequest,
     developer_delivery_receipt_report,
+    developer_delivery_receipt_verification_report,
 )
 from .conformance import (
     ConformanceCaseReport,
@@ -2273,7 +2276,10 @@ __all__ = [
     "DeliveryReceiptTargetReport",
     "DeveloperDeliveryReceiptReport",
     "DeveloperDeliveryReceiptRequest",
+    "DeveloperDeliveryReceiptVerificationReport",
+    "DeveloperDeliveryReceiptVerificationRequest",
     "developer_delivery_receipt_report",
+    "developer_delivery_receipt_verification_report",
     "DeliveryTargetReport",
     "DeliveryReadinessReport",
     "DeliveryExternalSurfaceReport",

@@ -38,7 +38,10 @@ from .execution_provenance import ExecutionProvenanceReport, ExecutionProvenance
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
+    DeveloperDeliveryReceiptVerificationReport,
+    DeveloperDeliveryReceiptVerificationRequest,
     developer_delivery_receipt_report,
+    developer_delivery_receipt_verification_report,
 )
 from .conformance import ConformanceRunReport, conformance_run_report
 from .context_requests import (
@@ -752,6 +755,15 @@ class ApiClient:
         normalized = request if isinstance(request, DeveloperDeliveryReceiptRequest) else DeveloperDeliveryReceiptRequest.from_wire(request)
         return self.call_tool("developer_delivery_receipt", normalized.to_mcp_arguments())
 
+    def developer_delivery_receipt_verify(
+        self,
+        request: DeveloperDeliveryReceiptVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a stored delivery receipt through the HTTP gateway."""
+
+        normalized = request if isinstance(request, DeveloperDeliveryReceiptVerificationRequest) else DeveloperDeliveryReceiptVerificationRequest.from_wire(request)
+        return self.call_tool("developer_delivery_receipt_verify", normalized.to_mcp_arguments())
+
     def developer_platform_status(
         self,
         *,
@@ -1309,6 +1321,14 @@ class ApiClient:
         """Return typed HTTP delivery receipt digests and readiness."""
 
         return developer_delivery_receipt_report(self.developer_delivery_receipt(request))
+
+    def developer_delivery_receipt_verification_report(
+        self,
+        request: DeveloperDeliveryReceiptVerificationRequest | Mapping[str, Any],
+    ) -> DeveloperDeliveryReceiptVerificationReport:
+        """Return typed HTTP receipt verification evidence."""
+
+        return developer_delivery_receipt_verification_report(self.developer_delivery_receipt_verify(request))
 
     def capability_discover(
         self,
@@ -3529,6 +3549,15 @@ class AsyncApiClient:
         normalized = request if isinstance(request, DeveloperDeliveryReceiptRequest) else DeveloperDeliveryReceiptRequest.from_wire(request)
         return await self.call_tool("developer_delivery_receipt", normalized.to_mcp_arguments())
 
+    async def developer_delivery_receipt_verify(
+        self,
+        request: DeveloperDeliveryReceiptVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async receipt verification through the HTTP gateway."""
+
+        normalized = request if isinstance(request, DeveloperDeliveryReceiptVerificationRequest) else DeveloperDeliveryReceiptVerificationRequest.from_wire(request)
+        return await self.call_tool("developer_delivery_receipt_verify", normalized.to_mcp_arguments())
+
     async def developer_platform_status(
         self,
         *,
@@ -4086,6 +4115,16 @@ class AsyncApiClient:
         """Return async typed HTTP delivery receipt digests and readiness."""
 
         return developer_delivery_receipt_report(await self.developer_delivery_receipt(request))
+
+    async def developer_delivery_receipt_verification_report(
+        self,
+        request: DeveloperDeliveryReceiptVerificationRequest | Mapping[str, Any],
+    ) -> DeveloperDeliveryReceiptVerificationReport:
+        """Return async typed HTTP receipt verification evidence."""
+
+        return developer_delivery_receipt_verification_report(
+            await self.developer_delivery_receipt_verify(request)
+        )
 
     async def capability_discover(
         self,

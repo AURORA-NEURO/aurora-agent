@@ -717,6 +717,9 @@ upgrades caller/provider evidence into execution authority.
 `developer_delivery_receipt` turns the resulting delivery audit into a deterministic,
 content-addressed structural handoff with canonical target/evidence rows and joinable digests; it
 still does not execute checks, contact providers, or approve a release.
+`developer_delivery_receipt_verify` recomputes that handoff against a completed delivery audit and
+surfaces tampering by dimension, so downstream consumers can verify record consistency without
+mistaking it for provider authentication or release authority.
 Typed discovery projections now preserve the complete matched group context—domains, Rust crates,
 CLI entrypoints, Python artifacts, ranked fields, matched tools, catalog digest, and optional
 authoritative tool schemas—so cross-domain routing can inspect coverage without falling back to

@@ -48,7 +48,10 @@ from .execution_provenance import (
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
+    DeveloperDeliveryReceiptVerificationReport,
+    DeveloperDeliveryReceiptVerificationRequest,
     developer_delivery_receipt_report,
+    developer_delivery_receipt_verification_report,
 )
 from .conformance import ConformanceRunArgs, ConformanceRunReport, conformance_run_report
 from .context_requests import (
@@ -2459,6 +2462,15 @@ class Workspace:
         normalized = request if isinstance(request, DeveloperDeliveryReceiptRequest) else DeveloperDeliveryReceiptRequest.from_wire(request)
         return self.tool("developer_delivery_receipt", normalized.to_mcp_arguments())
 
+    def developer_delivery_receipt_verify(
+        self,
+        request: DeveloperDeliveryReceiptVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a stored delivery receipt against its completed audit."""
+
+        normalized = request if isinstance(request, DeveloperDeliveryReceiptVerificationRequest) else DeveloperDeliveryReceiptVerificationRequest.from_wire(request)
+        return self.tool("developer_delivery_receipt_verify", normalized.to_mcp_arguments())
+
     def developer_platform_status(
         self,
         request: DeveloperPlatformStatusArgs | Mapping[str, Any] | None = None,
@@ -2796,6 +2808,14 @@ class Workspace:
         """Return typed target/evidence digests and structural receipt readiness."""
 
         return developer_delivery_receipt_report(self.developer_delivery_receipt(request))
+
+    def developer_delivery_receipt_verification_report(
+        self,
+        request: DeveloperDeliveryReceiptVerificationRequest | Mapping[str, Any],
+    ) -> DeveloperDeliveryReceiptVerificationReport:
+        """Return typed receipt digest and projection mismatch evidence."""
+
+        return developer_delivery_receipt_verification_report(self.developer_delivery_receipt_verify(request))
 
     def bioatlas_publication_audit(
         self,
@@ -5292,6 +5312,15 @@ class AsyncWorkspace:
         normalized = request if isinstance(request, DeveloperDeliveryReceiptRequest) else DeveloperDeliveryReceiptRequest.from_wire(request)
         return (await self.client.call_tool("developer_delivery_receipt", normalized.to_mcp_arguments())).require_ok()
 
+    async def developer_delivery_receipt_verify(
+        self,
+        request: DeveloperDeliveryReceiptVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async verification of a stored delivery receipt against its completed audit."""
+
+        normalized = request if isinstance(request, DeveloperDeliveryReceiptVerificationRequest) else DeveloperDeliveryReceiptVerificationRequest.from_wire(request)
+        return (await self.client.call_tool("developer_delivery_receipt_verify", normalized.to_mcp_arguments())).require_ok()
+
     async def developer_platform_status(
         self,
         request: DeveloperPlatformStatusArgs | Mapping[str, Any] | None = None,
@@ -5625,6 +5654,16 @@ class AsyncWorkspace:
         """Return async typed target/evidence digests and structural receipt readiness."""
 
         return developer_delivery_receipt_report(await self.developer_delivery_receipt(request))
+
+    async def developer_delivery_receipt_verification_report(
+        self,
+        request: DeveloperDeliveryReceiptVerificationRequest | Mapping[str, Any],
+    ) -> DeveloperDeliveryReceiptVerificationReport:
+        """Return async typed receipt digest and projection mismatch evidence."""
+
+        return developer_delivery_receipt_verification_report(
+            await self.developer_delivery_receipt_verify(request)
+        )
 
     async def bioatlas_publication_audit(self, atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs, **kwargs: Any) -> dict[str, Any]:
         if isinstance(atlas, BioAtlasPublicationAuditArgs):

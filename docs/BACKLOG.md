@@ -254,6 +254,10 @@ neither path silently upgrades structural evidence into execution authority.
 structural handoff. It sorts target rows canonically, preserves evidence presence/readiness and
 blockers, and emits delivery/target/receipt digests for cross-transport joins without timestamps;
 it does not add signatures, durable storage, provider execution, or release authority.
+`developer_delivery_receipt_verify` recomputes that handoff from the completed delivery audit and
+keeps tampered digest, target, evidence, and readiness fields separately visible. This makes the
+receipt replayable for cross-domain consumers without claiming provider authentication, durable
+revocation, execution, or deployment authority.
 `execution_provenance_audit` adds the corresponding mission-side handoff: returned plan identity,
 terminal results, deterministic trace ordering/tool identity, and delegated-check digests are
 reconciled in one structural projection. It does not replay a mission or replace external execution,

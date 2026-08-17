@@ -1313,6 +1313,31 @@ export interface DeveloperDeliveryReceiptResult extends JsonObject {
   limitations: string[];
 }
 
+export interface DeveloperDeliveryReceiptVerificationArgs extends JsonObject {
+  receipt: JsonObject;
+  delivery: JsonObject;
+}
+
+export interface DeveloperDeliveryReceiptVerificationResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_delivery_receipt_verify";
+  schema: "bioprism-devplat-delivery-receipt/0.1";
+  receipt_id: string;
+  supplied_receipt_digest: string | null;
+  recomputed_receipt_digest: string;
+  delivery_digest_match: boolean;
+  target_digest_match: boolean;
+  receipt_digest_match: boolean;
+  targets_match: boolean;
+  evidence_match: boolean;
+  valid: boolean;
+  verified: boolean;
+  structurally_valid: boolean;
+  findings: JsonObject[];
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DeveloperDeliveryTargetResult extends JsonObject {
   target: string;
   available: boolean;

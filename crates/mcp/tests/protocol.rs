@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 172);
+    assert_eq!(tools.len(), 173);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4266,6 +4266,29 @@ fn developer_delivery_receipt_canonicalizes_explicit_targets_and_evidence() {
     assert_eq!(receipt["delivery"]["workflow"], json!("developer_delivery_audit"));
     assert_eq!(receipt["receipt_digest"].as_str().unwrap().len(), 64);
 
+    let verified = call(
+        &mut server,
+        "developer_delivery_receipt_verify",
+        json!({"receipt": receipt.clone(), "delivery": receipt["delivery"].clone()}),
+    );
+    assert_eq!(verified["workflow"], json!("developer_delivery_receipt_verify"));
+    assert_eq!(verified["verified"], json!(true));
+    assert_eq!(verified["receipt_digest_match"], json!(true));
+
+    let mut tampered = receipt.clone();
+    tampered["targets"][0]["ready"] = json!(false);
+    let rejected = call(
+        &mut server,
+        "developer_delivery_receipt_verify",
+        json!({"receipt": tampered, "delivery": receipt["delivery"].clone()}),
+    );
+    assert_eq!(rejected["verified"], json!(false));
+    assert!(rejected["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "targets_mismatch"));
+
     let blocked = call(
         &mut server,
         "developer_delivery_receipt",
@@ -4778,12 +4801,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(172));
-    assert_eq!(result["advertised_tool_count"], json!(172));
+    assert_eq!(result["unique_catalog_tools"], json!(173));
+    assert_eq!(result["advertised_tool_count"], json!(173));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(172));
-    assert_eq!(result["schema_quality"]["valid"], json!(172));
+    assert_eq!(result["schema_quality"]["checked"], json!(173));
+    assert_eq!(result["schema_quality"]["valid"], json!(173));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
