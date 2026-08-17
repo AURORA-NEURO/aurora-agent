@@ -124,6 +124,9 @@ if (result.mcp.result?.isError) {
   terminal results and traces remain authoritative.
 - `missionTrace(missionId, after, limit)` pages the retained authoritative trace into a typed
   `MissionTracePage`; the exclusive `next_after` cursor and any retention gap are explicit.
+- Executable jobs retain `execution_provenance`, and `missionProvenance(missionId)` reads the
+  correlated review, gate digest, domain-evaluator evidence, and accepted-dispatch event as a
+  bounded audit projection; it never claims readiness or scientific validity.
 - `missionFromRoute()` converts a completed `capabilityRoute()` response into a provenance-preserving
   mission assembly only after every need has one caller-selected candidate and explicit JSON
   arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is

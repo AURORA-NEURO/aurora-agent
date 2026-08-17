@@ -7046,6 +7046,14 @@ export interface MissionResultOmission extends JsonObject {
   sha256: string;
 }
 
+export interface MissionExecutionProvenanceResponse extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mission-execution-provenance/0.1";
+  mission_id: string;
+  provenance: JsonObject;
+  readiness_claimed: false;
+}
+
 export interface MissionJob extends JsonObject {
   ok: boolean;
   mission_id: string;
@@ -7060,6 +7068,7 @@ export interface MissionJob extends JsonObject {
   poll?: string;
   cancel?: string;
   trace?: string;
+  execution_provenance?: JsonObject | null;
 }
 
 export interface MissionTracePage extends JsonObject {
@@ -7103,6 +7112,7 @@ export interface MissionInventoryItem extends JsonObject {
   poll: string;
   cancel: string;
   trace: string;
+  execution_provenance?: JsonObject | null;
 }
 
 export interface MissionInventoryResponse extends JsonObject {
@@ -7125,6 +7135,7 @@ export interface MissionPersistenceStatus extends JsonObject {
   integrity_verified: boolean | null;
   max_file_bytes: number;
   max_result_bytes: number;
+  max_provenance_bytes?: number;
   registry_size: number;
   event_log_durable: false;
   webhook_deliveries_durable: false;
@@ -7359,6 +7370,7 @@ export interface OperationsDomainGates extends JsonObject {
     completed_tool_events: number;
     refused_tool_events: number;
     evaluation_evidence_events: number;
+    domain_evaluator_evidence_events: number;
     safety_evidence_events: number;
     release_evidence_events: number;
     groups_blocked_catalogue: number;

@@ -34,6 +34,7 @@ const LEGACY_MISSION_STATE_SCHEMA_VERSION: u64 = 1;
 pub const MAX_MISSION_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PERSISTED_MISSION_RESULT_BYTES: usize = 256 * 1024;
 pub const MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES: usize = 64 * 1024;
+pub const MAX_PERSISTED_MISSION_PROVENANCE_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -240,6 +241,7 @@ struct MissionJobState {
     result_omitted: Option<Value>,
     error: Option<String>,
     recovered_after_restart: bool,
+    execution_provenance: Option<Value>,
 }
 
 #[derive(Clone)]
@@ -526,6 +528,9 @@ impl ApiRouter {
             }
             ("POST", "/v1/missions/preflight") => self.preflight_mission(&request, &request_id),
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
+            ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/provenance") => {
+                self.mission_provenance(&request, &request_id)
+            }
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/trace") => {
                 self.mission_trace(&request, &request_id)
             }
@@ -623,6 +628,7 @@ impl ApiRouter {
                 "integrity_verified": integrity_verified,
                 "max_file_bytes": MAX_MISSION_STATE_FILE_BYTES,
                 "max_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
+                "max_provenance_bytes": MAX_PERSISTED_MISSION_PROVENANCE_BYTES,
                 "registry_size": registry_size,
                 "event_log_durable": false,
                 "webhook_deliveries_durable": false,
@@ -718,7 +724,7 @@ impl ApiRouter {
                         "state_digest": mission_state_digest,
                         "integrity_verified": mission_integrity_verified,
                         "restores": [
-                            "terminal mission status, bounded progress, retained trace, and size-limited result metadata"
+                            "terminal mission status, bounded progress, retained trace, size-limited result metadata, and bounded execution provenance"
                         ],
                         "does_not_restore": [
                             "queued or running execution",
@@ -966,6 +972,7 @@ impl ApiRouter {
                     "event_cursor": true,
                     "async_missions": true,
                     "mission_inventory": true,
+                    "mission_execution_provenance": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -994,6 +1001,7 @@ impl ApiRouter {
                     "recovery": "/v1/recovery",
                     "mission_persistence": "/v1/missions/persistence",
                     "event_persistence": "/v1/events/persistence",
+                    "mission_provenance": "/v1/missions/{mission_id}/provenance",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -1330,6 +1338,7 @@ impl ApiRouter {
             .count();
         let mut global_channel_events = BTreeMap::<String, usize>::new();
         let mut global_channel_tools = BTreeMap::<String, BTreeSet<String>>::new();
+        let mut evaluator_bindings_by_group = BTreeMap::<String, Vec<Value>>::new();
         for (event, tool) in &tool_events {
             if event.event_type != "tool.completed" {
                 continue;
@@ -1342,6 +1351,18 @@ impl ApiRouter {
                     .entry((*channel).to_string())
                     .or_default()
                     .insert(tool.clone());
+            }
+            if operations_evidence_channels(tool).contains(&"evaluation") {
+                for group_id in operations_evaluator_group_bindings(tool) {
+                    evaluator_bindings_by_group
+                        .entry((*group_id).to_string())
+                        .or_default()
+                        .push(json!({
+                            "tool": tool,
+                            "event_id": event.id,
+                            "binding": "catalogue_group_alias"
+                        }));
+                }
             }
         }
         let mut attributed_event_ids = BTreeSet::new();
@@ -1364,6 +1385,15 @@ impl ApiRouter {
             let mut refused_event_count = 0usize;
             let channel_tools = global_channel_tools.clone();
             let channel_events = global_channel_events.clone();
+            let evaluator_bindings = evaluator_bindings_by_group
+                .get(id)
+                .cloned()
+                .unwrap_or_default();
+            let evaluator_tools = evaluator_bindings
+                .iter()
+                .filter_map(|binding| binding.get("tool").and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect::<BTreeSet<_>>();
             let mut last_event_id = None;
             for (event, tool) in &tool_events {
                 if !declared_tools.contains(tool) {
@@ -1413,12 +1443,18 @@ impl ApiRouter {
             } else {
                 "missing"
             };
+            let domain_evaluator_state = if evaluator_bindings.is_empty() {
+                "missing"
+            } else {
+                "observed"
+            };
             let gate_state = if missing_tool_count > 0 {
                 groups_blocked_catalogue += 1;
                 "catalogue_blocked"
             } else if observed_event_count == 0
                 || completed_event_count == 0
                 || channel_events.get("evaluation").copied().unwrap_or(0) == 0
+                || evaluator_bindings.is_empty()
                 || channel_events.get("safety").copied().unwrap_or(0) == 0
                 || channel_events.get("release").copied().unwrap_or(0) == 0
             {
@@ -1443,6 +1479,15 @@ impl ApiRouter {
                     "observed_activity": { "state": activity_state, "event_count": observed_event_count, "tool_count": observed_tools.len(), "tools": observed_tools },
                     "transport_completion": { "state": transport_state, "event_count": completed_event_count, "tool_count": completed_tools.len(), "tools": completed_tools, "refused_event_count": refused_event_count, "refused_tool_count": refused_tools.len(), "refused_tools": refused_tools },
                     "evaluation_evidence": channel_gate("evaluation"),
+                    "domain_evaluator_evidence": {
+                        "state": domain_evaluator_state,
+                        "scope": "completed_evaluator_tool_exact_or_catalogue_group_binding",
+                        "event_count": evaluator_bindings.len(),
+                        "tool_count": evaluator_tools.len(),
+                        "tools": evaluator_tools,
+                        "bindings": evaluator_bindings,
+                        "readiness_claimed": false
+                    },
                     "safety_evidence": channel_gate("safety"),
                     "release_evidence": channel_gate("release")
                 },
@@ -1474,6 +1519,7 @@ impl ApiRouter {
                 "completed_tool_events": completed_tool_events,
                 "refused_tool_events": refused_tool_events,
                 "evaluation_evidence_events": global_channel_events.get("evaluation").copied().unwrap_or(0),
+                "domain_evaluator_evidence_events": evaluator_bindings_by_group.values().map(Vec::len).sum::<usize>(),
                 "safety_evidence_events": global_channel_events.get("safety").copied().unwrap_or(0),
                 "release_evidence_events": global_channel_events.get("release").copied().unwrap_or(0),
                 "groups_blocked_catalogue": groups_blocked_catalogue,
@@ -1483,15 +1529,17 @@ impl ApiRouter {
             },
             "gate_policy": {
                 "required_gates": operations_required_gates(),
-                "decision_rule": "all gates need observed evidence; a complete evidence set still requires human or domain authority review",
+                "decision_rule": "all gates need observed evidence; domain evaluator evidence must bind a completed evaluator tool to the selected capability group; a complete evidence set still requires human or domain authority review",
                 "event_matching": "exact advertised tool name from event payload or subject",
                 "scope": "only the bounded event page requested by the caller",
                 "control_plane_evidence_scope": "completed evaluation, safety, and release tools are pooled across the page and applied to each matched domain group",
+                "domain_evaluator_binding_scope": "only completed evaluation-channel tools with an exact or catalogue-declared capability-group binding",
                 "cross_group_membership": "one tool event may contribute to multiple groups",
                 "readiness_claimed": false
             },
             "guarantees": [
-                "catalogue, activity, transport, evaluation, safety, and release evidence remain separate",
+                "catalogue, activity, transport, pooled evaluation, domain evaluator, safety, and release evidence remain separate",
+                "domain evaluator evidence is a bounded catalogue binding and does not assert scientific validity or evaluator adequacy",
                 "missing evidence is represented as a gate state instead of inferred readiness",
                 "no tool is invoked by this projection"
             ],
@@ -1679,7 +1727,7 @@ impl ApiRouter {
             return self.error(
                 422,
                 "operations_gate_review_not_ready",
-                "a review requires a current gate digest and every selected group to be review_required with all six accepted gates",
+                "a review requires a current gate digest and every selected group to be review_required with all required accepted gates",
                 request_id,
             );
         }
@@ -1771,37 +1819,42 @@ impl ApiRouter {
         )
     }
 
-    fn operations_gate_review_matches(&self, arguments: &Value, gate_digest: &Value) -> bool {
+    fn operations_gate_review_matches(
+        &self,
+        arguments: &Value,
+        gate_digest: &Value,
+    ) -> Option<u64> {
         let Some(acceptance) = arguments
             .get("operations_gate_acceptance")
             .and_then(Value::as_object)
         else {
-            return false;
+            return None;
         };
         let Some(review_id) = acceptance.get("review_id").and_then(Value::as_str) else {
-            return false;
+            return None;
         };
         let Some(current_fingerprint) =
             operations_gate_acceptance_canonical(&Value::Object(acceptance.clone()))
         else {
-            return false;
+            return None;
         };
         let events = match self.events.lock() {
             Ok(events) => events,
-            Err(_) => return false,
+            Err(_) => return None,
         };
         let page = match events.events_for_operations_gate_review(0, 1000, review_id) {
             Ok(page) => page,
-            Err(_) => return false,
+            Err(_) => return None,
         };
-        page.events.iter().any(|event| {
-            event.payload.get("review_id").and_then(Value::as_str) == Some(review_id)
+        page.events.iter().find_map(|event| {
+            let matches = event.payload.get("review_id").and_then(Value::as_str) == Some(review_id)
                 && event.payload.get("gate_digest") == Some(gate_digest)
                 && event
                     .payload
                     .get("acceptance")
                     .and_then(operations_gate_acceptance_canonical)
-                    .is_some_and(|fingerprint| fingerprint == current_fingerprint)
+                    .is_some_and(|fingerprint| fingerprint == current_fingerprint);
+            matches.then_some(event.id)
         })
     }
 
@@ -1892,8 +1945,13 @@ impl ApiRouter {
         let gate_digest = snapshot.get("gate_digest").cloned().unwrap_or(Value::Null);
         let acceptance_matches =
             operations_gate_acceptance_matches(arguments, &group_ids, &gate_digest, &rows);
-        let review_present = self.operations_gate_review_matches(arguments, &gate_digest);
+        let review_event_id = self.operations_gate_review_matches(arguments, &gate_digest);
+        let review_present = review_event_id.is_some();
         let acceptance_valid = all_review_required && acceptance_matches && review_present;
+        let review_id = arguments
+            .pointer("/operations_gate_acceptance/review_id")
+            .cloned()
+            .unwrap_or(Value::Null);
         json!({
             "schema": "bioprism-operations-preflight-evidence/0.1",
             "gate_digest": gate_digest,
@@ -1905,6 +1963,8 @@ impl ApiRouter {
             "decision": decision,
             "acceptance_required": mission_execution_requested(arguments),
             "acceptance_present": arguments.get("operations_gate_acceptance").is_some(),
+            "review_id": review_id,
+            "review_event_id": review_event_id,
             "review_present": review_present,
             "acceptance_matches_current_gates": acceptance_matches,
             "acceptance_valid": acceptance_valid,
@@ -1914,7 +1974,7 @@ impl ApiRouter {
             "readiness_claimed": false,
             "guarantees": [
                 "mission steps are mapped to every matching workspace capability group by exact tool name",
-                "all six evidence channels remain separate from the mission execution policy",
+                "all seven evidence gates remain separate from the mission execution policy",
                 "execution acceptance is bound to the current gate digest, selected group set, and retained review event"
             ],
             "non_claims": [
@@ -2049,6 +2109,7 @@ impl ApiRouter {
                     "operations_handoff": "/v1/operations/handoff",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
+                    "mission_provenance": "/v1/missions/{mission_id}/provenance",
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
@@ -2080,6 +2141,7 @@ impl ApiRouter {
                     "async_missions": true,
                     "mission_preflight": true,
                     "mission_inventory": true,
+                    "mission_execution_provenance": true,
                     "mission_trace": true,
                     "delivery_receipt_events": true,
                     "delivery_receipt_attempt_provenance": true,
@@ -2111,6 +2173,7 @@ impl ApiRouter {
                     "event_capacity": self.config.event_capacity,
                     "mission_state_file_bytes": MAX_MISSION_STATE_FILE_BYTES,
                     "persisted_mission_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
+                    "persisted_mission_provenance_bytes": MAX_PERSISTED_MISSION_PROVENANCE_BYTES,
                     "event_state_file_bytes": MAX_EVENT_STATE_FILE_BYTES,
                     "delivery_error_bytes": crate::events::MAX_DELIVERY_ERROR_BYTES,
                     "webhook_filters": MAX_FILTERS
@@ -2537,6 +2600,7 @@ impl ApiRouter {
         if let Err(error) = self.mission_executor.validate_agent_mission(&arguments) {
             return self.error(422, "invalid_mission", &error, request_id);
         }
+        let mut execution_provenance = None;
         if mission_execution_requested(&arguments) {
             let evidence = self.operations_gate_projection(&arguments);
             if evidence["acceptance_valid"] != json!(true)
@@ -2549,6 +2613,16 @@ impl ApiRouter {
                     request_id,
                 );
             }
+            let Some(provenance) = mission_execution_provenance(&mission_id, &arguments, &evidence)
+            else {
+                return self.error(
+                    500,
+                    "execution_provenance_unavailable",
+                    "the validated execution acceptance could not be converted into bounded provenance",
+                    request_id,
+                );
+            };
+            execution_provenance = Some(provenance);
         }
         let total_steps = arguments
             .get("steps")
@@ -2567,6 +2641,7 @@ impl ApiRouter {
             result_omitted: None,
             error: None,
             recovered_after_restart: false,
+            execution_provenance: execution_provenance.clone(),
         }));
         let job = Arc::new(MissionJob {
             cancellation: Arc::clone(&cancellation),
@@ -2607,6 +2682,65 @@ impl ApiRouter {
                 jobs.remove(&mission_id);
             }
             return self.error(503, "mission_persistence_unavailable", &error, request_id);
+        }
+
+        if let Some(provenance) = execution_provenance.as_mut() {
+            let event = {
+                let mut events = match self.events.lock() {
+                    Ok(events) => events,
+                    Err(_) => {
+                        if let Ok(mut jobs) = self.mission_jobs.lock() {
+                            jobs.remove(&mission_id);
+                        }
+                        let _ = self.persist_mission_registry();
+                        return self.error(
+                            500,
+                            "event_log_unavailable",
+                            "event log is unavailable",
+                            request_id,
+                        );
+                    }
+                };
+                match events.emit(
+                    "mission.execution.accepted",
+                    &mission_id,
+                    request_id,
+                    json!({
+                        "workflow": "mission_execution",
+                        "schema": "bioprism-mission-execution-provenance/0.1",
+                        "mission_id": mission_id,
+                        "provenance": provenance,
+                        "readiness_claimed": false
+                    }),
+                ) {
+                    Ok(event) => event,
+                    Err(error) => {
+                        if let Ok(mut jobs) = self.mission_jobs.lock() {
+                            jobs.remove(&mission_id);
+                        }
+                        let _ = self.persist_mission_registry();
+                        return self.error(500, "event_emit_failed", &error, request_id);
+                    }
+                }
+            };
+            if let Err(error) = self.event_persistence.persist() {
+                if let Ok(mut jobs) = self.mission_jobs.lock() {
+                    jobs.remove(&mission_id);
+                }
+                let _ = self.persist_mission_registry();
+                return self.error(503, "event_persistence_unavailable", &error, request_id);
+            }
+            provenance["accepted_event_id"] = json!(event.id);
+            if let Ok(mut current) = state.lock() {
+                current.execution_provenance = Some(provenance.clone());
+            }
+            if let Err(error) = self.persist_mission_registry() {
+                if let Ok(mut jobs) = self.mission_jobs.lock() {
+                    jobs.remove(&mission_id);
+                }
+                let _ = self.persist_mission_registry();
+                return self.error(503, "mission_persistence_unavailable", &error, request_id);
+            }
         }
 
         let progress_state = Arc::clone(&state);
@@ -2687,6 +2821,7 @@ impl ApiRouter {
                 "status": "queued",
                 "cancel_requested": false,
                 "progress": mission_progress_json(&MissionProgressState::new(total_steps)),
+                "execution_provenance": execution_provenance,
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
                 "trace": format!("/v1/missions/{mission_id}/trace"),
@@ -2773,6 +2908,7 @@ impl ApiRouter {
                 "cancel_requested": state.cancel_requested,
                 "cancel_reason": state.cancel_reason,
                 "recovered_after_restart": state.recovered_after_restart,
+                "execution_provenance": state.execution_provenance,
                 "progress": mission_progress_json(&state.progress),
                 "summary": mission_summary(&state),
                 "poll": format!("/v1/missions/{mission_id}"),
@@ -2839,6 +2975,7 @@ impl ApiRouter {
                 "cancel_requested": current.cancel_requested,
                 "cancel_reason": current.cancel_reason,
                 "recovered_after_restart": current.recovered_after_restart,
+                "execution_provenance": current.execution_provenance,
                 "progress": mission_progress_json(&current.progress),
                 "result": current.result,
                 "result_omitted": current.result_omitted,
@@ -2846,6 +2983,87 @@ impl ApiRouter {
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
                 "trace": format!("/v1/missions/{mission_id}/trace"),
+            }),
+        )
+    }
+
+    fn mission_provenance(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), Some("provenance")) else {
+            return self.error(
+                404,
+                "not_found",
+                "mission provenance route does not exist",
+                request_id,
+            );
+        };
+        if request
+            .query()
+            .map(|query| !query.is_empty())
+            .unwrap_or(true)
+        {
+            return self.error(
+                400,
+                "invalid_query",
+                "mission provenance does not accept query parameters",
+                request_id,
+            );
+        }
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(provenance) = state.execution_provenance else {
+            return self.error(
+                404,
+                "provenance_unavailable",
+                "mission has no execution provenance because it was preview-only or predates this contract",
+                request_id,
+            );
+        };
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "schema": "bioprism-mission-execution-provenance/0.1",
+                "mission_id": mission_id,
+                "provenance": provenance,
+                "readiness_claimed": false,
+                "guarantees": [
+                    "the projection is retained with the mission checkpoint when mission_state_path is configured",
+                    "review, gate digest, evaluator binding, and accepted-dispatch event identifiers remain correlated",
+                    "the underlying gate review and event routes remain authoritative for replay"
+                ],
+                "non_claims": [
+                    "preview-only missions have no dispatch provenance",
+                    "provenance is not scientific, clinical, regulatory, or deployment approval"
+                ],
+                "links": {
+                    "mission": format!("/v1/missions/{mission_id}"),
+                    "mission_trace": format!("/v1/missions/{mission_id}/trace"),
+                    "operations_gates": "/v1/operations/gates?after=0&limit=256",
+                    "events": "/v1/events?after=0&limit=256"
+                }
             }),
         )
     }
@@ -3638,6 +3856,7 @@ impl ApiRouter {
                     "/v1/missions/persistence": { "get": { "responses": { "200": { "description": "restart-aware mission snapshot status" } } } },
                     "/v1/missions/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded mission snapshot checkpoint" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
+                    "/v1/missions/{mission_id}/provenance": { "get": { "responses": { "200": { "description": "retained execution gate, review, evaluator, and dispatch provenance" } } } },
                     "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
@@ -3746,12 +3965,94 @@ fn operations_evidence_channels(tool: &str) -> &'static [&'static str] {
     &[]
 }
 
+/// Return the capability groups for which a completed evaluator tool is an explicit evidence
+/// witness. This is intentionally a catalogue binding, not a claim that the evaluator is valid,
+/// calibrated, independent, or scientifically sufficient for the group.
+fn operations_evaluator_group_bindings(tool: &str) -> &'static [&'static str] {
+    const BIOLOGICAL: &[&str] = &["biological_domains"];
+    const BIOEVALUATION: &[&str] = &[
+        "biological_domains",
+        "bioevaluation_reference_contracts",
+        "evaluation_and_baselines",
+    ];
+    const BASELINES: &[&str] = &["evaluation_and_baselines"];
+    const BENCHMARKS: &[&str] = &[
+        "evaluation_and_baselines",
+        "benchmark_pack_portfolio",
+        "megafactory_scale_and_oracles",
+        "mutation_and_causal_discovery",
+    ];
+    const TRAJECTORY: &[&str] = &["trajectory_and_decision_cells", "evaluation_and_baselines"];
+    const ATLAS: &[&str] = &["atlas_metrics_and_research_ci", "evaluation_and_baselines"];
+    const ORACLE: &[&str] = &["oracle_mesh", "evaluation_and_baselines"];
+    const DECISION: &[&str] = &["decision_context", "evaluation_and_baselines"];
+    const REGISTRY: &[&str] = &["registry_operations_and_infrastructure"];
+
+    if tool.starts_with("bioeval_") {
+        return BIOEVALUATION;
+    }
+    if tool.starts_with("benchmark_")
+        || matches!(tool, "mutation_family" | "scale_family_split_verify")
+    {
+        return BENCHMARKS;
+    }
+    if tool.starts_with("trace_")
+        || matches!(
+            tool,
+            "benchmark_trace_analyze"
+                | "benchmark_decision_audit"
+                | "benchmark_integrity_audit"
+                | "benchmark_counterfactual_check"
+                | "benchmark_oracle_review"
+        )
+    {
+        return TRAJECTORY;
+    }
+    if tool.starts_with("atlas_")
+        || tool.starts_with("metrics_")
+        || tool == "capability_rank"
+        || tool == "research_ci_check"
+    {
+        return ATLAS;
+    }
+    if tool.starts_with("oracle_") {
+        return ORACLE;
+    }
+    if matches!(
+        tool,
+        "context_compare" | "adaptive_panel" | "posterior_gate" | "prism_minimize"
+    ) {
+        return DECISION;
+    }
+    if matches!(
+        tool,
+        "modality_comparability_check"
+            | "measurement_compare"
+            | "onco_response_assess"
+            | "onco_outcome_analyze"
+            | "oncoworlds_methylation_compare"
+            | "oncoworlds_radiogenomic_check"
+            | "oncoworlds_era_shift_check"
+            | "oncoworlds_equity_check"
+    ) {
+        return BIOLOGICAL;
+    }
+    if tool == "quality_gate_run" {
+        return REGISTRY;
+    }
+    if tool.starts_with("evaluation_") {
+        return BASELINES;
+    }
+    &[]
+}
+
 fn operations_required_gates() -> &'static [&'static str] {
     &[
         "catalogue",
         "observed_activity",
         "transport_completion",
         "evaluation_evidence",
+        "domain_evaluator_evidence",
         "safety_evidence",
         "release_evidence",
     ]
@@ -4180,6 +4481,44 @@ fn mission_execution_requested(arguments: &Value) -> bool {
         .pointer("/policy/execute")
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn mission_execution_provenance(
+    mission_id: &str,
+    arguments: &Value,
+    evidence: &Value,
+) -> Option<Value> {
+    let review_id = evidence.get("review_id")?.as_str()?;
+    let review_event_id = evidence.get("review_event_id")?.as_u64()?;
+    let gate_digest = evidence.get("gate_digest")?.as_str()?;
+    let acceptance = arguments.get("operations_gate_acceptance")?.clone();
+    let mut provenance = json!({
+        "schema": "bioprism-mission-execution-provenance/0.1",
+        "workflow": "mission_execution",
+        "mission_id": mission_id,
+        "dispatch": "accepted",
+        "review_id": review_id,
+        "review_event_id": review_event_id,
+        "gate_digest": gate_digest,
+        "gate_digest_scope": evidence.get("gate_digest_scope").cloned().unwrap_or(Value::Null),
+        "acceptance": acceptance,
+        "operations_evidence": evidence,
+        "replay": {
+            "operations_gates": "/v1/operations/gates?after=0&limit=256",
+            "gate_review": format!("/v1/operations/gate-reviews?review_id={review_id}"),
+            "event_stream": "/v1/events?after=0&limit=256",
+        },
+        "readiness_claimed": false,
+        "provenance_digest_scope": "all_projection_fields_except_accepted_event_id",
+        "non_claims": [
+            "the retained review and evaluator binding do not establish scientific, clinical, regulatory, or deployment validity",
+            "the bounded evidence page is not complete history when retention gaps or pagination apply",
+            "dispatch acceptance does not prove successful tool execution or external effect completion"
+        ]
+    });
+    let digest_bytes = serde_json::to_vec(&provenance).ok()?;
+    provenance["provenance_digest"] = json!(hex_digest(&Sha256::digest(&digest_bytes)));
+    Some(provenance)
 }
 
 fn mission_domain_group_requirements(arguments: &Value) -> Value {
@@ -4693,6 +5032,10 @@ fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<Mission
                 .get("recovered_after_restart")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            execution_provenance: object
+                .get("execution_provenance")
+                .filter(|value| value.is_object())
+                .cloned(),
         };
         if !is_terminal_mission_status(&state.status) {
             state.status = "failed".into();
@@ -4731,6 +5074,17 @@ fn durable_mission_state_json(mission_id: &str, state: &MissionJobState) -> Valu
         },
         None => (Value::Null, None),
     };
+    let (execution_provenance, generated_provenance_omission) =
+        match state.execution_provenance.as_ref() {
+            Some(provenance) => match serde_json::to_vec(provenance) {
+                Ok(bytes) if bytes.len() <= MAX_PERSISTED_MISSION_PROVENANCE_BYTES => {
+                    (provenance.clone(), None)
+                }
+                Ok(bytes) => (Value::Null, Some(value_omission(&bytes))),
+                Err(_) => (Value::Null, None),
+            },
+            None => (Value::Null, None),
+        };
     json!({
         "mission_id": mission_id,
         "total_steps": state.total_steps,
@@ -4741,6 +5095,8 @@ fn durable_mission_state_json(mission_id: &str, state: &MissionJobState) -> Valu
         "trace": persisted_trace,
         "result": result,
         "result_omitted": state.result_omitted.clone().or(generated_omission),
+        "execution_provenance": execution_provenance,
+        "execution_provenance_omitted": generated_provenance_omission,
         "error": state.error,
         "recovered_after_restart": state.recovered_after_restart,
     })
@@ -5294,6 +5650,7 @@ mod tests {
             result_omitted: None,
             error: None,
             recovered_after_restart: false,
+            execution_provenance: None,
         };
         let persisted = durable_mission_state_json("large-result", &state);
         assert!(persisted["result"].is_null());
@@ -5582,6 +5939,14 @@ mod tests {
             biological["gates"]["evaluation_evidence"]["scope"],
             "cross_domain_control_plane_event_page"
         );
+        assert_eq!(
+            biological["gates"]["domain_evaluator_evidence"]["state"],
+            "observed"
+        );
+        assert_eq!(
+            biological["gates"]["domain_evaluator_evidence"]["scope"],
+            "completed_evaluator_tool_exact_or_catalogue_group_binding"
+        );
 
         let invalid = router.handle(request("GET", "/v1/operations/gates?limit=257", json!({})));
         assert_eq!(invalid.status, 422);
@@ -5667,6 +6032,130 @@ mod tests {
             "review_required"
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn executable_missions_retain_gate_review_and_domain_evaluator_provenance() {
+        let event_path = test_state_path("mission-provenance-events");
+        let mission_path = test_state_path("mission-provenance-missions");
+        let config = ApiConfig {
+            event_state_path: Some(event_path.clone()),
+            mission_state_path: Some(mission_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let completed = json!({
+            "result": {
+                "isError": false,
+                "content": [{"type": "text", "text": "{}"}]
+            }
+        });
+        router.record_tool_event("provenance-gate-1", "modality_catalog", &completed);
+        router.record_tool_event("provenance-gate-2", "bioeval_reference_audit", &completed);
+        router.record_tool_event("provenance-gate-3", "safety_release_gate", &completed);
+        let gates = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=256",
+            json!({}),
+        ));
+        let gates: Value = serde_json::from_slice(&gates.body).unwrap();
+        let review = router.handle(request(
+            "POST",
+            "/v1/operations/gate-reviews",
+            json!({
+                "gate_digest": gates["gate_digest"],
+                "reviewer": "operator-provenance",
+                "rationale": "reviewed domain-bound evidence",
+                "group_ids": ["biological_domains"],
+                "accepted_gates": {"biological_domains": operations_required_gates()}
+            }),
+        ));
+        assert_eq!(review.status, 201);
+        let review: Value = serde_json::from_slice(&review.body).unwrap();
+
+        let submitted = router.handle(request(
+            "POST",
+            "/v1/missions",
+            json!({
+                "mission_id": "provenance-mission",
+                "goal": "execute a reviewed bounded biological inspection",
+                "steps": [{
+                    "id": "catalog",
+                    "domain": "biological",
+                    "capability": "catalogue",
+                    "objective": "inspect modality support",
+                    "tool": "modality_catalog"
+                }],
+                "policy": {"execute": true, "allowed_tools": ["modality_catalog"]},
+                "operations_gate_acceptance": review["acceptance"]
+            }),
+        ));
+        assert_eq!(submitted.status, 202);
+        let submitted: Value = serde_json::from_slice(&submitted.body).unwrap();
+        assert_eq!(
+            submitted["execution_provenance"]["schema"],
+            "bioprism-mission-execution-provenance/0.1"
+        );
+        assert_eq!(
+            submitted["execution_provenance"]["review_id"],
+            review["review_id"]
+        );
+        assert!(submitted["execution_provenance"]["review_event_id"].is_u64());
+        assert!(submitted["execution_provenance"]["accepted_event_id"].is_u64());
+        assert_eq!(
+            submitted["execution_provenance"]["readiness_claimed"],
+            false
+        );
+
+        let provenance = router.handle(request(
+            "GET",
+            "/v1/missions/provenance-mission/provenance",
+            json!({}),
+        ));
+        assert_eq!(provenance.status, 200);
+        let provenance: Value = serde_json::from_slice(&provenance.body).unwrap();
+        assert_eq!(
+            provenance["provenance"]["gate_digest"],
+            gates["gate_digest"]
+        );
+        let biological_evidence = provenance["provenance"]["operations_evidence"]["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["group_id"] == "biological_domains")
+            .unwrap();
+        assert_eq!(
+            biological_evidence["gates"]["domain_evaluator_evidence"]["state"],
+            "observed"
+        );
+
+        let events = router.handle(request("GET", "/v1/events?after=0&limit=32", json!({})));
+        let events: Value = serde_json::from_slice(&events.body).unwrap();
+        assert!(events["page"]["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| {
+                event["event_type"] == "mission.execution.accepted"
+                    && event["payload"]["provenance"]["review_id"] == review["review_id"]
+            }));
+        router.handle(request("POST", "/v1/missions/persistence/flush", json!({})));
+
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_provenance = restored.handle(request(
+            "GET",
+            "/v1/missions/provenance-mission/provenance",
+            json!({}),
+        ));
+        assert_eq!(restored_provenance.status, 200);
+        let restored_provenance: Value = serde_json::from_slice(&restored_provenance.body).unwrap();
+        assert_eq!(
+            restored_provenance["provenance"]["provenance_digest"],
+            provenance["provenance"]["provenance_digest"]
+        );
+        let _ = std::fs::remove_file(event_path);
+        let _ = std::fs::remove_file(mission_path);
     }
 
     #[test]

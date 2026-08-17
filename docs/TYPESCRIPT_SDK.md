@@ -670,7 +670,9 @@ caller performs route review and mission preflight.
 keeps the event cursor, exact observed tools, catalogue gaps, and catalogued-but-unobserved tools
 separate; its `observation_policy` explicitly does not claim readiness.
 `operationsDomainGates(after, limit)` returns typed evidence gates for catalogue, activity,
-transport completion, evaluation, safety, and release channels. Its group state is explicitly
+transport completion, pooled evaluation, domain-evaluator, safety, and release channels. The
+domain-evaluator row preserves the exact evaluator tool/event binding without asserting scientific
+validity, calibration, or independence. Its group state is explicitly
 `catalogue_blocked`, `insufficient_evidence`, or `review_required`; the type contract preserves
 `readiness_claimed: false` even when all locally observed channels are present.
 `createOperationsGateReview()` persists a current review and `operationsGateReviews()` replays it
@@ -678,6 +680,10 @@ by cursor or content-addressed `review_id`. `AgentMissionArgs.operations_gate_ac
 carries that retained `review_id`, matching `gate_digest`, reviewer, rationale, exact group IDs,
 and accepted gate names. The HTTP API revalidates the retained review against current evidence
 before accepting an executable mission.
+Accepted executable jobs expose `execution_provenance`, and `missionProvenance(missionId)` reads
+the same `bioprism-mission-execution-provenance/0.1` projection directly. It correlates the
+retained review and gate digest, domain-evaluator evidence, bounded preflight projection, and
+accepted-dispatch event; it is an audit/replay record rather than a readiness claim.
 
 ```typescript
 const page = await api.events(0, 100);

@@ -2543,6 +2543,9 @@ test("client exposes asynchronous mission submission, status, and cancellation",
       if (path === "/v1/missions/async-1" && init.method === "GET") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "succeeded", cancel_requested: false, progress: { phase: "succeeded", current_wave: 0, total_steps: 1, completed_steps: 1, active_steps: 0, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, trace_sequence: 4, last_event: "mission.completed" }, result: { mission_status: "succeeded" } });
       }
+      if (path === "/v1/missions/async-1/provenance" && init.method === "GET") {
+        return jsonResponse({ ok: true, schema: "bioprism-mission-execution-provenance/0.1", mission_id: "async-1", provenance: { review_id: "e".repeat(64), gate_digest: "d".repeat(64), readiness_claimed: false }, readiness_claimed: false });
+      }
       if (path === "/v1/missions/slow" && init.method === "GET") {
         return jsonResponse({ ok: true, mission_id: "slow", status: "running", cancel_requested: false, progress: { phase: "running", current_wave: 0, total_steps: 1, completed_steps: 0, active_steps: 1, succeeded: 0, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 0, trace_sequence: 1, last_event: "step.started" } });
       }
@@ -2574,6 +2577,9 @@ test("client exposes asynchronous mission submission, status, and cancellation",
   assert.equal(trace.events[0].event, "mission.started");
   assert.equal(trace.events[1].event, "mission.completed");
   assert.equal(trace.next_after, 2);
+  const provenance = await client.missionProvenance("async-1");
+  assert.equal(provenance.mission_id, "async-1");
+  assert.equal(provenance.provenance.review_id, "e".repeat(64));
   assert.equal(status.result.mission_status, "succeeded");
   const inventory = await client.missions("succeeded", 5);
   assert.equal(inventory.missions[0].mission_id, "async-1");

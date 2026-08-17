@@ -259,6 +259,7 @@ import type {
   MetricsAnalyticsAuditArgs,
   MetricsProfileAuditArgs,
   MissionAssembly,
+  MissionExecutionProvenanceResponse,
   MissionJob,
   MissionJobStatus,
   MissionInventoryResponse,
@@ -1190,6 +1191,20 @@ export class ApiClient {
   async missionStatus(missionId: string, options?: ClientRequestOptions): Promise<MissionJob> {
     const id = pathSegment(missionId, "mission id");
     return this.request<MissionJob>("GET", `/v1/missions/${encodeURIComponent(id)}`, undefined, options);
+  }
+
+  /** Read the retained gate, review, evaluator, and accepted-dispatch provenance for a mission. */
+  async missionProvenance(
+    missionId: string,
+    options?: ClientRequestOptions,
+  ): Promise<MissionExecutionProvenanceResponse> {
+    const id = pathSegment(missionId, "mission id");
+    return this.request<MissionExecutionProvenanceResponse>(
+      "GET",
+      `/v1/missions/${encodeURIComponent(id)}/provenance`,
+      undefined,
+      options,
+    );
   }
 
   /** Read a bounded cursor page from the authoritative clock-free mission trace. */

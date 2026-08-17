@@ -6,6 +6,7 @@ from prism_sdk import (
     ArgumentError,
     MissionBinding,
     MissionExecutionReport,
+    MissionExecutionProvenance,
     MissionProgress,
     MissionRouteSelection,
     MissionRequest,
@@ -45,6 +46,24 @@ def catalogue() -> ToolCatalogue:
 
 
 class MissionPreflightTests(unittest.TestCase):
+    def test_execution_provenance_preserves_replay_correlation(self) -> None:
+        provenance = MissionExecutionProvenance.from_wire(
+            {
+                "ok": True,
+                "schema": "bioprism-mission-execution-provenance/0.1",
+                "mission_id": "mission-1",
+                "provenance": {
+                    "review_id": "e" * 64,
+                    "gate_digest": "d" * 64,
+                    "readiness_claimed": False,
+                },
+                "readiness_claimed": False,
+            }
+        )
+        self.assertEqual(provenance.mission_id, "mission-1")
+        self.assertEqual(provenance.provenance["review_id"], "e" * 64)
+        self.assertFalse(provenance.readiness_claimed)
+
     def test_trace_page_validates_cursor_order_and_gap_metadata(self) -> None:
         page = MissionTracePage.from_wire(
             {
@@ -127,6 +146,7 @@ class MissionPreflightTests(unittest.TestCase):
             "observed_activity",
             "transport_completion",
             "evaluation_evidence",
+            "domain_evaluator_evidence",
             "safety_evidence",
             "release_evidence",
         )

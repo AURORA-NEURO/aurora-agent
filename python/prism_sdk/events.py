@@ -825,7 +825,7 @@ class OperationsDomainActivity:
 
 @dataclass(frozen=True)
 class OperationsDomainGateGroup:
-    """One capability group with explicit evidence-channel gate states."""
+    """One capability group with pooled and domain-bound evidence-channel gate states."""
 
     raw: dict[str, Any]
     coverage: OperationsDomainGroup
@@ -858,6 +858,10 @@ class OperationsDomainGateGroup:
         }
         if not required.issubset(gates_raw):
             raise ArgumentError("operations domain gate group is missing a required gate")
+        if "domain_evaluator_evidence" in gates_raw:
+            required.add("domain_evaluator_evidence")
+            if not required.issubset(gates_raw):
+                raise ArgumentError("operations domain gate group is missing a required gate")
         gates = {name: _mapping(f"operations domain gate {name}", gates_raw[name]) for name in gates_raw}
         last_event_id = raw.get("last_event_id")
         if last_event_id is not None:
@@ -931,13 +935,15 @@ class OperationsDomainGates:
             "completed_tool_events",
             "refused_tool_events",
             "evaluation_evidence_events",
+            "domain_evaluator_evidence_events",
             "safety_evidence_events",
             "release_evidence_events",
             "groups_blocked_catalogue",
             "groups_insufficient_evidence",
             "groups_review_required",
         ):
-            summary[name] = _non_negative(f"operations domain gates summary {name}", summary_raw.get(name))
+            value = summary_raw.get(name, 0)
+            summary[name] = _non_negative(f"operations domain gates summary {name}", value)
         if summary_raw.get("readiness_claimed") is not False:
             raise ArgumentError("operations domain gates summary must not claim readiness")
         summary["readiness_claimed"] = False

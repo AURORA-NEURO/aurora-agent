@@ -22,7 +22,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
 | `GET /v1/operations/domains?after=N&limit=M` | Per-domain catalogue coverage plus exact local tool activity observed in the requested event page |
-| `GET /v1/operations/gates?after=N&limit=M` | Per-domain catalogue, activity, transport, evaluation, safety, and release evidence gates without readiness claims |
+| `GET /v1/operations/gates?after=N&limit=M` | Per-domain catalogue, activity, transport, pooled evaluation, domain-evaluator, safety, and release evidence gates without readiness claims |
 | `POST /v1/operations/handoff` | Build a content-addressed, non-executing domain-to-`capability_route` handoff |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
@@ -30,6 +30,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/missions/persistence` | Inspect bounded checkpoint configuration and on-disk size |
 | `POST /v1/missions/persistence/flush` | Force a checkpoint and verify it can be written |
 | `GET /v1/missions/{mission_id}` | Poll job state and retrieve the authoritative mission report |
+| `GET /v1/missions/{mission_id}/provenance` | Retrieve retained gate, review, domain-evaluator, and accepted-dispatch evidence |
 | `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
@@ -161,8 +162,11 @@ the response declares that activity is limited to the requested page and never c
 health or readiness.
 
 `GET /v1/operations/gates` applies the same cursor bounds to an evidence-gate projection. Each
-group keeps catalogue, observed-activity, transport-completion, evaluation, safety, and release
-gates separate, including the exact observed tools and refusal/completion counts. The overall
+group keeps catalogue, observed-activity, transport-completion, pooled evaluation,
+domain-evaluator, safety, and release gates separate, including the exact observed tools and
+refusal/completion counts. Domain-evaluator evidence is only a completed evaluation-channel
+tool with an exact or catalogue-declared capability-group binding; it does not claim evaluator
+validity, calibration, independence, or scientific adequacy. The overall
 state is `catalogue_blocked`, `insufficient_evidence`, or `review_required`; even a complete
 local evidence set requires domain-authority review and is returned with `readiness_claimed: false`.
 The channel classifier is an exact, documented tool-name projection; it does not execute tools or
@@ -182,9 +186,17 @@ A handoff copies the required gate names and the `operations_gate_acceptance` fi
 execution prerequisite. `/v1/missions/preflight` returns `operations_evidence` for the mission’s
 exact tool and domain groups. A real HTTP mission with `policy.execute: true` must supply a retained
 `review_id`, visible `reviewer` and `rationale`, matching `gate_digest`, exact group IDs, and all
-six accepted gates per group; otherwise the API refuses it before queueing or dispatching any tool.
+seven accepted gates per group; otherwise the API refuses it before queueing or dispatching any tool.
 This is an operator attestation boundary, not scientific, clinical, regulatory, or deployment
 approval.
+
+An accepted executable mission retains a `bioprism-mission-execution-provenance/0.1` projection in
+its status, inventory entry, and `/v1/missions/{mission_id}/provenance`. The projection correlates
+the retained review ID and event ID, current gate digest and scope, exact acceptance document,
+domain-evaluator rows, bounded preflight evidence, and the `mission.execution.accepted` event.
+When `mission_state_path` is configured, the bounded provenance survives restart with the mission
+checkpoint; otherwise it remains process-local. This is replay and accountability evidence, not a
+readiness or scientific-validity claim.
 
 ## Asynchronous missions
 

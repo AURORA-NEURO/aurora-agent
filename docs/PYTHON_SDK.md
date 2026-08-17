@@ -571,15 +571,20 @@ invent defaults:
   explicit event-cursor scope, exact observed tools, and catalogue-gap/unobserved distinctions;
   it is activity evidence rather than a readiness claim.
   `operations_domain_gates(after=..., limit=...)` returns typed per-domain evidence gates for
-  catalogue, activity, transport completion, evaluation, safety, and release channels. Gate rows
-  retain refusal/completion evidence and remain `insufficient_evidence` or `review_required`
+  catalogue, activity, transport completion, pooled evaluation, domain-evaluator, safety, and
+  release channels. Domain-evaluator rows retain the exact evaluator tool/event binding without
+  asserting scientific validity. Gate rows retain refusal/completion evidence and remain `insufficient_evidence` or `review_required`
   until a separate authority reviews them; the typed response enforces `readiness_claimed: false`.
   `OperationsGateReviewRequest` plus `create_operations_gate_review(...)` persists a current
   operator decision. `operations_gate_reviews(...)` replays the durable record by cursor or
   `review_id`; the resulting `OperationsGateAcceptance` binds an executable `MissionRequest` to
   the retained review ID, current gate digest, reviewed group IDs, reviewer, rationale, and all
-  six accepted gate names. The HTTP boundary rechecks that acceptance against the current retained evidence before queueing execution;
+  seven accepted gate names. The HTTP boundary rechecks that acceptance against the current retained evidence before queueing execution;
   `MissionRequest.to_mcp_arguments()` preserves the acceptance document for that boundary.
+  Accepted executable jobs expose `MissionJob.execution_provenance` and the typed
+  `mission_provenance(...)`/async helper. That projection correlates the retained review, gate
+  digest, domain-evaluator evidence, bounded preflight evidence, and accepted-dispatch event;
+  it remains an audit/replay record rather than a readiness claim.
   `rebind_subscription(...)` supplies a secret in memory,
   re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

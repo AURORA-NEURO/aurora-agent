@@ -116,6 +116,7 @@ from .mission import (
     MAX_MISSION_TRACE_PAGE,
     MAX_MISSION_WAIT_SECONDS,
     MissionJob,
+    MissionExecutionProvenance,
     MissionInventoryPage,
     MissionPersistenceStatus,
     MissionPolicy,
@@ -611,6 +612,14 @@ class ApiClient:
     def mission_status(self, mission_id: str) -> MissionJob:
         self._mission_id(mission_id)
         return MissionJob.from_wire(self.request("GET", f"/v1/missions/{mission_id}"))
+
+    def mission_provenance(self, mission_id: str) -> MissionExecutionProvenance:
+        """Read the retained gate/review/evaluator evidence for an accepted execution."""
+
+        self._mission_id(mission_id)
+        return MissionExecutionProvenance.from_wire(
+            self.request("GET", f"/v1/missions/{mission_id}/provenance")
+        )
 
     def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Read a bounded cursor page from the authoritative clock-free mission trace."""
@@ -3672,6 +3681,11 @@ class AsyncApiClient:
 
     async def mission_status(self, mission_id: str) -> MissionJob:
         return await asyncio.to_thread(self.client.mission_status, mission_id)
+
+    async def mission_provenance(self, mission_id: str) -> MissionExecutionProvenance:
+        """Async read of the retained gate/review/evaluator execution evidence."""
+
+        return await asyncio.to_thread(self.client.mission_provenance, mission_id)
 
     async def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Async bounded cursor page over the authoritative mission trace."""

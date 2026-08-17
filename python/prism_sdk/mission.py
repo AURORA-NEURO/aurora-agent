@@ -29,6 +29,7 @@ OPERATIONS_REQUIRED_GATES = (
     "observed_activity",
     "transport_completion",
     "evaluation_evidence",
+    "domain_evaluator_evidence",
     "safety_evidence",
     "release_evidence",
 )
@@ -963,6 +964,32 @@ class MissionResultOmission:
 
 
 @dataclass(frozen=True)
+class MissionExecutionProvenance:
+    """Replayable gate and dispatch evidence for an accepted executable mission."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    provenance: Mapping[str, Any]
+    readiness_claimed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionExecutionProvenance":
+        raw = _mapping("mission execution provenance", value)
+        mission_id = raw.get("mission_id")
+        _text("mission execution provenance mission_id", mission_id)
+        provenance = raw.get("provenance")
+        if not isinstance(provenance, Mapping):
+            raise ArgumentError("mission execution provenance provenance must be an object")
+        readiness_claimed = raw.get("readiness_claimed")
+        if not isinstance(readiness_claimed, bool):
+            raise ArgumentError("mission execution provenance readiness_claimed must be a boolean")
+        return cls(raw, mission_id, provenance, readiness_claimed)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class MissionJob:
     """Typed view over an asynchronous HTTP mission job."""
 
@@ -976,6 +1003,7 @@ class MissionJob:
     result_omitted: MissionResultOmission | None
     error: str | None
     progress: MissionProgress | None
+    execution_provenance: Mapping[str, Any] | None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "MissionJob":
@@ -1007,7 +1035,10 @@ class MissionJob:
             _text("mission job error", error)
         progress_value = raw.get("progress")
         progress = None if progress_value is None else MissionProgress.from_wire(progress_value)
-        return cls(raw, mission_id, status, cancel_requested, cancel_reason, recovered_after_restart, result, result_omitted, error, progress)
+        execution_provenance = raw.get("execution_provenance")
+        if execution_provenance is not None and not isinstance(execution_provenance, Mapping):
+            raise ArgumentError("mission job execution_provenance must be an object or null")
+        return cls(raw, mission_id, status, cancel_requested, cancel_reason, recovered_after_restart, result, result_omitted, error, progress, execution_provenance)
 
     @property
     def terminal(self) -> bool:
@@ -1088,6 +1119,7 @@ class MissionInventoryItem:
     poll: str
     cancel: str
     trace: str
+    execution_provenance: Mapping[str, Any] | None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "MissionInventoryItem":
@@ -1118,6 +1150,9 @@ class MissionInventoryItem:
             candidate = raw.get(name)
             _text(f"mission inventory {name}", candidate)
             links[name] = candidate
+        execution_provenance = raw.get("execution_provenance")
+        if execution_provenance is not None and not isinstance(execution_provenance, Mapping):
+            raise ArgumentError("mission inventory execution_provenance must be an object or null")
         return cls(
             raw,
             mission_id,
@@ -1130,6 +1165,7 @@ class MissionInventoryItem:
             links["poll"],
             links["cancel"],
             links["trace"],
+            execution_provenance,
         )
 
     @property
@@ -1509,6 +1545,7 @@ __all__ = [
     "OperationsGateAcceptance",
     "MissionPreflight",
     "MissionExecutionReport",
+    "MissionExecutionProvenance",
     "MissionJob",
     "MissionResultOmission",
     "MissionInventoryItem",

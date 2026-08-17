@@ -352,8 +352,10 @@ capability group, allowing operators to distinguish catalogued-but-unobserved to
 that actually emitted events in the requested cursor page. This is activity evidence only, not
 runtime, scientific, safety, or release readiness.
 `GET /v1/operations/gates?after=N&limit=M` turns the same bounded page into separate catalogue,
-activity, transport-completion, evaluation, safety, and release evidence gates for every capability
-group. A completed local call is never promoted into a readiness verdict: groups remain
+activity, transport-completion, pooled evaluation, domain-evaluator, safety, and release evidence
+gates for every capability group. Domain-evaluator evidence is bound to a completed evaluation
+tool by exact name or the workspace catalogue; it does not assert scientific validity, evaluator
+calibration, or independence. A completed local call is never promoted into a readiness verdict: groups remain
 `catalogue_blocked`, `insufficient_evidence`, or `review_required`, with `readiness_claimed: false`.
 Handoffs now carry an `operations_gate_acceptance` execution prerequisite; preflight binds the
 mission’s exact tools to matching capability groups and the current `gate_digest`, while executable
@@ -361,6 +363,11 @@ HTTP missions are refused until an operator acceptance covers every required gat
 Operators can persist that acceptance through `POST /v1/operations/gate-reviews` and replay it by
 content-addressed `review_id`; executable missions require the retained review record to survive
 the same event checkpoint and still match current evidence.
+Accepted executable missions retain a `bioprism-mission-execution-provenance/0.1` projection in
+mission status, inventory, and `/v1/missions/{mission_id}/provenance`. It correlates the review,
+gate digest, domain-evaluator evidence, bounded preflight projection, and the accepted-dispatch
+event; mission checkpoints retain it when `mission_state_path` is configured. It is an audit and
+replay boundary, never a readiness or scientific-validity claim.
 `GET /v1/webhooks/subscriptions/{id}/attempts` route and matching SDK helpers expose the
 provenance cursor with explicit retention gaps and dropped-row accounting. Receipt-bearing rows
 are also available through `/v1/delivery-receipts/{receipt_id}/attempts`, which joins the same

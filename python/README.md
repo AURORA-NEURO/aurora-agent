@@ -96,6 +96,9 @@ Each `MissionJob` also exposes an optional typed `MissionProgress` projection fo
 and terminal views. It includes phase, wave, active/completed counts, outcome counters, returned
 bytes, and the latest trace sequence/event; the authoritative terminal report remains the source of
 truth for replay and domain interpretation.
+Executable jobs additionally expose `MissionJob.execution_provenance`; the sync and async
+`mission_provenance()` helpers read its retained review, gate digest, domain-evaluator evidence,
+and accepted-dispatch event correlation without converting it into a readiness claim.
 `mission_trace(mission_id, after=..., limit=...)` pages the retained authoritative trace through a
 typed `MissionTracePage`; `gap` and `dropped_events` remain visible when a cursor falls behind the
 bounded retention window.
