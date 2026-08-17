@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .errors import ArgumentError, ProtocolError
+from .capability import (
+    DomainWorkflowReconciliationPersistenceStatus,
+    DomainWorkflowReconciliationSummaryReport,
+)
 from .mission import MissionPersistenceStatus
 
 
@@ -1091,6 +1095,8 @@ class OperationsSnapshot:
     mission_summary: dict[str, Any]
     mission_persistence: MissionPersistenceStatus
     event_persistence: EventPersistenceStatus
+    reconciliation_persistence: DomainWorkflowReconciliationPersistenceStatus
+    reconciliation_summary: DomainWorkflowReconciliationSummaryReport
     recovery: RecoveryMatrix
     domain_coverage: OperationsDomainCoverage
     consistency: dict[str, Any]
@@ -1168,6 +1174,12 @@ class OperationsSnapshot:
         persistence = _mapping("operations snapshot persistence", raw.get("persistence"))
         mission_persistence = MissionPersistenceStatus.from_wire(persistence.get("missions"))
         event_persistence = EventPersistenceStatus.from_wire(persistence.get("events"))
+        reconciliation_persistence = DomainWorkflowReconciliationPersistenceStatus.from_wire(
+            persistence.get("workflow_reconciliations")
+        )
+        reconciliation_summary = DomainWorkflowReconciliationSummaryReport.from_wire(
+            raw.get("reconciliation_summary")
+        )
         recovery = RecoveryMatrix.from_wire(raw.get("recovery"))
         domain_coverage = OperationsDomainCoverage.from_wire(raw.get("domain_coverage"))
         consistency_raw = _mapping("operations snapshot consistency", raw.get("consistency"))
@@ -1219,6 +1231,8 @@ class OperationsSnapshot:
             mission_summary=mission_summary,
             mission_persistence=mission_persistence,
             event_persistence=event_persistence,
+            reconciliation_persistence=reconciliation_persistence,
+            reconciliation_summary=reconciliation_summary,
             recovery=recovery,
             domain_coverage=domain_coverage,
             consistency=consistency,

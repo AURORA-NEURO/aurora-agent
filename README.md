@@ -352,6 +352,11 @@ outbox evidence, delivery-attempt provenance, secrets, and external effects sepa
 `GET /v1/operations/snapshot?after=N&limit=M` route and matching typed SDK helpers compose that
 matrix with one bounded event page, event metrics, mission status counts, persistence digests,
 capability transport flags, exact domain-group/tool coverage, and actionable operator follow-ups.
+The same snapshot includes `reconciliation_summary` plus reconciliation checkpoint status:
+stored report counts are split into completion statuses, structural-ready rows, explicit review
+requirements, integrity-invalid rows, and evidence-invalid rows. These are derived audit counters
+only; they do not authorize execution or upgrade a domain, scientific, clinical, safety, or release
+claim.
 The domain projection compares the authoritative workspace capability groups with the advertised
 tool catalogue, preserving missing names and omission counts without inferring semantic readiness.
 It is designed as a dashboard

@@ -17,6 +17,8 @@ pub const DOMAIN_WORKFLOW_RECONCILIATION_IMPORT_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-reconciliation-import/0.1";
 pub const DOMAIN_WORKFLOW_RECONCILIATION_QUERY_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-reconciliation-query/0.1";
+pub const DOMAIN_WORKFLOW_RECONCILIATION_SUMMARY_SCHEMA_VERSION: &str =
+    "bioprism-devplat-domain-workflow-reconciliation-summary/0.1";
 pub const MAX_DOMAIN_WORKFLOW_RECONCILIATIONS: usize = 512;
 pub const MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS: usize = 256;
@@ -110,6 +112,74 @@ impl DomainWorkflowReconciliationRegistry {
 
     pub fn get(&self, digest: &str) -> Option<Value> {
         self.records.get(digest).cloned()
+    }
+
+    /// Build a compact operator projection without returning report bodies.
+    ///
+    /// This is derived from the same retained records as `query`, making the operator snapshot
+    /// useful after restart while keeping readiness, evidence validity, and integrity separate.
+    /// No counter in this projection is an execution or domain-success claim.
+    pub fn operator_summary(&self) -> Value {
+        let mut completion_status_counts = BTreeMap::<String, usize>::new();
+        let mut ready_count = 0usize;
+        let mut review_required_count = 0usize;
+        let mut integrity_invalid_count = 0usize;
+        let mut evidence_invalid_count = 0usize;
+        for record in self.records.values() {
+            let status = record
+                .pointer("/completion/status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            *completion_status_counts.entry(status).or_default() += 1;
+            if record.pointer("/completion/ready").and_then(Value::as_bool) == Some(true) {
+                ready_count += 1;
+            }
+            if record
+                .pointer("/completion/review_required")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                review_required_count += 1;
+            }
+            if record.pointer("/integrity/valid").and_then(Value::as_bool) != Some(true) {
+                integrity_invalid_count += 1;
+            }
+            if record
+                .pointer("/evidence/evidence_valid")
+                .and_then(Value::as_bool)
+                != Some(true)
+            {
+                evidence_invalid_count += 1;
+            }
+        }
+        json!({
+            "ok": true,
+            "schema": DOMAIN_WORKFLOW_RECONCILIATION_SUMMARY_SCHEMA_VERSION,
+            "workflow": "domain_workflow_reconciliation_summary",
+            "registry_generation": self.generation,
+            "registry_size": self.records.len(),
+            "completion_status_counts": completion_status_counts,
+            "ready_count": ready_count,
+            "review_required_count": review_required_count,
+            "integrity_invalid_count": integrity_invalid_count,
+            "evidence_invalid_count": evidence_invalid_count,
+            "retention": {
+                "max_reconciliations": MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+                "max_bytes": MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES
+            },
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "counts are derived from stored digest-valid reconciliation reports",
+                "completion, integrity, and evidence counters remain separate",
+                "summary generation does not execute, retry, resume, or re-evaluate a mission"
+            ],
+            "limitations": [
+                "the summary covers only the bounded local registry",
+                "a ready count is structural evidence posture and not a domain-success claim"
+            ]
+        })
     }
 
     /// Query deterministic digest-ordered index rows without returning full reports by default.
@@ -518,6 +588,11 @@ mod tests {
             .unwrap();
         assert_eq!(query["rows"].as_array().unwrap().len(), 1);
         assert_eq!(query["rows"][0]["ready"], true);
+        let summary = registry.operator_summary();
+        assert_eq!(summary["registry_size"], 1);
+        assert_eq!(summary["ready_count"], 1);
+        assert_eq!(summary["review_required_count"], 1);
+        assert_eq!(summary["completion_status_counts"]["complete"], 1);
     }
 
     #[test]

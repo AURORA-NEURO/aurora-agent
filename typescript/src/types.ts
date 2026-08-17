@@ -7786,6 +7786,39 @@ export interface EventPersistenceStatus extends JsonObject {
   flush: string;
 }
 
+export interface DomainWorkflowReconciliationPersistenceStatus extends JsonObject {
+  ok: boolean;
+  enabled: boolean;
+  file_present: boolean;
+  file_bytes: number | null;
+  schema: string;
+  state_digest: string | null;
+  integrity_verified: boolean | null;
+  registry_size: number;
+  registry_generation: number;
+  max_reconciliations: number;
+  max_file_bytes: number;
+  recovery_policy: string;
+  flush: string;
+}
+
+export interface DomainWorkflowReconciliationSummary extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconciliation_summary";
+  registry_generation: number;
+  registry_size: number;
+  completion_status_counts: Record<string, number>;
+  ready_count: number;
+  review_required_count: number;
+  integrity_invalid_count: number;
+  evidence_invalid_count: number;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface RecoveryBoundary extends JsonObject {
   id: string;
   configured: boolean;
@@ -7827,6 +7860,8 @@ export interface OperationsSnapshotCapabilities extends JsonObject {
   event_cursor: boolean;
   async_missions: boolean;
   mission_inventory: boolean;
+  workflow_reconciliation_registry: boolean;
+  workflow_reconciliation_persistence: boolean;
   operations_snapshot: boolean;
   domain_coverage: boolean;
   delivery_attempt_provenance: boolean;
@@ -8051,7 +8086,9 @@ export interface OperationsSnapshot extends JsonObject {
   persistence: {
     missions: MissionPersistenceStatus;
     events: EventPersistenceStatus;
+    workflow_reconciliations: DomainWorkflowReconciliationPersistenceStatus;
   };
+  reconciliation_summary: DomainWorkflowReconciliationSummary;
   recovery: RecoveryMatrix;
   domain_coverage: OperationsDomainCoverage;
   consistency: OperationsSnapshotConsistency;

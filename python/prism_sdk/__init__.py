@@ -102,6 +102,8 @@ from .capability import (
     DomainWorkflowReconciliationGetRequest,
     DomainWorkflowReconciliationImportReport,
     DomainWorkflowReconciliationQueryReport,
+    DomainWorkflowReconciliationSummaryReport,
+    DomainWorkflowReconciliationPersistenceStatus,
     DomainWorkflowReconciliationGetReport,
     MissionEvaluatorAdapterReport,
     MissionEvaluatorBindingReport,

@@ -1272,6 +1272,18 @@ impl ApiRouter {
         let mission_persistence = response_value(self.mission_persistence_status());
         let event_persistence = response_value(self.event_persistence_status());
         let evidence_persistence = response_value(self.evidence_persistence_status());
+        let reconciliation_persistence = response_value(self.reconciliation_persistence_status());
+        let reconciliation_summary = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry.operator_summary(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
         let recovery = response_value(self.recovery_matrix());
         let mut operator_actions = vec![
             "advance the event cursor with recent_events.next_after and inspect gap before claiming continuity".to_string(),
@@ -1300,6 +1312,12 @@ impl ApiRouter {
                     .to_string(),
             );
         }
+        if self.config.reconciliation_state_path.is_none() {
+            operator_actions.push(
+                "configure reconciliation_state_path if digest-valid workflow reconciliation audit records must survive an API restart"
+                    .to_string(),
+            );
+        }
 
         HttpResponse::json(
             200,
@@ -1317,8 +1335,10 @@ impl ApiRouter {
                 "persistence": {
                     "missions": mission_persistence,
                     "events": event_persistence,
-                    "evidence_bundles": evidence_persistence
+                    "evidence_bundles": evidence_persistence,
+                    "workflow_reconciliations": reconciliation_persistence
                 },
+                "reconciliation_summary": reconciliation_summary,
                 "recovery": recovery,
                 "domain_coverage": operations_domain_coverage(),
                 "consistency": {
@@ -1346,6 +1366,8 @@ impl ApiRouter {
                     "mission_evidence_bundle_import": true,
                     "mission_evidence_bundle_query": true,
                     "mission_evidence_bundle_persistence": self.config.evidence_state_path.is_some(),
+                    "workflow_reconciliation_registry": true,
+                    "workflow_reconciliation_persistence": self.config.reconciliation_state_path.is_some(),
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -1360,6 +1382,7 @@ impl ApiRouter {
                     "the event page is bounded by the caller-supplied cursor and the server limit",
                     "mission counts come from the process-local authoritative registry without returning terminal reports",
                     "persistence and recovery views retain their existing digest, integrity, and non-claim semantics",
+                    "reconciliation_summary counts only stored digest-valid reports and keeps completion, integrity, and evidence posture separate",
                     "the snapshot reports local evidence and capability boundaries; it does not execute tools or external effects"
                 ],
                 "non_claims": [
@@ -1383,6 +1406,9 @@ impl ApiRouter {
                     "evidence_bundles": "/v1/evidence-bundles",
                     "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
                     "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
+                    "workflow_reconciliations": "/v1/domain-workflows/reconciliations",
+                    "workflow_reconciliation_persistence": "/v1/domain-workflows/reconciliations/persistence",
+                    "workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -7663,6 +7689,10 @@ mod tests {
         assert_eq!(snapshot["event_metrics"]["retained_events"], 1);
         assert_eq!(snapshot["mission_summary"]["total"], 0);
         assert_eq!(snapshot["persistence"]["events"]["enabled"], false);
+        assert_eq!(snapshot["persistence"]["workflow_reconciliations"]["enabled"], false);
+        assert_eq!(snapshot["reconciliation_summary"]["registry_size"], 0);
+        assert_eq!(snapshot["reconciliation_summary"]["ready_count"], 0);
+        assert_eq!(snapshot["reconciliation_summary"]["readiness_claimed"], false);
         assert_eq!(snapshot["recovery"]["automatic_resume"], false);
         assert_eq!(
             snapshot["domain_coverage"]["schema"],
@@ -7673,6 +7703,7 @@ mod tests {
         assert_eq!(snapshot["consistency"]["cross_store_atomic"], false);
         assert_eq!(snapshot["consistency"]["clock_free"], true);
         assert_eq!(snapshot["capabilities"]["operations_snapshot"], true);
+        assert_eq!(snapshot["capabilities"]["workflow_reconciliation_registry"], true);
         assert!(snapshot["operator_actions"].as_array().unwrap().len() >= 3);
         assert!(snapshot["non_claims"]
             .as_array()

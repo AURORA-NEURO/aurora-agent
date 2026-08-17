@@ -764,6 +764,108 @@ class DomainWorkflowReconciliationQueryReport:
 
 
 @dataclass(frozen=True)
+class DomainWorkflowReconciliationSummaryReport:
+    """Typed compact operator posture derived from retained reconciliation reports."""
+
+    raw: dict[str, Any]
+    registry_generation: int
+    registry_size: int
+    completion_status_counts: Mapping[str, int]
+    ready_count: int
+    review_required_count: int
+    integrity_invalid_count: int
+    evidence_invalid_count: int
+    readiness_claimed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationSummaryReport":
+        raw = _route_mapping("workflow reconciliation summary", value)
+        if raw.get("workflow") != "domain_workflow_reconciliation_summary":
+            raise ArgumentError("workflow reconciliation summary workflow is invalid")
+        counts_raw = _route_mapping(
+            "workflow reconciliation summary completion_status_counts",
+            raw.get("completion_status_counts"),
+        )
+        counts = {
+            _route_text("workflow reconciliation summary status", status): _route_count(
+                f"workflow reconciliation summary status count {status}", count
+            )
+            for status, count in counts_raw.items()
+        }
+        readiness_claimed = raw.get("readiness_claimed")
+        if readiness_claimed is not False:
+            raise ArgumentError("workflow reconciliation summary readiness_claimed must be false")
+        return cls(
+            raw=raw,
+            registry_generation=_route_count("workflow reconciliation summary generation", raw.get("registry_generation")),
+            registry_size=_route_count("workflow reconciliation summary size", raw.get("registry_size")),
+            completion_status_counts=counts,
+            ready_count=_route_count("workflow reconciliation summary ready count", raw.get("ready_count")),
+            review_required_count=_route_count("workflow reconciliation summary review count", raw.get("review_required_count")),
+            integrity_invalid_count=_route_count("workflow reconciliation summary integrity count", raw.get("integrity_invalid_count")),
+            evidence_invalid_count=_route_count("workflow reconciliation summary evidence count", raw.get("evidence_invalid_count")),
+            readiness_claimed=readiness_claimed,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationPersistenceStatus:
+    """Typed restart/checkpoint posture for the reconciliation registry."""
+
+    raw: dict[str, Any]
+    enabled: bool
+    file_present: bool
+    file_bytes: int | None
+    schema: str
+    state_digest: str | None
+    integrity_verified: bool | None
+    registry_size: int
+    registry_generation: int
+    max_reconciliations: int
+    max_file_bytes: int
+    recovery_policy: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationPersistenceStatus":
+        raw = _route_mapping("workflow reconciliation persistence", value)
+        enabled = raw.get("enabled")
+        file_present = raw.get("file_present")
+        if not isinstance(enabled, bool) or not isinstance(file_present, bool):
+            raise ArgumentError("workflow reconciliation persistence enabled and file_present must be booleans")
+        file_bytes = raw.get("file_bytes")
+        if file_bytes is not None:
+            file_bytes = _route_count("workflow reconciliation persistence file_bytes", file_bytes)
+        state_digest = raw.get("state_digest")
+        if state_digest is not None:
+            state_digest = _route_text("workflow reconciliation persistence state_digest", state_digest)
+            if len(state_digest) != 64 or any(character not in "0123456789abcdef" for character in state_digest):
+                raise ArgumentError("workflow reconciliation persistence state_digest must be a lowercase SHA-256 digest")
+        integrity_verified = raw.get("integrity_verified")
+        if integrity_verified is not None and not isinstance(integrity_verified, bool):
+            raise ArgumentError("workflow reconciliation persistence integrity_verified must be boolean or null")
+        return cls(
+            raw=raw,
+            enabled=enabled,
+            file_present=file_present,
+            file_bytes=file_bytes,
+            schema=_route_text("workflow reconciliation persistence schema", raw.get("schema")),
+            state_digest=state_digest,
+            integrity_verified=integrity_verified,
+            registry_size=_route_count("workflow reconciliation persistence size", raw.get("registry_size")),
+            registry_generation=_route_count("workflow reconciliation persistence generation", raw.get("registry_generation")),
+            max_reconciliations=_route_count("workflow reconciliation persistence max_reconciliations", raw.get("max_reconciliations")),
+            max_file_bytes=_route_count("workflow reconciliation persistence max_file_bytes", raw.get("max_file_bytes")),
+            recovery_policy=_route_text("workflow reconciliation persistence recovery_policy", raw.get("recovery_policy")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class DomainWorkflowReconciliationGetRequest:
     """Fetch one workflow reconciliation record by its content hash."""
 
@@ -2192,6 +2294,8 @@ __all__ = [
     "DomainWorkflowReconciliationGetRequest",
     "DomainWorkflowReconciliationImportReport",
     "DomainWorkflowReconciliationQueryReport",
+    "DomainWorkflowReconciliationSummaryReport",
+    "DomainWorkflowReconciliationPersistenceStatus",
     "DomainWorkflowReconciliationGetReport",
     "CapabilityQuery",
     "CapabilityGroupReport",
