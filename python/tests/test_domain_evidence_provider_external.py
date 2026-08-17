@@ -16,11 +16,13 @@ from prism_sdk import (
     DomainEvidenceProviderExternalPayloadReplayRequest,
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
     DomainEvidenceProviderExternalPayloadLineageAuditRequest,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
     Workspace,
     domain_evidence_provider_external_payload_receipt_report,
     domain_evidence_provider_external_payload_replay_verification_report,
     domain_evidence_provider_external_payload_normalization_report,
     domain_evidence_provider_external_payload_lineage_audit_report,
+    domain_evidence_provider_external_payload_execution_evidence_report,
 )
 from prism_sdk.authoring import content_digest
 
@@ -266,6 +268,63 @@ def lineage_payload() -> dict:
     }
 
 
+def execution_request() -> DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest:
+    return DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest(
+        receipt=request(),
+        expected_receipt_digest="e" * 64,
+        execution_status="transferred",
+        executor_id="caller-transfer-worker",
+        observed_payload_digest="b" * 64,
+        observed_byte_length=4096,
+        locator_opened=True,
+        observation_digest="c" * 64,
+    )
+
+
+def execution_payload() -> dict:
+    receipt_payload = payload()
+    evidence = {
+        "schema": "bioprism-devplat-domain-evidence-provider-external-payload-execution-evidence/0.1",
+        "workflow": "domain_evidence_provider_external_payload_execution_evidence",
+        "evidence_status": "matched",
+        "group_id": receipt_payload["receipt"]["group_id"],
+        "domains": receipt_payload["receipt"]["domains"],
+        "subject_id": receipt_payload["receipt"]["subject_id"],
+        "source_tool": receipt_payload["receipt"]["source_tool"],
+        "provider": receipt_payload["receipt"]["provider"],
+        "connector_kind": receipt_payload["receipt"]["connector_kind"],
+        "expected_receipt_digest": "e" * 64,
+        "retained_receipt_digest": "e" * 64,
+        "observed_receipt_digest": "e" * 64,
+        "execution_status": "transferred",
+        "executor_id": "caller-transfer-worker",
+        "observed_payload_digest": "b" * 64,
+        "observed_byte_length": 4096,
+        "locator_opened": True,
+        "observation_digest": "c" * 64,
+        "receipt": receipt_payload["receipt"],
+        "matches": {"receipt_present": True, "observed_payload_digest": True, "observed_byte_length": True},
+        "differences": [],
+        "evidence_digest": "1" * 64,
+        "guarantees": [],
+        "limitations": [],
+    }
+    return {
+        "ok": True,
+        "schema": evidence["schema"],
+        "workflow": evidence["workflow"],
+        "evidence": evidence,
+        "evidence_status": "matched",
+        "evidence_digest": "1" * 64,
+        "receipt_registry": {"ok": True, "already_present": True},
+        "artifact_registry": {"ok": True, "created": True},
+        "execution": "not_started",
+        "readiness_claimed": False,
+        "guarantees": [],
+        "does_not_claim": ["provider authenticity"],
+    }
+
+
 def test_external_receipt_is_out_of_line_and_rejects_payload_material() -> None:
     arguments = request().to_mcp_arguments()
     assert "payload" not in arguments
@@ -331,6 +390,21 @@ def test_external_lineage_audit_is_registry_bound_and_preserves_orchestration_bo
         DomainEvidenceProviderExternalPayloadLineageAuditRequest.from_wire(
             {**request().to_mcp_arguments(), "credential_material": "never"}
         )
+
+
+def test_external_execution_evidence_preserves_caller_observation_and_attestation_limits() -> None:
+    normalized = execution_request()
+    arguments = normalized.to_mcp_arguments()
+    assert arguments["execution_status"] == "transferred"
+    assert arguments["locator_opened"] is True
+    report = domain_evidence_provider_external_payload_execution_evidence_report(execution_payload())
+    assert report.evidence_status == "matched"
+    assert report.matches["observed_payload_digest"] is True
+    assert report.readiness_claimed is False
+    with pytest.raises(ArgumentError):
+        DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest.from_wire(
+            {**arguments, "expected_receipt_digest": "not-a-digest"}
+        )
 def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes() -> None:
     with patch.object(ApiClient, "request", return_value=payload()) as rest:
         assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_receipt(request()).byte_length == 4096
@@ -364,6 +438,14 @@ def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes()
         assert lineage_tool.call_args.args[0] == "domain_evidence_provider_external_payload_lineage_audit"
     with patch.object(Workspace, "tool", return_value=lineage_payload()):
         assert Workspace(None).domain_evidence_provider_external_payload_lineage_audit_report(lineage_request()).lineage_status == "matched"
+    with patch.object(ApiClient, "request", return_value=execution_payload()) as execution_rest:
+        assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_execution_evidence(execution_request()).evidence_status == "matched"
+        assert execution_rest.call_args.args[1] == "/v1/tools/domain_evidence_provider_external_payload_execution_evidence"
+    with patch.object(ApiClient, "call_tool", return_value=execution_payload()) as execution_tool:
+        assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_execution_evidence_tool(execution_request()).execution_status == "transferred"
+        assert execution_tool.call_args.args[0] == "domain_evidence_provider_external_payload_execution_evidence"
+    with patch.object(Workspace, "tool", return_value=execution_payload()):
+        assert Workspace(None).domain_evidence_provider_external_payload_execution_evidence_report(execution_request()).evidence_status == "matched"
 
     async def run() -> None:
         client = AsyncApiClient(ApiClient("http://127.0.0.1:8787"))
@@ -385,5 +467,9 @@ def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes()
             assert (await client.domain_evidence_provider_external_payload_lineage_audit(lineage_request())).lineage_status == "matched"
         with patch.object(AsyncWorkspace, "tool", new_callable=AsyncMock, return_value=lineage_payload()):
             assert (await AsyncWorkspace(None).domain_evidence_provider_external_payload_lineage_audit_report(lineage_request())).payload_binding_status == "matched"
+        with patch.object(ApiClient, "request", return_value=execution_payload()):
+            assert (await client.domain_evidence_provider_external_payload_execution_evidence(execution_request())).evidence_status == "matched"
+        with patch.object(AsyncWorkspace, "tool", new_callable=AsyncMock, return_value=execution_payload()):
+            assert (await AsyncWorkspace(None).domain_evidence_provider_external_payload_execution_evidence_report(execution_request())).execution_status == "transferred"
 
     asyncio.run(run())

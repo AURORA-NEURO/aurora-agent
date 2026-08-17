@@ -24,6 +24,10 @@ the digest, locator, and readiness boundaries.
 connector handoff and exposes matched, partial, mismatch, and orphaned states plus each boolean
 scope comparison. The result remains registry evidence only: no provider, storage, locator, or
 credential access occurs, and readiness stays false.
+`domainEvidenceProviderExternalPayloadExecutionEvidence()` retains caller-reported transfer
+observations, compares optional payload digest/size evidence with the receipt, and exposes the
+same matched/partial/mismatch/orphaned posture. Its executor and locator fields are typed caller
+assertions only; the SDK performs no transfer and exposes no readiness claim.
 
 The repository ships `typescript/`, a small ESM package for clients that can use the standard
 Fetch API. It is intentionally an integration layer over `bioprism-api`, not a second domain

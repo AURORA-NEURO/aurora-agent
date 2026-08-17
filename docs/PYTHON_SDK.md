@@ -130,6 +130,11 @@ length against the receipt before reusing the ordinary normalization and intake 
 connector handoff and preserve matched/partial/mismatch/orphaned scope, payload-binding, and
 artifact-registration states. The REST, MCP-tool, sync, async, and workspace methods never open
 the locator or turn a registry match into provider authenticity or readiness.
+`DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest` and
+`DomainEvidenceProviderExternalPayloadExecutionEvidenceReport` add the caller-observation layer:
+expected receipt identity, executor status, optional observed digest/size, and observation digest
+are retained separately. Missing and conflicting observations remain typed evidence states, while
+the SDK never executes a transfer or treats `locator_opened` as an authenticated attestation.
 
 ## Lifecycle
 

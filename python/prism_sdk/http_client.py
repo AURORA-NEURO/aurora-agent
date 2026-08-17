@@ -83,10 +83,13 @@ from .domain_evidence_provider_external import (
     DomainEvidenceProviderExternalPayloadNormalizationReport,
     DomainEvidenceProviderExternalPayloadLineageAuditRequest,
     DomainEvidenceProviderExternalPayloadLineageAuditReport,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceReport,
     domain_evidence_provider_external_payload_receipt_report,
     domain_evidence_provider_external_payload_replay_verification_report,
     domain_evidence_provider_external_payload_normalization_report,
     domain_evidence_provider_external_payload_lineage_audit_report,
+    domain_evidence_provider_external_payload_execution_evidence_report,
 )
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
@@ -1282,6 +1285,40 @@ class ApiClient:
         return domain_evidence_provider_external_payload_lineage_audit_report(
             self.call_tool(
                 "domain_evidence_provider_external_payload_lineage_audit", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_execution_evidence(
+        self,
+        request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+        """Retain caller-reported external transfer evidence through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest)
+            else DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_execution_evidence_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_execution_evidence",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_execution_evidence_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest)
+            else DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_execution_evidence_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_execution_evidence", normalized.to_mcp_arguments()
             )
         )
 
@@ -5248,6 +5285,22 @@ class AsyncApiClient:
     ) -> DomainEvidenceProviderExternalPayloadLineageAuditReport:
         return await asyncio.to_thread(
             self.client.domain_evidence_provider_external_payload_lineage_audit_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_execution_evidence(
+        self,
+        request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_execution_evidence, request
+        )
+
+    async def domain_evidence_provider_external_payload_execution_evidence_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_execution_evidence_tool, request
         )
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:

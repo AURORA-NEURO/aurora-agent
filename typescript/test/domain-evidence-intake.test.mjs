@@ -499,6 +499,57 @@ const providerExternalLineage = {
   does_not_claim: ["provider authenticity"],
 };
 
+const providerExternalExecutionArgs = {
+  ...providerExternalReceiptArgs,
+  expected_receipt_digest: "e".repeat(64),
+  execution_status: "transferred",
+  executor_id: "caller-transfer-worker",
+  observed_payload_digest: "b".repeat(64),
+  observed_byte_length: 4096,
+  locator_opened: true,
+  observation_digest: "c".repeat(64),
+};
+
+const providerExternalExecution = {
+  ok: true,
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-execution-evidence/0.1",
+  workflow: "domain_evidence_provider_external_payload_execution_evidence",
+  evidence: {
+    schema: "bioprism-devplat-domain-evidence-provider-external-payload-execution-evidence/0.1",
+    workflow: "domain_evidence_provider_external_payload_execution_evidence",
+    evidence_status: "matched",
+    group_id: "biological_domains",
+    domains: ["oncology"],
+    subject_id: "provider-ts",
+    source_tool: "literature_bind_check",
+    provider: "pubmed",
+    connector_kind: "literature",
+    expected_receipt_digest: "e".repeat(64),
+    retained_receipt_digest: "e".repeat(64),
+    observed_receipt_digest: "e".repeat(64),
+    execution_status: "transferred",
+    executor_id: "caller-transfer-worker",
+    observed_payload_digest: "b".repeat(64),
+    observed_byte_length: 4096,
+    locator_opened: true,
+    observation_digest: "c".repeat(64),
+    receipt: providerExternalReceipt.receipt,
+    matches: { receipt_present: true, observed_payload_digest: true, observed_byte_length: true },
+    differences: [],
+    evidence_digest: "1".repeat(64),
+    guarantees: [],
+    limitations: [],
+  },
+  evidence_status: "matched",
+  evidence_digest: "1".repeat(64),
+  receipt_registry: { ok: true, already_present: true },
+  artifact_registry: { ok: true, created: true },
+  execution: "not_started",
+  readiness_claimed: false,
+  guarantees: [],
+  does_not_claim: ["provider authenticity"],
+};
+
 test("domain evidence intake REST and tool clients preserve exact envelope metadata", async () => {
   const seen = [];
   const client = new ApiClient({
@@ -521,6 +572,7 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
       if (url.pathname === "/v1/tools/domain_evidence_provider_external_payload_replay_verify") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_external_payload_replay_verify", mcp: { result: { structuredContent: providerExternalReplay } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_provider_external_payload_normalize") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_external_payload_normalize", mcp: { result: { structuredContent: providerExternalNormalization } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_provider_external_payload_lineage_audit") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_external_payload_lineage_audit", mcp: { result: { structuredContent: providerExternalLineage } } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/tools/domain_evidence_provider_external_payload_execution_evidence") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_external_payload_execution_evidence", mcp: { result: { structuredContent: providerExternalExecution } } }), { status: 200, headers: { "content-type": "application/json" } });
       throw new Error(`unexpected path ${url.pathname}`);
     },
   });
@@ -548,6 +600,8 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   assert.equal((await client.domainEvidenceProviderExternalPayloadNormalizeTool(providerExternalNormalizationArgs)).mcp.result.structuredContent.outcome, "observed");
   assert.equal((await client.domainEvidenceProviderExternalPayloadLineageAudit(providerExternalReceiptArgs)).mcp.result.structuredContent.lineage_status, "matched");
   assert.equal((await client.domainEvidenceProviderExternalPayloadLineageAuditTool(providerExternalReceiptArgs)).mcp.result.structuredContent.audit.matches.payload_digest, true);
+  assert.equal((await client.domainEvidenceProviderExternalPayloadExecutionEvidence(providerExternalExecutionArgs)).mcp.result.structuredContent.evidence_status, "matched");
+  assert.equal((await client.domainEvidenceProviderExternalPayloadExecutionEvidenceTool(providerExternalExecutionArgs)).mcp.result.structuredContent.evidence.matches.observed_payload_digest, true);
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");
   assert.equal(seen[2].url.searchParams.get("include_intake_digests"), "true");
   assert.equal(seen[4].url.pathname, "/v1/domain-evidence/sources");
@@ -602,6 +656,14 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   );
   await assert.rejects(
     client.domainEvidenceProviderExternalPayloadLineageAudit({ ...providerExternalReceiptArgs, credential_material: "never" }),
+    ArgumentError,
+  );
+  await assert.rejects(
+    client.domainEvidenceProviderExternalPayloadExecutionEvidence({ ...providerExternalExecutionArgs, execution_status: "bad" }),
+    ArgumentError,
+  );
+  await assert.rejects(
+    client.domainEvidenceProviderExternalPayloadExecutionEvidence({ ...providerExternalExecutionArgs, credential_material: "never" }),
     ArgumentError,
   );
 });

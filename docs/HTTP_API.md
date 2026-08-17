@@ -297,6 +297,12 @@ retained connector handoff in the local artifact registry. It reports `matched`,
 `mismatch`, or `orphaned` lineage, exposes each scope comparison plus optional payload-digest
 binding, and idempotently records the audit. It performs no provider, store, locator, credential,
 or payload operation; even matched lineage remains `execution: not_started` with readiness false.
+`POST /v1/tools/domain_evidence_provider_external_payload_execution_evidence` retains a
+caller-supplied transfer observation and compares its expected receipt, observed payload digest,
+and observed byte length with the retained receipt. `matched`, `partial`, `mismatch`, and
+`orphaned` remain distinct; `execution_status`, `executor_id`, and `locator_opened` are explicit
+caller assertions, not cryptographic attestations. The core performs no transfer or external I/O,
+and every response remains not-started and not-ready.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

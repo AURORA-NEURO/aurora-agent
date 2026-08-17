@@ -5345,6 +5345,60 @@ export interface DomainEvidenceProviderExternalPayloadLineageAuditResult extends
   does_not_claim: string[];
 }
 
+export type DomainEvidenceProviderExternalPayloadExecutionStatus = "submitted" | "transferred" | "partial" | "refused" | "error" | "unknown";
+
+export interface DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs extends DomainEvidenceProviderExternalPayloadReceiptArgs {
+  expected_receipt_digest: string;
+  execution_status: DomainEvidenceProviderExternalPayloadExecutionStatus;
+  executor_id: string;
+  observed_payload_digest?: string | null;
+  observed_byte_length?: number | null;
+  locator_opened?: boolean;
+  observation_digest?: string | null;
+}
+
+export interface DomainEvidenceProviderExternalPayloadExecutionEvidence extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-execution-evidence/0.1";
+  workflow: "domain_evidence_provider_external_payload_execution_evidence";
+  evidence_status: "matched" | "partial" | "mismatch" | "orphaned";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  expected_receipt_digest: string;
+  retained_receipt_digest: string | null;
+  observed_receipt_digest: string;
+  execution_status: DomainEvidenceProviderExternalPayloadExecutionStatus;
+  executor_id: string;
+  observed_payload_digest: string | null;
+  observed_byte_length: number | null;
+  locator_opened: boolean;
+  observation_digest: string | null;
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  matches: Record<string, boolean>;
+  differences: string[];
+  evidence_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadExecutionEvidenceResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-execution-evidence/0.1";
+  workflow: "domain_evidence_provider_external_payload_execution_evidence";
+  evidence: DomainEvidenceProviderExternalPayloadExecutionEvidence;
+  evidence_status: DomainEvidenceProviderExternalPayloadExecutionEvidence["evidence_status"];
+  evidence_digest: string;
+  receipt_registry: JsonObject;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
   candidate_fields: string[];
   present_record_count: number;

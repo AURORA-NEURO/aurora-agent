@@ -56,6 +56,8 @@ import type {
   DomainEvidenceProviderExternalPayloadNormalizationResult,
   DomainEvidenceProviderExternalPayloadLineageAuditArgs,
   DomainEvidenceProviderExternalPayloadLineageAuditResult,
+  DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs,
+  DomainEvidenceProviderExternalPayloadExecutionEvidenceResult,
   DomainEvidenceProviderReplayVerifyArgs,
   DomainEvidenceProviderReplayVerifyResult,
   AdapterPlanArgs,
@@ -1041,6 +1043,44 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadLineageAuditResult>> {
     return this.domainEvidenceProviderExternalPayloadLineageAudit(args, options);
+  }
+
+  /** Retain caller-reported transfer observations without executing external I/O. */
+  async domainEvidenceProviderExternalPayloadExecutionEvidence(
+    args: DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadExecutionEvidenceResult>> {
+    if (!isObject(args)) throw new ArgumentError("external payload execution evidence arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider], ["handoff_digest", args.handoff_digest], ["transfer_id", args.transfer_id], ["payload_digest", args.payload_digest], ["locator", args.locator], ["expected_receipt_digest", args.expected_receipt_digest], ["execution_status", args.execution_status], ["executor_id", args.executor_id]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!(args.connector_kind === "literature" || args.connector_kind === "clinical_trial" || args.connector_kind === "fhir" || args.connector_kind === "object_store" || args.connector_kind === "provider_api")) throw new ArgumentError("connector_kind is invalid");
+    if (!(args.execution_status === "submitted" || args.execution_status === "transferred" || args.execution_status === "partial" || args.execution_status === "refused" || args.execution_status === "error" || args.execution_status === "unknown")) throw new ArgumentError("execution_status is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    for (const [name, value] of [["handoff_digest", args.handoff_digest], ["payload_digest", args.payload_digest], ["request_digest", args.request_digest], ["expected_receipt_digest", args.expected_receipt_digest], ["observed_payload_digest", args.observed_payload_digest], ["observation_digest", args.observation_digest]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
+    }
+    if (!Number.isSafeInteger(args.byte_length) || args.byte_length < 1 || args.byte_length > 68719476736) throw new ArgumentError("byte_length must be 1..=68719476736");
+    if (args.observed_byte_length !== undefined && args.observed_byte_length !== null && (!Number.isSafeInteger(args.observed_byte_length) || args.observed_byte_length < 1 || args.observed_byte_length > 68719476736)) throw new ArgumentError("observed_byte_length must be 1..=68719476736 or null");
+    if (args.locator_opened !== undefined && typeof args.locator_opened !== "boolean") throw new ArgumentError("locator_opened must be boolean");
+    if (!(args.storage_backend === "object_store" || args.storage_backend === "file" || args.storage_backend === "database" || args.storage_backend === "caller_managed")) throw new ArgumentError("storage_backend is invalid");
+    if (!(args.locator_kind === "opaque" || args.locator_kind === "uri" || args.locator_kind === "path")) throw new ArgumentError("locator_kind is invalid");
+    if (args.locator.includes("\r") || args.locator.includes("\n")) throw new ArgumentError("locator must not contain control line breaks");
+    const authority = args.locator.split("://")[1]?.split(/[/?#]/, 1)[0];
+    if (authority?.includes("@")) throw new ArgumentError("locator must not contain embedded credentials");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.availability !== undefined && !(args.availability === "available" || args.availability === "partial" || args.availability === "missing" || args.availability === "unknown")) throw new ArgumentError("availability is invalid");
+    if (args.retention !== undefined && !(args.retention === "ephemeral" || args.retention === "durable" || args.retention === "unknown")) throw new ArgumentError("retention is invalid");
+    if ("payload" in args || "credential_material" in args || "credentials" in args) throw new ArgumentError("payload and credential material are not accepted by the external execution evidence boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadExecutionEvidenceResult>("domain_evidence_provider_external_payload_execution_evidence", { ...args, availability: args.availability ?? "unknown", retention: args.retention ?? "unknown", locator_opened: args.locator_opened ?? false }, options);
+  }
+
+  /** Explicit alias for the external payload execution-evidence MCP tool. */
+  async domainEvidenceProviderExternalPayloadExecutionEvidenceTool(
+    args: DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadExecutionEvidenceResult>> {
+    return this.domainEvidenceProviderExternalPayloadExecutionEvidence(args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

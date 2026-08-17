@@ -23,6 +23,11 @@ DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA = "bioprism-devpl
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW = "domain_evidence_provider_external_payload_normalize"
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA = "bioprism-devplat-domain-evidence-provider-external-payload-lineage/0.1"
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW = "domain_evidence_provider_external_payload_lineage_audit"
+DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA = "bioprism-devplat-domain-evidence-provider-external-payload-execution-evidence/0.1"
+DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW = "domain_evidence_provider_external_payload_execution_evidence"
+DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_STATUSES = (
+    "submitted", "transferred", "partial", "refused", "error", "unknown"
+)
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_CONNECTOR_KINDS = (
     "literature", "clinical_trial", "fhir", "object_store", "provider_api"
 )
@@ -566,6 +571,134 @@ class DomainEvidenceProviderExternalPayloadLineageAuditReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest:
+    """Retain caller-reported transfer observations without performing the transfer."""
+
+    receipt: DomainEvidenceProviderExternalPayloadReceiptRequest
+    expected_receipt_digest: str
+    execution_status: str
+    executor_id: str
+    observed_payload_digest: str | None = None
+    observed_byte_length: int | None = None
+    locator_opened: bool = False
+    observation_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        _lower_digest("external payload execution expected_receipt_digest", self.expected_receipt_digest)
+        _text("external payload execution_status", self.execution_status)
+        if self.execution_status not in DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_STATUSES:
+            raise ArgumentError("external payload execution_status is invalid")
+        _text("external payload executor_id", self.executor_id)
+        if self.observed_payload_digest is not None:
+            _lower_digest("external payload execution observed_payload_digest", self.observed_payload_digest)
+        if self.observed_byte_length is not None and (
+            isinstance(self.observed_byte_length, bool)
+            or not isinstance(self.observed_byte_length, int)
+            or not 1 <= self.observed_byte_length <= MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_BYTES
+        ):
+            raise ArgumentError("external payload execution observed_byte_length is outside its bound")
+        if not isinstance(self.locator_opened, bool):
+            raise ArgumentError("external payload execution locator_opened must be boolean")
+        if self.observation_digest is not None:
+            _lower_digest("external payload execution observation_digest", self.observation_digest)
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest":
+        raw = _mapping("external payload execution evidence request", value)
+        extras = {
+            "expected_receipt_digest", "execution_status", "executor_id", "observed_payload_digest",
+            "observed_byte_length", "locator_opened", "observation_digest",
+        }
+        required = {"expected_receipt_digest", "execution_status", "executor_id"}
+        missing = sorted(required - set(raw))
+        if missing:
+            raise ArgumentError(f"external payload execution evidence request is missing: {', '.join(missing)}")
+        receipt_raw = {name: item for name, item in raw.items() if name not in extras}
+        return cls(
+            receipt=DomainEvidenceProviderExternalPayloadReceiptRequest.from_wire(receipt_raw),
+            expected_receipt_digest=_route_text("external payload execution expected_receipt_digest", raw.get("expected_receipt_digest")),
+            execution_status=_route_text("external payload execution_status", raw.get("execution_status")),
+            executor_id=_route_text("external payload executor_id", raw.get("executor_id")),
+            observed_payload_digest=raw.get("observed_payload_digest"),
+            observed_byte_length=raw.get("observed_byte_length"),
+            locator_opened=raw.get("locator_opened", False),
+            observation_digest=raw.get("observation_digest"),
+        )
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result = {
+            **self.receipt.to_mcp_arguments(),
+            "expected_receipt_digest": self.expected_receipt_digest,
+            "execution_status": self.execution_status,
+            "executor_id": self.executor_id,
+            "locator_opened": self.locator_opened,
+        }
+        if self.observed_payload_digest is not None:
+            result["observed_payload_digest"] = self.observed_payload_digest
+        if self.observed_byte_length is not None:
+            result["observed_byte_length"] = self.observed_byte_length
+        if self.observation_digest is not None:
+            result["observation_digest"] = self.observation_digest
+        return result
+
+
+@dataclass(frozen=True)
+class DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+    raw: dict[str, Any]
+    evidence_status: str
+    execution_status: str
+    executor_id: str
+    receipt: Mapping[str, Any]
+    matches: Mapping[str, bool]
+    differences: tuple[str, ...]
+    evidence_digest: str
+    receipt_registry: Mapping[str, Any]
+    artifact_registry: Mapping[str, Any]
+    execution: str
+    readiness_claimed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceProviderExternalPayloadExecutionEvidenceReport":
+        raw = _tool_payload(value, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW)
+        if raw.get("ok") is not True or raw.get("readiness_claimed") is not False:
+            raise ArgumentError("external payload execution evidence is not successful or ready")
+        evidence = _mapping("external payload execution evidence", raw.get("evidence"))
+        evidence_status = _route_text("external payload evidence status", evidence.get("evidence_status"))
+        if evidence_status not in {"matched", "partial", "mismatch", "orphaned"}:
+            raise ArgumentError("external payload evidence status is invalid")
+        matches_raw = _mapping("external payload execution matches", evidence.get("matches"))
+        matches = {name: item for name, item in matches_raw.items() if isinstance(name, str) and isinstance(item, bool)}
+        if len(matches) != len(matches_raw):
+            raise ArgumentError("external payload execution matches must be boolean fields")
+        receipt_registry = _mapping("external payload execution receipt registry", raw.get("receipt_registry"))
+        artifact_registry = _mapping("external payload execution artifact registry", raw.get("artifact_registry"))
+        for name, registry in (("receipt", receipt_registry), ("evidence", artifact_registry)):
+            if registry.get("ok") is not True or not (
+                registry.get("created") is True or registry.get("already_present") is True
+            ):
+                raise ArgumentError(f"external payload execution {name} artifact was not registered")
+        if raw.get("evidence_status") != evidence_status:
+            raise ArgumentError("external payload execution status fields disagree")
+        return cls(
+            raw=raw,
+            evidence_status=evidence_status,
+            execution_status=_route_text("external payload execution_status", evidence.get("execution_status")),
+            executor_id=_route_text("external payload executor_id", evidence.get("executor_id")),
+            receipt=_mapping("external payload execution receipt", evidence.get("receipt")),
+            matches=matches,
+            differences=_bounded_text_list("external payload execution differences", evidence.get("differences", []), maximum=16),
+            evidence_digest=_lower_digest("external payload evidence_digest", raw.get("evidence_digest")),
+            receipt_registry=receipt_registry,
+            artifact_registry=artifact_registry,
+            execution=_route_text("external payload execution execution", raw.get("execution")),
+            readiness_claimed=False,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def domain_evidence_provider_external_payload_receipt_report(value: Mapping[str, Any]) -> DomainEvidenceProviderExternalPayloadReceiptReport:
     return DomainEvidenceProviderExternalPayloadReceiptReport.from_wire(value)
 
@@ -582,6 +715,10 @@ def domain_evidence_provider_external_payload_lineage_audit_report(value: Mappin
     return DomainEvidenceProviderExternalPayloadLineageAuditReport.from_wire(value)
 
 
+def domain_evidence_provider_external_payload_execution_evidence_report(value: Mapping[str, Any]) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+    return DomainEvidenceProviderExternalPayloadExecutionEvidenceReport.from_wire(value)
+
+
 __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW",
@@ -591,6 +728,9 @@ __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_STATUSES",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_CONNECTOR_KINDS",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_STORAGE_BACKENDS",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LOCATOR_KINDS",
@@ -609,4 +749,7 @@ __all__ = [
     "DomainEvidenceProviderExternalPayloadLineageAuditRequest",
     "DomainEvidenceProviderExternalPayloadLineageAuditReport",
     "domain_evidence_provider_external_payload_lineage_audit_report",
+    "DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest",
+    "DomainEvidenceProviderExternalPayloadExecutionEvidenceReport",
+    "domain_evidence_provider_external_payload_execution_evidence_report",
 ]
