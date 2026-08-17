@@ -196,6 +196,10 @@ claim, durable record, deployment approval, or release authority. `bioAtlasPubli
 independent digest, target, evidence, and readiness match dimensions for a stored receipt and its
 completed delivery audit. It verifies supplied structural records only and does not authenticate
 external execution or create release authority.
+`DeveloperDeliveryAuditArgs.ci_provider` provides the composed provider path: the delivery route
+normalizes the raw payload, audits the resulting plan-bound evidence, and returns the intermediate
+normalization alongside `ci_evidence`. It is mutually exclusive with `ci_evidence` and remains
+caller-supplied structural evidence only.
 `ciProviderNormalize` accepts a GitHub Actions-shaped or generic provider payload and returns
 `CiProviderNormalizationResult` with a plan-bound canonical evidence object, provider/source labels,
 payload and derived-check digest metadata, and warnings for missing provider digests. It is an input

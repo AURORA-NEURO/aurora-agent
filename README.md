@@ -709,6 +709,9 @@ projects it into the exact `CiRunEvidence` envelope consumed by that audit. Miss
 digests are derived from the supplied check object and labeled, while unknown and non-passing states
 remain visible; normalization never contacts a provider, verifies signatures, fetches logs, or turns
 caller-supplied data into authenticated execution truth.
+`developer_delivery_audit` can compose that normalization directly through an explicit `ci_provider`
+argument; it returns both the normalized provider projection and the downstream `ci_evidence` audit,
+while rejecting simultaneous `ci_provider` and canonical `ci_evidence` inputs.
 When a delivery decision needs this signal, `developer_delivery_audit` accepts the exact
 `ci_evidence` payload and exposes a separate `ci_execution_evidence` target; missing evidence blocks
 that target without changing the semantics of other delivery targets.

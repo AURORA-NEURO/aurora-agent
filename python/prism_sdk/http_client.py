@@ -366,14 +366,28 @@ def _developer_delivery_arguments(
     *,
     request_id: str | None,
     targets: Sequence[str] | None,
-    checks: Mapping[str, Mapping[str, Any] | CiExecutionEvidenceRequest | ExecutionProvenanceRequest | None],
+    checks: Mapping[
+        str,
+        Mapping[str, Any]
+        | CiExecutionEvidenceRequest
+        | CiProviderNormalizationRequest
+        | ExecutionProvenanceRequest
+        | None,
+    ],
 ) -> dict[str, Any]:
     arguments: dict[str, Any] = {}
     for name, value in checks.items():
         if value is not None:
             arguments[name] = (
                 value.to_mcp_arguments()
-                if isinstance(value, (CiExecutionEvidenceRequest, ExecutionProvenanceRequest))
+                if isinstance(
+                    value,
+                    (
+                        CiExecutionEvidenceRequest,
+                        CiProviderNormalizationRequest,
+                        ExecutionProvenanceRequest,
+                    ),
+                )
                 else dict(value)
             )
     if request_id is None and targets is None:
@@ -729,6 +743,7 @@ class ApiClient:
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
+        ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the cross-domain delivery audit through the HTTP gateway."""
@@ -746,6 +761,7 @@ class ApiClient:
                 "governance": governance,
                 "release": release,
                 "ci_evidence": ci_evidence,
+                "ci_provider": ci_provider,
                 "execution_provenance": execution_provenance,
             },
         )
@@ -1298,6 +1314,7 @@ class ApiClient:
         governance: Mapping[str, Any] | None = None,
         release: Mapping[str, Any] | None = None,
         ci_evidence: CiExecutionEvidenceRequest | Mapping[str, Any] | None = None,
+        ci_provider: CiProviderNormalizationRequest | Mapping[str, Any] | None = None,
         execution_provenance: ExecutionProvenanceRequest | Mapping[str, Any] | None = None,
     ) -> DeveloperDeliveryAuditReport:
         """Return typed delivery-readiness evidence from the HTTP gateway."""
@@ -3557,6 +3574,7 @@ class AsyncApiClient:
                 "governance": governance,
                 "release": release,
                 "ci_evidence": ci_evidence,
+                "ci_provider": ci_provider,
                 "execution_provenance": execution_provenance,
             },
         )

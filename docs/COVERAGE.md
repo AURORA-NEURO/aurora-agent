@@ -59,6 +59,9 @@ accepts bounded GitHub Actions or generic payloads, binds the regenerated plan d
 provider statuses into canonical `CiRunEvidence`, derives absent result digests deterministically,
 and labels those derivations. Invalid supplied digests are refused; unknown and non-passing states
 remain downstream audit findings. The route still does not contact providers or authenticate them.
+`developer_delivery_audit` accepts this same request as `ci_provider`, composes normalization and
+the plan-bound evidence audit, and returns both layers. Canonical `ci_evidence` and `ci_provider`
+are mutually exclusive so provenance cannot be silently blended.
 `developer_delivery_audit` composes the platform, repository, SDK, conformance, provider,
 governance, and release checks into independently inspectable readiness gates. Its typed Python and
 TypeScript projections preserve explicit release targets, blockers, fail-closed/no-implicit-release

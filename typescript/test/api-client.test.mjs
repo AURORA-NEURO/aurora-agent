@@ -1843,7 +1843,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(leaderboard.mcp.result.structuredContent.schema, "bioprism-mcp/hub-leaderboard/0.1");
   assert.equal(leaderboard.mcp.result.structuredContent.unranked_count, 1);
   const delivery = await client.developerDeliveryAudit({
-    ci_evidence: { ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } },
+    ci_provider: { ci: { workflow: "contracts" }, provider: "github_actions", payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] } },
     execution_provenance: { mission: { plan: { mission_id: "mission-ts" } }, delegated_checks: [] },
     release_request: { id: "delivery-1", targets: ["ci_execution_evidence"] },
   });
@@ -1855,7 +1855,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(delivery.mcp.result.structuredContent.readiness.execution_provenance_ready, true);
   assert.equal(delivery.mcp.result.structuredContent.release_request.targets[0].target, "ci_execution_evidence");
   const deliveryRequest = JSON.parse(seen.at(-1).init.body);
-  assert.deepEqual(deliveryRequest.ci_evidence, { ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } });
+  assert.deepEqual(deliveryRequest.ci_provider, { ci: { workflow: "contracts" }, provider: "github_actions", payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] } });
   assert.deepEqual(deliveryRequest.execution_provenance, { mission: { plan: { mission_id: "mission-ts" } }, delegated_checks: [] });
   const receipt = await client.developerDeliveryReceipt({
     receipt_id: "receipt-ts-1",

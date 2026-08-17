@@ -4212,6 +4212,49 @@ fn ci_provider_normalize_projects_github_payload_into_auditable_evidence() {
 }
 
 #[test]
+fn developer_delivery_composes_provider_normalization_into_ci_release_evidence() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "delivery-provider",
+        "triggers": ["push"],
+        "rust_toolchain": "stable",
+        "offline": true,
+        "checks": [{"name": "tests", "run": "cargo test -p core", "required": true}]
+    });
+    let delivery = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "ci_provider": {
+                "ci": ci,
+                "provider": "github_actions",
+                "payload": {
+                    "run": {"id": 9010, "conclusion": "success"},
+                    "jobs": [{"name": "tests", "conclusion": "success"}]
+                }
+            },
+            "release_request": {"id": "delivery-provider-1", "targets": ["ci_execution_evidence"]}
+        }),
+    );
+    assert_eq!(delivery["workflow"], json!("developer_delivery_audit"));
+    assert_eq!(delivery["ci_provider_normalization"]["provider"], json!("github_actions"));
+    assert_eq!(delivery["ci_provider_normalization"]["run_id"], json!("9010"));
+    assert_eq!(delivery["readiness"]["ci_execution_evidence_ready"], json!(true));
+    assert_eq!(delivery["ci_evidence"]["ci_evidence_ready"], json!(true));
+    assert_eq!(delivery["release_request"]["ready"], json!(true));
+
+    let rejected = call(
+        &mut server,
+        "developer_delivery_audit",
+        json!({
+            "ci_evidence": {"ci": {}, "evidence": {}},
+            "ci_provider": {"ci": {}, "provider": "generic", "payload": {"run_id": "1", "checks": []}}
+        }),
+    );
+    assert_eq!(rejected["__isError"], json!(true));
+}
+
+#[test]
 fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
     let mut server = server();
     let ci = json!({
@@ -5407,7 +5450,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 20000
+                "budget": 21000
             },
             "policy": "normative",
             "include_markdown": true,

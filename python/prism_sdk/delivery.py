@@ -254,6 +254,7 @@ class DeveloperDeliveryAuditReport:
     external_surface_posture: DeliveryExternalSurfaceReport
     release_request: DeliveryReleaseRequestReport
     checks: dict[str, dict[str, Any] | None]
+    ci_provider_normalization: dict[str, Any] | None
     guarantees: tuple[str, ...]
     limitations: tuple[str, ...]
 
@@ -289,6 +290,10 @@ class DeveloperDeliveryAuditReport:
                     "execution_provenance",
                 )
             },
+            ci_provider_normalization=_optional_mapping(
+                "developer delivery ci_provider_normalization",
+                raw.get("ci_provider_normalization"),
+            ),
             guarantees=_route_strings("developer delivery guarantees", raw.get("guarantees", [])),
             limitations=_route_strings("developer delivery limitations", raw.get("limitations", [])),
         )

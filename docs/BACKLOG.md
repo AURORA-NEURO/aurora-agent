@@ -249,9 +249,14 @@ GitHub Actions and generic payloads map into canonical `CiRunEvidence`, missing 
 derived and labeled, supplied malformed digests are refused, and unknown/non-passing statuses stay
 visible to the downstream audit. It remains caller-supplied structural normalization rather than
 provider contact, signature verification, log retrieval, or external CI execution.
-`developer_delivery_audit` now accepts that result only through an explicit `ci_evidence` argument;
-the independent `ci_execution_evidence` release target is fail-closed when the evidence is absent or
-not ready, while unrelated local-delivery targets remain independently auditable.
+The delivery audit now accepts that request directly as `ci_provider`, returning the normalized
+projection and downstream CI evidence audit together while refusing mixed canonical/provider
+evidence inputs. This closes the local composition gap without claiming that an external runner,
+provider signature, or log service exists.
+`developer_delivery_audit` accepts either canonical evidence through `ci_evidence` or provider-shaped
+evidence through `ci_provider`; the independent `ci_execution_evidence` release target is fail-closed
+when its evidence is absent or not ready, while unrelated local-delivery targets remain independently
+auditable.
 The delivery audit also exposes a separate `execution_provenance` target, allowing a caller to
 request mission-trace readiness independently of CI evidence or to require both explicit signals;
 neither path silently upgrades structural evidence into execution authority.

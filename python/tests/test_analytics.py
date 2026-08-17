@@ -1627,6 +1627,7 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             governance=None,
             release=None,
             ci_evidence=None,
+            ci_provider=None,
             execution_provenance=None,
         )
 
@@ -1934,6 +1935,7 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             governance=None,
             release=None,
             ci_evidence=None,
+            ci_provider=None,
             execution_provenance=None,
         )
 

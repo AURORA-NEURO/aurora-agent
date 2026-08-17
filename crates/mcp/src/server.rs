@@ -24685,6 +24685,36 @@ impl Server {
             Some(raw) => Some(self.ci_execution_evidence_audit(raw)?),
             None => None,
         };
+        let ci_provider_normalization = match arguments.get("ci_provider") {
+            Some(_) if arguments.get("ci_evidence").is_some() => {
+                return Err(
+                    "ci_provider and ci_evidence are mutually exclusive; supply one evidence source"
+                        .into(),
+                )
+            }
+            Some(raw) => {
+                let normalized = self.ci_provider_normalize(raw)?;
+                let ci = raw
+                    .get("ci")
+                    .cloned()
+                    .ok_or("ci_provider requires the canonical ci request")?;
+                let evidence = normalized
+                    .get("evidence")
+                    .cloned()
+                    .ok_or("ci_provider normalization returned no evidence envelope")?;
+                let audit = self.ci_execution_evidence_audit(&json!({
+                    "ci": ci,
+                    "evidence": evidence,
+                }))?;
+                Some((normalized, audit))
+            }
+            None => None,
+        };
+        let ci_evidence = ci_evidence.or_else(|| {
+            ci_provider_normalization
+                .as_ref()
+                .map(|(_, audit)| audit.clone())
+        });
         let execution_provenance = match arguments.get("execution_provenance") {
             Some(raw) => Some(self.execution_provenance_audit(raw)?),
             None => None,
@@ -25118,6 +25148,9 @@ impl Server {
             "governance": governance,
             "release": release,
             "ci_evidence": ci_evidence,
+            "ci_provider_normalization": ci_provider_normalization
+                .as_ref()
+                .map(|(normalized, _)| normalized.clone()),
             "execution_provenance": execution_provenance,
             "readiness": {
                 "platform_checks_clean": platform_ready,
@@ -29272,7 +29305,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "provider": { "type": "object", "description": "Optional exact arguments for provider_capability_gate. Required for provider_capability readiness." },
                     "governance": { "type": "object", "description": "Optional exact arguments for governance_schema_check. A document-mode conforming result is required for governance_schema readiness; a catalog result is not enough." },
                     "release": { "type": "object", "description": "Optional exact arguments for release_audit. Required for release readiness." },
-                    "ci_evidence": { "type": "object", "description": "Optional exact CiExecutionEvidenceRequest arguments with ci and evidence. Required for the ci_execution_evidence target; it is structurally reconciled and never executed here." },
+                    "ci_evidence": { "type": "object", "description": "Optional exact CiExecutionEvidenceRequest arguments with ci and evidence. Mutually exclusive with ci_provider; it is structurally reconciled and never executed here." },
+                    "ci_provider": { "type": "object", "description": "Optional CiProviderNormalizationRequest with ci, provider (github_actions or generic), payload, and optional source. It is normalized into canonical evidence and then structurally audited; mutually exclusive with ci_evidence and never authenticated or executed here." },
                     "execution_provenance": { "type": "object", "description": "Optional exact ExecutionProvenanceRequest arguments with mission and delegated_checks. Required for the execution_provenance target; it reconciles a supplied mission trace without replaying it." },
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, ci_execution_evidence, or execution_provenance. Omit it to receive no readiness claim." }
                 },

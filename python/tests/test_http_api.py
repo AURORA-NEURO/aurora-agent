@@ -520,6 +520,15 @@ class HttpApiClientTests(unittest.TestCase):
             provider_result["mcp"]["result"]["payload"]["run"]["id"],
             9001,
         )
+        provider_delivery = client.developer_delivery_audit(
+            request_id="delivery-provider-1",
+            targets=["ci_execution_evidence"],
+            ci_provider=provider_request,
+        )
+        self.assertEqual(
+            provider_delivery["mcp"]["result"]["ci_provider"],
+            provider_request.to_mcp_arguments(),
+        )
         receipt_request = DeveloperDeliveryReceiptRequest(
             "receipt-http-1",
             {"release_request": {"id": "delivery-http-1", "targets": ["ci_execution_evidence"]}},

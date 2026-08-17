@@ -50,6 +50,10 @@ content digest from the supplied check object and emits both `derived_result_dig
 per-check warning labels. A supplied but malformed digest is refused rather than silently replaced.
 The derived digest identifies the caller-supplied payload object; it is not a log, signature, or
 provider-authentication proof. The route remains non-networked and non-executing.
+`developer_delivery_audit` accepts the same request as `ci_provider` and composes normalization
+and audit in one explicit delivery call. The result keeps the normalized provider projection and
+the downstream `ci_evidence` audit separately visible; `ci_provider` and canonical `ci_evidence`
+are mutually exclusive inputs.
 
 ## Result semantics
 

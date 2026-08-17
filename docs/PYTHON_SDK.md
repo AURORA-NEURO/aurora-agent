@@ -412,6 +412,11 @@ invent defaults:
   mission provenance as separate, opt-in release targets (`ci_execution_evidence` and
   `execution_provenance`). Each target is fail-closed when its evidence is absent or not ready;
   providing either signal does not imply provider execution, deployment approval, or release authority.
+- `developer_delivery_audit(..., ci_provider=...)` composes `CiProviderNormalizationRequest` into
+  that same CI target end to end: the server normalizes the provider payload, audits the resulting
+  evidence against the regenerated plan, and returns both `ci_provider_normalization` and
+  `ci_evidence`. `ci_provider` and `ci_evidence` are mutually exclusive, and neither implies
+  provider authentication or external execution.
 - `DeveloperDeliveryReceiptRequest` and `developer_delivery_receipt(...)` recompute that audit and
   return `DeveloperDeliveryReceiptReport` with canonical target rows, evidence presence/readiness,
   target/delivery/receipt digests, and structural receipt findings across `Workspace`,
