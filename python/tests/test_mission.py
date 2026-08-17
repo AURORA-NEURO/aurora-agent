@@ -72,6 +72,15 @@ class MissionPreflightTests(unittest.TestCase):
                     ],
                 )
             ],
+            evaluator_review={
+                "workflow": "mission_evaluator_review",
+                "review_id": "e" * 64,
+                "catalog_digest": "c" * 64,
+                "discovery_digest": "d" * 64,
+                "review_status": "ready",
+                "binding_posture": "ready_for_mission_claim_bindings",
+                "execution": "not_started",
+            },
         )
         arguments = request.to_mcp_arguments()
         self.assertEqual(arguments["claim_requests"][0]["requires_steps"], ["observe"])
@@ -91,13 +100,21 @@ class MissionPreflightTests(unittest.TestCase):
                 "schema": "bioprism-mission-claim-lineage-response/0.1",
                 "mission_id": "mission-claims",
                 "claim_lineage": {
-                    "claims": [{"id": "observed", "claimable": True, "evaluator_coverage": {"disagreement_posture": "disagreement"}}],
+                    "evaluator_review": {"present": True, "review_id": "e" * 64},
+                    "claims": [{
+                        "id": "observed",
+                        "claimable": True,
+                        "evaluator_coverage": {"disagreement_posture": "disagreement"},
+                        "evaluator_bindings": [{"outcome_state": "retained"}],
+                    }],
                     "readiness_claimed": False,
                 },
             }
         )
         self.assertTrue(lineage.claims[0]["claimable"])
         self.assertEqual(lineage.disagreement_postures, ("disagreement",))
+        self.assertEqual(lineage.evaluator_review["review_id"], "e" * 64)
+        self.assertEqual(lineage.evaluator_outcome_states, (("retained",),))
 
     def test_execution_provenance_preserves_replay_correlation(self) -> None:
         provenance = MissionExecutionProvenance.from_wire(
@@ -228,6 +245,7 @@ class MissionPreflightTests(unittest.TestCase):
                 "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
                 "mission_status": "succeeded",
                 "returned_bytes": 12,
+                "evaluator_review": {"review_id": "e" * 64, "review_status": "ready"},
                 "execution_trace": [
                     {
                         "sequence": 0,
@@ -256,6 +274,7 @@ class MissionPreflightTests(unittest.TestCase):
         )
         self.assertEqual(report.mission_status, "succeeded")
         self.assertEqual(report.returned_bytes, 12)
+        self.assertEqual(report.evaluator_review["review_status"], "ready")
         self.assertIsInstance(report.execution_trace[0], MissionTraceEvent)
         self.assertEqual(report.execution_trace[-1].event, "mission.completed")
         with self.assertRaises(ArgumentError):

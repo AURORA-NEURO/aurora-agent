@@ -137,7 +137,7 @@ use bioprism_devplat::{
     CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
     DeliveryReceiptRequest,
     DeliveryReceiptVerificationRequest,
-    DevPlatReport, ExecutionProvenanceRequest, MissionReport, mission_claim_lineage,
+    DevPlatReport, ExecutionProvenanceRequest, MissionReport, mission_claim_lineage_with_review,
     MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
     MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReviewRequest,
     MISSION_EVALUATOR_SCHEMA_VERSION,
@@ -442,7 +442,11 @@ struct ParallelCallOutcome {
 
 fn encode_mission_report(report: MissionReport, context: &str) -> Result<Value, String> {
     let mut report = report;
-    report.claim_lineage = mission_claim_lineage(&report.claim_requests, &report.results);
+    report.claim_lineage = mission_claim_lineage_with_review(
+        &report.claim_requests,
+        &report.results,
+        report.evaluator_review.as_ref(),
+    );
     let mut output = serde_json::to_value(report).map_err(|error| format!("{context}: {error}"))?;
     output["ok"] = json!(true);
     output["workflow"] = json!("agent_mission");
@@ -23364,6 +23368,7 @@ impl Server {
             execution_trace_schema_version: MISSION_TRACE_SCHEMA_VERSION.into(),
             execution_trace: Vec::new(),
             claim_requests: request.claim_requests.clone(),
+            evaluator_review: request.evaluator_review.clone(),
             claim_lineage: json!({}),
             trace_observer: self.mission_trace_observer.clone(),
             guarantees: vec![
@@ -29785,7 +29790,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "agent_mission",
-            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. Optional caller-authored claim_requests produce a bounded claim-to-step evidence lineage projection with explicit omission and non-claim posture; they never become semantic truth assertions. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
+            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. Optional caller-authored claim_requests produce a bounded claim-to-step evidence lineage projection with explicit refusal, omission, disagreement, and non-claim posture; they never become semantic truth assertions. An optional ready evaluator_review binds those claims to the digest-fresh discovery/review checkpoint and is revalidated before dispatch. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -29824,6 +29829,10 @@ pub fn tool_definitions() -> Vec<Value> {
                             },
                             "required": ["id", "claim", "domains", "requires_steps"]
                         }
+                    },
+                    "evaluator_review": {
+                        "type": "object",
+                        "description": "Optional ready, non-executing mission_evaluator_review response. When supplied, every evaluator binding must match its reviewed claim, adapter, domain, step, pointer, and required posture; stale or blocked reviews refuse before nested dispatch."
                     },
                     "steps": {
                         "type": "array",

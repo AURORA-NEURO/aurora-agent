@@ -1507,6 +1507,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         ],
         plan: {},
         results: [],
+        evaluator_review: { review_id: "e".repeat(64), catalog_digest: "c".repeat(64), discovery_digest: "d".repeat(64), review_status: "ready", binding_posture: "ready_for_mission_claim_bindings", execution: "not_started" },
       } } } });
       if (path.startsWith("/v1/route-reviews/")) return jsonResponse({ ok: true, workflow: "capability_route_review_evidence", review_id: "a".repeat(64), found: true, page: { events: [{ id: 1, event_type: "tool.completed", subject: "capability_route_review", request_id: "req-1", payload: {} }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0 } });
       if (path === "/v1/tools/refuse") return jsonResponse({ ok: true, tool: "refuse", request_id: "r2", mcp: { result: { isError: true, structuredContent: { reason: "blocked" } } }, guarantee: "shared" });
@@ -2197,7 +2198,13 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(evaluationWorldline.mcp.result.structuredContent.dangling_references[0][1], "missing");
   assert.equal(reproduction.mcp.result.structuredContent.reproduced, false);
   assert.equal(trajectory.mcp.result.structuredContent.steps, 1);
-  const mission = await client.agentMission({ mission_id: "mission-1", goal: "discover", steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }] });
+  const mission = await client.agentMission({
+    mission_id: "mission-1",
+    goal: "discover",
+    steps: [{ id: "catalog", domain: "workspace", capability: "discovery", objective: "discover", tool: "workspace_capabilities" }],
+    claim_requests: [{ id: "catalog-claim", claim: "The catalogue response was retained.", domains: ["workspace"], requires_steps: ["catalog"], evaluator_bindings: [{ id: "catalog-evaluator", adapter_id: "workspace.catalogue", domain: "workspace", step_id: "catalog", output_pointer: "/capabilities" }] }],
+    evaluator_review: { workflow: "mission_evaluator_review", review_id: "e".repeat(64), catalog_digest: "c".repeat(64), discovery_digest: "d".repeat(64), review_status: "ready", binding_posture: "ready_for_mission_claim_bindings", execution: "not_started", bindings: [] },
+  });
   assert.equal(mission.mcp.result.structuredContent.workflow, "agent_mission");
   assert.equal(mission.mcp.result.structuredContent.execution_trace[0].event, "mission.started");
   assert.equal(mission.mcp.result.structuredContent.execution_trace.at(-1).event, "mission.completed");
@@ -2560,7 +2567,7 @@ test("client exposes asynchronous mission submission, status, and cancellation",
         return jsonResponse({ ok: true, schema: "bioprism-mission-execution-provenance/0.1", mission_id: "async-1", provenance: { review_id: "e".repeat(64), gate_digest: "d".repeat(64), readiness_claimed: false }, readiness_claimed: false });
       }
       if (path === "/v1/missions/async-1/claims" && init.method === "GET") {
-        return jsonResponse({ ok: true, schema: "bioprism-mission-claim-lineage-response/0.1", mission_id: "async-1", claim_lineage: { claims: [{ id: "observed", claimable: true }], readiness_claimed: false } });
+        return jsonResponse({ ok: true, schema: "bioprism-mission-claim-lineage-response/0.1", mission_id: "async-1", claim_lineage: { evaluator_review: { present: true, review_id: "e".repeat(64) }, claims: [{ id: "observed", claimable: true, evaluator_bindings: [{ outcome_state: "retained" }] }], readiness_claimed: false } });
       }
       if (path === "/v1/missions/slow" && init.method === "GET") {
         return jsonResponse({ ok: true, mission_id: "slow", status: "running", cancel_requested: false, progress: { phase: "running", current_wave: 0, total_steps: 1, completed_steps: 0, active_steps: 1, succeeded: 0, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 0, trace_sequence: 1, last_event: "step.started" } });
@@ -2599,6 +2606,8 @@ test("client exposes asynchronous mission submission, status, and cancellation",
   const claims = await client.missionClaimLineage("async-1");
   assert.equal(claims.mission_id, "async-1");
   assert.equal(claims.claim_lineage.claims[0].claimable, true);
+  assert.equal(claims.claim_lineage.evaluator_review.review_id, "e".repeat(64));
+  assert.equal(claims.claim_lineage.claims[0].evaluator_bindings[0].outcome_state, "retained");
   assert.equal(status.result.mission_status, "succeeded");
   const inventory = await client.missions("succeeded", 5);
   assert.equal(inventory.missions[0].mission_id, "async-1");

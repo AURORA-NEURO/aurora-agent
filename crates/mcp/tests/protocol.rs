@@ -1294,6 +1294,57 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
     assert_eq!(ready["bindings"][0]["proposed_binding"]["step_id"], json!("assay"));
     assert_eq!(ready["execution"], json!("not_started"));
 
+    let mission = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "reviewed-fidelity",
+            "goal": "retain a reviewed evaluator output",
+            "steps": [{
+                "id": "assay",
+                "domain": "oncology",
+                "capability": "assay",
+                "objective": "retain assay evidence",
+                "tool": "workspace_capabilities"
+            }],
+            "claim_requests": [{
+                "id": "fidelity-claim",
+                "claim": "The assay output was retained for review.",
+                "domains": ["oncology"],
+                "requires_steps": ["assay"],
+                "level": "evaluation",
+                "evidence_mode": "successful_tool_result",
+                "evaluator_bindings": [ready["bindings"][0]["proposed_binding"].clone()]
+            }],
+            "evaluator_review": ready
+        }),
+    );
+    assert_eq!(mission["workflow"], json!("agent_mission"));
+    assert_eq!(mission["execution"], json!("planned"));
+    assert_eq!(mission["claim_lineage"]["evaluator_review"]["present"], json!(true));
+    assert_eq!(mission["claim_lineage"]["claims"][0]["evaluator_review"]["review_status"], json!("ready"));
+
+    let mut mismatched_review = ready.clone();
+    mismatched_review["bindings"][0]["domain"] = json!("unrelated");
+    let rejected = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "reviewed-fidelity-rejected",
+            "goal": "reject a stale binding",
+            "steps": [{"id": "assay", "domain": "oncology", "capability": "assay", "objective": "retain", "tool": "workspace_capabilities"}],
+            "claim_requests": [{
+                "id": "fidelity-claim",
+                "claim": "The assay output was retained for review.",
+                "domains": ["oncology"],
+                "requires_steps": ["assay"],
+                "evaluator_bindings": [ready["bindings"][0]["proposed_binding"].clone()]
+            }],
+            "evaluator_review": mismatched_review
+        }),
+    );
+    assert_eq!(rejected["__isError"], json!(true));
+
     let discovery_for_blocked = call(
         &mut server,
         "mission_evaluator_discover",

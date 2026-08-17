@@ -494,6 +494,7 @@ class MissionRequest:
     policy: MissionPolicy | Mapping[str, Any] | None = None
     operations_gate_acceptance: OperationsGateAcceptance | Mapping[str, Any] | None = None
     claim_requests: Sequence[MissionClaimRequest | Mapping[str, Any]] = ()
+    evaluator_review: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _text("mission_id", self.mission_id)
@@ -534,6 +535,16 @@ class MissionRequest:
                     raise ArgumentError(
                         f"claim evaluator {evaluator['id']} must reference one of the claim requires_steps"
                     )
+        if self.evaluator_review is not None:
+            review = _mapping("evaluator_review", self.evaluator_review)
+            if review.get("workflow") != "mission_evaluator_review":
+                raise ArgumentError("evaluator_review.workflow must be mission_evaluator_review")
+            if review.get("review_status") != "ready":
+                raise ArgumentError("evaluator_review must have review_status=ready")
+            if review.get("binding_posture") != "ready_for_mission_claim_bindings":
+                raise ArgumentError("evaluator_review must have a ready binding posture")
+            if review.get("execution") != "not_started":
+                raise ArgumentError("evaluator_review must be non-executing")
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         arguments: dict[str, Any] = {
@@ -555,6 +566,8 @@ class MissionRequest:
             )
         if self.claim_requests:
             arguments["claim_requests"] = [_claim_request(value) for value in self.claim_requests]
+        if self.evaluator_review is not None:
+            arguments["evaluator_review"] = _mapping("evaluator_review", self.evaluator_review)
         return arguments
 
 
@@ -1051,6 +1064,15 @@ class MissionExecutionReport:
         return value
 
     @property
+    def evaluator_review(self) -> Mapping[str, Any]:
+        """Return the ready review provenance retained with the mission, when supplied."""
+
+        value = self.raw.get("evaluator_review")
+        if value is None:
+            return {}
+        return _mapping("mission evaluator review", value)
+
+    @property
     def cancelled(self) -> int:
         value = self.raw.get("cancelled", 0)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -1209,6 +1231,31 @@ class MissionClaimLineage:
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
             raise ArgumentError("mission claim lineage claims must be an array")
         return tuple(_mapping("mission claim lineage row", value) for value in values)
+
+    @property
+    def evaluator_review(self) -> Mapping[str, Any]:
+        """Return review identity/status without treating it as scientific evidence."""
+
+        value = self.claim_lineage.get("evaluator_review", {"present": False})
+        return _mapping("mission claim lineage evaluator_review", value)
+
+    @property
+    def evaluator_outcome_states(self) -> tuple[tuple[str, ...], ...]:
+        """Return per-claim retained/refused/omitted outcome labels without resolving them."""
+
+        output: list[tuple[str, ...]] = []
+        for claim in self.claims:
+            values = claim.get("evaluator_bindings", [])
+            if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+                raise ArgumentError("mission claim evaluator_bindings must be an array")
+            states: list[str] = []
+            for value in values:
+                row = _mapping("mission claim evaluator outcome", value)
+                state = row.get("outcome_state")
+                _text("mission claim evaluator outcome_state", state)
+                states.append(state)
+            output.append(tuple(states))
+        return tuple(output)
 
     @property
     def disagreement_postures(self) -> tuple[str, ...]:

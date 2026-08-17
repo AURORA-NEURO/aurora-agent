@@ -19,6 +19,8 @@ use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::evaluator::MissionEvaluatorCatalogue;
+
 /// Schema version for mission requests, plans, and execution reports.
 pub const MISSION_SCHEMA_VERSION: &str = "bioprism-devplat-mission/0.1";
 pub const MISSION_TRACE_SCHEMA_VERSION: &str = "bioprism-devplat-mission-trace/0.1";
@@ -531,6 +533,224 @@ impl MissionClaimRequest {
     }
 }
 
+fn evaluator_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn normalized_evaluator_label(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+/// Require a ready review to be the exact provenance envelope consumed by a mission.
+///
+/// A caller may still submit legacy evaluator bindings without a review for compatibility, but once
+/// `evaluator_review` is present the handoff is fail-closed: every binding must appear exactly once
+/// in the ready review, retain the same claim/adapter/domain/step/pointer fields, and still match
+/// the current in-tree evaluator catalogue. This turns discovery/review into an auditable input to
+/// dispatch rather than a suggestion that can silently be replaced before execution.
+fn validate_evaluator_review(
+    review: &Value,
+    claims: &[MissionClaimRequest],
+) -> Result<(), MissionError> {
+    let object = review
+        .as_object()
+        .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+            reason: "evaluator_review must be an object".into(),
+        })?;
+    let field_text = |field: &'static str| {
+        object
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                reason: format!("evaluator_review.{field} must be a non-empty string"),
+            })
+    };
+    if object.get("workflow").and_then(Value::as_str) != Some("mission_evaluator_review") {
+        return Err(MissionError::InvalidEvaluatorReview {
+            reason: "workflow must be mission_evaluator_review".into(),
+        });
+    }
+    if object.get("ok").and_then(Value::as_bool) != Some(true)
+        || object.get("review_status").and_then(Value::as_str) != Some("ready")
+        || object.get("binding_posture").and_then(Value::as_str)
+            != Some("ready_for_mission_claim_bindings")
+        || object.get("execution").and_then(Value::as_str) != Some("not_started")
+    {
+        return Err(MissionError::InvalidEvaluatorReview {
+            reason: "evaluator_review must be an ok, ready, non-executing review".into(),
+        });
+    }
+    let review_id = field_text("review_id")?;
+    let catalog_digest = field_text("catalog_digest")?;
+    let discovery_digest = field_text("discovery_digest")?;
+    if !evaluator_digest(review_id)
+        || !evaluator_digest(catalog_digest)
+        || !evaluator_digest(discovery_digest)
+    {
+        return Err(MissionError::InvalidEvaluatorReview {
+            reason: "review_id, catalog_digest, and discovery_digest must be 64-character digests"
+                .into(),
+        });
+    }
+    let catalogue = MissionEvaluatorCatalogue::standard();
+    if catalog_digest != catalogue.digest().to_string() {
+        return Err(MissionError::InvalidEvaluatorReview {
+            reason: format!(
+                "catalog_digest is stale; expected {}",
+                catalogue.digest()
+            ),
+        });
+    }
+    let findings = object
+        .get("findings")
+        .and_then(Value::as_array)
+        .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+            reason: "findings must be an array".into(),
+        })?;
+    if !findings.is_empty() {
+        return Err(MissionError::InvalidEvaluatorReview {
+            reason: "blocked review findings must be corrected before dispatch".into(),
+        });
+    }
+    let rows = object
+        .get("bindings")
+        .and_then(Value::as_array)
+        .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+            reason: "bindings must be an array".into(),
+        })?;
+    let expected = claims
+        .iter()
+        .flat_map(|claim| claim.evaluator_bindings.iter().map(move |binding| (claim, binding)))
+        .collect::<Vec<_>>();
+    if expected.is_empty() {
+        return Err(MissionError::InvalidEvaluatorReview {
+            reason: "a ready evaluator review must accompany at least one evaluator binding".into(),
+        });
+    }
+    if rows.len() != expected.len() {
+        return Err(MissionError::InvalidEvaluatorReview {
+            reason: format!(
+                "review contains {} binding rows but the mission carries {}",
+                rows.len(),
+                expected.len()
+            ),
+        });
+    }
+    if object.get("selection_count").and_then(Value::as_u64) != Some(rows.len() as u64) {
+        return Err(MissionError::InvalidEvaluatorReview {
+            reason: "selection_count does not match bindings".into(),
+        });
+    }
+    let mut rows_by_id = BTreeMap::<String, &Value>::new();
+    for row in rows {
+        let row_object = row
+            .as_object()
+            .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                reason: "every evaluator review binding must be an object".into(),
+            })?;
+        let id = row_object
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                reason: "every evaluator review binding requires a non-empty id".into(),
+            })?;
+        if rows_by_id.insert(id.to_string(), row).is_some() {
+            return Err(MissionError::InvalidEvaluatorReview {
+                reason: format!("review contains duplicate binding id `{id}`"),
+            });
+        }
+        if row_object.get("binding_posture").and_then(Value::as_str) != Some("ready")
+            || row_object.get("candidate_found").and_then(Value::as_bool) != Some(true)
+            || row_object.get("domain_supported").and_then(Value::as_bool) != Some(true)
+        {
+            return Err(MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{id}` is not ready for mission dispatch"),
+            });
+        }
+        let adapter_id = row_object
+            .get("adapter_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{id}` has no adapter_id"),
+            })?;
+        let domain = row_object
+            .get("domain")
+            .and_then(Value::as_str)
+            .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{id}` has no domain"),
+            })?;
+        let adapter = catalogue
+            .adapters()
+            .iter()
+            .find(|adapter| adapter.id == adapter_id)
+            .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{id}` names unknown adapter `{adapter_id}`"),
+            })?;
+        if !adapter.domains.iter().any(|candidate| {
+            normalized_evaluator_label(candidate).contains(&normalized_evaluator_label(domain))
+        }) {
+            return Err(MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{id}` uses an unsupported domain `{domain}`"),
+            });
+        }
+    }
+
+    for (claim, binding) in expected {
+        let row = rows_by_id.get(&binding.id).ok_or_else(|| {
+            MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{}` is absent from evaluator_review", binding.id),
+            }
+        })?;
+        let row_object = row.as_object().expect("review rows were checked above");
+        for (field, expected_value) in [
+            ("claim_id", claim.id.as_str()),
+            ("adapter_id", binding.adapter_id.as_str()),
+            ("domain", binding.domain.as_str()),
+            ("step_id", binding.step_id.as_str()),
+            ("output_pointer", binding.output_pointer.as_str()),
+        ] {
+            if row_object.get(field).and_then(Value::as_str) != Some(expected_value) {
+                return Err(MissionError::InvalidEvaluatorReview {
+                    reason: format!("binding `{}` does not match review field `{field}`", binding.id),
+                });
+            }
+        }
+        if row_object.get("required").and_then(Value::as_bool) != Some(binding.required) {
+            return Err(MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{}` does not match review required posture", binding.id),
+            });
+        }
+        let proposed = row_object
+            .get("proposed_binding")
+            .and_then(Value::as_object)
+            .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{}` has no proposed_binding", binding.id),
+            })?;
+        for (field, expected_value) in [
+            ("id", binding.id.as_str()),
+            ("claim_id", claim.id.as_str()),
+            ("adapter_id", binding.adapter_id.as_str()),
+            ("domain", binding.domain.as_str()),
+            ("step_id", binding.step_id.as_str()),
+            ("output_pointer", binding.output_pointer.as_str()),
+        ] {
+            if proposed.get(field).and_then(Value::as_str) != Some(expected_value) {
+                return Err(MissionError::InvalidEvaluatorReview {
+                    reason: format!("binding `{}` proposed_binding does not match `{field}`", binding.id),
+                });
+            }
+        }
+        if proposed.get("required").and_then(Value::as_bool) != Some(binding.required) {
+            return Err(MissionError::InvalidEvaluatorReview {
+                reason: format!("binding `{}` proposed_binding does not match required posture", binding.id),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// A complete mission request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissionRequest {
@@ -541,6 +761,10 @@ pub struct MissionRequest {
     pub policy: MissionPolicy,
     #[serde(default)]
     pub claim_requests: Vec<MissionClaimRequest>,
+    /// The ready, non-executing evaluator review consumed by this mission, when bindings were
+    /// selected through `mission_evaluator_review`.
+    #[serde(default)]
+    pub evaluator_review: Option<Value>,
 }
 
 impl MissionRequest {
@@ -598,6 +822,9 @@ impl MissionRequest {
                 });
             }
             claim.validate(&ids)?;
+        }
+        if let Some(review) = &self.evaluator_review {
+            validate_evaluator_review(review, &self.claim_requests)?;
         }
         for step in &self.steps {
             let mut dependencies = BTreeSet::new();
@@ -736,10 +963,67 @@ pub struct MissionStepResult {
     pub error: Option<String>,
 }
 
+fn retained_result_payload(result: &MissionStepResult) -> Option<(Value, &'static str)> {
+    let wire = result.wire.as_ref()?;
+    if let Some(payload) = wire.pointer("/result/structuredContent") {
+        return Some((payload.clone(), "structured_content"));
+    }
+    if let Some(text) = wire.pointer("/result/content/0/text").and_then(Value::as_str) {
+        if let Ok(payload) = serde_json::from_str::<Value>(text) {
+            return Some((payload, "content_text_json"));
+        }
+    }
+    Some((wire.clone(), "wire_envelope"))
+}
+
+fn json_value_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn evaluator_outcome_state(status: &str) -> &'static str {
+    match status {
+        "refused" => "refused",
+        "blocked" => "blocked",
+        "cancelled" => "cancelled",
+        _ => "step_not_successful",
+    }
+}
+
+fn evaluator_review_provenance(review: Option<&Value>) -> Value {
+    let Some(object) = review.and_then(Value::as_object) else {
+        return json!({"present": false});
+    };
+    json!({
+        "present": true,
+        "review_id": object.get("review_id").cloned().unwrap_or(Value::Null),
+        "catalog_digest": object.get("catalog_digest").cloned().unwrap_or(Value::Null),
+        "discovery_digest": object.get("discovery_digest").cloned().unwrap_or(Value::Null),
+        "review_status": object.get("review_status").cloned().unwrap_or(Value::Null),
+        "binding_posture": object.get("binding_posture").cloned().unwrap_or(Value::Null),
+        "execution": object.get("execution").cloned().unwrap_or(Value::Null),
+    })
+}
+
 /// Build a bounded lineage projection without interpreting the claim statement.
 pub fn mission_claim_lineage(
     claims: &[MissionClaimRequest],
     results: &[MissionStepResult],
+) -> Value {
+    mission_claim_lineage_with_review(claims, results, None)
+}
+
+/// Build lineage while retaining the provenance of the evaluator review consumed by dispatch.
+pub fn mission_claim_lineage_with_review(
+    claims: &[MissionClaimRequest],
+    results: &[MissionStepResult],
+    evaluator_review: Option<&Value>,
 ) -> Value {
     let result_by_id = results
         .iter()
@@ -820,35 +1104,82 @@ pub fn mission_claim_lineage(
                 let Some(result) = result_by_id.get(binding.step_id.as_str()) else {
                     let mut row = base();
                     row["evaluator_state"] = json!("missing_step_result");
+                    row["outcome_state"] = json!("missing_step_result");
+                    row["step_status"] = Value::Null;
+                    row["step_error"] = Value::Null;
                     return row;
                 };
                 if result.status != "succeeded" {
                     let mut row = base();
                     row["evaluator_state"] = json!("step_not_successful");
+                    row["outcome_state"] = json!(evaluator_outcome_state(&result.status));
+                    row["step_status"] = json!(result.status);
+                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
                     return row;
                 }
-                let Some(wire) = result.wire.as_ref() else {
+                let Some((payload, output_source)) = retained_result_payload(result) else {
                     let mut row = base();
                     row["evaluator_state"] = json!("evaluator_output_omitted");
+                    row["outcome_state"] = json!("output_omitted");
+                    row["step_status"] = json!(result.status);
+                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
                     return row;
                 };
                 let output = if binding.output_pointer.is_empty() {
-                    Some(wire)
+                    Some(&payload)
                 } else {
-                    wire.pointer(&binding.output_pointer)
+                    payload.pointer(&binding.output_pointer)
                 };
                 let Some(output) = output else {
                     let mut row = base();
                     row["evaluator_state"] = json!("evaluator_pointer_missing");
+                    row["outcome_state"] = json!("pointer_missing");
+                    row["step_status"] = json!(result.status);
+                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                    row["output_source"] = json!(output_source);
                     return row;
                 };
                 let mut row = base();
+                row["step_status"] = json!(result.status);
+                row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                row["output_source"] = json!(output_source);
+                row["output_type"] = json!(json_value_type(output));
+                row["output_bytes"] = serde_json::to_vec(output)
+                    .map(|bytes| json!(bytes.len()))
+                    .unwrap_or(Value::Null);
                 row["output_digest"] = ContentHash::of_value(output)
                     .ok()
                     .map(|digest| json!(digest.to_string()))
                     .unwrap_or(Value::Null);
                 row["evaluator_state"] = json!("evaluator_output_retained");
+                row["outcome_state"] = json!("retained");
                 row
+            })
+            .collect::<Vec<_>>();
+        let outcome_counts = evaluator_rows
+            .iter()
+            .filter_map(|row| row.get("outcome_state").and_then(Value::as_str))
+            .fold(BTreeMap::<String, usize>::new(), |mut counts, state| {
+                *counts.entry(state.to_string()).or_default() += 1;
+                counts
+            });
+        let mut output_digest_groups = BTreeMap::<String, Vec<String>>::new();
+        for row in &evaluator_rows {
+            if let (Some(digest), Some(id)) = (
+                row.get("output_digest").and_then(Value::as_str),
+                row.get("id").and_then(Value::as_str),
+            ) {
+                output_digest_groups
+                    .entry(digest.to_string())
+                    .or_default()
+                    .push(id.to_string());
+            }
+        }
+        let output_digest_groups = output_digest_groups
+            .into_iter()
+            .map(|(digest, mut binding_ids)| {
+                binding_ids.sort();
+                json!({"digest": digest, "binding_ids": binding_ids})
             })
             .collect::<Vec<_>>();
         let evaluator_required_total = evaluator_rows
@@ -898,6 +1229,8 @@ pub fn mission_claim_lineage(
             "required_complete": evaluator_required_complete,
             "retained": evaluator_retained,
             "distinct_output_digests": evaluator_output_digests.len(),
+            "outcome_counts": outcome_counts,
+            "output_digest_groups": output_digest_groups,
             "disagreement_posture": evaluator_disagreement_posture,
             "posture": if claim.evaluator_bindings.is_empty() {
                 "not_requested"
@@ -922,6 +1255,7 @@ pub fn mission_claim_lineage(
             "evidence": evidence,
             "evaluator_bindings": evaluator_rows,
             "evaluator_coverage": evaluator_coverage,
+            "evaluator_review": evaluator_review_provenance(evaluator_review),
             "claim_status": "unreviewed",
             "claimable": claimable,
             "readiness_claimed": false,
@@ -941,6 +1275,7 @@ pub fn mission_claim_lineage(
         "requested": claims.len(),
         "returned": claims.len().min(MAX_CLAIM_REQUESTS),
         "omitted": claims.len().saturating_sub(MAX_CLAIM_REQUESTS),
+        "evaluator_review": evaluator_review_provenance(evaluator_review),
         "claim_status": "unreviewed",
         "readiness_claimed": false,
         "guarantees": [
@@ -1019,6 +1354,8 @@ pub struct MissionReport {
     pub execution_trace_schema_version: String,
     pub execution_trace: Vec<MissionTraceEvent>,
     pub claim_requests: Vec<MissionClaimRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_review: Option<Value>,
     pub claim_lineage: Value,
     #[serde(skip)]
     pub trace_observer: Option<MissionTraceObserver>,
@@ -1085,6 +1422,8 @@ pub enum MissionError {
     InvalidClaim { claim: String, reason: String },
     #[error("mission claim `{claim}` requires unknown step `{step}`")]
     UnknownClaimStep { claim: String, step: String },
+    #[error("invalid evaluator review: {reason}")]
+    InvalidEvaluatorReview { reason: String },
 }
 
 /// Build a deterministic plan from a mission request.
@@ -1187,6 +1526,9 @@ pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::evaluator::{
+        MissionEvaluatorQuery, MissionEvaluatorReviewRequest, MissionEvaluatorSelection,
+    };
 
     fn step(id: &str, tool: &str, depends_on: &[&str]) -> MissionStep {
         MissionStep {
@@ -1209,6 +1551,7 @@ mod tests {
             steps,
             policy: MissionPolicy::default(),
             claim_requests: Vec::new(),
+            evaluator_review: None,
         }
     }
 
@@ -1487,6 +1830,136 @@ mod tests {
         assert_eq!(
             omitted["claims"][0]["evaluator_bindings"][0]["evaluator_state"],
             "evaluator_output_omitted"
+        );
+        assert_eq!(
+            omitted["claims"][0]["evaluator_bindings"][0]["outcome_state"],
+            "output_omitted"
+        );
+    }
+
+    #[test]
+    fn ready_evaluator_review_is_required_to_match_dispatch_bindings() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let search = catalogue
+            .search(&MissionEvaluatorQuery {
+                adapter_id: Some("oncoworlds.assay_fidelity".into()),
+                max_items: 4,
+                ..MissionEvaluatorQuery::default()
+            })
+            .unwrap();
+        let mut discovery = serde_json::to_value(search).unwrap();
+        discovery["workflow"] = json!("mission_evaluator_discover");
+        discovery["selection_posture"] = json!("candidate_only");
+        let review = catalogue
+            .review(&MissionEvaluatorReviewRequest {
+                discovery,
+                selections: vec![MissionEvaluatorSelection {
+                    id: "assay-evaluator".into(),
+                    claim_id: "fidelity-claim".into(),
+                    adapter_id: "oncoworlds.assay_fidelity".into(),
+                    domain: "oncology".into(),
+                    step_id: "assay".into(),
+                    output_pointer: "/fidelity".into(),
+                    required: true,
+                }],
+            })
+            .unwrap();
+        let claim = MissionClaimRequest {
+            id: "fidelity-claim".into(),
+            claim: "The assay output was retained for review.".into(),
+            domains: vec!["oncology".into()],
+            requires_steps: vec!["assay".into()],
+            level: "evaluation".into(),
+            evidence_mode: "successful_tool_result".into(),
+            evaluator_bindings: vec![MissionClaimEvaluatorBinding {
+                id: "assay-evaluator".into(),
+                adapter_id: "oncoworlds.assay_fidelity".into(),
+                domain: "oncology".into(),
+                step_id: "assay".into(),
+                output_pointer: "/fidelity".into(),
+                required: true,
+            }],
+        };
+        let mut mission = request(vec![step("assay", "capability_audit", &[])]);
+        mission.claim_requests = vec![claim];
+        mission.evaluator_review = Some(review.clone());
+        assert!(plan_mission(&mission).is_ok());
+
+        let mut mismatched = review;
+        mismatched["bindings"][0]["domain"] = json!("unrelated");
+        mission.evaluator_review = Some(mismatched);
+        assert!(matches!(
+            plan_mission(&mission),
+            Err(MissionError::InvalidEvaluatorReview { .. })
+        ));
+    }
+
+    #[test]
+    fn lineage_retains_structured_evaluator_output_and_refusal_classes() {
+        let claim = MissionClaimRequest {
+            id: "fidelity-claim".into(),
+            claim: "The assay output was retained for review.".into(),
+            domains: vec!["oncology".into()],
+            requires_steps: vec!["assay".into()],
+            level: "evaluation".into(),
+            evidence_mode: "successful_tool_result".into(),
+            evaluator_bindings: vec![MissionClaimEvaluatorBinding {
+                id: "assay-evaluator".into(),
+                adapter_id: "oncoworlds.assay_fidelity".into(),
+                domain: "oncology".into(),
+                step_id: "assay".into(),
+                output_pointer: "/fidelity".into(),
+                required: true,
+            }],
+        };
+        let retained = mission_claim_lineage(
+            &[claim.clone()],
+            &[MissionStepResult {
+                id: "assay".into(),
+                tool: "oncoworlds_model_transport".into(),
+                status: "succeeded".into(),
+                required: true,
+                arguments_digest: Some("a".repeat(64)),
+                bytes: 120,
+                wire: Some(json!({
+                    "result": {"structuredContent": {"fidelity": {"score": 0.9}}}
+                })),
+                error: None,
+            }],
+        );
+        assert_eq!(
+            retained["claims"][0]["evaluator_bindings"][0]["outcome_state"],
+            "retained"
+        );
+        assert_eq!(
+            retained["claims"][0]["evaluator_bindings"][0]["output_source"],
+            "structured_content"
+        );
+        assert_eq!(
+            retained["claims"][0]["evaluator_bindings"][0]["output_type"],
+            "object"
+        );
+
+        let refused = mission_claim_lineage(
+            &[claim],
+            &[MissionStepResult {
+                id: "assay".into(),
+                tool: "oncoworlds_model_transport".into(),
+                status: "refused".into(),
+                required: true,
+                arguments_digest: Some("a".repeat(64)),
+                bytes: 40,
+                wire: None,
+                error: Some("domain tool refused".into()),
+            }],
+        );
+        assert_eq!(
+            refused["claims"][0]["evaluator_bindings"][0]["outcome_state"],
+            "refused"
+        );
+        assert_eq!(
+            refused["claims"][0]["evaluator_coverage"]["outcome_counts"]["refused"],
+            1
         );
     }
 }

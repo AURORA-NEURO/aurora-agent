@@ -7103,6 +7103,7 @@ export interface AgentMissionArgs extends JsonObject {
   policy?: AgentMissionPolicy;
   operations_gate_acceptance?: OperationsGateAcceptance;
   claim_requests?: MissionClaimRequest[];
+  evaluator_review?: JsonObject;
 }
 
 export type MissionTraceEventName =
@@ -7143,6 +7144,7 @@ export interface AgentMissionReport extends JsonObject {
   execution_trace_schema_version: string;
   execution_trace: MissionTraceEvent[];
   claim_requests?: MissionClaimRequest[];
+  evaluator_review?: JsonObject;
   claim_lineage?: JsonObject;
   preflight?: boolean;
   dispatch?: "not_started";
@@ -7199,13 +7201,33 @@ export interface MissionClaimEvaluatorEvidence extends JsonObject {
   step_id: string;
   output_pointer: string;
   required: boolean;
+  claim_id?: string;
   output_digest?: string | null;
+  output_source?: "structured_content" | "content_text_json" | "wire_envelope";
+  output_type?: "null" | "boolean" | "number" | "string" | "array" | "object";
+  output_bytes?: number | null;
+  step_status?: string | null;
+  step_error?: string | null;
   evaluator_state:
     | "missing_step_result"
     | "step_not_successful"
     | "evaluator_output_omitted"
     | "evaluator_pointer_missing"
     | "evaluator_output_retained";
+  outcome_state:
+    | "missing_step_result"
+    | "refused"
+    | "blocked"
+    | "cancelled"
+    | "step_not_successful"
+    | "output_omitted"
+    | "pointer_missing"
+    | "retained";
+}
+
+export interface MissionClaimEvaluatorDigestGroup extends JsonObject {
+  digest: string;
+  binding_ids: string[];
 }
 
 export interface MissionClaimEvaluatorCoverage extends JsonObject {
@@ -7217,6 +7239,8 @@ export interface MissionClaimEvaluatorCoverage extends JsonObject {
   required_complete: boolean;
   retained: number;
   distinct_output_digests: number;
+  outcome_counts: Record<string, number>;
+  output_digest_groups: MissionClaimEvaluatorDigestGroup[];
   disagreement_posture: MissionEvaluatorDisagreementPosture;
   posture: "not_requested" | "required_complete" | "required_incomplete";
 }
@@ -7232,6 +7256,7 @@ export interface MissionClaimLineageRow extends JsonObject {
   evidence: JsonObject[];
   evaluator_bindings: MissionClaimEvaluatorEvidence[];
   evaluator_coverage: MissionClaimEvaluatorCoverage;
+  evaluator_review?: JsonObject;
   claim_status: "unreviewed";
   claimable: boolean;
   readiness_claimed: false;
@@ -7244,6 +7269,7 @@ export interface MissionClaimLineageProjection extends JsonObject {
   requested: number;
   returned: number;
   omitted: number;
+  evaluator_review?: JsonObject;
   claim_status: "unreviewed";
   readiness_claimed: false;
   lineage_digest?: string;

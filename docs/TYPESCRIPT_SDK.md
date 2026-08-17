@@ -699,7 +699,12 @@ semantic adjudication route.
 and bounded claim-selection rows, then returns typed ready/blocked findings for stale discovery,
 unknown candidates, unsupported domains, duplicate IDs, per-claim overflow, and invalid RFC 6901
 pointers. Ready rows include proposed evaluator-binding scaffolds, but `execution: "not_started"`
-is preserved because `agentMission(...)` remains the execution and refusal authority.
+is preserved because `agentMission(...)` remains the execution and refusal authority. A ready review
+can be passed back through `AgentMissionArgs.evaluator_review`; the server revalidates its catalogue
+digest and exact claim-binding rows before nested dispatch. `MissionClaimEvaluatorEvidence` retains
+outcome state, step refusal/error, output source/type/size, and digest-group disagreement evidence,
+while `MissionClaimLineageProjection.evaluator_review` preserves review provenance without claiming
+semantic truth.
 
 ```typescript
 const page = await api.events(0, 100);

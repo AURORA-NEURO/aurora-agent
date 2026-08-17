@@ -602,8 +602,13 @@ invent defaults:
   `MissionRequest`. The terminal `MissionExecutionReport.claim_lineage` property and
   `mission_claim_lineage(...)`/async helper expose retained result digests, omission states, and
   non-claim posture. `MissionClaimEvaluatorBinding` adds explicit adapter/domain/output-pointer
-  coverage with required-retention counts. `claimable` only means the requested transport evidence
-  was retained; it is never a truth, safety, or release verdict.
+  coverage with required-retention counts. Supplying the ready `mission_evaluator_review` response as
+  `MissionRequest.evaluator_review` makes the Rust boundary recheck catalogue freshness and exact
+  reviewed rows before dispatch. `MissionExecutionReport.evaluator_review`, lineage review
+  provenance, `MissionClaimLineage.evaluator_outcome_states`, outcome counts, output source/type/size,
+  refusal/blocked/cancelled/omitted/pointer-missing states, and digest groups remain available without
+  semantic adjudication. `claimable` only means the requested transport evidence was retained; it is
+  never a truth, safety, or release verdict.
   `rebind_subscription(...)` supplies a secret in memory,
   re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

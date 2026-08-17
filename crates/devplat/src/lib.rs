@@ -300,7 +300,7 @@ pub use delivery_receipt::{
     DELIVERY_RECEIPT_SCHEMA,
 };
 pub use mission::{
-    apply_binding, mission_claim_lineage, plan_mission, MissionBinding, MissionClaimEvaluatorBinding,
+    apply_binding, mission_claim_lineage, mission_claim_lineage_with_review, plan_mission, MissionBinding, MissionClaimEvaluatorBinding,
     MissionClaimRequest, MissionError, MissionPlan, MissionPolicy, MissionReport, MissionRequest, MissionStep,
     MissionStepPlan, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
     MAX_CLAIM_EVALUATORS, MAX_CLAIM_REFERENCES, MAX_CLAIM_REQUESTS, MISSION_SCHEMA_VERSION,

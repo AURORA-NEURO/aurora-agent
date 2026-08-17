@@ -290,6 +290,11 @@ pointers; coverage and pointer/refusal/omission posture are reported separately,
 plug in a named evaluator without giving the orchestration layer semantic authority. Multiple
 retained evaluator outputs also expose canonical-digest agreement/disagreement as an explicit
 witness, never as an automatic adjudication.
+Retained outcomes also distinguish refused, blocked, cancelled, output-omitted, pointer-missing, and
+successful evaluator rows, including output source/type/size and digest groups. A ready
+`mission_evaluator_review` can be supplied back as `evaluator_review`; `agent_mission` rechecks its
+catalogue digest and exact binding rows before any nested call, then preserves review provenance in
+the report and claim lineage.
 The Rust executor also performs bounded authoritative JSON Schema preflight against the live
 `tools/list` definitions: static arguments are checked before a mission is accepted or planned,
 and bound arguments are checked again after upstream payloads are materialized, before either
