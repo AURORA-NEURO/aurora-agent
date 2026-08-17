@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 201);
+    assert_eq!(tools.len(), 202);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1445,6 +1445,95 @@ fn domain_evidence_provider_normalize_retains_caller_managed_payload_with_explic
     assert_eq!(replay["replay"]["differences"], json!([]));
     assert_eq!(replay["artifact_registry"]["created"], json!(true));
     assert_eq!(replay["replay_digest"].as_str().unwrap().len(), 64);
+}
+
+#[test]
+fn domain_evidence_provider_connector_handoff_is_scoped_secret_safe_and_idempotent() {
+    let mut server = server();
+    let request = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology", "genomics"],
+        "subject_id": "connector-subject",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "manifest": {
+            "schema": "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1",
+            "connector_id": "caller.pubmed",
+            "version": "1.2.0",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "domains": ["genomics", "oncology"],
+            "capabilities": ["query", "retain"],
+            "transport": "caller_managed",
+            "auth_posture": {
+                "status": "caller_asserted",
+                "secret_refs": ["secret://caller/pubmed"],
+                "does_not_claim": ["provider authentication"]
+            }
+        },
+        "status": "prepared",
+        "request_digest": "a".repeat(64),
+        "payload_digest": "b".repeat(64),
+        "source_plan_digest": "c".repeat(64),
+        "parent_digests": ["d".repeat(64)],
+        "attempt_id": "attempt-1"
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_provider_connector_handoff",
+        request.clone(),
+    );
+    assert_eq!(
+        first["workflow"],
+        json!("domain_evidence_provider_connector_handoff")
+    );
+    assert_eq!(first["execution"], json!("not_started"));
+    assert_eq!(first["readiness_claimed"], json!(false));
+    assert_eq!(first["handoff"]["status"], json!("prepared"));
+    assert_eq!(
+        first["handoff"]["manifest"]["auth_posture"]["secret_refs"][0],
+        json!("secret://caller/pubmed")
+    );
+    assert_eq!(first["handoff_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(first["artifact_registry"]["created"], json!(true));
+    let second = call(
+        &mut server,
+        "domain_evidence_provider_connector_handoff",
+        request,
+    );
+    assert_eq!(second["handoff_digest"], first["handoff_digest"]);
+    assert_eq!(second["artifact_registry"]["created"], json!(false));
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+    assert!(!serde_json::to_string(&first["handoff"])
+        .unwrap()
+        .contains("credential_material"));
+
+    let refused = call(
+        &mut server,
+        "domain_evidence_provider_connector_handoff",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "connector-refused",
+            "source_tool": "literature_bind_check",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "manifest": {
+                "schema": "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1",
+                "connector_id": "caller.pubmed",
+                "version": "1.2.0",
+                "provider": "pubmed",
+                "connector_kind": "literature",
+                "domains": ["oncology"],
+                "capabilities": ["query"],
+                "transport": "caller_managed",
+                "auth_posture": {"status": "unknown", "does_not_claim": ["auth"]}
+            },
+            "credential_material": "must-refuse"
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
 }
 
 #[test]
@@ -6868,6 +6957,11 @@ fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
                 .unwrap()
                 .iter()
                 .any(|tool| tool == "domain_evidence_provider_replay_verify")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_connector_handoff")
             && route["interpretation"]["status"].is_string()
             && route["limitations"].as_array().is_some()
     }));
@@ -6903,12 +6997,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(201));
-    assert_eq!(result["advertised_tool_count"], json!(201));
+    assert_eq!(result["unique_catalog_tools"], json!(202));
+    assert_eq!(result["advertised_tool_count"], json!(202));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(201));
-    assert_eq!(result["schema_quality"]["valid"], json!(201));
+    assert_eq!(result["schema_quality"]["checked"], json!(202));
+    assert_eq!(result["schema_quality"]["valid"], json!(202));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

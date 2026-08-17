@@ -5071,6 +5071,80 @@ export type DomainEvidenceSourceRetrievalMode = "reference_only" | "metadata_onl
 
 export type DomainEvidenceProviderConnectorKind = "literature" | "clinical_trial" | "fhir" | "object_store" | "provider_api";
 export type DomainEvidenceProviderShapeStatus = "structured" | "partial" | "unclassified" | "refused";
+export type DomainEvidenceProviderHandoffStatus = "prepared" | "submitted" | "observed" | "partial" | "refused" | "error" | "unknown";
+export type DomainEvidenceProviderAuthStatus = "none" | "caller_asserted" | "delegated" | "unknown";
+
+export interface DomainEvidenceProviderAuthPosture extends JsonObject {
+  status: DomainEvidenceProviderAuthStatus;
+  secret_refs?: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceProviderConnectorManifest extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1";
+  connector_id: string;
+  version: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  domains: string[];
+  capabilities: string[];
+  transport: "caller_managed";
+  auth_posture: DomainEvidenceProviderAuthPosture;
+}
+
+export interface DomainEvidenceProviderHandoffArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  manifest: DomainEvidenceProviderConnectorManifest;
+  status?: DomainEvidenceProviderHandoffStatus;
+  request_digest?: string;
+  payload_digest?: string;
+  source_plan_digest?: string;
+  parent_digests?: string[];
+  attempt_id?: string;
+}
+
+export interface DomainEvidenceProviderHandoff extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-connector-handoff/0.1";
+  workflow: "domain_evidence_provider_connector_handoff";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  status: DomainEvidenceProviderHandoffStatus;
+  manifest: DomainEvidenceProviderConnectorManifest;
+  manifest_digest: string;
+  request_digest: string | null;
+  payload_digest: string | null;
+  source_plan_digest: string | null;
+  parent_digests: string[];
+  attempt_id: string | null;
+  handoff_digest: string;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderHandoffResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-connector-handoff/0.1";
+  workflow: "domain_evidence_provider_connector_handoff";
+  handoff: DomainEvidenceProviderHandoff;
+  manifest_digest: string;
+  handoff_digest: string;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
 
 export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
   candidate_fields: string[];

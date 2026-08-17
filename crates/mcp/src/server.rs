@@ -127,36 +127,39 @@ use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
     audit_execution_provenance, build_dashboard, build_delivery_receipt,
     build_domain_acquisition_catalogue, build_domain_workflow_catalogue,
-    execute_domain_evidence_source, instantiate_domain_workflow, mission_claim_lineage_with_review,
-    normalize_ci_provider_payload, normalize_domain_evidence_provider, plan_domain_evidence_source,
-    plan_mission, reconcile_domain_workflow, run_workbench, scaffold_domain_workflow,
-    standard_walkthroughs, verify_delivery_receipt, verify_domain_evidence_provider_replay,
+    execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
+    mission_claim_lineage_with_review, normalize_ci_provider_payload,
+    normalize_domain_evidence_provider, plan_domain_evidence_source, plan_mission,
+    reconcile_domain_workflow, run_workbench, scaffold_domain_workflow, standard_walkthroughs,
+    verify_delivery_receipt, verify_domain_evidence_provider_replay,
     verify_mission_evidence_bundle, ArtifactRegistry, CapabilityCatalogue,
     CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
     CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
     DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
-    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
-    DomainWorkflowReconciliationRegistry, EngineeringManifest, EngineeringPlanRequest,
-    EvidenceBundleRegistry, ExecutionProvenanceRequest, MissionEvaluatorCatalogue,
-    MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
-    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
-    MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
-    SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
-    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
-    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
-    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
-    DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
-    DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
-    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
-    ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
-    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
-    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
-    SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
+    DomainEvidenceProviderHandoffRequest, DomainEvidenceProviderNormalizationRequest,
+    DomainEvidenceProviderReplayRequest, DomainWorkflowReconciliationRegistry, EngineeringManifest,
+    EngineeringPlanRequest, EvidenceBundleRegistry, ExecutionProvenanceRequest,
+    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayRequest, MissionEvaluatorReviewRequest, MissionReport, MissionRequest,
+    MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
+    OperationalReadinessManifest, ReleasePipelineManifest, SandboxManifest, SandboxRuntimeManifest,
+    SecurityPrivacyManifest, SecurityProgramManifest, WorkbenchRequest, CAPABILITY_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_SCHEMA_VERSION, DOMAIN_ACQUISITION_WORKFLOW,
+    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW,
+    DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
+    DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW,
+    DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION, DOMAIN_REPORT_COVERAGE_WORKFLOW,
+    DOMAIN_REPORT_PROJECT_SCHEMA_VERSION, DOMAIN_REPORT_PROJECT_WORKFLOW,
+    DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA,
+    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS, MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION,
+    OPERATIONAL_READINESS_AUDIT_SCHEMA, RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA,
+    SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
+    WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1386,6 +1389,9 @@ impl Server {
             }
             "domain_evidence_provider_replay_verify" => {
                 self.domain_evidence_provider_replay_verify(&arguments)
+            }
+            "domain_evidence_provider_connector_handoff" => {
+                self.domain_evidence_provider_connector_handoff(&arguments)
             }
             "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
@@ -3514,6 +3520,59 @@ impl Server {
                 "provider authenticity, request execution, or retrieval completeness",
                 "scientific, clinical, causal, regulatory, provenance, or release validity",
                 "that a matching JSON replay proves the provider returned the payload originally"
+            ]
+        }))
+    }
+
+    /// Register a caller-managed provider connector declaration before payload intake. This is
+    /// deliberately a handoff boundary: the core validates scope and digests, but never launches
+    /// a plugin, resolves credentials, authenticates a provider, or contacts a network.
+    fn domain_evidence_provider_connector_handoff(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode provider handoff input: {error}"))?;
+        if encoded.len() > 2_000_000 {
+            return Err("provider handoff input exceeds the 2000000-byte safety bound".into());
+        }
+        let request: DomainEvidenceProviderHandoffRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid provider handoff input: {error}"))?;
+        let handoff = handoff_domain_evidence_provider(&request)
+            .map_err(|error| format!("domain evidence provider handoff refused: {error}"))?;
+        let artifact = serde_json::to_value(&handoff)
+            .map_err(|error| format!("cannot encode provider handoff artifact: {error}"))?;
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_handoff",
+                "subject_id": handoff.subject_id,
+                "domains": handoff.domains,
+                "parent_digests": handoff.parent_digests,
+                "declared_digest": handoff.handoff_digest,
+                "artifact": artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW,
+            "handoff": handoff,
+            "manifest_digest": handoff.manifest_digest,
+            "handoff_digest": handoff.handoff_digest,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "connector scope, capabilities, and auth posture are validated before payload intake",
+                "only opaque caller-owned secret references may be retained",
+                "request and payload identities can parent a later provider-normalization artifact"
+            ],
+            "does_not_claim": [
+                "plugin launch, provider authentication, authorization, or network execution",
+                "provider authenticity, retrieval completeness, or payload correctness",
+                "scientific, clinical, causal, provenance, regulatory, or release validity"
             ]
         }))
     }
@@ -30007,6 +30066,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_source_execute",
         "domain_evidence_provider_normalize",
         "domain_evidence_provider_replay_verify",
+        "domain_evidence_provider_connector_handoff",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -30377,6 +30437,54 @@ pub fn tool_definitions() -> Vec<Value> {
                     "expected_intake_digest": { "type": "string", "description": "Required digest of the recomputed domain-evidence intake envelope." }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "connector_kind", "provider", "payload", "expected_payload_digest", "expected_shape_digest", "expected_normalization_digest", "expected_intake_digest"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_connector_handoff",
+            "description": "Validate and retain a caller-managed provider connector manifest before payload intake. The handoff is digest-addressed and idempotently indexed, permits only opaque secret references, and explicitly records that plugin launch, credentials, authentication, network execution, and provider validity remain outside the core.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning this provider handoff." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Requested domain labels; each must be covered by the manifest." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, study, run, or report identity." },
+                    "source_tool": { "type": "string", "description": "Caller-owned source tool associated with the external connector." },
+                    "provider": { "type": "string", "description": "Caller-declared provider label; it is not authenticated by this core." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "manifest": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "schema": { "type": "string", "const": "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1" },
+                            "connector_id": { "type": "string" },
+                            "version": { "type": "string" },
+                            "provider": { "type": "string" },
+                            "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                            "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                            "capabilities": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                            "transport": { "type": "string", "const": "caller_managed" },
+                            "auth_posture": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "status": { "type": "string", "enum": ["none", "caller_asserted", "delegated", "unknown"] },
+                                    "secret_refs": { "type": "array", "maxItems": 32, "items": { "type": "string" } },
+                                    "does_not_claim": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } }
+                                },
+                                "required": ["status", "does_not_claim"]
+                            }
+                        },
+                        "required": ["schema", "connector_id", "version", "provider", "connector_kind", "domains", "capabilities", "transport", "auth_posture"]
+                    },
+                    "status": { "type": "string", "enum": ["prepared", "submitted", "observed", "partial", "refused", "error", "unknown"], "default": "unknown" },
+                    "request_digest": { "type": ["string", "null"] },
+                    "payload_digest": { "type": ["string", "null"] },
+                    "source_plan_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "attempt_id": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "manifest"]
             }
         }),
         json!({

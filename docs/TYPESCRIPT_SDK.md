@@ -5,6 +5,12 @@ and **40.15** (TypeScript SDK contract). The package and its tests are intention
 the Rust workspace so those two modules have a citable, reviewable implementation rather than a
 foreign-artifact placeholder.
 
+Provider connectors use `domainEvidenceProviderConnectorHandoff()` before normalization. The
+typed manifest records connector scope, capabilities, caller-asserted authentication posture, and
+opaque secret references only. The client rejects credential material, validates lowercase digest
+parents, and preserves the server's `not_started`/readiness-false boundary; plugin launch,
+authentication, network access, and provider validity remain caller responsibilities.
+
 The repository ships `typescript/`, a small ESM package for clients that can use the standard
 Fetch API. It is intentionally an integration layer over `bioprism-api`, not a second domain
 implementation. The Rust MCP server remains the authority for tool schemas, refusal semantics,

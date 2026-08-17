@@ -261,6 +261,65 @@ const providerReplayArgs = {
   expected_intake_digest: "d".repeat(64),
 };
 
+const providerHandoff = {
+  ok: true,
+  schema: "bioprism-devplat-domain-evidence-provider-connector-handoff/0.1",
+  workflow: "domain_evidence_provider_connector_handoff",
+  handoff: {
+    schema: "bioprism-devplat-domain-evidence-provider-connector-handoff/0.1",
+    workflow: "domain_evidence_provider_connector_handoff",
+    group_id: "biological_domains",
+    domains: ["oncology"],
+    subject_id: "provider-ts",
+    source_tool: "literature_bind_check",
+    provider: "pubmed",
+    connector_kind: "literature",
+    status: "prepared",
+    manifest: {
+      schema: "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1",
+      connector_id: "caller.pubmed",
+      version: "1.2.0",
+      provider: "pubmed",
+      connector_kind: "literature",
+      domains: ["oncology"],
+      capabilities: ["query", "retain"],
+      transport: "caller_managed",
+      auth_posture: { status: "caller_asserted", secret_refs: ["secret://caller/pubmed"], does_not_claim: ["provider authentication"] },
+    },
+    manifest_digest: "f".repeat(64),
+    request_digest: "a".repeat(64),
+    payload_digest: "b".repeat(64),
+    source_plan_digest: null,
+    parent_digests: [],
+    attempt_id: null,
+    handoff_digest: "e".repeat(64),
+    execution: "not_started",
+    readiness_claimed: false,
+    guarantees: [],
+    limitations: [],
+  },
+  manifest_digest: "f".repeat(64),
+  handoff_digest: "e".repeat(64),
+  artifact_registry: { created: true, indexed: true },
+  execution: "not_started",
+  readiness_claimed: false,
+  guarantees: [],
+  does_not_claim: ["provider authentication"],
+};
+
+const providerHandoffArgs = {
+  group_id: "biological_domains",
+  domains: ["oncology"],
+  subject_id: "provider-ts",
+  source_tool: "literature_bind_check",
+  provider: "pubmed",
+  connector_kind: "literature",
+  manifest: providerHandoff.handoff.manifest,
+  status: "prepared",
+  request_digest: "a".repeat(64),
+  payload_digest: "b".repeat(64),
+};
+
 test("domain evidence intake REST and tool clients preserve exact envelope metadata", async () => {
   const seen = [];
   const client = new ApiClient({
@@ -278,6 +337,7 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
       if (url.pathname === "/v1/tools/domain_evidence_source_execute") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_source_execute", mcp: { result: { structuredContent: sourceExecution } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_provider_normalize") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_normalize", mcp: { result: { structuredContent: providerNormalization } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_provider_replay_verify") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_replay_verify", mcp: { result: { structuredContent: providerReplay } } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/tools/domain_evidence_provider_connector_handoff") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_connector_handoff", mcp: { result: { structuredContent: providerHandoff } } }), { status: 200, headers: { "content-type": "application/json" } });
       throw new Error(`unexpected path ${url.pathname}`);
     },
   });
@@ -295,6 +355,8 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.record_index.omitted_record_count, 0);
   assert.equal((await client.domainEvidenceProviderReplayVerify(providerReplayArgs)).mcp.result.structuredContent.replay_status, "matched");
   assert.equal((await client.domainEvidenceProviderReplayVerifyTool(providerReplayArgs)).mcp.result.structuredContent.replay.matched, true);
+  assert.equal((await client.domainEvidenceProviderConnectorHandoff(providerHandoffArgs)).mcp.result.structuredContent.handoff.status, "prepared");
+  assert.equal((await client.domainEvidenceProviderConnectorHandoffTool(providerHandoffArgs)).mcp.result.structuredContent.handoff.manifest.auth_posture.secret_refs[0], "secret://caller/pubmed");
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");
   assert.equal(seen[2].url.searchParams.get("include_intake_digests"), "true");
   assert.equal(seen[4].url.pathname, "/v1/domain-evidence/sources");
@@ -313,6 +375,14 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   );
   await assert.rejects(
     client.domainEvidenceProviderReplayVerify({ ...providerReplayArgs, expected_shape_digest: "not-a-digest" }),
+    ArgumentError,
+  );
+  await assert.rejects(
+    client.domainEvidenceProviderConnectorHandoff({ ...providerHandoffArgs, credential_material: "never" }),
+    ArgumentError,
+  );
+  await assert.rejects(
+    client.domainEvidenceProviderConnectorHandoff({ ...providerHandoffArgs, manifest: { ...providerHandoffArgs.manifest, transport: "http" } }),
     ArgumentError,
   );
 });

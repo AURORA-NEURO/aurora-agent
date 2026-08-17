@@ -46,6 +46,8 @@ import type {
   DomainEvidenceSourceExecutionResult,
   DomainEvidenceProviderNormalizationArgs,
   DomainEvidenceProviderNormalizationResult,
+  DomainEvidenceProviderHandoffArgs,
+  DomainEvidenceProviderHandoffResult,
   DomainEvidenceProviderReplayVerifyArgs,
   DomainEvidenceProviderReplayVerifyResult,
   AdapterPlanArgs,
@@ -839,6 +841,48 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceProviderReplayVerifyResult>> {
     return this.domainEvidenceProviderReplayVerify(args, options);
+  }
+
+  /** Declare and retain a caller-managed provider connector boundary before payload intake. */
+  async domainEvidenceProviderConnectorHandoff(
+    args: DomainEvidenceProviderHandoffArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderHandoffResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence provider handoff arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const connectors = ["literature", "clinical_trial", "fhir", "object_store", "provider_api"];
+    if (!connectors.includes(args.connector_kind)) throw new ArgumentError("connector_kind is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!isObject(args.manifest)) throw new ArgumentError("manifest must be an object");
+    const manifest = args.manifest;
+    if (manifest.schema !== "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1") throw new ArgumentError("manifest.schema is invalid");
+    if (manifest.transport !== "caller_managed") throw new ArgumentError("manifest.transport must be caller_managed");
+    if (manifest.provider !== args.provider || manifest.connector_kind !== args.connector_kind) throw new ArgumentError("manifest provider scope does not match handoff");
+    if (!Array.isArray(manifest.domains) || manifest.domains.length < 1 || manifest.domains.length > 64 || args.domains.some((domain) => !manifest.domains.includes(domain))) throw new ArgumentError("handoff domains must be covered by manifest.domains");
+    if (!Array.isArray(manifest.capabilities) || manifest.capabilities.length < 1 || manifest.capabilities.length > 64 || manifest.capabilities.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("manifest.capabilities must contain 1..=64 strings");
+    if (!isObject(manifest.auth_posture)) throw new ArgumentError("manifest.auth_posture must be an object");
+    if (!(manifest.auth_posture.status === "none" || manifest.auth_posture.status === "caller_asserted" || manifest.auth_posture.status === "delegated" || manifest.auth_posture.status === "unknown")) throw new ArgumentError("manifest.auth_posture.status is invalid");
+    if (manifest.auth_posture.secret_refs !== undefined && (!Array.isArray(manifest.auth_posture.secret_refs) || manifest.auth_posture.secret_refs.length > 32 || manifest.auth_posture.secret_refs.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError("manifest.auth_posture.secret_refs is invalid");
+    if (!Array.isArray(manifest.auth_posture.does_not_claim) || manifest.auth_posture.does_not_claim.length < 1 || manifest.auth_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("manifest.auth_posture.does_not_claim must be non-empty");
+    const statuses = ["prepared", "submitted", "observed", "partial", "refused", "error", "unknown"];
+    if (args.status !== undefined && !statuses.includes(args.status)) throw new ArgumentError("status is invalid");
+    for (const [name, value] of [["request_digest", args.request_digest], ["payload_digest", args.payload_digest], ["source_plan_digest", args.source_plan_digest]] as const) {
+      if (value !== undefined && !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+    }
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.attempt_id !== undefined && (typeof args.attempt_id !== "string" || args.attempt_id.trim().length === 0)) throw new ArgumentError("attempt_id must be a non-empty string");
+    if ("credential_material" in args || "credentials" in args) throw new ArgumentError("credential material is not accepted by the handoff boundary");
+    return this.callTool<DomainEvidenceProviderHandoffResult>("domain_evidence_provider_connector_handoff", { ...args, status: args.status ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the connector-handoff MCP tool. */
+  async domainEvidenceProviderConnectorHandoffTool(
+    args: DomainEvidenceProviderHandoffArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderHandoffResult>> {
+    return this.domainEvidenceProviderConnectorHandoff(args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

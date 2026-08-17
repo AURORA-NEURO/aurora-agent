@@ -69,6 +69,11 @@ from .domain_evidence_provider import (
     domain_evidence_provider_normalization_report,
     domain_evidence_provider_replay_verification_report,
 )
+from .domain_evidence_provider_handoff import (
+    DomainEvidenceProviderHandoffReport,
+    DomainEvidenceProviderHandoffRequest,
+    domain_evidence_provider_handoff_report,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -1095,6 +1100,40 @@ class ApiClient:
         return domain_evidence_provider_replay_verification_report(
             self.call_tool(
                 "domain_evidence_provider_replay_verify", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_connector_handoff(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        """Declare and retain a caller-managed connector boundary through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderHandoffRequest)
+            else DomainEvidenceProviderHandoffRequest.from_wire(request)
+        )
+        return domain_evidence_provider_handoff_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_connector_handoff",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_connector_handoff_tool(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderHandoffRequest)
+            else DomainEvidenceProviderHandoffRequest.from_wire(request)
+        )
+        return domain_evidence_provider_handoff_report(
+            self.call_tool(
+                "domain_evidence_provider_connector_handoff", normalized.to_mcp_arguments()
             )
         )
 
@@ -4982,6 +5021,22 @@ class AsyncApiClient:
         request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
     ) -> DomainEvidenceProviderReplayVerificationReport:
         return await asyncio.to_thread(self.client.domain_evidence_provider_replay_verify_tool, request)
+
+    async def domain_evidence_provider_connector_handoff(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_connector_handoff, request
+        )
+
+    async def domain_evidence_provider_connector_handoff_tool(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_connector_handoff_tool, request
+        )
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

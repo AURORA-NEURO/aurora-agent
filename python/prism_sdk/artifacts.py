@@ -20,6 +20,7 @@ ARTIFACT_KINDS = (
     "domain_report",
     "domain_evidence_harmonization",
     "domain_evidence_intake",
+    "domain_evidence_provider_handoff",
     "domain_evidence_source_plan",
     "external_reference",
 )

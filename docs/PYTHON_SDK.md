@@ -106,6 +106,12 @@ interpretation remain explicit non-claims.
 workspace facades recompute payload, request, shape, normalization-envelope, and intake digests,
 return each match dimension, and retain a value-free replay artifact idempotently. A mismatch is
 reported structurally; it is never converted into an observed provider result.
+`DomainEvidenceProviderAuthPosture`, `DomainEvidenceProviderConnectorManifest`,
+`DomainEvidenceProviderHandoffRequest`, and `DomainEvidenceProviderHandoffReport` expose the
+caller-managed plugin boundary. They retain connector scope, capabilities, opaque secret labels,
+status, and digest parents through `ApiClient`, `AsyncApiClient`, `Workspace`, and
+`AsyncWorkspace`; unsupported credential fields fail locally, and every returned handoff remains
+`not_started` with readiness false until a separate caller-owned executor performs work.
 
 ## Lifecycle
 

@@ -65,6 +65,11 @@ from .domain_evidence_provider import (
     domain_evidence_provider_normalization_report,
     domain_evidence_provider_replay_verification_report,
 )
+from .domain_evidence_provider_handoff import (
+    DomainEvidenceProviderHandoffReport,
+    DomainEvidenceProviderHandoffRequest,
+    domain_evidence_provider_handoff_report,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -2227,6 +2232,27 @@ class Workspace:
     ) -> DomainEvidenceProviderReplayVerificationReport:
         return domain_evidence_provider_replay_verification_report(
             self.domain_evidence_provider_replay_verify(request)
+        )
+
+    def domain_evidence_provider_connector_handoff(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderHandoffRequest)
+            else DomainEvidenceProviderHandoffRequest.from_wire(request)
+        )
+        return self.tool(
+            "domain_evidence_provider_connector_handoff", normalized.to_mcp_arguments()
+        )
+
+    def domain_evidence_provider_connector_handoff_report(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        return domain_evidence_provider_handoff_report(
+            self.domain_evidence_provider_connector_handoff(request)
         )
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
@@ -5727,6 +5753,27 @@ class AsyncWorkspace:
     ) -> DomainEvidenceProviderReplayVerificationReport:
         return domain_evidence_provider_replay_verification_report(
             await self.domain_evidence_provider_replay_verify(request)
+        )
+
+    async def domain_evidence_provider_connector_handoff(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderHandoffRequest)
+            else DomainEvidenceProviderHandoffRequest.from_wire(request)
+        )
+        return await self.tool(
+            "domain_evidence_provider_connector_handoff", normalized.to_mcp_arguments()
+        )
+
+    async def domain_evidence_provider_connector_handoff_report(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        return domain_evidence_provider_handoff_report(
+            await self.domain_evidence_provider_connector_handoff(request)
         )
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:

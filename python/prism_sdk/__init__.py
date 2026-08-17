@@ -61,6 +61,20 @@ from .domain_evidence_provider import (
     domain_evidence_provider_normalization_report,
     domain_evidence_provider_replay_verification_report,
 )
+from .domain_evidence_provider_handoff import (
+    DOMAIN_EVIDENCE_PROVIDER_AUTH_STATUSES,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_CONNECTOR_KINDS,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_STATUSES,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_MANIFEST_SCHEMA,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SECRET_REFS,
+    DomainEvidenceProviderAuthPosture,
+    DomainEvidenceProviderConnectorManifest,
+    DomainEvidenceProviderHandoffReport,
+    DomainEvidenceProviderHandoffRequest,
+    domain_evidence_provider_handoff_report,
+)
 from .analytics import (
     AnalyticsDirection,
     AnalyticsEvidence,

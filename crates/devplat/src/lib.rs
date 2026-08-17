@@ -217,6 +217,7 @@ pub mod domain_acquisition;
 pub mod domain_evidence;
 pub mod domain_evidence_intake;
 pub mod domain_evidence_provider;
+pub mod domain_evidence_provider_handoff;
 pub mod domain_evidence_source;
 pub mod domain_evidence_source_execution;
 pub mod domain_report;
@@ -324,6 +325,17 @@ pub use domain_evidence_provider::{
     MAX_DOMAIN_EVIDENCE_PROVIDER_BYTES, MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS,
     MAX_DOMAIN_EVIDENCE_PROVIDER_PARENTS, MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS,
     MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES,
+};
+pub use domain_evidence_provider_handoff::{
+    handoff_domain_evidence_provider, DomainEvidenceProviderAuthPosture,
+    DomainEvidenceProviderConnectorManifest, DomainEvidenceProviderHandoff,
+    DomainEvidenceProviderHandoffError, DomainEvidenceProviderHandoffRequest,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_MANIFEST_SCHEMA, MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_BYTES,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_CAPABILITIES,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_DOMAINS, MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_PARENTS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SECRET_REFS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_TEXT_BYTES,
 };
 pub use domain_evidence_source::{
     plan_domain_evidence_source, validate_domain_evidence_source_plan,

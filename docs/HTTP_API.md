@@ -248,7 +248,7 @@ interpretation kept separate: bounded file/plain-HTTP transport, caller-managed 
 families, native adapter matches, Python-delegated adapter matches, domain-tool-only rows, and
 unmapped rows are distinct. Adapter matches are based only on declared scope-label overlap and
 carry the adapter registry digest; they do not resolve ontologies, execute adapters, verify
-dependencies, or claim scientific/clinical validity. The six evidence transport/intake/provider
+dependencies, or claim scientific/clinical validity. The seven evidence transport/intake/provider
 tools are explicitly cross-cutting memberships for all 29 groups, so existing source-plan,
 provider, and intake scope checks can be used for every declared domain rather than only
 infrastructure domains.
@@ -268,6 +268,14 @@ normalization and compares required payload, request, shape, normalization, and 
 It returns `matched`/`mismatch` dimensions and registers only the value-free replay verification
 artifact, so repeated verification is idempotent and a match remains an identity check rather
 than proof of provider authenticity or domain validity.
+`POST /v1/tools/domain_evidence_provider_connector_handoff` is the production plugin seam before
+that intake: it validates a caller-managed connector manifest, requested domain scope, capability
+set, authentication posture, opaque secret references, optional request/payload/source-plan
+digests, and parent edges. The resulting handoff is content-addressed and idempotently retained
+as `domain_evidence_provider_handoff`; it always reports `execution: not_started` and
+`readiness_claimed: false`. The core never launches a plugin, resolves credentials, authenticates
+or contacts a provider, and rejects credential material rather than serializing it into the
+artifact.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

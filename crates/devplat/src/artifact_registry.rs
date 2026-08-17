@@ -18,6 +18,7 @@ use crate::domain_evidence_intake::{
     validate_domain_evidence_intake, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
 };
 use crate::domain_evidence_provider::DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA;
+use crate::domain_evidence_provider_handoff::DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA;
 use crate::domain_evidence_source::{
     validate_domain_evidence_source_plan, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
 };
@@ -52,6 +53,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_evidence_harmonization",
     "domain_evidence_intake",
     "domain_evidence_provider_replay",
+    "domain_evidence_provider_handoff",
     "domain_evidence_source_plan",
     "external_reference",
 ];
@@ -700,6 +702,40 @@ fn verify_known_artifact(
                 }),
             ))
         }
+        "domain_evidence_provider_handoff" => {
+            let object = artifact.as_object().ok_or_else(|| {
+                ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider handoff must be an object".into(),
+                )
+            })?;
+            if object.get("schema").and_then(Value::as_str)
+                != Some(DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA)
+            {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider handoff schema is unsupported".into(),
+                ));
+            }
+            let declared = required_digest(object, "handoff_digest")?;
+            let mut unsigned = artifact.clone();
+            unsigned
+                .as_object_mut()
+                .expect("handoff object was checked above")
+                .remove("handoff_digest");
+            let recomputed = content_digest(&unsigned)?;
+            if declared != recomputed {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "handoff_digest does not match the record contents".into(),
+                ));
+            }
+            Ok((
+                Some(declared.clone()),
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_evidence_provider_handoff_digest",
+                    "handoff_digest": declared
+                }),
+            ))
+        }
         "domain_evidence_source_plan"
             if artifact.get("schema").and_then(Value::as_str)
                 == Some(DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION) =>
@@ -988,6 +1024,41 @@ mod tests {
         let mut registry = ArtifactRegistry::new();
         let first = registry.register(&request).unwrap();
         assert_eq!(first["created"], true);
+        let restored = ArtifactRegistry::from_snapshot(&registry.snapshot().unwrap()).unwrap();
+        assert_eq!(restored.len(), 1);
+    }
+
+    #[test]
+    fn provider_handoff_artifacts_reverify_their_declared_digest_on_restore() {
+        let mut handoff = json!({
+            "schema": DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA,
+            "workflow": "domain_evidence_provider_connector_handoff",
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-1",
+            "source_tool": "literature_bind_check",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "status": "prepared",
+            "manifest": {"connector_id": "caller.pubmed", "transport": "caller_managed"},
+            "manifest_digest": "a".repeat(64),
+            "request_digest": null,
+            "payload_digest": null,
+            "source_plan_digest": null,
+            "parent_digests": [],
+            "attempt_id": null,
+            "handoff_digest": ""
+        });
+        let digest = {
+            let mut unsigned = handoff.clone();
+            unsigned.as_object_mut().unwrap().remove("handoff_digest");
+            ContentHash::of_value(&unsigned).unwrap().to_string()
+        };
+        handoff["handoff_digest"] = json!(digest.clone());
+        let mut request = artifact("domain_evidence_provider_handoff", "provider-1", handoff);
+        request["declared_digest"] = json!(digest);
+        let mut registry = ArtifactRegistry::new();
+        assert_eq!(registry.register(&request).unwrap()["created"], true);
         let restored = ArtifactRegistry::from_snapshot(&registry.snapshot().unwrap()).unwrap();
         assert_eq!(restored.len(), 1);
     }
