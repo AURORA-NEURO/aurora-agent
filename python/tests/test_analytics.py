@@ -273,7 +273,7 @@ def mission_evaluator_discover_payload() -> dict:
                     "domains": ["oncology models", "assays", "fidelity"],
                     "levels": ["evaluation", "observation"],
                     "purpose": "Compare model and assay fidelity axes with their declared evidence and split conditions.",
-                    "candidate_tools": ["onco_model_audit", "assay_fidelity_check"],
+                    "candidate_tools": ["oncoworlds_model_transport", "oncoworlds_methylation_classify"],
                     "output_pointer_examples": ["/fidelity", "/evidence"],
                     "status": "candidate_only",
                 },
