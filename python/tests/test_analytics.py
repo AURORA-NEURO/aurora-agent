@@ -1726,6 +1726,10 @@ class AnalyticsModelTests(unittest.TestCase):
             "selection": {"selected_tools": ["workspace_capabilities"]},
             "domain_contract": {"posture": "advisory_review_gated"},
             "domain_contract_digest": "k" * 64,
+            "execution_contract": {
+                "provider_boundary": {"container": "unavailable"},
+                "readiness_claimed": False,
+            },
             "evidence_plan": {"steps": [{"step_id": "catalog"}]},
             "preflight": {"required": True},
             "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
@@ -1735,6 +1739,7 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(instantiation.domain_contract["posture"], "advisory_review_gated")
         self.assertEqual(instantiation.evidence_plan["steps"][0]["step_id"], "catalog")
         self.assertEqual(instantiation.preflight_report["dispatch"], "not_started")
+        self.assertEqual(instantiation.execution_contract["readiness_claimed"], False)
 
         scaffold_request = DomainWorkflowScaffoldRequest(
             "documentation_and_knowledge",
@@ -1760,10 +1765,15 @@ class AnalyticsModelTests(unittest.TestCase):
             "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
             "execution": "not_started",
             "readiness_claimed": False,
+            "execution_contract": {
+                "provider_boundary": {"subprocess": "unavailable"},
+                "readiness_claimed": False,
+            },
         })
         self.assertEqual(scaffold.selected_tools, ("workspace_capabilities",))
         self.assertFalse(scaffold.readiness_claimed)
         self.assertEqual(scaffold.preflight_status, "ready")
+        self.assertEqual(scaffold.execution_contract["provider_boundary"]["subprocess"], "unavailable")
 
         reconcile_request = DomainWorkflowReconcileRequest(
             {"workflow": "domain_workflow_instantiate", "workflow_id": "documentation_and_knowledge"},

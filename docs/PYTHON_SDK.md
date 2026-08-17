@@ -635,6 +635,14 @@ invent defaults:
   mission scheduling or effect rollback. Schema-1 migration inputs report no digest before the
   gateway rewrites them as schema 2; `integrity_verified` reports whether the observed current
   file matches that digest.
+  `mission_queue()` returns a typed `MissionQueueInventory` with lifecycle state, resource class,
+  idempotency class, attempt counters, recovery metadata, and links while keeping the checkpointed
+  job specification out of the inventory. `mission_queue_persistence()` returns a typed
+  `MissionQueueStatus` with the content digest, atomic-checkpoint integrity result, and startup
+  recovery rows. `flush_mission_queue_persistence()` returns a typed `MissionQueueFlushResult`.
+  These methods expose the bounded single-process factory checkpoint; `automatic_resume` is
+  explicitly false and no method claims distributed scheduling, lease fencing, authentication,
+  tenant isolation, or external-effect completion.
   `recovery_matrix()` and its async counterpart provide one typed matrix that keeps mission,
   event, subscription, outbox, secret, and external-effect recovery boundaries separate.
   `operations_snapshot(after=..., limit=...)` and its async counterpart return a typed

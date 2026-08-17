@@ -8,16 +8,25 @@
 //! 3. outputs commit atomically;
 //! 4. cancellation and compensation are explicit.
 //!
-//! In-memory and single-process. A durable multi-node store needs the event ledger of 40.09 and a
-//! transactional backend; what is here is the lifecycle logic those would wrap, not a substitute.
+//! The live store is single-process. [`JobStore::checkpoint_to_path`] provides a bounded recovery
+//! image, but a multi-node deployment still needs the event ledger of 40.09, a transactional
+//! backend, and distributed lease fencing; the checkpoint is not a substitute for those.
 
 use crate::error::FactoryError;
 use crate::job::{Idempotency, Job, JobState, ResourceClass};
 use crate::lease::{Lease, WorkerCapability};
+use crate::snapshot::{
+    CompensationRecord, IdempotencyIndexEntry, JobStoreSnapshot, OutputRecord,
+    JOB_STORE_SNAPSHOT_SCHEMA_VERSION, MAX_JOB_STORE_SNAPSHOT_ID_BYTES,
+    MAX_JOB_STORE_SNAPSHOT_JOBS, MAX_JOB_STORE_SNAPSHOT_VALUE_BYTES,
+    MAX_JOB_STORE_SNAPSHOT_WORKER_ID_BYTES,
+};
 use bioprism_scope::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// What happened to an attempt whose lease ran out.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +66,334 @@ impl JobStore {
 
     pub fn is_empty(&self) -> bool {
         self.jobs.is_empty()
+    }
+
+    /// Create a deterministic, content-addressed checkpoint of the complete lifecycle state.
+    ///
+    /// A checkpoint is intentionally separate from the event ledger: it is a compact recovery
+    /// image, while the ledger is what a multi-node deployment would use for audit and conflict
+    /// resolution. Restoring one validates every cross-index before exposing the store.
+    pub fn snapshot(&self) -> Result<JobStoreSnapshot, FactoryError> {
+        let mut snapshot = JobStoreSnapshot {
+            schema_version: JOB_STORE_SNAPSHOT_SCHEMA_VERSION,
+            jobs: self.jobs.values().cloned().collect(),
+            leases: self.leases.values().cloned().collect(),
+            staged: self
+                .staged
+                .iter()
+                .map(|(job_id, value)| OutputRecord {
+                    job_id: job_id.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
+            committed: self
+                .committed
+                .iter()
+                .map(|(job_id, value)| OutputRecord {
+                    job_id: job_id.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
+            idempotency_index: self
+                .by_key
+                .iter()
+                .map(|(key, job_id)| IdempotencyIndexEntry {
+                    key: key.clone(),
+                    job_id: job_id.clone(),
+                })
+                .collect(),
+            compensation: self
+                .compensated
+                .iter()
+                .map(|(job_id, completed)| CompensationRecord {
+                    job_id: job_id.clone(),
+                    completed: *completed,
+                })
+                .collect(),
+            state_digest: String::new(),
+        };
+        snapshot.state_digest = snapshot.computed_digest()?;
+        Ok(snapshot)
+    }
+
+    /// Restore a store from a validated checkpoint.
+    ///
+    /// The digest is checked before structural validation. A caller must not turn malformed or
+    /// partially written state into an empty queue: every failure is returned explicitly.
+    pub fn from_snapshot(snapshot: JobStoreSnapshot) -> Result<Self, FactoryError> {
+        snapshot.verify_digest()?;
+        if snapshot.schema_version != JOB_STORE_SNAPSHOT_SCHEMA_VERSION {
+            return Err(FactoryError::InvalidSnapshot {
+                reason: format!(
+                    "unsupported schema version {}; expected {}",
+                    snapshot.schema_version, JOB_STORE_SNAPSHOT_SCHEMA_VERSION
+                ),
+            });
+        }
+        if snapshot.jobs.len() > MAX_JOB_STORE_SNAPSHOT_JOBS {
+            return Err(FactoryError::InvalidSnapshot {
+                reason: format!(
+                    "contains {} jobs above the {}-job bound",
+                    snapshot.jobs.len(),
+                    MAX_JOB_STORE_SNAPSHOT_JOBS
+                ),
+            });
+        }
+
+        let mut jobs = BTreeMap::new();
+        for job in snapshot.jobs {
+            validate_identifier(&job.id, MAX_JOB_STORE_SNAPSHOT_ID_BYTES, "job id")?;
+            if jobs.insert(job.id.clone(), job).is_some() {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: "contains duplicate job ids".into(),
+                });
+            }
+        }
+
+        let mut leases = BTreeMap::new();
+        for lease in snapshot.leases {
+            validate_identifier(
+                &lease.job_id,
+                MAX_JOB_STORE_SNAPSHOT_ID_BYTES,
+                "lease job id",
+            )?;
+            validate_identifier(
+                &lease.worker_id,
+                MAX_JOB_STORE_SNAPSHOT_WORKER_ID_BYTES,
+                "lease worker id",
+            )?;
+            if lease.attempt == 0 {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: format!("lease for {} has attempt zero", lease.job_id),
+                });
+            }
+            if leases.insert(lease.job_id.clone(), lease).is_some() {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: "contains duplicate active leases".into(),
+                });
+            }
+        }
+
+        let mut staged = BTreeMap::new();
+        for output in snapshot.staged {
+            validate_output(&output, &jobs, &leases, JobState::Staged)?;
+            if staged.insert(output.job_id.clone(), output.value).is_some() {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: "contains duplicate staged output records".into(),
+                });
+            }
+        }
+
+        let mut committed = BTreeMap::new();
+        for output in snapshot.committed {
+            validate_output(&output, &jobs, &BTreeMap::new(), JobState::Succeeded)?;
+            if committed
+                .insert(output.job_id.clone(), output.value)
+                .is_some()
+            {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: "contains duplicate committed output records".into(),
+                });
+            }
+        }
+
+        for job in jobs.values() {
+            let has_lease = leases.contains_key(&job.id);
+            let has_staged = staged.contains_key(&job.id);
+            let has_committed = committed.contains_key(&job.id);
+            match job.state {
+                JobState::Queued
+                | JobState::Failed
+                | JobState::Quarantined
+                | JobState::DeadLettered
+                | JobState::Cancelled
+                    if has_lease || has_staged || has_committed =>
+                {
+                    return Err(FactoryError::InvalidSnapshot {
+                        reason: format!(
+                            "job {} in {:?} has incompatible lease or output state",
+                            job.id, job.state
+                        ),
+                    });
+                }
+                JobState::Leased if !has_lease || has_staged || has_committed => {
+                    return Err(FactoryError::InvalidSnapshot {
+                        reason: format!(
+                            "leased job {} must have exactly one lease and no staged or committed output",
+                            job.id
+                        ),
+                    });
+                }
+                JobState::Staged if !has_lease || !has_staged || has_committed => {
+                    return Err(FactoryError::InvalidSnapshot {
+                        reason: format!(
+                            "staged job {} must have one lease, staged output, and no committed output",
+                            job.id
+                        ),
+                    });
+                }
+                JobState::Succeeded if has_lease || has_staged || !has_committed => {
+                    return Err(FactoryError::InvalidSnapshot {
+                        reason: format!(
+                            "succeeded job {} must have committed output and no active lease",
+                            job.id
+                        ),
+                    });
+                }
+                JobState::Leased | JobState::Staged | JobState::Succeeded => {}
+                JobState::Queued
+                | JobState::Failed
+                | JobState::Quarantined
+                | JobState::DeadLettered
+                | JobState::Cancelled => {}
+            }
+            if let Some(lease) = leases.get(&job.id) {
+                if lease.attempt != job.attempts {
+                    return Err(FactoryError::InvalidSnapshot {
+                        reason: format!(
+                            "lease for {} is attempt {}, but job records attempt {}",
+                            job.id, lease.attempt, job.attempts
+                        ),
+                    });
+                }
+            }
+        }
+
+        let mut by_key = BTreeMap::new();
+        for entry in snapshot.idempotency_index {
+            validate_identifier(&entry.key, MAX_JOB_STORE_SNAPSHOT_ID_BYTES, "idempotency key")?;
+            let job = jobs.get(&entry.job_id).ok_or_else(|| FactoryError::InvalidSnapshot {
+                reason: format!(
+                    "idempotency index entry {} references unknown job {}",
+                    entry.key, entry.job_id
+                ),
+            })?;
+            if job.idempotency_key().as_str() != entry.key {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: format!(
+                        "idempotency index entry for {} does not match the job specification",
+                        entry.job_id
+                    ),
+                });
+            }
+            if by_key.insert(entry.key, entry.job_id).is_some() {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: "contains duplicate idempotency index keys".into(),
+                });
+            }
+        }
+
+        let mut compensated = BTreeMap::new();
+        for entry in snapshot.compensation {
+            let job = jobs.get(&entry.job_id).ok_or_else(|| FactoryError::InvalidSnapshot {
+                reason: format!(
+                    "compensation record references unknown job {}",
+                    entry.job_id
+                ),
+            })?;
+            if job.idempotency != Idempotency::Compensable {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: format!(
+                        "compensation record references non-compensable job {}",
+                        entry.job_id
+                    ),
+                });
+            }
+            if !entry.completed && job.state != JobState::Quarantined {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: format!(
+                        "incomplete compensation record for {} requires quarantined state",
+                        entry.job_id
+                    ),
+                });
+            }
+            if compensated
+                .insert(entry.job_id.clone(), entry.completed)
+                .is_some()
+            {
+                return Err(FactoryError::InvalidSnapshot {
+                    reason: "contains duplicate compensation records".into(),
+                });
+            }
+        }
+
+        Ok(JobStore {
+            jobs,
+            leases,
+            staged,
+            committed,
+            by_key,
+            compensated,
+        })
+    }
+
+    /// Load a checkpoint, treating a missing file as a new empty store.
+    pub fn load_from_path(path: &Path) -> Result<Self, FactoryError> {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Self::new()),
+            Err(error) => return Err(snapshot_io("read", path, error)),
+        };
+        let snapshot = JobStoreSnapshot::from_json_bytes(&bytes)?;
+        Self::from_snapshot(snapshot)
+    }
+
+    /// Atomically write a bounded checkpoint. The target is replaced only after the complete JSON
+    /// document has been written and validated in memory.
+    pub fn checkpoint_to_path(&self, path: &Path) -> Result<usize, FactoryError> {
+        let snapshot = self.snapshot()?;
+        let bytes = snapshot.to_json_bytes()?;
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| snapshot_io("create directory", path, error))?;
+        }
+        let filename = path.file_name().ok_or_else(|| FactoryError::SnapshotIo {
+            operation: "name temporary file".into(),
+            path: path.display().to_string(),
+            reason: "path must name a file".into(),
+        })?.to_string_lossy();
+        let sequence = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}-{sequence}",
+            std::process::id()
+        ));
+        if let Err(error) = std::fs::write(&temporary, &bytes) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(snapshot_io("write temporary file", &temporary, error));
+        }
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                if let Err(second_error) = std::fs::rename(&temporary, path) {
+                    let _ = std::fs::remove_file(&temporary);
+                    return Err(FactoryError::SnapshotIo {
+                        operation: "install snapshot".into(),
+                        path: path.display().to_string(),
+                        reason: format!("{first_error}; retry: {second_error}"),
+                    });
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = std::fs::remove_file(&temporary);
+                return Err(snapshot_io("install snapshot", path, first_error));
+            }
+        }
+        Ok(bytes.len())
+    }
+
+    /// Recover expired work and persist the resulting branch in one explicit operation.
+    pub fn recover_expired_at_path(
+        path: &Path,
+        now: Timestamp,
+    ) -> Result<Vec<Recovery>, FactoryError> {
+        let mut store = Self::load_from_path(path)?;
+        let recoveries = store.recover_expired(now);
+        store.checkpoint_to_path(path)?;
+        Ok(recoveries)
     }
 
     pub fn job(&self, id: &str) -> Option<&Job> {
@@ -412,5 +749,71 @@ impl JobStore {
             });
         }
         Ok(())
+    }
+}
+
+static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(1);
+
+fn validate_identifier(value: &str, max_bytes: usize, label: &str) -> Result<(), FactoryError> {
+    if value.is_empty() || value.len() > max_bytes || value.bytes().any(|byte| byte < 0x20) {
+        return Err(FactoryError::InvalidSnapshot {
+            reason: format!("{label} is empty, too long, or contains control bytes"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_output(
+    output: &OutputRecord,
+    jobs: &BTreeMap<String, Job>,
+    leases: &BTreeMap<String, Lease>,
+    required_state: JobState,
+) -> Result<(), FactoryError> {
+    validate_identifier(
+        &output.job_id,
+        MAX_JOB_STORE_SNAPSHOT_ID_BYTES,
+        "output job id",
+    )?;
+    let job = jobs.get(&output.job_id).ok_or_else(|| FactoryError::InvalidSnapshot {
+        reason: format!("output references unknown job {}", output.job_id),
+    })?;
+    if job.state != required_state {
+        return Err(FactoryError::InvalidSnapshot {
+            reason: format!(
+                "output for {} requires {:?} state, found {:?}",
+                output.job_id, required_state, job.state
+            ),
+        });
+    }
+    if required_state == JobState::Staged && !leases.contains_key(&output.job_id) {
+        return Err(FactoryError::InvalidSnapshot {
+            reason: format!("staged output for {} has no active lease", output.job_id),
+        });
+    }
+    let encoded = serde_json::to_vec(&output.value).map_err(|error| FactoryError::InvalidSnapshot {
+        reason: format!("output for {} is not serializable: {error}", output.job_id),
+    })?;
+    if encoded.len() > MAX_JOB_STORE_SNAPSHOT_VALUE_BYTES {
+        return Err(FactoryError::InvalidSnapshot {
+            reason: format!(
+                "output for {} is {} bytes, above the {}-byte bound",
+                output.job_id,
+                encoded.len(),
+                MAX_JOB_STORE_SNAPSHOT_VALUE_BYTES
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn snapshot_io(
+    operation: &str,
+    path: &Path,
+    error: impl std::fmt::Display,
+) -> FactoryError {
+    FactoryError::SnapshotIo {
+        operation: operation.into(),
+        path: path.display().to_string(),
+        reason: error.to_string(),
     }
 }

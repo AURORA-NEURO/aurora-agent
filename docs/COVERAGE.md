@@ -18,7 +18,9 @@ contract, and observability projection workflows. `factory_lifecycle_simulate`,
 `hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, `release_audit`, and
 `developer_delivery_audit` now
 compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
-durable queues, identity, public-key signing, UI, OTLP export, and network publication explicit as unimplemented;
+multi-node durable queues, identity, public-key signing, UI, OTLP export, and network publication
+explicit as unimplemented; the factory checkpoint is bounded single-process recovery state, not a
+distributed queue;
 the Python MCP transport foundation is documented separately and does not imply the full SDK.
 `trace_otel_ingest` adds a bounded, dependency-free OTLP JSON span importer with source-preserving
 Event IR mapping and explicit semantic-loss accounting; it does not export to a collector or infer
@@ -144,11 +146,14 @@ replay/observability contract without inventing domain-specific event semantics.
 The same retained rows are emitted as `mission.trace` events into the gateway's cursor, SSE, and
 signed webhook surfaces, allowing lifecycle monitoring and delivery retry to share one event log
 and one retention-gap contract with ordinary tool calls.
-The gateway also accepts an optional `--mission-state` path for an atomic, 64 MiB-bounded mission
+The gateway also accepts optional `--mission-state` and `--mission-queue-state` paths. The former
+is an atomic, 64 MiB-bounded mission
 checkpoint. Terminal jobs restore their retained progress, traces, and size-limited reports;
 queued/running jobs become explicit `failed` records with `recovered_after_restart` after a
-restart, never falsely claiming that interrupted work resumed. This is restart-aware mission
-inspection, not durable event storage, distributed scheduling, or effect rollback.
+restart, never falsely claiming that interrupted work resumed. The latter checkpoints the typed
+factory lease/idempotency lifecycle and classifies expired work without automatic dispatch. This
+is restart-aware mission inspection plus bounded local queue recovery, not durable event ledger
+storage, distributed scheduling, provider execution, or effect rollback.
 Mission-state schema 2 now carries a content SHA-256 digest and rejects tampered snapshots before
 restoration; schema 1 remains a migration input and is rewritten with a digest after startup.
 Mission and event persistence status now expose both the digest and an observation-time

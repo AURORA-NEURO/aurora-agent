@@ -16,8 +16,14 @@ use bioprism_devplat::{
     MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayRequest, MAX_EVIDENCE_REGISTRY_BYTES,
 };
+use bioprism_factory::{
+    Idempotency as FactoryIdempotency, Job as FactoryJob, JobStore,
+    Lease as FactoryLease, Recovery as FactoryRecovery, ResourceClass, WorkerCapability,
+    JOB_STORE_SNAPSHOT_SCHEMA_VERSION, MAX_JOB_STORE_SNAPSHOT_BYTES,
+};
 use bioprism_ids::ContentHash;
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
+use bioprism_scope::Timestamp;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,6 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const API_VERSION: &str = "v1";
 pub const DEFAULT_MAX_HEADER_BYTES: usize = 32 * 1024;
@@ -45,6 +52,9 @@ pub const MAX_PERSISTED_MISSION_PROVENANCE_BYTES: usize = 128 * 1024;
 pub const MAX_MISSION_EVIDENCE_BUNDLE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_WORKFLOW_RECONCILIATION_STATE_BYTES: usize =
     bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES;
+pub const MISSION_QUEUE_LEASE_DURATION_NANOS: i128 = 24 * 60 * 60 * 1_000_000_000;
+const MISSION_QUEUE_WORKER_ID: &str = "bioprism-api-mission-worker";
+static NEXT_CHECKPOINT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -57,6 +67,12 @@ pub struct ApiConfig {
     /// Event cursors remain process-local; this path only restores mission status, bounded
     /// trace rows, progress, and size-bounded result metadata after an API restart.
     pub mission_state_path: Option<PathBuf>,
+    /// Optional atomic checkpoint for the typed factory lifecycle behind mission execution.
+    ///
+    /// This is separate from `mission_state_path`: the mission projection answers what the API
+    /// observed, while the queue checkpoint answers which lease/idempotency branch is recoverable.
+    /// It never enables automatic resumption of an in-process worker.
+    pub mission_queue_state_path: Option<PathBuf>,
     /// Optional atomic JSON checkpoint for the bounded event cursor, subscription metadata, and
     /// signed pending webhook outbox.
     pub event_state_path: Option<PathBuf>,
@@ -74,6 +90,7 @@ impl Default for ApiConfig {
             event_capacity: DEFAULT_EVENT_CAPACITY,
             bearer_token: None,
             mission_state_path: None,
+            mission_queue_state_path: None,
             event_state_path: None,
             evidence_state_path: None,
             reconciliation_state_path: None,
@@ -103,6 +120,13 @@ impl ApiConfig {
             .is_some_and(|path| path.as_os_str().is_empty())
         {
             return Err("mission_state_path must not be empty".into());
+        }
+        if self
+            .mission_queue_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("mission_queue_state_path must not be empty".into());
         }
         if self
             .event_state_path
@@ -137,6 +161,7 @@ pub struct ApiRouter {
     next_request_id: AtomicU64,
     mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
     mission_persistence: Arc<MissionPersistence>,
+    mission_queue_persistence: Arc<MissionQueuePersistence>,
     event_persistence: Arc<EventPersistence>,
     evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
     evidence_persistence: Arc<EvidencePersistence>,
@@ -155,6 +180,13 @@ struct MissionPersistence {
     lock: Mutex<()>,
 }
 
+struct MissionQueuePersistence {
+    path: Option<PathBuf>,
+    queue: Arc<Mutex<JobStore>>,
+    lock: Mutex<()>,
+    startup_recoveries: Vec<FactoryRecovery>,
+}
+
 struct EventPersistence {
     path: Option<PathBuf>,
     events: Arc<Mutex<EventLog>>,
@@ -171,6 +203,196 @@ struct ReconciliationPersistence {
     path: Option<PathBuf>,
     registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
     lock: Mutex<()>,
+}
+
+impl MissionQueuePersistence {
+    fn new(path: Option<PathBuf>) -> Result<Self, String> {
+        let mut queue = match path.as_deref() {
+            Some(path) => JobStore::load_from_path(path)
+                .map_err(|error| format!("mission queue checkpoint could not be loaded: {error}"))?,
+            None => JobStore::new(),
+        };
+        let startup_recoveries = if path.is_some() {
+            let now = current_timestamp()?;
+            queue.recover_expired(now)
+        } else {
+            Vec::new()
+        };
+        if let Some(path) = path.as_deref() {
+            queue
+                .checkpoint_to_path(path)
+                .map_err(|error| format!("mission queue checkpoint failed during startup: {error}"))?;
+        }
+        Ok(Self {
+            path,
+            queue: Arc::new(Mutex::new(queue)),
+            lock: Mutex::new(()),
+            startup_recoveries,
+        })
+    }
+
+    fn persist(&self) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "mission queue persistence lock is unavailable".to_string())?;
+        let queue = self
+            .queue
+            .lock()
+            .map_err(|_| "mission queue is unavailable".to_string())?;
+        queue
+            .checkpoint_to_path(path)
+            .map_err(|error| format!("mission queue checkpoint failed: {error}"))
+    }
+
+    /// Apply a queue transition transactionally. The candidate store is checkpointed before it
+    /// replaces the live projection, so a full disk or malformed result cannot leave memory ahead
+    /// of the durable boundary.
+    fn mutate<T, F>(&self, operation: &str, transition: F) -> Result<T, String>
+    where
+        F: FnOnce(&mut JobStore) -> Result<T, String>,
+    {
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "mission queue persistence lock is unavailable".to_string())?;
+        let mut queue = self
+            .queue
+            .lock()
+            .map_err(|_| "mission queue is unavailable".to_string())?;
+        let mut candidate = queue.clone();
+        let value = transition(&mut candidate)
+            .map_err(|error| format!("mission queue {operation} was refused: {error}"))?;
+        if let Some(path) = self.path.as_deref() {
+            candidate.checkpoint_to_path(path).map_err(|error| {
+                format!("mission queue {operation} could not be checkpointed: {error}")
+            })?;
+        }
+        *queue = candidate;
+        Ok(value)
+    }
+
+    fn enqueue_and_lease(
+        &self,
+        job: FactoryJob,
+        now: Timestamp,
+    ) -> Result<FactoryLease, String> {
+        let mission_id = job.id.clone();
+        self.mutate("enqueue", move |queue| {
+            let accepted = queue.enqueue(job).map_err(|error| error.to_string())?;
+            if accepted != mission_id {
+                return Err(format!("duplicate work is already represented by {accepted}"));
+            }
+            let worker = WorkerCapability::new(
+                MISSION_QUEUE_WORKER_ID,
+                vec![ResourceClass::Evaluate],
+            )
+            .with_lease_duration_nanos(MISSION_QUEUE_LEASE_DURATION_NANOS);
+            queue
+                .lease(&worker, now)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "no compatible mission worker capacity is available".to_string())
+        })
+    }
+
+    fn heartbeat(&self, mission_id: &str, now: Timestamp) -> Result<(), String> {
+        let mission_id = mission_id.to_string();
+        self.mutate("heartbeat", move |queue| {
+            queue
+                .heartbeat(
+                    &mission_id,
+                    MISSION_QUEUE_WORKER_ID,
+                    now,
+                    MISSION_QUEUE_LEASE_DURATION_NANOS,
+                )
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn commit_success(&self, mission_id: &str, result: Value, now: Timestamp) -> Result<(), String> {
+        let mission_id = mission_id.to_string();
+        self.mutate("commit", move |queue| {
+            queue
+                .stage(&mission_id, MISSION_QUEUE_WORKER_ID, now, result)
+                .and_then(|_| queue.commit(&mission_id, MISSION_QUEUE_WORKER_ID, now))
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn record_failure(&self, mission_id: &str, reason: String, now: Timestamp) -> Result<(), String> {
+        let mission_id = mission_id.to_string();
+        self.mutate("failure", move |queue| {
+            queue
+                .fail(&mission_id, MISSION_QUEUE_WORKER_ID, now, reason)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn cancel(&self, mission_id: &str, reason: &str) -> Result<(), String> {
+        let mission_id = mission_id.to_string();
+        let reason = reason.to_string();
+        self.mutate("cancellation", move |queue| {
+            queue
+                .cancel(&mission_id, reason)
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn status(&self) -> Result<Value, String> {
+        let path = self.path.as_deref();
+        let queue = self
+            .queue
+            .lock()
+            .map_err(|_| "mission queue is unavailable".to_string())?;
+        let snapshot = queue
+            .snapshot()
+            .map_err(|error| format!("mission queue snapshot failed: {error}"))?;
+        let jobs = snapshot
+            .jobs
+            .iter()
+            .map(mission_queue_job_json)
+            .collect::<Vec<_>>();
+        let file_bytes = path.and_then(|path| std::fs::metadata(path).ok()).map(|m| m.len());
+        let integrity_verified = mission_queue_checkpoint_integrity(path, &snapshot.state_digest);
+        Ok(json!({
+            "ok": true,
+            "enabled": path.is_some(),
+            "file_present": file_bytes.is_some(),
+            "file_bytes": file_bytes,
+            "schema_version": JOB_STORE_SNAPSHOT_SCHEMA_VERSION,
+            "state_digest": snapshot.state_digest,
+            "integrity_verified": integrity_verified,
+            "max_file_bytes": MAX_JOB_STORE_SNAPSHOT_BYTES,
+            "registry_size": jobs.len(),
+            "jobs": jobs,
+            "startup_recoveries": self.startup_recoveries,
+            "automatic_resume": false,
+            "execution_scope": "single-process-api-worker",
+            "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
+            "does_not_claim": [
+                "distributed scheduling or lease fencing",
+                "external effect completion",
+                "automatic resume of an interrupted mission",
+                "provider authentication or tenant isolation"
+            ],
+            "flush": "/v1/missions/queue/persistence/flush"
+        }))
+    }
+
+    fn projection(&self, mission_id: &str) -> Result<Value, String> {
+        let queue = self
+            .queue
+            .lock()
+            .map_err(|_| "mission queue is unavailable".to_string())?;
+        Ok(queue
+            .job(mission_id)
+            .map(mission_queue_job_json)
+            .unwrap_or(Value::Null))
+    }
 }
 
 impl EventPersistence {
@@ -240,7 +462,10 @@ impl EvidencePersistence {
             .file_name()
             .ok_or_else(|| "evidence_state_path must name a file".to_string())?
             .to_string_lossy();
-        let temporary = path.with_file_name(format!(".{filename}.tmp"));
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(&temporary, &bytes).map_err(|error| {
             format!("evidence state temporary file could not be written: {error}")
         })?;
@@ -316,7 +541,10 @@ impl ReconciliationPersistence {
             .file_name()
             .ok_or_else(|| "reconciliation_state_path must name a file".to_string())?
             .to_string_lossy();
-        let temporary = path.with_file_name(format!(".{filename}.tmp"));
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(&temporary, &bytes).map_err(|error| {
             format!("workflow reconciliation state temporary file could not be written: {error}")
         })?;
@@ -401,7 +629,10 @@ impl MissionPersistence {
             .file_name()
             .ok_or_else(|| "mission_state_path must name a file".to_string())?
             .to_string_lossy();
-        let temporary = path.with_file_name(format!(".{filename}.tmp"));
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(&temporary, &bytes).map_err(|error| {
             format!("mission state temporary file could not be written: {error}")
         })?;
@@ -581,6 +812,9 @@ impl MissionJobState {
 impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
         config.validate()?;
+        let mission_queue_persistence = Arc::new(MissionQueuePersistence::new(
+            config.mission_queue_state_path.clone(),
+        )?);
         let events = Arc::new(Mutex::new(EventLog::from_checkpoint_path(
             config.event_capacity,
             config.event_state_path.as_deref(),
@@ -644,6 +878,7 @@ impl ApiRouter {
             next_request_id: AtomicU64::new(1),
             mission_jobs,
             mission_persistence,
+            mission_queue_persistence,
             event_persistence,
             evidence_registry,
             evidence_persistence,
@@ -676,6 +911,10 @@ impl ApiRouter {
 
     fn persist_mission_registry(&self) -> Result<(), String> {
         self.mission_persistence.persist()
+    }
+
+    fn persist_mission_queue(&self) -> Result<usize, String> {
+        self.mission_queue_persistence.persist()
     }
 
     fn persist_evidence_registry(&self) -> Result<usize, String> {
@@ -813,6 +1052,11 @@ impl ApiRouter {
             ("POST", "/v1/missions/persistence/flush") => {
                 self.flush_mission_persistence(&request_id)
             }
+            ("GET", "/v1/missions/queue") => self.mission_queue_inventory(&request_id),
+            ("GET", "/v1/missions/queue/persistence") => self.mission_queue_persistence_status(),
+            ("POST", "/v1/missions/queue/persistence/flush") => {
+                self.flush_mission_queue_persistence(&request_id)
+            }
             ("POST", "/v1/missions/preflight") => self.preflight_mission(&request, &request_id),
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/provenance") => {
@@ -944,6 +1188,64 @@ impl ApiRouter {
         )
     }
 
+    fn mission_queue_persistence_status(&self) -> HttpResponse {
+        match self.mission_queue_persistence.status() {
+            Ok(status) => HttpResponse::json(200, &status),
+            Err(error) => HttpResponse::json(
+                500,
+                &json!({
+                    "ok": false,
+                    "error": "mission_queue_unavailable",
+                    "detail": error
+                }),
+            ),
+        }
+    }
+
+    fn mission_queue_inventory(&self, request_id: &str) -> HttpResponse {
+        match self.mission_queue_persistence.status() {
+            Ok(status) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "schema": "bioprism-mission-queue/0.1",
+                    "queue": status,
+                    "guarantees": [
+                        "queue state is projected from the typed factory lifecycle",
+                        "job specifications remain checkpointed but are not returned in this inventory",
+                        "expired leases are classified explicitly rather than silently dropped",
+                        "a queued recovery record is not evidence that a worker has resumed"
+                    ],
+                    "links": {
+                        "persistence": "/v1/missions/queue/persistence",
+                        "flush": "/v1/missions/queue/persistence/flush",
+                        "mission_inventory": "/v1/missions"
+                    }
+                }),
+            ),
+            Err(error) => self.error(500, "mission_queue_unavailable", &error, request_id),
+        }
+    }
+
+    fn flush_mission_queue_persistence(&self, request_id: &str) -> HttpResponse {
+        match self.persist_mission_queue() {
+            Ok(bytes) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "bytes": bytes,
+                    "queue": self.mission_queue_persistence.status().unwrap_or_else(|error| json!({"ok": false, "error": error})),
+                    "request_id": request_id,
+                    "guarantees": [
+                        "the checkpoint is content-addressed and atomically replaced",
+                        "a successful flush does not claim external effect completion"
+                    ]
+                }),
+            ),
+            Err(error) => self.error(503, "mission_queue_persistence_unavailable", &error, request_id),
+        }
+    }
+
     fn event_persistence_status(&self) -> HttpResponse {
         let enabled = self.config.event_state_path.is_some();
         let file_bytes = self
@@ -1007,6 +1309,15 @@ impl ApiRouter {
             self.config.mission_state_path.as_deref(),
             MISSION_STATE_SCHEMA_VERSION,
         );
+        let mission_queue_persistence = response_value(self.mission_queue_persistence_status());
+        let mission_queue_enabled = mission_queue_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mission_queue_checkpoint_present = mission_queue_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let metrics = self.event_metrics();
         let state_digest = checkpoint_digest_from_path(self.config.event_state_path.as_deref());
         let event_integrity_verified = checkpoint_integrity_from_path(
@@ -1072,6 +1383,23 @@ impl ApiRouter {
                             "distributed consensus or cross-instance ordering"
                         ],
                         "operator_action": "verify the state_digest and treat retention gaps as explicit evidence"
+                    },
+                    {
+                        "id": "mission_execution_queue",
+                        "configured": mission_queue_enabled,
+                        "checkpoint_present": mission_queue_checkpoint_present,
+                        "schema_version": mission_queue_persistence.get("schema_version").cloned().unwrap_or(Value::Null),
+                        "state_digest": mission_queue_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": mission_queue_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "restores": [
+                            "typed mission job state, idempotency class, attempt count, lease ownership, staged/committed output boundary, and recovery posture"
+                        ],
+                        "does_not_restore": [
+                            "an in-process worker thread",
+                            "external effect completion or rollback",
+                            "distributed lease fencing, fair-share scheduling, provider authentication, or automatic dispatch"
+                        ],
+                        "operator_action": "inspect /v1/missions/queue and explicitly resubmit interrupted work after reviewing quarantine or requeue evidence"
                     },
                     {
                         "id": "subscription_metadata",
@@ -1185,6 +1513,7 @@ impl ApiRouter {
                 ],
                 "observed": {
                     "mission_checkpoint_present": mission_checkpoint_present,
+                    "mission_queue_checkpoint_present": mission_queue_checkpoint_present,
                     "event_checkpoint_present": event_checkpoint_present,
                     "retained_events": metrics.retained_events,
                     "active_subscriptions": metrics.active_subscriptions,
@@ -1198,17 +1527,22 @@ impl ApiRouter {
                 },
                 "guarantees": [
                     "restart boundaries are reported separately for missions, events, subscriptions, outbox rows, delivery provenance, secrets, and external effects",
+                    "mission execution queue recovery is reported separately from the mission status projection",
                     "absence of a checkpoint is visible and never presented as recovered state",
                     "a successful HTTP response does not claim receiver acceptance or effect completion"
                 ],
                 "non_claims": [
                     "distributed event storage",
+                    "distributed mission scheduling",
                     "automatic job resumption",
                     "secret recovery",
                     "network delivery or receiver acknowledgement"
                 ],
                 "links": {
                     "mission_persistence": "/v1/missions/persistence",
+                    "mission_queue": "/v1/missions/queue",
+                    "mission_queue_persistence": "/v1/missions/queue/persistence",
+                    "mission_queue_flush": "/v1/missions/queue/persistence/flush",
                     "event_persistence": "/v1/events/persistence",
                     "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
                     "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
@@ -1277,6 +1611,7 @@ impl ApiRouter {
             }
         };
         let mission_persistence = response_value(self.mission_persistence_status());
+        let mission_queue_persistence = response_value(self.mission_queue_persistence_status());
         let event_persistence = response_value(self.event_persistence_status());
         let evidence_persistence = response_value(self.evidence_persistence_status());
         let reconciliation_persistence = response_value(self.reconciliation_persistence_status());
@@ -1313,6 +1648,11 @@ impl ApiRouter {
                 .to_string(),
             );
         }
+        if self.config.mission_queue_state_path.is_none() {
+            operator_actions.push(
+                "configure mission_queue_state_path if mission lease, idempotency, and restart recovery state must survive an API restart".to_string(),
+            );
+        }
         if self.config.evidence_state_path.is_none() {
             operator_actions.push(
                 "configure evidence_state_path if independently verified evidence bundles must survive an API restart"
@@ -1341,6 +1681,7 @@ impl ApiRouter {
                 "mission_summary": mission_summary,
                 "persistence": {
                     "missions": mission_persistence,
+                    "mission_queue": mission_queue_persistence,
                     "events": event_persistence,
                     "evidence_bundles": evidence_persistence,
                     "workflow_reconciliations": reconciliation_persistence
@@ -1363,6 +1704,8 @@ impl ApiRouter {
                     "event_cursor": true,
                     "async_missions": true,
                     "mission_inventory": true,
+                    "mission_execution_queue": true,
+                    "mission_queue_persistence": self.config.mission_queue_state_path.is_some(),
                     "mission_execution_provenance": true,
                     "mission_claim_lineage": true,
                     "mission_evaluator_replay_query": true,
@@ -2568,6 +2911,9 @@ impl ApiRouter {
                      "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
                      "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
                     "mission_persistence": "/v1/missions/persistence",
+                    "mission_queue": "/v1/missions/queue",
+                    "mission_queue_persistence": "/v1/missions/queue/persistence",
+                    "mission_queue_persistence_flush": "/v1/missions/queue/persistence/flush",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
                     "delivery_receipt_events": "/v1/delivery-receipts/{receipt_id}/events",
@@ -2624,6 +2970,7 @@ impl ApiRouter {
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
+                    "durable_mission_queue_snapshots": self.config.mission_queue_state_path.is_some(),
                     "durable_event_snapshots": self.config.event_state_path.is_some(),
                     "signed_webhook_outbox": true,
                     "delivery_failure_inspection": true,
@@ -3438,6 +3785,57 @@ impl ApiRouter {
             .and_then(Value::as_array)
             .map_or(0, Vec::len);
 
+        let mission_already_exists = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.contains_key(&mission_id),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        if mission_already_exists {
+            return self.error(
+                409,
+                "mission_exists",
+                "a mission with this mission_id already exists",
+                request_id,
+            );
+        }
+
+        let queue_now = match current_timestamp() {
+            Ok(now) => now,
+            Err(error) => return self.error(500, "mission_queue_clock_unavailable", &error, request_id),
+        };
+        let queue_idempotency = if mission_execution_requested(&arguments) {
+            FactoryIdempotency::NonIdempotent
+        } else {
+            FactoryIdempotency::Idempotent
+        };
+        let queue_job = FactoryJob::new(
+            mission_id.clone(),
+            ResourceClass::Evaluate,
+            queue_idempotency,
+            arguments.clone(),
+        )
+        .with_priority(8);
+        let queue_lease = match self
+            .mission_queue_persistence
+            .enqueue_and_lease(queue_job, queue_now)
+        {
+            Ok(lease) => lease,
+            Err(error)
+                if error.contains("duplicate work") || error.contains("already present") =>
+            {
+                return self.error(409, "mission_duplicate_work", &error, request_id)
+            }
+            Err(error) => {
+                return self.error(503, "mission_queue_unavailable", &error, request_id)
+            }
+        };
+
         let cancellation = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(MissionJobState {
             total_steps,
@@ -3470,6 +3868,9 @@ impl ApiRouter {
                 }
             };
             if jobs.contains_key(&mission_id) {
+                let _ = self
+                    .mission_queue_persistence
+                    .cancel(&mission_id, "mission id already exists");
                 return self.error(
                     409,
                     "mission_exists",
@@ -3478,6 +3879,9 @@ impl ApiRouter {
                 );
             }
             if jobs.len() >= MAX_MISSION_JOBS {
+                let _ = self
+                    .mission_queue_persistence
+                    .cancel(&mission_id, "mission registry capacity exhausted");
                 return self.error(
                     429,
                     "mission_capacity_exhausted",
@@ -3491,6 +3895,9 @@ impl ApiRouter {
             if let Ok(mut jobs) = self.mission_jobs.lock() {
                 jobs.remove(&mission_id);
             }
+            let _ = self
+                .mission_queue_persistence
+                .cancel(&mission_id, "mission checkpoint unavailable");
             return self.error(503, "mission_persistence_unavailable", &error, request_id);
         }
 
@@ -3503,6 +3910,9 @@ impl ApiRouter {
                             jobs.remove(&mission_id);
                         }
                         let _ = self.persist_mission_registry();
+                        let _ = self
+                            .mission_queue_persistence
+                            .cancel(&mission_id, "event log unavailable");
                         return self.error(
                             500,
                             "event_log_unavailable",
@@ -3529,6 +3939,9 @@ impl ApiRouter {
                             jobs.remove(&mission_id);
                         }
                         let _ = self.persist_mission_registry();
+                        let _ = self
+                            .mission_queue_persistence
+                            .cancel(&mission_id, "mission acceptance event failed");
                         return self.error(500, "event_emit_failed", &error, request_id);
                     }
                 }
@@ -3538,6 +3951,9 @@ impl ApiRouter {
                     jobs.remove(&mission_id);
                 }
                 let _ = self.persist_mission_registry();
+                let _ = self
+                    .mission_queue_persistence
+                    .cancel(&mission_id, "event checkpoint unavailable");
                 return self.error(503, "event_persistence_unavailable", &error, request_id);
             }
             provenance["accepted_event_id"] = json!(event.id);
@@ -3549,6 +3965,9 @@ impl ApiRouter {
                     jobs.remove(&mission_id);
                 }
                 let _ = self.persist_mission_registry();
+                let _ = self
+                    .mission_queue_persistence
+                    .cancel(&mission_id, "mission checkpoint unavailable");
                 return self.error(503, "mission_persistence_unavailable", &error, request_id);
             }
         }
@@ -3557,11 +3976,15 @@ impl ApiRouter {
         let mission_events = Arc::clone(&self.events);
         let persistence = Arc::clone(&self.mission_persistence);
         let event_persistence = Arc::clone(&self.event_persistence);
+        let mission_queue_persistence = Arc::clone(&self.mission_queue_persistence);
         let mission_subject = mission_id.clone();
         let mission_request_id = request_id.to_string();
         let observer = Arc::new(move |event: Value| {
             if let Ok(mut current) = progress_state.lock() {
                 current.record_trace(event.clone());
+            }
+            if let Ok(now) = current_timestamp() {
+                let _ = mission_queue_persistence.heartbeat(&mission_subject, now);
             }
             let _ = persistence.persist();
             if let Ok(mut events) = mission_events.lock() {
@@ -3577,6 +4000,7 @@ impl ApiRouter {
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
         let worker_persistence = Arc::clone(&self.mission_persistence);
         let worker_reconciliation_persistence = Arc::clone(&self.reconciliation_persistence);
+        let worker_queue_persistence = Arc::clone(&self.mission_queue_persistence);
         let worker_id = mission_id.clone();
         let worker_mission_id = mission_id.clone();
         let worker_arguments = arguments;
@@ -3596,22 +4020,47 @@ impl ApiRouter {
                 if let Ok(mut current) = job.state.lock() {
                     match outcome {
                         Ok(result) => {
-                            current.progress.reconcile(&result);
-                            current.status = result
-                                .get("mission_status")
-                                .and_then(Value::as_str)
-                                .unwrap_or("succeeded")
-                                .into();
-                            current.evaluator_replay_summary =
-                                evaluator_replay_summary(&result, &worker_mission_id);
-                            current.result = Some(result);
-                            current.result_omitted = None;
+                            let queue_commit = current_timestamp().and_then(|now| {
+                                worker_queue_persistence
+                                    .commit_success(&worker_mission_id, result.clone(), now)
+                            });
+                            if let Err(queue_error) = queue_commit {
+                                current.status = "failed".into();
+                                current.progress.phase = "failed".into();
+                                current.progress.active_steps = 0;
+                                current.error = Some(format!(
+                                    "mission produced a report but the durable execution lease could not commit: {queue_error}"
+                                ));
+                                current.result = Some(result);
+                                current.result_omitted = None;
+                            } else {
+                                current.progress.reconcile(&result);
+                                current.status = result
+                                    .get("mission_status")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("succeeded")
+                                    .into();
+                                current.evaluator_replay_summary =
+                                    evaluator_replay_summary(&result, &worker_mission_id);
+                                current.result = Some(result);
+                                current.result_omitted = None;
+                            }
                         }
                         Err(error) => {
+                            let queue_error = current_timestamp()
+                                .and_then(|now| worker_queue_persistence.record_failure(
+                                    &worker_mission_id,
+                                    error.clone(),
+                                    now,
+                                ))
+                                .err();
                             current.status = "failed".into();
                             current.progress.phase = "failed".into();
                             current.progress.active_steps = 0;
-                            current.error = Some(error);
+                            current.error = Some(match queue_error {
+                                Some(queue_error) => format!("{error}; queue transition failed: {queue_error}"),
+                                None => error,
+                            });
                         }
                     }
                 }
@@ -3622,6 +4071,9 @@ impl ApiRouter {
                 jobs.remove(&mission_id);
             }
             let _ = self.persist_mission_registry();
+            let _ = self
+                .mission_queue_persistence
+                .cancel(&mission_id, "mission worker could not be started");
             return self.error(
                 503,
                 "mission_worker_unavailable",
@@ -3636,6 +4088,13 @@ impl ApiRouter {
                 "ok": true,
                 "mission_id": mission_id,
                 "status": "queued",
+                "queue": {
+                    "state": "leased",
+                    "attempt": queue_lease.attempt,
+                    "worker_id": queue_lease.worker_id,
+                    "expires_at": queue_lease.expires_at,
+                    "automatic_resume": false
+                },
                 "cancel_requested": false,
                 "progress": mission_progress_json(&MissionProgressState::new(total_steps)),
                 "execution_provenance": execution_provenance,
@@ -3719,6 +4178,17 @@ impl ApiRouter {
             if status_filter.is_some_and(|status| status != state.status) {
                 continue;
             }
+            let queue = match self.mission_queue_persistence.projection(mission_id) {
+                Ok(queue) => queue,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "mission_queue_unavailable",
+                        "mission queue is unavailable",
+                        request_id,
+                    )
+                }
+            };
             entries.push(json!({
                 "mission_id": mission_id,
                 "status": state.status,
@@ -3726,6 +4196,7 @@ impl ApiRouter {
                 "cancel_reason": state.cancel_reason,
                 "recovered_after_restart": state.recovered_after_restart,
                 "execution_provenance": state.execution_provenance,
+                "queue": queue,
                 "progress": mission_progress_json(&state.progress),
                 "summary": mission_summary(&state),
                 "poll": format!("/v1/missions/{mission_id}"),
@@ -3783,6 +4254,10 @@ impl ApiRouter {
                 )
             }
         };
+        let queue = match self.mission_queue_persistence.projection(&mission_id) {
+            Ok(queue) => queue,
+            Err(error) => return self.error(500, "mission_queue_unavailable", &error, request_id),
+        };
         HttpResponse::json(
             200,
             &json!({
@@ -3793,6 +4268,7 @@ impl ApiRouter {
                 "cancel_reason": current.cancel_reason,
                 "recovered_after_restart": current.recovered_after_restart,
                 "execution_provenance": current.execution_provenance,
+                "queue": queue,
                 "progress": mission_progress_json(&current.progress),
                 "result": current.result,
                 "result_omitted": current.result_omitted,
@@ -4983,6 +5459,14 @@ impl ApiRouter {
         state.cancel_reason = current.cancel_reason.clone();
         state.progress.request_cancel();
         drop(state);
+        if let Err(error) = self
+            .mission_queue_persistence
+            .cancel(&mission_id, &reason)
+        {
+            if !error.contains("already terminal") {
+                return self.error(503, "mission_queue_unavailable", &error, request_id);
+            }
+        }
         let _ = self.persist_mission_registry();
         HttpResponse::json(
             202,
@@ -5040,6 +5524,28 @@ impl ApiRouter {
             );
         }
         drop(jobs);
+        let queue_projection = match self.mission_queue_persistence.projection(&mission_id) {
+            Ok(projection) => projection,
+            Err(error) => {
+                if let Ok(mut jobs) = self.mission_jobs.lock() {
+                    jobs.insert(mission_id.clone(), job);
+                }
+                return self.error(503, "mission_queue_unavailable", &error, request_id);
+            }
+        };
+        if !queue_projection.is_null() {
+            if let Err(error) = self
+                .mission_queue_persistence
+                .cancel(&mission_id, "mission deleted by operator")
+            {
+                if !error.contains("already terminal") {
+                    if let Ok(mut jobs) = self.mission_jobs.lock() {
+                        jobs.insert(mission_id.clone(), job);
+                    }
+                    return self.error(503, "mission_queue_unavailable", &error, request_id);
+                }
+            }
+        }
         if let Err(error) = self.persist_mission_registry() {
             if let Ok(mut jobs) = self.mission_jobs.lock() {
                 jobs.insert(mission_id.clone(), job);
@@ -5580,6 +6086,9 @@ impl ApiRouter {
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/persistence": { "get": { "responses": { "200": { "description": "restart-aware mission snapshot status" } } } },
                     "/v1/missions/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded mission snapshot checkpoint" } } } },
+                    "/v1/missions/queue": { "get": { "responses": { "200": { "description": "typed factory mission queue projection and recovery posture" } } } },
+                    "/v1/missions/queue/persistence": { "get": { "responses": { "200": { "description": "content-addressed mission queue checkpoint status" } } } },
+                    "/v1/missions/queue/persistence/flush": { "post": { "responses": { "200": { "description": "force an atomic mission queue checkpoint" }, "503": { "description": "queue checkpoint unavailable" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
                     "/v1/missions/{mission_id}/provenance": { "get": { "responses": { "200": { "description": "retained execution gate, review, evaluator, and dispatch provenance" } } } },
                      "/v1/missions/{mission_id}/claims": { "get": { "responses": { "200": { "description": "bounded claim-to-step evidence lineage projection" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "terminal report was omitted from the bounded registry" } } } },
@@ -5616,6 +6125,31 @@ impl ApiRouter {
 
 fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
     job.state.lock().map(|state| state.clone()).map_err(|_| ())
+}
+
+fn current_timestamp() -> Result<Timestamp, String> {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock is before the Unix epoch: {error}"))?;
+    let nanos = i128::try_from(elapsed.as_nanos())
+        .map_err(|_| "system clock timestamp exceeds the supported range".to_string())?;
+    Ok(Timestamp::from_nanos_utc(nanos))
+}
+
+fn mission_queue_job_json(job: &FactoryJob) -> Value {
+    json!({
+        "mission_id": job.id,
+        "resource_class": job.resource_class,
+        "idempotency": job.idempotency,
+        "idempotency_key": job.idempotency_key().to_string(),
+        "priority": job.priority,
+        "max_attempts": job.max_attempts,
+        "state": job.state,
+        "attempts": job.attempts,
+        "attempts_remaining": job.attempts_remaining(),
+        "reason": job.reason,
+        "spec_returned": false
+    })
 }
 
 fn response_value(response: HttpResponse) -> Value {
@@ -6655,6 +7189,22 @@ fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> 
         return Some(false);
     };
     Some(computed == stored)
+}
+
+fn mission_queue_checkpoint_integrity(
+    path: Option<&Path>,
+    expected_digest: &str,
+) -> Option<bool> {
+    let path = path?;
+    if std::fs::metadata(path).is_err() {
+        return None;
+    }
+    Some(
+        JobStore::load_from_path(path)
+            .and_then(|store| store.snapshot())
+            .map(|snapshot| snapshot.state_digest == expected_digest)
+            .unwrap_or(false),
+    )
 }
 
 fn load_evidence_registry(path: Option<&Path>) -> Result<EvidenceBundleRegistry, String> {
@@ -8921,6 +9471,71 @@ mod tests {
         assert_eq!(deleted.status, 200);
         let missing = router.handle(request("GET", "/v1/missions/api-async-1", json!({})));
         assert_eq!(missing.status, 404);
+    }
+
+    #[test]
+    fn durable_mission_queue_checkpoint_tracks_commit_and_survives_restart() {
+        let queue_path = test_state_path("mission-queue");
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_queue_state_path: Some(queue_path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let submitted = router.handle(request(
+            "POST",
+            "/v1/missions",
+            json!({
+                "mission_id": "durable-queue-1",
+                "goal": "exercise the durable mission queue",
+                "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}]
+            }),
+        ));
+        assert_eq!(submitted.status, 202);
+        let mut mission = Value::Null;
+        for _ in 0..100 {
+            let response = router.handle(request("GET", "/v1/missions/durable-queue-1", json!({})));
+            mission = serde_json::from_slice(&response.body).unwrap();
+            if mission["status"] == "planned" {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(mission["status"], "planned");
+        assert_eq!(mission["queue"]["state"], "succeeded");
+        assert_eq!(mission["queue"]["attempts"], 1);
+
+        let queue = router.handle(request("GET", "/v1/missions/queue", json!({})));
+        assert_eq!(queue.status, 200);
+        let queue: Value = serde_json::from_slice(&queue.body).unwrap();
+        assert_eq!(queue["queue"]["enabled"], true);
+        assert_eq!(queue["queue"]["file_present"], true);
+        assert_eq!(queue["queue"]["integrity_verified"], true);
+        assert_eq!(queue["queue"]["jobs"][0]["spec_returned"], false);
+        assert_eq!(queue["queue"]["jobs"][0]["state"], "succeeded");
+        assert_eq!(queue["queue"]["state_digest"].as_str().unwrap().len(), 64);
+        drop(router);
+
+        let restored = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_queue_state_path: Some(queue_path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let restored_queue = restored.handle(request(
+            "GET",
+            "/v1/missions/queue/persistence",
+            json!({}),
+        ));
+        assert_eq!(restored_queue.status, 200);
+        let restored_queue: Value = serde_json::from_slice(&restored_queue.body).unwrap();
+        assert_eq!(restored_queue["integrity_verified"], true);
+        assert_eq!(restored_queue["jobs"][0]["state"], "succeeded");
+        let _ = std::fs::remove_file(queue_path);
     }
 
     #[test]

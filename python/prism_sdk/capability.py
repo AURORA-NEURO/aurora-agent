@@ -547,6 +547,7 @@ class DomainWorkflowInstantiationReport:
     preflight: Mapping[str, Any]
     preflight_report: Mapping[str, Any] | None
     execution: str
+    execution_contract: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowInstantiationReport":
@@ -575,6 +576,9 @@ class DomainWorkflowInstantiationReport:
             preflight=_route_mapping("domain workflow preflight", raw.get("preflight")),
             preflight_report=preflight_report,
             execution=_route_text("domain workflow execution", raw.get("execution")),
+            execution_contract=_route_mapping(
+                "domain workflow execution contract", raw.get("execution_contract", {})
+            ),
         )
 
     @property
@@ -612,6 +616,7 @@ class DomainWorkflowScaffoldReport:
     preflight_report: Mapping[str, Any]
     execution: str
     readiness_claimed: bool
+    execution_contract: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowScaffoldReport":
@@ -631,6 +636,9 @@ class DomainWorkflowScaffoldReport:
             preflight_report=_route_mapping("domain workflow scaffold preflight report", raw.get("preflight_report", {})),
             execution=_route_text("domain workflow scaffold execution", raw.get("execution")),
             readiness_claimed=readiness_claimed,
+            execution_contract=_route_mapping(
+                "domain workflow scaffold execution contract", raw.get("execution_contract", {})
+            ),
         )
 
     @property

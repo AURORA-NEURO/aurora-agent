@@ -5,7 +5,8 @@ available as a library (`bioprism_api::ApiRouter`) and as the `bioprism-api` bin
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes> \
-  --mission-state .local/mission-state.json --event-state .local/event-state.json \
+  --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
+  --event-state .local/event-state.json \
   --reconciliation-state .local/reconciliation-state.json
 ```
 
@@ -39,6 +40,9 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
 | `GET /v1/missions/persistence` | Inspect bounded checkpoint configuration and on-disk size |
 | `POST /v1/missions/persistence/flush` | Force a checkpoint and verify it can be written |
+| `GET /v1/missions/queue` | Inspect typed factory queue state, lease/recovery posture, and bounded job projections |
+| `GET /v1/missions/queue/persistence` | Inspect mission queue checkpoint integrity and startup recovery rows |
+| `POST /v1/missions/queue/persistence/flush` | Force an atomic content-addressed factory checkpoint |
 | `GET /v1/missions/{mission_id}` | Poll job state and retrieve the authoritative mission report |
 | `GET /v1/missions/{mission_id}/provenance` | Retrieve retained gate, review, domain-evaluator, and accepted-dispatch evidence |
 | `GET /v1/missions/{mission_id}/claims` | Retrieve the bounded claim-to-step evidence-lineage projection |
@@ -198,6 +202,22 @@ status, retention/omission metadata, optional result and trace, replay projectio
 comparison, execution provenance, links, and a SHA-256 `bundle_digest` into one bounded export.
 Neither route executes a domain tool or evaluator; the evidence bundle rejects oversized serialized
 exports with `413` rather than silently truncating them.
+
+## Mission execution queue
+
+Pass `--mission-queue-state <file>` to persist the factory lifecycle behind asynchronous mission
+execution separately from the mission read model. Each accepted mission is represented as an
+`Evaluate` job with an explicit idempotency class, leased to the local API worker, and committed
+only after the executor report is staged. Queue checkpoint writes are bounded, digest-verified,
+cross-index validated, and atomically replaced. A failed checkpoint does not replace the live
+queue projection.
+
+On startup, expired leases are classified by the factory policy: idempotent jobs are requeued,
+non-idempotent jobs are quarantined, and compensable jobs await compensation. This is recovery
+classification, not automatic resumption. The API never dispatches a recovered job without a new
+explicit submission, and the queue does not claim distributed scheduling, lease fencing, provider
+authentication, tenant isolation, or external-effect completion. The queue inventory intentionally
+returns job metadata and an idempotency digest while omitting the original mission specification.
 
 Pass `--event-state <file>` to checkpoint the retained event cursor plus bounded subscription and
 outbox metadata as a separate JSON document. It restores event IDs, retention-gap accounting,

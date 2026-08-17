@@ -1622,6 +1622,292 @@ class MissionPersistenceStatus:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class MissionQueueJob:
+    """Typed projection of one durable mission-queue record.
+
+    The queue deliberately does not return the original job specification from its inventory
+    route. Callers get the lifecycle and recovery posture without accidentally treating a
+    checkpoint projection as an authorization to replay work.
+    """
+
+    raw: dict[str, Any]
+    mission_id: str
+    resource_class: str
+    idempotency: str
+    idempotency_key: str
+    priority: int
+    max_attempts: int
+    state: str
+    attempts: int
+    attempts_remaining: int
+    reason: str | None
+    spec_returned: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueJob":
+        raw = _mapping("mission queue job", value)
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission queue job {name} must be a non-negative integer")
+            return candidate
+
+        mission_id = raw.get("mission_id")
+        resource_class = raw.get("resource_class")
+        idempotency = raw.get("idempotency")
+        idempotency_key = raw.get("idempotency_key")
+        state = raw.get("state")
+        for name, candidate in (
+            ("mission_id", mission_id),
+            ("resource_class", resource_class),
+            ("idempotency", idempotency),
+            ("idempotency_key", idempotency_key),
+            ("state", state),
+        ):
+            _text(f"mission queue job {name}", candidate)
+        if resource_class not in {"compile", "ingest", "sandbox", "evaluate", "mutate", "index"}:
+            raise ArgumentError(f"unknown mission queue resource_class: {resource_class}")
+        if idempotency not in {"idempotent", "non_idempotent", "compensable"}:
+            raise ArgumentError(f"unknown mission queue idempotency: {idempotency}")
+        if state not in {
+            "queued",
+            "leased",
+            "staged",
+            "succeeded",
+            "failed",
+            "quarantined",
+            "dead_lettered",
+            "cancelled",
+        }:
+            raise ArgumentError(f"unknown mission queue state: {state}")
+        priority = raw.get("priority")
+        if not isinstance(priority, int) or isinstance(priority, bool) or not 0 <= priority <= 255:
+            raise ArgumentError("mission queue job priority must be an integer between 0 and 255")
+        max_attempts = non_negative("max_attempts")
+        attempts = non_negative("attempts")
+        attempts_remaining = non_negative("attempts_remaining")
+        reason = raw.get("reason")
+        if reason is not None:
+            _text("mission queue job reason", reason)
+        spec_returned = raw.get("spec_returned")
+        if not isinstance(spec_returned, bool):
+            raise ArgumentError("mission queue job spec_returned must be a boolean")
+        if spec_returned:
+            raise ArgumentError("mission queue inventory must not return job specifications")
+        return cls(
+            raw,
+            mission_id,
+            resource_class,
+            idempotency,
+            idempotency_key,
+            priority,
+            max_attempts,
+            state,
+            attempts,
+            attempts_remaining,
+            reason,
+            spec_returned,
+        )
+
+    @property
+    def terminal(self) -> bool:
+        return self.state in {"succeeded", "dead_lettered", "cancelled"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionQueueStatus:
+    """Operator view of the bounded local mission queue checkpoint."""
+
+    raw: dict[str, Any]
+    enabled: bool
+    file_present: bool
+    file_bytes: int | None
+    schema_version: int
+    state_digest: str
+    integrity_verified: bool | None
+    max_file_bytes: int
+    registry_size: int
+    jobs: tuple[MissionQueueJob, ...]
+    startup_recoveries: tuple[Mapping[str, Any], ...]
+    automatic_resume: bool
+    execution_scope: str
+    recovery_policy: str
+    does_not_claim: tuple[str, ...]
+    flush: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueStatus":
+        raw = _mapping("mission queue status", value)
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission queue {name} must be a non-negative integer")
+            return candidate
+
+        enabled = raw.get("enabled")
+        file_present = raw.get("file_present")
+        automatic_resume = raw.get("automatic_resume")
+        for name, candidate in (
+            ("enabled", enabled),
+            ("file_present", file_present),
+            ("automatic_resume", automatic_resume),
+        ):
+            if not isinstance(candidate, bool):
+                raise ArgumentError(f"mission queue {name} must be a boolean")
+        file_bytes = raw.get("file_bytes")
+        if file_bytes is not None and (
+            not isinstance(file_bytes, int) or isinstance(file_bytes, bool) or file_bytes < 0
+        ):
+            raise ArgumentError("mission queue file_bytes must be a non-negative integer or null")
+        schema_version = non_negative("schema_version")
+        state_digest = raw.get("state_digest")
+        if (
+            not isinstance(state_digest, str)
+            or len(state_digest) != 64
+            or any(character not in "0123456789abcdef" for character in state_digest)
+        ):
+            raise ArgumentError("mission queue state_digest must be 64 lowercase hexadecimal characters")
+        integrity_verified = raw.get("integrity_verified")
+        if integrity_verified is not None and not isinstance(integrity_verified, bool):
+            raise ArgumentError("mission queue integrity_verified must be a boolean or null")
+        values = raw.get("jobs")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ArgumentError("mission queue jobs must be an array")
+        jobs = tuple(MissionQueueJob.from_wire(item) for item in values)
+        if len(jobs) != non_negative("registry_size"):
+            raise ArgumentError("mission queue registry_size must equal the number of jobs")
+        recoveries = raw.get("startup_recoveries")
+        if not isinstance(recoveries, Sequence) or isinstance(recoveries, (str, bytes)):
+            raise ArgumentError("mission queue startup_recoveries must be an array")
+        startup_recoveries: list[Mapping[str, Any]] = []
+        for recovery in recoveries:
+            if not isinstance(recovery, Mapping):
+                raise ArgumentError("mission queue startup recovery rows must be objects")
+            startup_recoveries.append(dict(recovery))
+        execution_scope = raw.get("execution_scope")
+        recovery_policy = raw.get("recovery_policy")
+        flush = raw.get("flush")
+        for name, candidate in (
+            ("execution_scope", execution_scope),
+            ("recovery_policy", recovery_policy),
+            ("flush", flush),
+        ):
+            _text(f"mission queue {name}", candidate)
+        claims = raw.get("does_not_claim")
+        if not isinstance(claims, Sequence) or isinstance(claims, (str, bytes)):
+            raise ArgumentError("mission queue does_not_claim must be an array")
+        does_not_claim: list[str] = []
+        for claim in claims:
+            _text("mission queue non-claim", claim)
+            does_not_claim.append(claim)
+        return cls(
+            raw,
+            enabled,
+            file_present,
+            file_bytes,
+            schema_version,
+            state_digest,
+            integrity_verified,
+            non_negative("max_file_bytes"),
+            non_negative("registry_size"),
+            jobs,
+            tuple(startup_recoveries),
+            automatic_resume,
+            execution_scope,
+            recovery_policy,
+            tuple(does_not_claim),
+            flush,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionQueueInventory:
+    """Typed response for the queue inventory envelope."""
+
+    raw: dict[str, Any]
+    queue: MissionQueueStatus
+    schema: str
+    guarantees: tuple[str, ...]
+    persistence: str
+    flush: str
+    mission_inventory: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueInventory":
+        raw = _mapping("mission queue inventory", value)
+        queue = raw.get("queue")
+        if not isinstance(queue, Mapping):
+            raise ArgumentError("mission queue inventory queue must be an object")
+        schema = raw.get("schema")
+        _text("mission queue inventory schema", schema)
+        guarantees = raw.get("guarantees")
+        if not isinstance(guarantees, Sequence) or isinstance(guarantees, (str, bytes)):
+            raise ArgumentError("mission queue inventory guarantees must be an array")
+        guarantee_values: list[str] = []
+        for guarantee in guarantees:
+            _text("mission queue guarantee", guarantee)
+            guarantee_values.append(guarantee)
+        links = raw.get("links")
+        if not isinstance(links, Mapping):
+            raise ArgumentError("mission queue inventory links must be an object")
+        persistence = links.get("persistence")
+        flush = links.get("flush")
+        mission_inventory = links.get("mission_inventory")
+        for name, candidate in (
+            ("persistence", persistence),
+            ("flush", flush),
+            ("mission_inventory", mission_inventory),
+        ):
+            _text(f"mission queue inventory link {name}", candidate)
+        return cls(raw, MissionQueueStatus.from_wire(queue), schema, tuple(guarantee_values), persistence, flush, mission_inventory)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionQueueFlushResult:
+    """Typed response for an atomic queue checkpoint flush."""
+
+    raw: dict[str, Any]
+    bytes: int
+    queue: MissionQueueStatus
+    request_id: str
+    guarantees: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueFlushResult":
+        raw = _mapping("mission queue flush", value)
+        byte_count = raw.get("bytes")
+        if not isinstance(byte_count, int) or isinstance(byte_count, bool) or byte_count < 0:
+            raise ArgumentError("mission queue flush bytes must be a non-negative integer")
+        queue = raw.get("queue")
+        if not isinstance(queue, Mapping):
+            raise ArgumentError("mission queue flush queue must be an object")
+        request_id = raw.get("request_id")
+        _text("mission queue flush request_id", request_id)
+        guarantees = raw.get("guarantees")
+        if not isinstance(guarantees, Sequence) or isinstance(guarantees, (str, bytes)):
+            raise ArgumentError("mission queue flush guarantees must be an array")
+        guarantee_values: list[str] = []
+        for guarantee in guarantees:
+            _text("mission queue flush guarantee", guarantee)
+            guarantee_values.append(guarantee)
+        return cls(raw, byte_count, MissionQueueStatus.from_wire(queue), request_id, tuple(guarantee_values))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> MissionPreflight:
     """Review a mission against a live schema snapshot without dispatching any tool."""
 
@@ -1885,6 +2171,10 @@ __all__ = [
     "MissionInventoryPage",
     "MissionInventorySummary",
     "MissionPersistenceStatus",
+    "MissionQueueJob",
+    "MissionQueueStatus",
+    "MissionQueueInventory",
+    "MissionQueueFlushResult",
     "MissionTraceEvent",
     "MissionPreflightError",
     "MissionRouteSelection",

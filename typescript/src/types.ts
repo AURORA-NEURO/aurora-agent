@@ -4657,7 +4657,19 @@ export interface DomainWorkflowToolContract extends JsonObject {
   schema_digest?: string | null;
   argument_validation: "authoritative_mcp_preflight_required";
   argument_contract?: JsonObject;
+  execution_contract?: DomainWorkflowExecutionContract;
   evidence: JsonObject;
+}
+
+export interface DomainWorkflowExecutionContract extends JsonObject {
+  resource_class?: "compile" | "ingest" | "sandbox" | "evaluate" | "mutate" | "index" | string;
+  idempotency?: string;
+  side_effects?: string;
+  dispatch?: string;
+  providers?: JsonObject;
+  provider_boundary?: JsonObject;
+  queue_resource_class?: string;
+  readiness_claimed?: false;
 }
 
 export interface DomainWorkflowContract extends JsonObject {
@@ -4668,6 +4680,7 @@ export interface DomainWorkflowContract extends JsonObject {
   pre_dispatch_gates: JsonValue[];
   evidence_contract: JsonObject;
   completion_contract: JsonObject;
+  execution_boundary?: DomainWorkflowExecutionContract;
 }
 
 export interface DomainWorkflowTemplate extends JsonObject {
@@ -4678,6 +4691,7 @@ export interface DomainWorkflowTemplate extends JsonObject {
   tool_contracts: DomainWorkflowToolContract[];
   tools: JsonObject;
   recommended_stages: JsonValue[];
+  execution_contract?: DomainWorkflowExecutionContract;
 }
 
 export interface DomainWorkflowEvidencePlan extends JsonObject {
@@ -4725,6 +4739,7 @@ export interface DomainWorkflowInstantiateResult extends JsonObject {
   preflight: JsonObject;
   preflight_report?: JsonObject;
   execution: "not_started";
+  execution_contract?: DomainWorkflowExecutionContract;
   guarantees: string[];
   limitations: string[];
 }
@@ -4743,6 +4758,7 @@ export interface DomainWorkflowScaffoldResult extends JsonObject {
   domain_contract_digest: string;
   evidence_plan: DomainWorkflowEvidencePlan;
   execution: "not_started";
+  execution_contract?: DomainWorkflowExecutionContract;
   readiness_claimed: false;
   preflight: JsonObject;
   preflight_status: "ready" | "blocked";
@@ -7805,6 +7821,73 @@ export interface MissionPersistenceStatus extends JsonObject {
   webhook_deliveries_durable: false;
   recovery_policy: string;
   flush: string;
+}
+
+export type MissionQueueResourceClass = "compile" | "ingest" | "sandbox" | "evaluate" | "mutate" | "index";
+
+export type MissionQueueIdempotency = "idempotent" | "non_idempotent" | "compensable";
+
+export type MissionQueueJobState =
+  | "queued"
+  | "leased"
+  | "staged"
+  | "succeeded"
+  | "failed"
+  | "quarantined"
+  | "dead_lettered"
+  | "cancelled";
+
+export interface MissionQueueJob extends JsonObject {
+  mission_id: string;
+  resource_class: MissionQueueResourceClass;
+  idempotency: MissionQueueIdempotency;
+  idempotency_key: string;
+  priority: number;
+  max_attempts: number;
+  state: MissionQueueJobState;
+  attempts: number;
+  attempts_remaining: number;
+  reason?: string | null;
+  spec_returned: false;
+}
+
+export interface MissionQueueStatus extends JsonObject {
+  ok: boolean;
+  enabled: boolean;
+  file_present: boolean;
+  file_bytes: number | null;
+  schema_version: number;
+  state_digest: string;
+  integrity_verified: boolean | null;
+  max_file_bytes: number;
+  registry_size: number;
+  jobs: MissionQueueJob[];
+  startup_recoveries: JsonObject[];
+  automatic_resume: false;
+  execution_scope: string;
+  recovery_policy: string;
+  does_not_claim: string[];
+  flush: string;
+}
+
+export interface MissionQueueInventoryResponse extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mission-queue/0.1";
+  queue: MissionQueueStatus;
+  guarantees: string[];
+  links: {
+    persistence: string;
+    flush: string;
+    mission_inventory: string;
+  };
+}
+
+export interface MissionQueueFlushResponse extends JsonObject {
+  ok: boolean;
+  bytes: number;
+  queue: MissionQueueStatus;
+  request_id: string;
+  guarantees: string[];
 }
 
 export interface EventPersistenceStatus extends JsonObject {

@@ -295,6 +295,9 @@ import type {
   MissionJob,
   MissionJobStatus,
   MissionInventoryResponse,
+  MissionQueueFlushResponse,
+  MissionQueueInventoryResponse,
+  MissionQueueStatus,
   MissionPersistenceStatus,
   MissionPreflightResult,
   MissionRouteSelection,
@@ -1429,6 +1432,21 @@ export class ApiClient {
   /** Force a bounded mission snapshot checkpoint; the gateway returns the resulting status. */
   async flushMissionPersistence(options?: ClientRequestOptions): Promise<MissionPersistenceStatus> {
     return this.request<MissionPersistenceStatus>("POST", "/v1/missions/persistence/flush", {}, options);
+  }
+
+  /** Read queue lifecycle projections without returning checkpointed job specifications. */
+  async missionQueue(options?: ClientRequestOptions): Promise<MissionQueueInventoryResponse> {
+    return this.request<MissionQueueInventoryResponse>("GET", "/v1/missions/queue", undefined, options);
+  }
+
+  /** Inspect queue checkpoint integrity, startup recovery rows, and the explicit no-resume boundary. */
+  async missionQueuePersistence(options?: ClientRequestOptions): Promise<MissionQueueStatus> {
+    return this.request<MissionQueueStatus>("GET", "/v1/missions/queue/persistence", undefined, options);
+  }
+
+  /** Atomically flush the queue checkpoint and return its resulting status and byte count. */
+  async flushMissionQueuePersistence(options?: ClientRequestOptions): Promise<MissionQueueFlushResponse> {
+    return this.request<MissionQueueFlushResponse>("POST", "/v1/missions/queue/persistence/flush", {}, options);
   }
 
   /** Read the current asynchronous mission status and, once terminal, its authoritative report. */

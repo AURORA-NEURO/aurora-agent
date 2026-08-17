@@ -193,6 +193,13 @@ polling and returns only a terminal `MissionJob`; `MissionWaitTimeoutError` carr
 authoritative live snapshot so an operator can resume or cancel without losing progress.
 `missionPersistence()` and `flushMissionPersistence()` expose the same bounded checkpoint status
 and explicit flush/readiness check for operator tooling.
+`missionQueue()` returns a `MissionQueueInventoryResponse` whose `MissionQueueJob` rows preserve
+resource class, idempotency, attempt counters, terminal state, and the deliberate
+`spec_returned: false` omission. `missionQueuePersistence()` exposes `MissionQueueStatus` with
+the content digest, integrity result, startup recovery rows, and explicit `automatic_resume: false`.
+`flushMissionQueuePersistence()` returns the atomic checkpoint byte count plus the resulting queue
+status. These are local checkpoint controls, not distributed scheduling, lease fencing, provider
+authentication, tenant isolation, or external-effect completion.
 `eventPersistence()` and `flushEventPersistence()` provide the event-cursor equivalent while
 typing the explicit non-durability of webhook subscriptions and pending deliveries.
 
@@ -684,6 +691,10 @@ effects; its delivery-attempt boundary is separately queryable; `automatic_resum
 `missionPersistence()` and `eventPersistence()` separately expose their checkpoint schema and
 optional content digests plus `integrity_verified`; a digest is an integrity correlation, not a
 claim of distributed consensus.
+`missionQueue()` / `missionQueuePersistence()` / `flushMissionQueuePersistence()` expose the
+factory-backed mission execution boundary with typed idempotency and recovery posture. A queued
+or requeued row is evidence of persisted lifecycle state only; the SDK preserves the API's
+no-automatic-resume and no-external-effect claims.
 `operationsSnapshot(after, limit)` returns the typed `OperationsSnapshot` control-plane view:
 one bounded event cursor page, event metrics, reconciled mission status counts, nested persistence
 status (including workflow-reconciliation checkpoint state), and a typed reconciliation posture

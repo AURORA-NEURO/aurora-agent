@@ -28,7 +28,9 @@ The runtime transport now also runs bounded deterministic effect programs throug
 budget, fault, and fork checks. The million-scale transport exposes mechanistic twin discrepancy
 qualification plus distributed placement, attestation, locality, fencing, and duplicate-effect
 audits. These endpoints make existing Rust contracts agent-callable; they do not claim that real
-containers, workers, durable queues, external-state restoration, or biological calibration exist.
+containers, distributed workers, multi-node durable queues, external-state restoration, or
+biological calibration exist. The factory now has a bounded single-process checkpoint and explicit
+lease recovery; that checkpoint is not a distributed queue or scheduler.
 The transport also exposes the deeper OncoWorld longitudinal-clock, integrated-classification, and
 identity-join contracts; these remain transport integrations of existing domain invariants and do
 not imply that clinical inference, identity or contamination oracles, or external data connectors

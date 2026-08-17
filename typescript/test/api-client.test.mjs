@@ -2607,6 +2607,30 @@ test("client exposes asynchronous mission submission, status, and cancellation",
       if (path === "/v1/missions/preflight" && init.method === "POST") {
         return jsonResponse({ ok: true, workflow: "agent_mission", execution: "planned", mission_status: "planned", preflight: true, dispatch: "not_started", results: [] });
       }
+      if (path === "/v1/missions/queue" && init.method === "GET") {
+        const queue = {
+          ok: true,
+          enabled: true,
+          file_present: true,
+          file_bytes: 128,
+          schema_version: 1,
+          state_digest: "q".repeat(64),
+          integrity_verified: true,
+          max_file_bytes: 64 * 1024 * 1024,
+          registry_size: 1,
+          jobs: [{ mission_id: "async-1", resource_class: "evaluate", idempotency: "idempotent", idempotency_key: "k".repeat(64), priority: 8, max_attempts: 3, state: "succeeded", attempts: 1, attempts_remaining: 2, reason: null, spec_returned: false }],
+          startup_recoveries: [],
+          automatic_resume: false,
+          execution_scope: "single-process-api-worker",
+          recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
+          does_not_claim: ["distributed scheduling or lease fencing", "external effect completion"],
+          flush: "/v1/missions/queue/persistence/flush",
+        };
+        return jsonResponse({ ok: true, schema: "bioprism-mission-queue/0.1", queue, guarantees: ["queue state is projected from the typed factory lifecycle"], links: { persistence: "/v1/missions/queue/persistence", flush: "/v1/missions/queue/persistence/flush", mission_inventory: "/v1/missions" } });
+      }
+      if (path === "/v1/missions/queue/persistence" && init.method === "GET") {
+        return jsonResponse({ ok: true, enabled: true, file_present: true, file_bytes: 128, schema_version: 1, state_digest: "q".repeat(64), integrity_verified: true, max_file_bytes: 64 * 1024 * 1024, registry_size: 0, jobs: [], startup_recoveries: [], automatic_resume: false, execution_scope: "single-process-api-worker", recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched", does_not_claim: ["distributed scheduling or lease fencing"], flush: "/v1/missions/queue/persistence/flush" });
+      }
       if (path === "/v1/missions/async-1" && init.method === "GET") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "succeeded", cancel_requested: false, progress: { phase: "succeeded", current_wave: 0, total_steps: 1, completed_steps: 1, active_steps: 0, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, trace_sequence: 4, last_event: "mission.completed" }, result: { mission_status: "succeeded" } });
       }
@@ -2627,6 +2651,9 @@ test("client exposes asynchronous mission submission, status, and cancellation",
       }
       if (path === "/v1/missions" && init.method === "GET") {
         return jsonResponse({ ok: true, missions: [{ mission_id: "async-1", status: "succeeded", cancel_requested: false, progress: { phase: "succeeded", current_wave: 0, total_steps: 1, completed_steps: 1, active_steps: 0, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, trace_sequence: 4, last_event: "mission.completed" }, summary: { total_steps: 1, completed_steps: 1, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, result_available: true }, poll: "/v1/missions/async-1", cancel: "/v1/missions/async-1/cancel" }], returned: 1, total_matching: 1, limit: 5, truncated: false, status_filter: "succeeded" });
+      }
+      if (path === "/v1/missions/queue/persistence/flush" && init.method === "POST") {
+        return jsonResponse({ ok: true, bytes: 128, queue: { ok: true, enabled: true, file_present: true, file_bytes: 128, schema_version: 1, state_digest: "q".repeat(64), integrity_verified: true, max_file_bytes: 64 * 1024 * 1024, registry_size: 0, jobs: [], startup_recoveries: [], automatic_resume: false, execution_scope: "single-process-api-worker", recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched", does_not_claim: ["external effect completion"], flush: "/v1/missions/queue/persistence/flush" }, request_id: "queue-flush-1", guarantees: ["the checkpoint is content-addressed and atomically replaced"] });
       }
       return jsonResponse({ ok: false, error: { code: "not_found", message: path } }, 404);
     },
@@ -2659,6 +2686,14 @@ test("client exposes asynchronous mission submission, status, and cancellation",
   const inventory = await client.missions("succeeded", 5);
   assert.equal(inventory.missions[0].mission_id, "async-1");
   assert.equal(inventory.missions[0].progress.completed_steps, 1);
+  const queue = await client.missionQueue();
+  assert.equal(queue.queue.jobs[0].state, "succeeded");
+  assert.equal(queue.queue.jobs[0].spec_returned, false);
+  const queuePersistence = await client.missionQueuePersistence();
+  assert.equal(queuePersistence.automatic_resume, false);
+  assert.equal(queuePersistence.integrity_verified, true);
+  const queueFlush = await client.flushMissionQueuePersistence();
+  assert.equal(queueFlush.bytes, 128);
   const cancelled = await client.cancelMission("async-1", "operator stop");
   assert.equal(cancelled.cancel_requested, true);
   assert.equal(cancelled.cancel_reason, "operator stop");

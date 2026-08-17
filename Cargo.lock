@@ -32,8 +32,10 @@ name = "bioprism-api"
 version = "0.1.0"
 dependencies = [
  "bioprism-devplat",
+ "bioprism-factory",
  "bioprism-ids",
  "bioprism-mcp",
+ "bioprism-scope",
  "serde",
  "serde_json",
  "sha2",

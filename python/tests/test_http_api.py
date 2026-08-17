@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionQueueFlushResult, MissionQueueInventory, MissionQueueStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -68,6 +68,39 @@ def developer_platform_status_payload() -> dict:
         "diagnostic_catalogue": {"clean": True, "checked": 0, "errors": 0, "warnings": 0, "finding_count": 0, "findings_returned": [], "omitted_findings": 0},
         "exit_code_audit": {"clean": True, "retry_decision_recoverable_from_code_alone": True, "divergence_count": 0, "divergences_returned": [], "omitted_divergences": 0},
         "limitations": ["foreign artifacts remain explicit"],
+    }
+
+
+def mission_queue_status_payload() -> dict:
+    return {
+        "ok": True,
+        "enabled": True,
+        "file_present": True,
+        "file_bytes": 128,
+        "schema_version": 1,
+        "state_digest": "a" * 64,
+        "integrity_verified": True,
+        "max_file_bytes": 64 * 1024 * 1024,
+        "registry_size": 1,
+        "jobs": [{
+            "mission_id": "async-1",
+            "resource_class": "evaluate",
+            "idempotency": "idempotent",
+            "idempotency_key": "k" * 64,
+            "priority": 8,
+            "max_attempts": 3,
+            "state": "succeeded",
+            "attempts": 1,
+            "attempts_remaining": 2,
+            "reason": None,
+            "spec_returned": False,
+        }],
+        "startup_recoveries": [],
+        "automatic_resume": False,
+        "execution_scope": "single-process-api-worker",
+        "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
+        "does_not_claim": ["distributed scheduling or lease fencing", "external effect completion"],
+        "flush": "/v1/missions/queue/persistence/flush",
     }
 
 
@@ -390,6 +423,10 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "progress": {"phase": "succeeded", "current_wave": 0, "total_steps": 1, "completed_steps": 1, "active_steps": 0, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "trace_sequence": 4, "last_event": "mission.completed"}, "summary": {"total_steps": 1, "completed_steps": 1, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "result_available": True}, "poll": "/v1/missions/async-1", "cancel": "/v1/missions/async-1/cancel", "trace": "/v1/missions/async-1/trace"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
         elif self.path == "/v1/missions/persistence":
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "event_log_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "terminal snapshots restore; queued and running jobs fail explicitly after restart", "flush": "/v1/missions/persistence/flush"})
+        elif self.path == "/v1/missions/queue":
+            self._send(200, {"ok": True, "schema": "bioprism-mission-queue/0.1", "queue": mission_queue_status_payload(), "guarantees": ["queue state is projected from the typed factory lifecycle", "a queued recovery record is not evidence that a worker has resumed"], "links": {"persistence": "/v1/missions/queue/persistence", "flush": "/v1/missions/queue/persistence/flush", "mission_inventory": "/v1/missions"}})
+        elif self.path == "/v1/missions/queue/persistence":
+            self._send(200, mission_queue_status_payload())
         elif self.path == "/v1/missions/async-1/claims":
             self._send(200, {"ok": True, "schema": "bioprism-mission-claim-lineage-response/0.1", "mission_id": "async-1", "claim_lineage": {"claims": [{"id": "observed", "claimable": True}], "readiness_claimed": False}})
         elif self.path.startswith("/v1/missions/async-1/trace"):
@@ -410,6 +447,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "queued", "cancel_requested": False})
         elif self.path == "/v1/missions/async-1/cancel":
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "running", "cancel_requested": True, "cancel_reason": body.get("reason")})
+        elif self.path == "/v1/missions/queue/persistence/flush":
+            self._send(200, {"ok": True, "bytes": 128, "queue": mission_queue_status_payload(), "request_id": "queue-flush-1", "guarantees": ["the checkpoint is content-addressed and atomically replaced", "a successful flush does not claim external effect completion"]})
         elif self.path in {"/v1/missions/persistence/flush", "/v1/events/persistence/flush"}:
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/operations/gate-reviews":
@@ -530,6 +569,15 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(typed_inventory.missions[0].progress.completed_steps, 1)
         self.assertIsInstance(client.mission_persistence(), MissionPersistenceStatus)
         self.assertIsInstance(client.flush_mission_persistence(), MissionPersistenceStatus)
+        queue_inventory = client.mission_queue()
+        self.assertIsInstance(queue_inventory, MissionQueueInventory)
+        self.assertEqual(queue_inventory.queue.jobs[0].state, "succeeded")
+        self.assertTrue(queue_inventory.queue.jobs[0].terminal)
+        queue_status = client.mission_queue_persistence()
+        self.assertIsInstance(queue_status, MissionQueueStatus)
+        self.assertFalse(queue_status.automatic_resume)
+        self.assertTrue(queue_status.integrity_verified)
+        self.assertIsInstance(client.flush_mission_queue_persistence(), MissionQueueFlushResult)
         with self.assertRaises(ArgumentError):
             client.wait_mission("async-1", timeout=0)
         with self.assertRaises(MissionWaitTimeout) as wait_error:
@@ -1254,6 +1302,13 @@ class HttpApiClientTests(unittest.TestCase):
             typed_inventory = await client.mission_inventory(status="succeeded", limit=5)
             self.assertIsInstance(typed_inventory, MissionInventoryPage)
             self.assertTrue(typed_inventory.missions[0].terminal)
+            queue_inventory = await client.mission_queue()
+            self.assertIsInstance(queue_inventory, MissionQueueInventory)
+            self.assertFalse(queue_inventory.queue.automatic_resume)
+            queue_status = await client.mission_queue_persistence()
+            self.assertIsInstance(queue_status, MissionQueueStatus)
+            self.assertTrue(queue_status.integrity_verified)
+            self.assertIsInstance(await client.flush_mission_queue_persistence(), MissionQueueFlushResult)
             snapshot = await client.operations_snapshot(limit=2)
             self.assertIsInstance(snapshot, OperationsSnapshot)
             self.assertEqual(snapshot.limit, 2)

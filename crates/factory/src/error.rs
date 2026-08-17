@@ -37,4 +37,23 @@ pub enum FactoryError {
 
     #[error("job {job_id} is already terminal ({state})")]
     AlreadyTerminal { job_id: String, state: String },
+
+    #[error("job-store snapshot is invalid: {reason}")]
+    InvalidSnapshot { reason: String },
+
+    #[error("job-store snapshot digest mismatch: expected {expected}, computed {actual}")]
+    SnapshotDigestMismatch { expected: String, actual: String },
+
+    #[error("job-store snapshot is {bytes} bytes, above the {max_bytes}-byte bound")]
+    SnapshotTooLarge { bytes: usize, max_bytes: usize },
+
+    #[error("job-store snapshot {operation} failed for {path}: {reason}")]
+    SnapshotIo {
+        operation: String,
+        path: String,
+        reason: String,
+    },
+
+    #[error("job-store snapshot could not be serialized: {reason}")]
+    SnapshotSerialization { reason: String },
 }

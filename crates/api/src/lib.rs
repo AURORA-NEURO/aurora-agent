@@ -7,8 +7,9 @@
 //! envelopes; an operator-owned worker polls, retries, sends, and acknowledges those envelopes.
 //!
 //! This is intentionally explicit about what it does not provide: HTTP/2 gRPC, TLS termination,
-//! external delivery workers, durable storage, and authentication providers remain deployment
-//! concerns.  The local boundary still enforces body/header limits, root confinement through the
+//! distributed durable storage, external delivery workers, and authentication providers remain
+//! deployment concerns. The mission queue has a bounded local checkpoint, but it is not a
+//! distributed scheduler. The local boundary still enforces body/header limits, root confinement through the
 //! MCP server, constant-time bearer comparison, deterministic cursors, retention-gap reporting,
 //! HMAC-SHA256 signatures, and idempotent acknowledgement.
 //!
@@ -32,7 +33,7 @@ pub use router::{
     ApiConfig, ApiRouter, API_VERSION, DEFAULT_EVENT_CAPACITY, DEFAULT_MAX_BODY_BYTES,
     DEFAULT_MAX_HEADER_BYTES, MAX_MISSION_JOBS, MAX_MISSION_STATE_FILE_BYTES,
     MAX_PERSISTED_MISSION_RESULT_BYTES, MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES,
-    MISSION_STATE_SCHEMA_VERSION,
+    MISSION_QUEUE_LEASE_DURATION_NANOS, MISSION_STATE_SCHEMA_VERSION,
 };
 
 use std::io::{BufReader, Write};

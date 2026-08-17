@@ -324,7 +324,8 @@ The repository ships `bioprism-api` for deployments that need a network boundary
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <visible-token> \
-  --mission-state .local/mission-state.json --event-state .local/event-state.json \
+  --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
+  --event-state .local/event-state.json \
   --reconciliation-state .local/reconciliation-state.json
 ```
 
@@ -336,6 +337,12 @@ are marked failed after restart instead of being falsely resumed. Mission checkp
 2 with a content SHA-256 `state_digest`; schema-1 snapshots are
 accepted for migration and rewritten after startup, while tampered schema-2 state is rejected.
 Persistence status reports both the digest and observation-time `integrity_verified` state.
+`--mission-queue-state` adds a separate content-addressed factory checkpoint for mission leases,
+idempotency class, attempts, staged/committed output boundaries, and explicit startup recovery.
+`GET /v1/missions/queue` exposes that queue projection without returning the original mission
+specification. Expired idempotent work is requeued and ambiguous non-idempotent work is quarantined,
+but no recovered job is automatically dispatched; the checkpoint is a single-process recovery
+image, not distributed scheduling, provider authentication, or proof of external effect completion.
 `--event-state` checkpoints retained events, subscription metadata, and signed pending outbox rows while never persisting
 webhook secrets; the current schema-5 checkpoint is content-addressed with a SHA-256
 `state_digest`, and startup rejects tampering before restoring rows. It also retains a bounded,

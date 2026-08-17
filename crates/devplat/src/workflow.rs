@@ -203,6 +203,131 @@ fn tool_role(tool: &str) -> &'static str {
     }
 }
 
+/// A conservative execution classification used for planning and authorization review.
+///
+/// This is deliberately lexical metadata, just like `tool_role`: it does not inspect a provider
+/// implementation or prove that a particular domain operation is safe. Unknown names remain
+/// `review_required`; the catalogue must never turn missing semantic knowledge into a benign
+/// read-only claim.
+fn execution_resource_class(tool: &str) -> &'static str {
+    let name = tool.to_ascii_lowercase();
+    if name.contains("compile") {
+        "compile"
+    } else if name.contains("ingest") || name.contains("import") || name.contains("acquisition") {
+        "ingest"
+    } else if name.contains("sandbox") || name.contains("security") {
+        "sandbox"
+    } else if name.contains("index") || name.contains("catalog") || name.contains("register") {
+        "index"
+    } else if name.contains("mutate") || name.contains("apply") || name.contains("publish") {
+        "mutate"
+    } else {
+        "evaluate"
+    }
+}
+
+fn execution_side_effect_posture(tool: &str) -> (&'static str, &'static str) {
+    let name = tool.to_ascii_lowercase();
+    if [
+        "mutate", "apply", "publish", "delivery", "submit", "accept", "release", "delete",
+        "write", "upload", "send", "rebind",
+    ]
+    .iter()
+    .any(|word| name.contains(word))
+    {
+        (
+            "potential_external_effect",
+            "non_idempotent_requires_explicit_authorization",
+        )
+    } else if matches!(tool_role(tool), "discover" | "validate_or_review") {
+        ("no_declared_external_effect", "idempotent_after_preflight")
+    } else {
+        ("unknown_requires_review", "unknown_requires_review")
+    }
+}
+
+fn execution_contract(tool: &str, available: bool) -> Value {
+    let (side_effects, idempotency) = execution_side_effect_posture(tool);
+    let dispatch = if !available {
+        "blocked_missing_tool_definition"
+    } else if side_effects == "potential_external_effect" {
+        "authorization_and_provider_review_required"
+    } else if side_effects == "unknown_requires_review" {
+        "semantic_side_effect_review_required"
+    } else {
+        "authoritative_preflight_required"
+    };
+    json!({
+        "resource_class": execution_resource_class(tool),
+        "idempotency": idempotency,
+        "side_effects": side_effects,
+        "dispatch": dispatch,
+        "providers": {
+            "mcp_in_process": {
+                "state": if available { "available" } else { "unavailable" },
+                "scope": "bounded_bioprism_mcp_dispatcher",
+            },
+            "subprocess": {
+                "state": "unavailable",
+                "reason": "subprocess provider is declared but not implemented",
+            },
+            "container": {
+                "state": "unavailable",
+                "reason": "container provider is declared but not implemented",
+            },
+        },
+        "claims": {
+            "provider_ready": false,
+            "side_effect_safe": side_effects == "no_declared_external_effect",
+            "readiness_claimed": false,
+        },
+    })
+}
+
+fn workflow_execution_boundary(tool_contracts: &[Value], all_tools_available: bool) -> Value {
+    let mut potential_effect_count = 0usize;
+    let mut unknown_count = 0usize;
+    let mut unavailable_count = 0usize;
+    for contract in tool_contracts {
+        match contract
+            .pointer("/execution_contract/side_effects")
+            .and_then(Value::as_str)
+        {
+            Some("potential_external_effect") => potential_effect_count += 1,
+            Some("unknown_requires_review") => unknown_count += 1,
+            _ => {}
+        }
+        if contract
+            .pointer("/execution_contract/providers/mcp_in_process/state")
+            .and_then(Value::as_str)
+            == Some("unavailable")
+        {
+            unavailable_count += 1;
+        }
+    }
+    let side_effect_posture = if potential_effect_count > 0 {
+        "authorization_required"
+    } else if unknown_count > 0 {
+        "review_required"
+    } else {
+        "no_declared_external_effect"
+    };
+    json!({
+        "provider_boundary": {
+            "in_process_mcp": if all_tools_available { "available_for_bounded_dispatch" } else { "blocked_by_missing_tools" },
+            "subprocess": "unavailable",
+            "container": "unavailable",
+        },
+        "queue_resource_class": "evaluate",
+        "side_effect_posture": side_effect_posture,
+        "potential_external_effect_tools": potential_effect_count,
+        "unknown_semantics_tools": unknown_count,
+        "unavailable_provider_tools": unavailable_count,
+        "dispatch": "blocked_until_authoritative_preflight_and_explicit_policy",
+        "readiness_claimed": false,
+    })
+}
+
 fn title_for(id: &str) -> String {
     id.split('_')
         .filter(|word| !word.is_empty())
@@ -283,6 +408,7 @@ fn tool_contracts(
                 "schema_state": schema_state,
                 "schema_digest": schema_digest,
                 "argument_contract": argument_contract(schema),
+                "execution_contract": execution_contract(tool, is_available),
                 "argument_validation": "authoritative_mcp_preflight_required",
                 "evidence": {
                     "capture": ["arguments_digest", "result_status", "result_digest"],
@@ -491,6 +617,7 @@ fn group_workflow(
             "claim_binding": "claims must point to explicit completed-step evidence; refusal and omission remain non-support",
             "unresolved_work": "must remain visible until caller review resolves or accepts it",
         },
+        "execution_boundary": workflow_execution_boundary(&tool_contracts, all_tools_available),
         "completion_contract": {
             "required_steps": "succeeded",
             "optional_steps": "succeeded_or_explicit_refusal_or_omission",
@@ -516,6 +643,7 @@ fn group_workflow(
         },
         "tool_contracts": tool_contracts,
         "domain_contract": domain_contract,
+        "execution_contract": domain_contract["execution_boundary"],
         "domain_contract_digest": domain_contract_digest,
         "recommended_stages": recommended_stages,
         "instantiation": {
@@ -941,6 +1069,7 @@ pub fn instantiate_domain_workflow(
         },
         "domain_contract": workflow["domain_contract"],
         "domain_contract_digest": workflow["domain_contract_digest"],
+        "execution_contract": workflow["execution_contract"],
         "evidence_plan": workflow_evidence_plan,
         "preflight": {
             "required": true,
@@ -1168,6 +1297,7 @@ pub fn scaffold_domain_workflow(
         "mission": instantiation["mission"],
         "domain_contract": instantiation["domain_contract"],
         "domain_contract_digest": instantiation["domain_contract_digest"],
+        "execution_contract": instantiation["execution_contract"],
         "evidence_plan": instantiation["evidence_plan"],
         "execution": "not_started",
         "readiness_claimed": false,
@@ -1238,6 +1368,21 @@ mod tests {
             .unwrap()
             .iter()
             .all(|workflow| workflow["domain_contract"].is_object()));
+        assert!(report["workflows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|workflow| workflow["execution_contract"].is_object()));
+        assert!(report["workflows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|workflow| workflow["tool_contracts"].as_array().unwrap())
+            .all(|contract| {
+                contract["execution_contract"]["providers"]["subprocess"]["state"]
+                    == "unavailable"
+                    && contract["execution_contract"]["claims"]["readiness_claimed"] == false
+            }));
         assert_eq!(
             report["workflows"][0]["tool_contracts"][1]["schema_state"],
             "unavailable"
@@ -1260,6 +1405,11 @@ mod tests {
         });
         let report = instantiate_domain_workflow(&catalogue, &tools, &request).unwrap();
         assert_eq!(report["execution"], "not_started");
+        assert_eq!(report["execution_contract"]["readiness_claimed"], false);
+        assert_eq!(
+            report["execution_contract"]["provider_boundary"]["container"],
+            "unavailable"
+        );
         assert_eq!(
             report["selection"]["selected_tools"][0],
             "onco_boundary_check"
@@ -1352,6 +1502,11 @@ mod tests {
         assert_eq!(output["mission"]["policy"]["execute"], false);
         assert_eq!(output["execution"], "not_started");
         assert_eq!(output["readiness_claimed"], false);
+        assert_eq!(output["execution_contract"]["readiness_claimed"], false);
+        assert_eq!(
+            output["execution_contract"]["provider_boundary"]["subprocess"],
+            "unavailable"
+        );
         assert_eq!(output["instantiation"]["workflow"], "domain_workflow_instantiate");
         assert_eq!(output["mission"]["workflow_binding"]["workflow_id"], "oncology_workflows");
         assert_eq!(output["scaffold_digest"].as_str().unwrap().len(), 64);

@@ -164,6 +164,9 @@ from .mission import (
     MissionExecutionProvenance,
     MissionInventoryPage,
     MissionPersistenceStatus,
+    MissionQueueFlushResult,
+    MissionQueueInventory,
+    MissionQueueStatus,
     MissionPolicy,
     MissionPreflight,
     MissionRequest,
@@ -1217,6 +1220,25 @@ class ApiClient:
 
         return MissionPersistenceStatus.from_wire(
             self.request("POST", "/v1/missions/persistence/flush", {})
+        )
+
+    def mission_queue(self) -> MissionQueueInventory:
+        """Return the bounded queue projection without exposing checkpointed job specifications."""
+
+        return MissionQueueInventory.from_wire(self.request("GET", "/v1/missions/queue"))
+
+    def mission_queue_persistence(self) -> MissionQueueStatus:
+        """Inspect the queue checkpoint digest, recovery rows, and no-resume boundary."""
+
+        return MissionQueueStatus.from_wire(
+            self.request("GET", "/v1/missions/queue/persistence")
+        )
+
+    def flush_mission_queue_persistence(self) -> MissionQueueFlushResult:
+        """Atomically checkpoint the queue and return the resulting integrity projection."""
+
+        return MissionQueueFlushResult.from_wire(
+            self.request("POST", "/v1/missions/queue/persistence/flush", {})
         )
 
     def missions(self, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
@@ -4834,6 +4856,21 @@ class AsyncApiClient:
         """Async forced checkpoint with typed bounded status."""
 
         return await asyncio.to_thread(self.client.flush_mission_persistence)
+
+    async def mission_queue(self) -> MissionQueueInventory:
+        """Async typed projection of the bounded mission queue inventory."""
+
+        return await asyncio.to_thread(self.client.mission_queue)
+
+    async def mission_queue_persistence(self) -> MissionQueueStatus:
+        """Async inspection of queue checkpoint integrity and startup recoveries."""
+
+        return await asyncio.to_thread(self.client.mission_queue_persistence)
+
+    async def flush_mission_queue_persistence(self) -> MissionQueueFlushResult:
+        """Async atomic queue checkpoint flush."""
+
+        return await asyncio.to_thread(self.client.flush_mission_queue_persistence)
 
     async def delivery_page(self, subscription_id: str, *, after: int = 0, limit: int = 100) -> DeliveryPage:
         """Async typed cursor page over pending signed deliveries."""
