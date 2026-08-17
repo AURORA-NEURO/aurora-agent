@@ -1,6 +1,6 @@
 //! `bioprism-api` — bounded HTTP/REST and event gateway.
 //!
-//! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--event-state <file>] [--evidence-state <file>]`
+//! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>]`
 
 use bioprism_api::{serve, ApiConfig, ApiRouter};
 use std::net::TcpListener;
@@ -15,6 +15,7 @@ fn main() {
     let mut mission_state_path = None;
     let mut event_state_path = None;
     let mut evidence_state_path = None;
+    let mut reconciliation_state_path = None;
     let mut max_body_bytes = ApiConfig::default().max_body_bytes;
     let mut event_capacity = ApiConfig::default().event_capacity;
 
@@ -38,6 +39,10 @@ fn main() {
             "--evidence-state" => {
                 evidence_state_path = Some(PathBuf::from(value("--evidence-state", &mut arguments)))
             }
+            "--reconciliation-state" => {
+                reconciliation_state_path =
+                    Some(PathBuf::from(value("--reconciliation-state", &mut arguments)))
+            }
             "--max-body-bytes" => {
                 max_body_bytes = value("--max-body-bytes", &mut arguments)
                     .parse()
@@ -57,13 +62,14 @@ fn main() {
             "-h" | "--help" => {
                 println!(
                     "bioprism-api — bounded HTTP/REST and event gateway\n\n\
-                     USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--event-state <file>] [--evidence-state <file>]\n\n\
+                     USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--mission-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>]\n\n\
                      GET /healthz and /readyz are public. Other /v1 routes require --token when configured.\n\
                      REST tools: POST /v1/tools/<name> with a JSON object body.\n\
                      JSON-RPC: POST /v1/rpc. Events: GET /v1/events or /v1/events/stream.\n\
                      Missions: POST /v1/missions; --mission-state enables bounded restart-aware snapshots.\n\
                      Events: --event-state enables bounded event, subscription, and signed outbox checkpoints; secrets remain process-local.\n\
                      Evidence: --evidence-state enables bounded restart-safe imports of independently verified mission bundles.\n\
+                     Reconciliation: --reconciliation-state enables bounded restart-safe imports of digest-valid workflow reconciliation reports.\n\
                      Webhooks: register, poll signed deliveries, retry, and acknowledge.\n\
                      The gateway does not terminate TLS, speak gRPC, or send arbitrary outbound requests."
                 );
@@ -87,6 +93,7 @@ fn main() {
         mission_state_path,
         event_state_path,
         evidence_state_path,
+        reconciliation_state_path,
         ..ApiConfig::default()
     };
     let router = match ApiRouter::new(root, config) {

@@ -4733,6 +4733,62 @@ export interface DomainWorkflowReconcileResult extends JsonObject {
   limitations: string[];
 }
 
+/** Import a digest-bound reconciliation report into the bounded audit registry. */
+export interface DomainWorkflowReconciliationImportArgs extends JsonObject {
+  record: JsonObject;
+}
+
+export interface DomainWorkflowReconciliationImportResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconciliation_import";
+  reconciliation_digest: string;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+/** Bounded indexed lookup over retained domain-workflow reconciliation reports. */
+export interface DomainWorkflowReconciliationQueryOptions extends JsonObject {
+  mission_id?: string;
+  workflow_id?: string;
+  mission_plan_digest?: string;
+  completion_status?: string;
+  after?: string;
+  max_items?: number;
+  include_records?: boolean;
+}
+
+export interface DomainWorkflowReconciliationQueryResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconciliation_query";
+  filters: DomainWorkflowReconciliationQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowReconciliationGetResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconciliation_get";
+  reconciliation_digest: string;
+  record: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;

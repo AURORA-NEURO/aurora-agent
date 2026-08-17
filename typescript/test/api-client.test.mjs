@@ -4318,4 +4318,81 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
     },
   });
   assert.equal((await mcpReconcile.domainWorkflowReconcile(reconciliationArgs)).mcp.result.structuredContent.completion.ready, true);
+
+  const reconciliationDigest = reconciliation.reconciliation_digest;
+  const importReport = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-reconciliation-import/0.1",
+    workflow: "domain_workflow_reconciliation_import",
+    reconciliation_digest: reconciliationDigest,
+    created: true,
+    already_present: false,
+    registry_generation: 1,
+    registry_size: 1,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const queryReport = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-reconciliation-query/0.1",
+    workflow: "domain_workflow_reconciliation_query",
+    filters: { mission_id: "ts-workflow", max_items: 8, include_records: true },
+    registry_generation: 1,
+    registry_size: 1,
+    rows: [{ reconciliation_digest: reconciliationDigest, record: reconciliation }],
+    next_after: null,
+    has_more: false,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const getReport = {
+    ok: true,
+    schema: "bioprism-api/domain-workflow-reconciliation-record/0.1",
+    workflow: "domain_workflow_reconciliation_get",
+    reconciliation_digest: reconciliationDigest,
+    record: reconciliation,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const restRegistry = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/domain-workflows/reconciliations" && init.method === "POST") {
+        assert.deepEqual(JSON.parse(init.body), { record: reconciliation });
+        return jsonResponse(importReport, 201);
+      }
+      if (url.pathname === "/v1/domain-workflows/reconciliations" && init.method === "GET") {
+        assert.equal(url.searchParams.get("mission_id"), "ts-workflow");
+        assert.equal(url.searchParams.get("limit"), "8");
+        assert.equal(url.searchParams.get("include_records"), "true");
+        return jsonResponse(queryReport);
+      }
+      assert.equal(url.pathname, `/v1/domain-workflows/reconciliations/${reconciliationDigest}`);
+      assert.equal(init.method, "GET");
+      return jsonResponse(getReport);
+    },
+  });
+  assert.equal((await restRegistry.domainWorkflowReconciliationImport({ record: reconciliation })).created, true);
+  assert.equal((await restRegistry.domainWorkflowReconciliationQuery({ mission_id: "ts-workflow", max_items: 8, include_records: true })).rows.length, 1);
+  assert.equal((await restRegistry.domainWorkflowReconciliationGet(reconciliationDigest)).record.workflow, "domain_workflow_reconcile");
+
+  const mcpRegistry = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const name = new URL(String(input)).pathname.split("/").at(-1);
+      const body = JSON.parse(init.body);
+      if (name === "domain_workflow_reconciliation_import") assert.deepEqual(body, { record: reconciliation });
+      if (name === "domain_workflow_reconciliation_query") assert.equal(body.mission_id, "ts-workflow");
+      if (name === "domain_workflow_reconciliation_get") assert.equal(body.reconciliation_digest, reconciliationDigest);
+      const payload = name.endsWith("import") ? importReport : name.endsWith("query") ? queryReport : getReport;
+      return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: payload } } });
+    },
+  });
+  assert.equal((await mcpRegistry.domainWorkflowReconciliationImportTool({ record: reconciliation })).mcp.result.structuredContent.created, true);
+  assert.equal((await mcpRegistry.domainWorkflowReconciliationQueryTool({ mission_id: "ts-workflow" })).mcp.result.structuredContent.rows.length, 1);
+  assert.equal((await mcpRegistry.domainWorkflowReconciliationGetTool(reconciliationDigest)).mcp.result.structuredContent.record.workflow, "domain_workflow_reconcile");
 });

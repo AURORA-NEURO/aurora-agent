@@ -86,6 +86,13 @@ Convenience methods currently cover:
 - `domainWorkflowReconcileQuery` / `domainWorkflowReconcile`: correlate a retained mission report
   or evidence bundle with an instantiation and return typed integrity, per-step evidence, trace,
   completion, and omission posture. The result remains review-required and non-executing.
+- `domainWorkflowReconciliationImport` / `domainWorkflowReconciliationQuery` /
+  `domainWorkflowReconciliationGet` expose the durable digest-bound audit registry over REST;
+  `domainWorkflowReconciliationImportTool` / `...QueryTool` / `...GetTool` expose the same bounded
+  operations through MCP. Query rows are cursor-ordered and filterable by mission, workflow, plan
+  digest, and completion status. Configure `--reconciliation-state` on the API for restart-safe
+  persistence; lookup and restore never resume execution or imply provenance, scientific, clinical,
+  safety, or release validity.
 
 - `traceOtelIngest`: bounded OTLP JSON import with typed normalized events, source-to-IR mapping,
   semantic-loss categories, and compilation-readiness reporting;

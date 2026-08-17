@@ -14,7 +14,9 @@ mod exit;
 mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
-use bioprism_devplat::{EvidenceBundleRegistry, verify_mission_evidence_bundle};
+use bioprism_devplat::{
+    DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry, verify_mission_evidence_bundle,
+};
 use bioprism_devplat::{
     build_domain_workflow_catalogue, instantiate_domain_workflow, reconcile_domain_workflow,
 };
@@ -157,6 +159,30 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             mission,
             evidence_bundle,
         } => workflow_reconcile(instantiation, mission.as_deref(), evidence_bundle.as_deref()),
+        Command::WorkflowReconciliationImport {
+            record,
+            store,
+            dry_run,
+        } => workflow_reconciliation_import(record, store, *dry_run),
+        Command::WorkflowReconciliationQuery {
+            store,
+            mission_id,
+            workflow_id,
+            mission_plan_digest,
+            completion_status,
+            after,
+            limit,
+            include_records,
+        } => workflow_reconciliation_query(
+            store,
+            mission_id.as_deref(),
+            workflow_id.as_deref(),
+            mission_plan_digest.as_deref(),
+            completion_status.as_deref(),
+            after.as_deref(),
+            *limit,
+            *include_records,
+        ),
     }
 }
 
@@ -268,6 +294,111 @@ fn workflow_reconcile(
         ready,
     );
     Ok(Outcome::ok(report, human).failing_if(!ready))
+}
+
+fn load_workflow_reconciliation_registry(
+    store_path: &Path,
+) -> CliResult<DomainWorkflowReconciliationRegistry> {
+    if !store_path.exists() {
+        return Ok(DomainWorkflowReconciliationRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    DomainWorkflowReconciliationRegistry::from_snapshot(&snapshot)
+        .map_err(|error| CliError::invalid(error.to_string()).about(store_path.display().to_string()))
+}
+
+fn workflow_reconciliation_import(
+    record_path: &Path,
+    store_path: &Path,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let record = io::read_json(record_path)?;
+    let mut registry = load_workflow_reconciliation_registry(store_path)?;
+    let report = registry.import(&record).map_err(|error| {
+        CliError::invalid(error.to_string()).about(record_path.display().to_string())
+    })?;
+    let snapshot = registry
+        .snapshot()
+        .map_err(|error| CliError::internal(error.to_string()).about(store_path.display().to_string()))?;
+    let artifact = if report.get("created").and_then(Value::as_bool) == Some(true) {
+        Some(io::write_artifact(store_path, &snapshot, dry_run)?)
+    } else {
+        None
+    };
+    let mut document = report;
+    document["store"] = json!(store_path.display().to_string());
+    document["record"] = json!(record_path.display().to_string());
+    document["dry_run"] = json!(dry_run);
+    document["state_digest"] = snapshot.get("state_digest").cloned().unwrap_or(Value::Null);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let digest = document
+        .get("reconciliation_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "workflow reconciliation {}\n  digest: {}\n  registry: {} (generation {})\n  state: {}\n\nNext: bioprism workflow reconciliation-query --store {}\n",
+        if document.get("created").and_then(Value::as_bool) == Some(true) {
+            if dry_run { "planned for import" } else { "imported" }
+        } else {
+            "already present"
+        },
+        digest,
+        store_path.display(),
+        document
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        if dry_run { "not written (dry run)" } else { "checkpoint updated" },
+        store_path.display()
+    );
+    Ok(Outcome::ok(document, human))
+}
+
+fn workflow_reconciliation_query(
+    store_path: &Path,
+    mission_id: Option<&str>,
+    workflow_id: Option<&str>,
+    mission_plan_digest: Option<&str>,
+    completion_status: Option<&str>,
+    after: Option<&str>,
+    limit: usize,
+    include_records: bool,
+) -> CliResult<Outcome> {
+    let registry = load_workflow_reconciliation_registry(store_path)?;
+    let report = registry
+        .query(
+            mission_id,
+            workflow_id,
+            mission_plan_digest,
+            completion_status,
+            after,
+            limit,
+            include_records,
+        )
+        .map_err(|error| CliError::invalid(error.to_string()).about(store_path.display().to_string()))?;
+    let rows = report.get("rows").and_then(Value::as_array).map_or(0, Vec::len);
+    let next_after = report
+        .get("next_after")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let human = format!(
+        "workflow reconciliation registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism workflow reconciliation-query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        next_after,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
 }
 
 fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {

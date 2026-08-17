@@ -23,6 +23,11 @@ import type {
   DomainWorkflowInstantiateResult,
   DomainWorkflowReconcileArgs,
   DomainWorkflowReconcileResult,
+  DomainWorkflowReconciliationImportArgs,
+  DomainWorkflowReconciliationImportResult,
+  DomainWorkflowReconciliationQueryOptions,
+  DomainWorkflowReconciliationQueryResult,
+  DomainWorkflowReconciliationGetResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -473,6 +478,43 @@ export class ApiClient {
       throw new ArgumentError("workflow reconciliation requires mission_report or evidence_bundle");
     }
     return this.request<DomainWorkflowReconcileResult>("POST", "/v1/domain-workflows/reconcile", args, options);
+  }
+
+  /** Import one digest-bound reconciliation report into the durable audit surface. */
+  async domainWorkflowReconciliationImport(
+    args: DomainWorkflowReconciliationImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowReconciliationImportResult> {
+    if (!isObject(args) || !isObject(args.record)) throw new ArgumentError("workflow reconciliation record must be a JSON object");
+    return this.request<DomainWorkflowReconciliationImportResult>("POST", "/v1/domain-workflows/reconciliations", args, options);
+  }
+
+  /** Query retained reconciliation index rows without re-executing or re-evaluating a mission. */
+  async domainWorkflowReconciliationQuery(
+    args: DomainWorkflowReconciliationQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowReconciliationQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("workflow reconciliation query arguments must be a JSON object");
+    for (const [name, value] of [["mission_id", args.mission_id], ["workflow_id", args.workflow_id], ["mission_plan_digest", args.mission_plan_digest], ["completion_status", args.completion_status], ["after", args.after]] as const) {
+      if (value !== undefined && typeof value !== "string") throw new ArgumentError(`${name} must be a string`);
+    }
+    if (args.include_records !== undefined && typeof args.include_records !== "boolean") throw new ArgumentError("include_records must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    const query = new URLSearchParams({ limit: String(maxItems), include_records: String(args.include_records ?? false) });
+    for (const [name, value] of [["mission_id", args.mission_id], ["workflow_id", args.workflow_id], ["mission_plan_digest", args.mission_plan_digest], ["completion_status", args.completion_status], ["after", args.after]] as const) {
+      if (value !== undefined) query.set(name, value);
+    }
+    return this.request<DomainWorkflowReconciliationQueryResult>("GET", `/v1/domain-workflows/reconciliations?${query.toString()}`, undefined, options);
+  }
+
+  /** Fetch one retained reconciliation report by its SHA-256 content digest. */
+  async domainWorkflowReconciliationGet(
+    reconciliationDigest: string,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowReconciliationGetResult> {
+    const digest = pathSegment(reconciliationDigest, "reconciliation digest");
+    return this.request<DomainWorkflowReconciliationGetResult>("GET", `/v1/domain-workflows/reconciliations/${encodeURIComponent(digest)}`, undefined, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */
@@ -934,6 +976,32 @@ export class ApiClient {
       throw new ArgumentError("workflow reconciliation requires mission_report or evidence_bundle");
     }
     return this.callTool<DomainWorkflowReconcileResult>("domain_workflow_reconcile", args, options);
+  }
+
+  async domainWorkflowReconciliationImportTool(
+    args: DomainWorkflowReconciliationImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowReconciliationImportResult>> {
+    if (!isObject(args) || !isObject(args.record)) throw new ArgumentError("workflow reconciliation record must be a JSON object");
+    return this.callTool<DomainWorkflowReconciliationImportResult>("domain_workflow_reconciliation_import", args, options);
+  }
+
+  async domainWorkflowReconciliationQueryTool(
+    args: DomainWorkflowReconciliationQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowReconciliationQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("workflow reconciliation query arguments must be a JSON object");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    return this.callTool<DomainWorkflowReconciliationQueryResult>("domain_workflow_reconciliation_query", { ...args, max_items: maxItems }, options);
+  }
+
+  async domainWorkflowReconciliationGetTool(
+    reconciliationDigest: string,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowReconciliationGetResult>> {
+    const digest = pathSegment(reconciliationDigest, "reconciliation digest");
+    return this.callTool<DomainWorkflowReconciliationGetResult>("domain_workflow_reconciliation_get", { reconciliation_digest: digest }, options);
   }
 
   async missionEvaluatorDiscover(args: MissionEvaluatorDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvaluatorDiscoverResult>> {

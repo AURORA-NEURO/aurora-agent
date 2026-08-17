@@ -575,6 +575,14 @@ invent defaults:
   `Workspace` expose sync/async REST and MCP helpers; the typed report separates integrity validity,
   per-step evidence retention, completion status, and review-required posture. Summary-only bundles
   remain verifiable artifacts but cannot become completion evidence.
+- `DomainWorkflowReconciliationImportRequest`, `DomainWorkflowReconciliationQueryRequest`, and
+  `DomainWorkflowReconciliationGetRequest` expose the bounded durable reconciliation registry.
+  `ApiClient`/`AsyncApiClient` use the REST import/query/get routes, while `Workspace`/
+  `AsyncWorkspace` and the `*_tool` methods use the MCP bridge. Typed reports preserve idempotency,
+  digest-ordered cursor rows, mission/workflow/plan/status filters, and exact content-hash lookup.
+  Configure `--reconciliation-state` for restart-safe API persistence; restored reports remain
+  non-executing audit evidence and never become provenance, scientific, clinical, safety, or release
+  approval.
 - `ApiClient.route_review_evidence(...)` and `AsyncApiClient.route_review_evidence(...)` expose
   bounded retained event evidence for that exact id as `RouteReviewEvidence`; `event_page(...)`,
   `event_stream(...)`, and raw `events(...)` also accept `review_id=...` for transport-native

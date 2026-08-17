@@ -233,6 +233,7 @@ pub mod walkthrough;
 pub mod workbench;
 pub mod workflow;
 pub mod workflow_reconciliation;
+pub mod workflow_reconciliation_registry;
 
 pub use audit::{
     catalogues_are_disjoint, findings, recipes_are_all_in_tree, unimplemented_titles,
@@ -303,6 +304,15 @@ pub use evidence_registry::{
     EVIDENCE_REGISTRY_QUERY_SCHEMA_VERSION, EVIDENCE_REGISTRY_SCHEMA_VERSION,
     MAX_EVIDENCE_REGISTRY_BUNDLES, MAX_EVIDENCE_REGISTRY_BYTES,
     MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+};
+pub use workflow_reconciliation_registry::{
+    DomainWorkflowReconciliationRegistry, DomainWorkflowReconciliationRegistryError,
+    DOMAIN_WORKFLOW_RECONCILIATION_IMPORT_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_RECONCILIATION_QUERY_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_RECONCILIATION_REGISTRY_SCHEMA_VERSION,
+    MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+    MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES,
+    MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
 };
 pub use execution_provenance::{
     audit_execution_provenance, DelegatedCheckEvidence, ExecutionProvenanceAudit,

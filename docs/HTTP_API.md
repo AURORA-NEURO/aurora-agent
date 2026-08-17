@@ -5,7 +5,8 @@ available as a library (`bioprism_api::ApiRouter`) and as the `bioprism-api` bin
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes> \
-  --mission-state .local/mission-state.json --event-state .local/event-state.json
+  --mission-state .local/mission-state.json --event-state .local/event-state.json \
+  --reconciliation-state .local/reconciliation-state.json
 ```
 
 The gateway is intentionally bounded and one-request-per-connection. Headers default to 32 KiB,
@@ -27,6 +28,11 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/domain-workflows` | Build one deterministic, digest-bound workflow template for every capability group |
 | `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
 | `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
+| `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
+| `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows |
+| `GET /v1/domain-workflows/reconciliations/{reconciliation_digest}` | Fetch one digest-verified reconciliation report |
+| `GET /v1/domain-workflows/reconciliations/persistence` | Inspect reconciliation checkpoint integrity, generation, and retention bounds |
+| `POST /v1/domain-workflows/reconciliations/persistence/flush` | Force an atomic reconciliation registry checkpoint |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
@@ -110,6 +116,18 @@ summary-only omissions, and `completion.status`. `completion.ready` is true only
 required step succeeded with retained raw output and the correlated plan/evidence artifact is
 structurally valid. A verified summary-only bundle is intentionally `unverified`, not complete;
 all reports remain review-required and non-claiming.
+
+The reconciliation registry is a bounded, content-addressed audit index layered on that projection.
+`POST /v1/domain-workflows/reconciliations` accepts `{ "record": <domain_workflow_reconcile> }`,
+recomputes the report digest, and returns an idempotent import report. The query route returns compact
+rows ordered by `reconciliation_digest`; filters are structural (`mission_id`, `workflow_id`,
+`mission_plan_digest`, and `completion_status`) and `include_records=true` is opt-in because full
+reports consume the 32 MiB checkpoint bound. `GET .../{reconciliation_digest}` performs an exact
+content-hash lookup. Configure `--reconciliation-state <file>` for atomic restart-safe persistence;
+startup rejects a tampered snapshot or report, and `/persistence/flush` is an explicit checkpoint
+operation. Neither import, query, lookup, nor restore dispatches, retries, resumes, or re-evaluates a
+mission, and registry presence is not provenance, scientific validity, clinical safety, or release
+approval.
 
 ## Restart-aware mission snapshots
 

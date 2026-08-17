@@ -61,6 +61,12 @@ from prism_sdk import (
     DomainWorkflowInstantiationReport,
     DomainWorkflowReconcileRequest,
     DomainWorkflowReconciliationReport,
+    DomainWorkflowReconciliationImportReport,
+    DomainWorkflowReconciliationImportRequest,
+    DomainWorkflowReconciliationQueryReport,
+    DomainWorkflowReconciliationQueryRequest,
+    DomainWorkflowReconciliationGetReport,
+    DomainWorkflowReconciliationGetRequest,
     ConformanceCaseReport,
     ConformancePyramidReport,
     ConformanceReleaseDecisionReport,
@@ -614,6 +620,67 @@ def mission_evidence_bundle_get_payload() -> dict:
         "execution": "not_started",
         "guarantees": ["verified before import"],
         "limitations": ["bounded local registry"],
+    }
+
+
+def domain_workflow_reconciliation_record_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-workflow-reconcile/0.1",
+        "workflow": "domain_workflow_reconcile",
+        "workflow_id": "oncology",
+        "workflow_digest": "w" * 64,
+        "catalog_digest": "c" * 64,
+        "domain_contract_digest": "d" * 64,
+        "mission_id": "mission-python",
+        "mission_plan_digest": "p" * 64,
+        "reconciliation_digest": "r" * 64,
+        "source": "mission_report",
+        "report": {"present": True},
+        "evidence": {"evidence_valid": True},
+        "completion": {"status": "complete", "ready": True},
+        "integrity": {"valid": True},
+        "execution": "not_started",
+    }
+
+
+def domain_workflow_reconciliation_import_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-workflow-reconciliation-import/0.1",
+        "workflow": "domain_workflow_reconciliation_import",
+        "reconciliation_digest": "r" * 64,
+        "created": True,
+        "already_present": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+        "execution": "not_started",
+    }
+
+
+def domain_workflow_reconciliation_query_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-workflow-reconciliation-query/0.1",
+        "workflow": "domain_workflow_reconciliation_query",
+        "filters": {"mission_id": "mission-python", "max_items": 10, "include_records": True},
+        "registry_generation": 1,
+        "registry_size": 1,
+        "rows": [{"reconciliation_digest": "r" * 64, "record": domain_workflow_reconciliation_record_payload()}],
+        "next_after": None,
+        "has_more": False,
+        "execution": "not_started",
+    }
+
+
+def domain_workflow_reconciliation_get_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-api/domain-workflow-reconciliation-record/0.1",
+        "workflow": "domain_workflow_reconciliation_get",
+        "reconciliation_digest": "r" * 64,
+        "record": domain_workflow_reconciliation_record_payload(),
+        "execution": "not_started",
     }
 
 
@@ -1892,6 +1959,85 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(tool.call_args_list[0].args[0], "mission_evidence_bundle_import")
         self.assertEqual(tool.call_args_list[1].args[0], "mission_evidence_bundle_query")
         self.assertEqual(tool.call_args_list[2].args[0], "mission_evidence_bundle_get")
+
+    def test_workflow_reconciliation_registry_requests_and_reports_preserve_bounds(self) -> None:
+        record = domain_workflow_reconciliation_record_payload()
+        imported_request = DomainWorkflowReconciliationImportRequest(record)
+        self.assertEqual(imported_request.to_http_body(), {"record": record})
+        imported = DomainWorkflowReconciliationImportReport.from_wire(
+            domain_workflow_reconciliation_import_payload()
+        )
+        self.assertTrue(imported.created)
+        query_request = DomainWorkflowReconciliationQueryRequest(mission_id="mission-python", include_records=True)
+        self.assertEqual(query_request.to_query_params()["mission_id"], "mission-python")
+        self.assertEqual(query_request.to_arguments(), {"max_items": 100, "include_records": True, "mission_id": "mission-python"})
+        queried = DomainWorkflowReconciliationQueryReport.from_wire(
+            domain_workflow_reconciliation_query_payload()
+        )
+        self.assertEqual(queried.rows[0]["reconciliation_digest"], "r" * 64)
+        fetched_request = DomainWorkflowReconciliationGetRequest("r" * 64)
+        self.assertEqual(fetched_request.to_arguments(), {"reconciliation_digest": "r" * 64})
+        fetched = DomainWorkflowReconciliationGetReport.from_wire(
+            domain_workflow_reconciliation_get_payload()
+        )
+        self.assertEqual(fetched.record["mission_id"], "mission-python")
+        with self.assertRaises(ArgumentError):
+            DomainWorkflowReconciliationQueryRequest(max_items=257)
+
+    def test_sync_http_workflow_reconciliation_registry_uses_rest_routes(self) -> None:
+        record = domain_workflow_reconciliation_record_payload()
+        with patch.object(
+            ApiClient,
+            "request",
+            side_effect=[
+                domain_workflow_reconciliation_import_payload(),
+                domain_workflow_reconciliation_query_payload(),
+                domain_workflow_reconciliation_get_payload(),
+            ],
+        ) as request:
+            client = ApiClient("http://127.0.0.1:8787")
+            self.assertTrue(client.domain_workflow_reconciliation_import_report({"record": record}).created)
+            self.assertEqual(
+                client.domain_workflow_reconciliation_query_report(
+                    {"mission_id": "mission-python", "include_records": True}
+                ).rows[0]["reconciliation_digest"],
+                "r" * 64,
+            )
+            self.assertEqual(
+                client.domain_workflow_reconciliation_get_report("r" * 64).reconciliation_digest,
+                "r" * 64,
+            )
+        self.assertEqual(request.call_args_list[0].args[0:2], ("POST", "/v1/domain-workflows/reconciliations"))
+        self.assertEqual(
+            request.call_args_list[1].args[0:2],
+            ("GET", "/v1/domain-workflows/reconciliations?limit=100&include_records=true&mission_id=mission-python"),
+        )
+        self.assertEqual(
+            request.call_args_list[2].args[0:2],
+            ("GET", f"/v1/domain-workflows/reconciliations/{'r' * 64}"),
+        )
+
+    def test_sync_http_workflow_reconciliation_registry_uses_mcp_bridge(self) -> None:
+        record = DomainWorkflowReconciliationImportRequest(domain_workflow_reconciliation_record_payload())
+        with patch.object(
+            ApiClient,
+            "call_tool",
+            side_effect=[
+                domain_workflow_reconciliation_import_payload(),
+                domain_workflow_reconciliation_query_payload(),
+                domain_workflow_reconciliation_get_payload(),
+            ],
+        ) as tool:
+            client = ApiClient("http://127.0.0.1:8787")
+            self.assertTrue(client.domain_workflow_reconciliation_import_tool_report(record).created)
+            self.assertFalse(client.domain_workflow_reconciliation_query_tool_report({}).has_more)
+            self.assertEqual(
+                client.domain_workflow_reconciliation_get_tool_report("r" * 64).reconciliation_digest,
+                "r" * 64,
+            )
+        self.assertEqual(tool.call_args_list[0].args[0], "domain_workflow_reconciliation_import")
+        self.assertEqual(tool.call_args_list[1].args[0], "domain_workflow_reconciliation_query")
+        self.assertEqual(tool.call_args_list[2].args[0], "domain_workflow_reconciliation_get")
 
     def test_sync_http_mission_evaluator_replay_query_uses_bounded_route(self) -> None:
         payload = mission_evaluator_replay_query_payload(summary_only=True)

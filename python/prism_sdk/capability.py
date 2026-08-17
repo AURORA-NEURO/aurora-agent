@@ -613,6 +613,195 @@ def domain_workflow_reconciliation_report(value: Mapping[str, Any]) -> DomainWor
 
 
 @dataclass(frozen=True)
+class DomainWorkflowReconciliationImportRequest:
+    """Import one canonical domain workflow reconciliation report into a registry."""
+
+    record: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "record", dict(_route_mapping("workflow reconciliation record", self.record)))
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"record": dict(self.record)}
+
+    def to_http_body(self) -> dict[str, Any]:
+        return self.to_arguments()
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationQueryRequest:
+    """Bounded registry query for retained workflow reconciliation posture."""
+
+    mission_id: str | None = None
+    workflow_id: str | None = None
+    mission_plan_digest: str | None = None
+    completion_status: str | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_records: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("mission_id", self.mission_id),
+            ("workflow_id", self.workflow_id),
+            ("mission_plan_digest", self.mission_plan_digest),
+            ("completion_status", self.completion_status),
+            ("after", self.after),
+        ):
+            if value is not None:
+                _route_text(f"workflow reconciliation query {name}", value)
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("workflow reconciliation query max_items must be between 1 and 256")
+        if not isinstance(self.include_records, bool):
+            raise ArgumentError("workflow reconciliation query include_records must be a boolean")
+
+    def to_query_params(self) -> dict[str, str]:
+        params: dict[str, str] = {
+            "limit": str(self.max_items),
+            "include_records": "true" if self.include_records else "false",
+        }
+        for name, value in (
+            ("mission_id", self.mission_id),
+            ("workflow_id", self.workflow_id),
+            ("mission_plan_digest", self.mission_plan_digest),
+            ("completion_status", self.completion_status),
+            ("after", self.after),
+        ):
+            if value is not None:
+                params[name] = value
+        return params
+
+    def to_arguments(self) -> dict[str, Any]:
+        arguments: dict[str, Any] = {
+            "max_items": self.max_items,
+            "include_records": self.include_records,
+        }
+        for name, value in (
+            ("mission_id", self.mission_id),
+            ("workflow_id", self.workflow_id),
+            ("mission_plan_digest", self.mission_plan_digest),
+            ("completion_status", self.completion_status),
+            ("after", self.after),
+        ):
+            if value is not None:
+                arguments[name] = value
+        return arguments
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationImportReport:
+    """Typed idempotent workflow reconciliation registry import result."""
+
+    raw: dict[str, Any]
+    reconciliation_digest: str
+    created: bool
+    already_present: bool
+    registry_generation: int
+    registry_size: int
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationImportReport":
+        raw = _tool_payload(value, "domain_workflow_reconciliation_import")
+        if raw.get("workflow") != "domain_workflow_reconciliation_import":
+            raise ArgumentError("workflow reconciliation import workflow is invalid")
+        created = raw.get("created")
+        already_present = raw.get("already_present")
+        if not isinstance(created, bool) or not isinstance(already_present, bool):
+            raise ArgumentError("workflow reconciliation import flags must be booleans")
+        return cls(
+            raw=raw,
+            reconciliation_digest=_route_text("workflow reconciliation import digest", raw.get("reconciliation_digest")),
+            created=created,
+            already_present=already_present,
+            registry_generation=_route_count("workflow reconciliation import generation", raw.get("registry_generation")),
+            registry_size=_route_count("workflow reconciliation import size", raw.get("registry_size")),
+            execution=_route_text("workflow reconciliation import execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationQueryReport:
+    """Typed deterministic workflow reconciliation registry index page."""
+
+    raw: dict[str, Any]
+    rows: tuple[Mapping[str, Any], ...]
+    next_after: str | None
+    has_more: bool
+    registry_generation: int
+    registry_size: int
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationQueryReport":
+        raw = _tool_payload(value, "domain_workflow_reconciliation_query")
+        if raw.get("workflow") != "domain_workflow_reconciliation_query":
+            raise ArgumentError("workflow reconciliation query workflow is invalid")
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("workflow reconciliation query rows must be an array")
+        next_after = raw.get("next_after")
+        if next_after is not None:
+            _route_text("workflow reconciliation query next cursor", next_after)
+        has_more = raw.get("has_more")
+        if not isinstance(has_more, bool):
+            raise ArgumentError("workflow reconciliation query has_more must be a boolean")
+        return cls(
+            raw=raw,
+            rows=tuple(_route_mapping("workflow reconciliation query row", row) for row in rows),
+            next_after=next_after,
+            has_more=has_more,
+            registry_generation=_route_count("workflow reconciliation query generation", raw.get("registry_generation")),
+            registry_size=_route_count("workflow reconciliation query size", raw.get("registry_size")),
+            execution=_route_text("workflow reconciliation query execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationGetRequest:
+    """Fetch one workflow reconciliation record by its content hash."""
+
+    reconciliation_digest: str
+
+    def __post_init__(self) -> None:
+        _route_text("workflow reconciliation digest", self.reconciliation_digest)
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"reconciliation_digest": self.reconciliation_digest}
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationGetReport:
+    """Typed lookup result for one stored workflow reconciliation report."""
+
+    raw: dict[str, Any]
+    reconciliation_digest: str
+    record: Mapping[str, Any]
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationGetReport":
+        raw = _tool_payload(value, "domain_workflow_reconciliation_get")
+        if raw.get("workflow") != "domain_workflow_reconciliation_get":
+            raise ArgumentError("workflow reconciliation get workflow is invalid")
+        return cls(
+            raw=raw,
+            reconciliation_digest=_route_text("workflow reconciliation get digest", raw.get("reconciliation_digest")),
+            record=_route_mapping("workflow reconciliation get record", raw.get("record")),
+            execution=_route_text("workflow reconciliation get execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class CapabilityGroupReport:
     """Validated cross-domain catalogue metadata for one ranked group."""
 
@@ -1998,6 +2187,12 @@ __all__ = [
     "DomainWorkflowCatalogueReport",
     "DomainWorkflowInstantiationReport",
     "DomainWorkflowReconciliationReport",
+    "DomainWorkflowReconciliationImportRequest",
+    "DomainWorkflowReconciliationQueryRequest",
+    "DomainWorkflowReconciliationGetRequest",
+    "DomainWorkflowReconciliationImportReport",
+    "DomainWorkflowReconciliationQueryReport",
+    "DomainWorkflowReconciliationGetReport",
     "CapabilityQuery",
     "CapabilityGroupReport",
     "CapabilityMatchReport",

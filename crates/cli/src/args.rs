@@ -102,6 +102,13 @@ COMMANDS
   workflow reconcile --instantiation <path> [--mission <path>] [--evidence-bundle <path>]
                     Reconcile a retained agent_mission report or evidence bundle against the
                     instantiated workflow. Exit 1 when completion evidence is not ready.
+  workflow reconciliation-import --record <path> --store <path> [--dry-run]
+                    Import a digest-valid workflow reconciliation report into a bounded local
+                    registry checkpoint. --dry-run performs no write.
+  workflow reconciliation-query --store <path> [--mission-id <id>] [--workflow-id <id>]
+                    [--plan-digest <digest>] [--status <status>] [--after <digest>]
+                    [--limit <n>] [--include-records]
+                    Query a local reconciliation registry without executing a mission.
 
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
@@ -169,6 +176,21 @@ pub enum Command {
         instantiation: PathBuf,
         mission: Option<PathBuf>,
         evidence_bundle: Option<PathBuf>,
+    },
+    WorkflowReconciliationImport {
+        record: PathBuf,
+        store: PathBuf,
+        dry_run: bool,
+    },
+    WorkflowReconciliationQuery {
+        store: PathBuf,
+        mission_id: Option<String>,
+        workflow_id: Option<String>,
+        mission_plan_digest: Option<String>,
+        completion_status: Option<String>,
+        after: Option<String>,
+        limit: usize,
+        include_records: bool,
     },
 }
 
@@ -337,6 +359,26 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             instantiation: options.take_path("--instantiation")?,
             mission: options.take_optional_path("--mission"),
             evidence_bundle: options.take_optional_path("--evidence-bundle"),
+        },
+        ("workflow", "reconciliation-import") => Command::WorkflowReconciliationImport {
+            record: options.take_path("--record")?,
+            store: options.take_path("--store")?,
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("workflow", "reconciliation-query") => Command::WorkflowReconciliationQuery {
+            store: options.take_path("--store")?,
+            mission_id: options.take_optional("--mission-id"),
+            workflow_id: options.take_optional("--workflow-id"),
+            mission_plan_digest: options.take_optional("--plan-digest"),
+            completion_status: options.take_optional("--status"),
+            after: options.take_optional("--after"),
+            limit: match options.take_optional("--limit") {
+                None => 100,
+                Some(text) => text
+                    .parse()
+                    .map_err(|_| usage(format!("--limit must be a number, got {text:?}")))?,
+            },
+            include_records: options.take_switch("--include-records"),
         },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
@@ -541,6 +583,74 @@ mod tests {
                     instantiation: PathBuf::from("instantiation.json"),
                     mission: Some(PathBuf::from("mission.json")),
                     evidence_bundle: None,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn workflow_reconciliation_registry_commands_parse_filters_and_dry_run() {
+        let imported = parse(
+            [
+                "workflow",
+                "reconciliation-import",
+                "--record",
+                "record.json",
+                "--store",
+                "reconciliations.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse reconciliation import");
+        assert_eq!(
+            imported,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkflowReconciliationImport {
+                    record: PathBuf::from("record.json"),
+                    store: PathBuf::from("reconciliations.json"),
+                    dry_run: true,
+                },
+            })
+        );
+
+        let queried = parse(
+            [
+                "workflow",
+                "reconciliation-query",
+                "--store",
+                "reconciliations.json",
+                "--mission-id",
+                "m-1",
+                "--workflow-id",
+                "oncology",
+                "--plan-digest",
+                "d".repeat(64).as_str(),
+                "--status",
+                "complete",
+                "--limit",
+                "7",
+                "--include-records",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse reconciliation query");
+        assert_eq!(
+            queried,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkflowReconciliationQuery {
+                    store: PathBuf::from("reconciliations.json"),
+                    mission_id: Some("m-1".into()),
+                    workflow_id: Some("oncology".into()),
+                    mission_plan_digest: Some("d".repeat(64)),
+                    completion_status: Some("complete".into()),
+                    after: None,
+                    limit: 7,
+                    include_records: true,
                 },
             })
         );

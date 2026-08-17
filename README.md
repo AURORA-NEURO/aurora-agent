@@ -324,7 +324,8 @@ The repository ships `bioprism-api` for deployments that need a network boundary
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <visible-token> \
-  --mission-state .local/mission-state.json --event-state .local/event-state.json
+  --mission-state .local/mission-state.json --event-state .local/event-state.json \
+  --reconciliation-state .local/reconciliation-state.json
 ```
 
 It exposes the exact MCP tool catalogue through REST and JSON-RPC, bounded health/capability
@@ -773,6 +774,16 @@ permission, scientific evidence, clinical guidance, deployment readiness, or exe
 trace consistency, preserves refusals and omissions, and makes structural completion readiness
 explicit without retrying or dispatching tools. Its `complete` status is evidence posture only and
 still requires review before any domain claim.
+The reconciliation registry continuation makes that audit durable and searchable: import a
+digest-valid report through `POST /v1/domain-workflows/reconciliations`, query compact
+mission/workflow/plan/status index rows with bounded cursors, and fetch one record by its
+`reconciliation_digest`. `--reconciliation-state <file>` enables an atomic restart-safe
+checkpoint; startup verifies the snapshot and every report digest, while the explicit persistence
+status/flush routes expose the checkpoint posture. MCP exposes the same import/query/get tools,
+the CLI provides `workflow reconciliation-import` and `workflow reconciliation-query`, and the
+Python/TypeScript SDKs expose typed REST and MCP helpers. Registry presence is an audit lookup only:
+it never resumes, retries, or re-evaluates a mission and never authenticates provenance or a
+scientific, clinical, safety, or release claim.
 `mission_evaluator_discover` complements tool routing with a digest-bound catalogue of explicit
 evaluator candidates for every workspace capability group. It filters by intent, group, domain,
 mission level, or adapter ID and returns purpose, candidate evidence tools, and RFC 6901 pointer

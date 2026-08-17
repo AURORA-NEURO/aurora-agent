@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 186);
+    assert_eq!(tools.len(), 189);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1312,6 +1312,35 @@ fn domain_workflow_reconciliation_binds_execution_results_to_the_instantiated_co
     assert_eq!(reconciled["completion"]["status"], json!("complete"));
     assert_eq!(reconciled["completion"]["ready"], json!(true));
     assert_eq!(reconciled["evidence"]["rows"][0]["result_retained"], json!(true));
+
+    let imported = call(
+        &mut server,
+        "domain_workflow_reconciliation_import",
+        json!({"record": reconciled}),
+    );
+    assert_eq!(
+        imported["workflow"],
+        json!("domain_workflow_reconciliation_import")
+    );
+    assert_eq!(imported["created"], json!(true));
+    let digest = imported["reconciliation_digest"].as_str().unwrap();
+    let queried = call(
+        &mut server,
+        "domain_workflow_reconciliation_query",
+        json!({"mission_id": "workflow-reconcile", "completion_status": "complete"}),
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(queried["rows"][0]["reconciliation_digest"], json!(digest));
+    let fetched = call(
+        &mut server,
+        "domain_workflow_reconciliation_get",
+        json!({"reconciliation_digest": digest}),
+    );
+    assert_eq!(
+        fetched["workflow"],
+        json!("domain_workflow_reconciliation_get")
+    );
+    assert_eq!(fetched["record"]["reconciliation_digest"], json!(digest));
 }
 
 #[test]
@@ -5400,12 +5429,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(186));
-    assert_eq!(result["advertised_tool_count"], json!(186));
+    assert_eq!(result["unique_catalog_tools"], json!(189));
+    assert_eq!(result["advertised_tool_count"], json!(189));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(186));
-    assert_eq!(result["schema_quality"]["valid"], json!(186));
+    assert_eq!(result["schema_quality"]["checked"], json!(189));
+    assert_eq!(result["schema_quality"]["valid"], json!(189));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

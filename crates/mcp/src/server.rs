@@ -133,6 +133,7 @@ use bioprism_devplat::{
     build_delivery_receipt, plan_mission, run_workbench, verify_delivery_receipt,
     build_domain_workflow_catalogue, instantiate_domain_workflow,
     reconcile_domain_workflow,
+    DomainWorkflowReconciliationRegistry,
     normalize_ci_provider_payload,
     standard_walkthroughs,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
@@ -421,6 +422,7 @@ pub struct Server {
     lifecycle: Lifecycle,
     mission_trace_observer: Option<MissionTraceObserver>,
     evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+    workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
 }
 
 enum ParallelPending<'a> {
@@ -1036,6 +1038,9 @@ impl Server {
             lifecycle: Lifecycle::New,
             mission_trace_observer: None,
             evidence_registry: Arc::new(Mutex::new(EvidenceBundleRegistry::new())),
+            workflow_reconciliation_registry: Arc::new(Mutex::new(
+                DomainWorkflowReconciliationRegistry::new(),
+            )),
         }
     }
 
@@ -1529,6 +1534,15 @@ impl Server {
             "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
             "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
             "domain_workflow_reconcile" => self.domain_workflow_reconcile(&arguments),
+            "domain_workflow_reconciliation_import" => {
+                self.domain_workflow_reconciliation_import(&arguments)
+            }
+            "domain_workflow_reconciliation_query" => {
+                self.domain_workflow_reconciliation_query(&arguments)
+            }
+            "domain_workflow_reconciliation_get" => {
+                self.domain_workflow_reconciliation_get(&arguments)
+            }
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -22231,6 +22245,120 @@ impl Server {
             .map_err(|error| format!("domain workflow reconciliation refused: {error}"))
     }
 
+    /// Import a previously produced reconciliation report into the bounded process-local audit
+    /// registry. The report digest is recomputed before it becomes queryable.
+    fn domain_workflow_reconciliation_import(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode domain workflow reconciliation import input: {error}")
+        })?;
+        if encoded.len() > bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES {
+            return Err(format!(
+                "domain workflow reconciliation import input exceeds the {}-byte bound",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES
+            ));
+        }
+        let record = arguments.get("record").ok_or("record is required")?;
+        self.workflow_reconciliation_registry
+            .lock()
+            .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?
+            .import(record)
+            .map_err(|error| format!("domain workflow reconciliation import refused: {error}"))
+    }
+
+    /// Query digest-ordered reconciliation rows without executing or re-evaluating anything.
+    fn domain_workflow_reconciliation_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode domain workflow reconciliation query input: {error}")
+        })?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "domain workflow reconciliation query input exceeds the 1000000-byte bound"
+                    .into(),
+            );
+        }
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| value.as_str().ok_or_else(|| format!("{name} must be a string")))
+                .transpose()
+        };
+        let mission_id = optional_string("mission_id")?;
+        let workflow_id = optional_string("workflow_id")?;
+        let mission_plan_digest = optional_string("mission_plan_digest")?;
+        let completion_status = optional_string("completion_status")?;
+        let after = optional_string("after")?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        if !(1..=bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS)
+            .contains(&max_items)
+        {
+            return Err(format!(
+                "max_items must be between 1 and {}",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS
+            ));
+        }
+        let include_records = arguments
+            .get("include_records")
+            .map(|value| value.as_bool().ok_or("include_records must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.workflow_reconciliation_registry
+            .lock()
+            .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?
+            .query(
+                mission_id,
+                workflow_id,
+                mission_plan_digest,
+                completion_status,
+                after,
+                max_items,
+                include_records,
+            )
+            .map_err(|error| format!("domain workflow reconciliation query refused: {error}"))
+    }
+
+    /// Fetch one imported reconciliation report by its content hash.
+    fn domain_workflow_reconciliation_get(&self, arguments: &Value) -> Result<Value, String> {
+        let digest = arguments
+            .get("reconciliation_digest")
+            .and_then(Value::as_str)
+            .ok_or("reconciliation_digest is required and must be a content hash")?;
+        bioprism_ids::ContentHash::parse(digest.to_string())
+            .map_err(|error| format!("reconciliation_digest is invalid: {error}"))?;
+        let record = self
+            .workflow_reconciliation_registry
+            .lock()
+            .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?
+            .get(digest)
+            .ok_or_else(|| format!("reconciliation {digest:?} is not present in the registry"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/domain-workflow-reconciliation-record/0.1",
+            "workflow": "domain_workflow_reconciliation_get",
+            "reconciliation_digest": digest,
+            "record": record,
+            "execution": "not_started",
+            "guarantees": [
+                "the returned report passed the shared reconciliation digest check before import",
+                "lookup does not execute, retry, resume, or mutate a mission"
+            ],
+            "limitations": [
+                "the process-local registry is bounded and is not a distributed audit store",
+                "report presence does not establish scientific validity, clinical safety, or release approval"
+            ]
+        }))
+    }
+
     /// Search the complete workspace capability catalogue and optionally attach authoritative MCP
     /// schemas for the matched tools.
     ///
@@ -27628,7 +27756,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "domain_workflow_catalogue", "domain_workflow_instantiate", "domain_workflow_reconcile", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "domain_workflow_catalogue", "domain_workflow_instantiate", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -30100,6 +30228,45 @@ pub fn tool_definitions() -> Vec<Value> {
                     "evidence_bundle": { "type": "object", "description": "A verified mission_evidence_bundle_export, including result when full retention is available. Provide this or mission_report." }
                 },
                 "required": ["instantiation"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_reconciliation_import",
+            "description": "Import a previously produced domain_workflow_reconcile report into the bounded process-local audit registry after recomputing its reconciliation_digest. Import is idempotent and never executes, retries, resumes, or mutates a mission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "record": { "type": "object", "description": "The complete report returned by domain_workflow_reconcile, without transport-only request metadata." }
+                },
+                "required": ["record"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_reconciliation_query",
+            "description": "Query bounded digest-ordered domain workflow reconciliation records by mission, workflow, plan digest, or completion status. This is an audit index query and never re-executes or re-evaluates a mission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission_id": { "type": "string" },
+                    "workflow_id": { "type": "string" },
+                    "mission_plan_digest": { "type": "string" },
+                    "completion_status": { "type": "string", "enum": ["complete", "partial", "failed", "complete_with_output_omissions", "unverified"] },
+                    "after": { "type": "string", "description": "Exclusive reconciliation digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_records": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "domain_workflow_reconciliation_get",
+            "description": "Fetch one imported domain workflow reconciliation report by its SHA-256 reconciliation digest. Lookup is bounded and non-executing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reconciliation_digest": { "type": "string", "description": "The content hash returned by reconciliation import or query." }
+                },
+                "required": ["reconciliation_digest"]
             }
         }),
         json!({

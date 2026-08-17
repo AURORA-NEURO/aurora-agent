@@ -30,6 +30,12 @@ from .capability import (
     DomainWorkflowInstantiationReport,
     DomainWorkflowReconcileRequest,
     DomainWorkflowReconciliationReport,
+    DomainWorkflowReconciliationImportRequest,
+    DomainWorkflowReconciliationQueryRequest,
+    DomainWorkflowReconciliationGetRequest,
+    DomainWorkflowReconciliationImportReport,
+    DomainWorkflowReconciliationQueryReport,
+    DomainWorkflowReconciliationGetReport,
     MissionEvaluatorQuery,
     MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayComparisonReport,
@@ -1879,6 +1885,65 @@ class Workspace:
         request: DomainWorkflowReconcileRequest | Mapping[str, Any],
     ) -> DomainWorkflowReconciliationReport:
         return domain_workflow_reconciliation_report(self.domain_workflow_reconcile(request))
+
+    def domain_workflow_reconciliation_import(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationImportRequest)
+            else DomainWorkflowReconciliationImportRequest(**dict(request))
+        )
+        return self.tool("domain_workflow_reconciliation_import", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_import_report(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationImportReport:
+        return DomainWorkflowReconciliationImportReport.from_wire(
+            self.domain_workflow_reconciliation_import(request)
+        )
+
+    def domain_workflow_reconciliation_query(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationQueryRequest)
+            else DomainWorkflowReconciliationQueryRequest(**dict(request or {}))
+        )
+        return self.tool("domain_workflow_reconciliation_query", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_query_report(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainWorkflowReconciliationQueryReport:
+        return DomainWorkflowReconciliationQueryReport.from_wire(
+            self.domain_workflow_reconciliation_query(request)
+        )
+
+    def domain_workflow_reconciliation_get(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationGetRequest)
+            else DomainWorkflowReconciliationGetRequest(request)
+            if isinstance(request, str)
+            else DomainWorkflowReconciliationGetRequest(**dict(request))
+        )
+        return self.tool("domain_workflow_reconciliation_get", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_get_report(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> DomainWorkflowReconciliationGetReport:
+        return DomainWorkflowReconciliationGetReport.from_wire(
+            self.domain_workflow_reconciliation_get(request)
+        )
 
     def adapter_plan(
         self,
@@ -4991,6 +5056,67 @@ class AsyncWorkspace:
     ) -> DomainWorkflowReconciliationReport:
         return domain_workflow_reconciliation_report(
             await self.domain_workflow_reconcile(request)
+        )
+
+    async def domain_workflow_reconciliation_import(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await self.tool(
+            "domain_workflow_reconciliation_import",
+            (
+                request
+                if isinstance(request, DomainWorkflowReconciliationImportRequest)
+                else DomainWorkflowReconciliationImportRequest(**dict(request))
+            ).to_arguments(),
+        )
+
+    async def domain_workflow_reconciliation_import_report(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationImportReport:
+        return DomainWorkflowReconciliationImportReport.from_wire(
+            await self.domain_workflow_reconciliation_import(request)
+        )
+
+    async def domain_workflow_reconciliation_query(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationQueryRequest)
+            else DomainWorkflowReconciliationQueryRequest(**dict(request or {}))
+        )
+        return await self.tool("domain_workflow_reconciliation_query", normalized.to_arguments())
+
+    async def domain_workflow_reconciliation_query_report(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainWorkflowReconciliationQueryReport:
+        return DomainWorkflowReconciliationQueryReport.from_wire(
+            await self.domain_workflow_reconciliation_query(request)
+        )
+
+    async def domain_workflow_reconciliation_get(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationGetRequest)
+            else DomainWorkflowReconciliationGetRequest(request)
+            if isinstance(request, str)
+            else DomainWorkflowReconciliationGetRequest(**dict(request))
+        )
+        return await self.tool("domain_workflow_reconciliation_get", normalized.to_arguments())
+
+    async def domain_workflow_reconciliation_get_report(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> DomainWorkflowReconciliationGetReport:
+        return DomainWorkflowReconciliationGetReport.from_wire(
+            await self.domain_workflow_reconciliation_get(request)
         )
 
     async def adapter_plan(

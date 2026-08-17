@@ -12,7 +12,8 @@ use crate::events::{
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
     verify_mission_evidence_bundle, EvidenceBundleError, EvidenceBundleRegistry,
-    EvidenceRegistryError, MissionEvaluatorCatalogue, MissionEvaluatorReplayCompareRequest,
+    DomainWorkflowReconciliationRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
+    MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayRequest, MAX_EVIDENCE_REGISTRY_BYTES,
 };
 use bioprism_ids::ContentHash;
@@ -42,6 +43,8 @@ pub const MAX_PERSISTED_MISSION_RESULT_BYTES: usize = 256 * 1024;
 pub const MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES: usize = 64 * 1024;
 pub const MAX_PERSISTED_MISSION_PROVENANCE_BYTES: usize = 128 * 1024;
 pub const MAX_MISSION_EVIDENCE_BUNDLE_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_WORKFLOW_RECONCILIATION_STATE_BYTES: usize =
+    bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES;
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -59,6 +62,8 @@ pub struct ApiConfig {
     pub event_state_path: Option<PathBuf>,
     /// Optional atomic JSON checkpoint for imported, independently verified evidence bundles.
     pub evidence_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for imported domain-workflow reconciliation reports.
+    pub reconciliation_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -71,6 +76,7 @@ impl Default for ApiConfig {
             mission_state_path: None,
             event_state_path: None,
             evidence_state_path: None,
+            reconciliation_state_path: None,
         }
     }
 }
@@ -112,6 +118,13 @@ impl ApiConfig {
         {
             return Err("evidence_state_path must not be empty".into());
         }
+        if self
+            .reconciliation_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("reconciliation_state_path must not be empty".into());
+        }
         Ok(())
     }
 }
@@ -127,6 +140,8 @@ pub struct ApiRouter {
     event_persistence: Arc<EventPersistence>,
     evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
     evidence_persistence: Arc<EvidencePersistence>,
+    reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    reconciliation_persistence: Arc<ReconciliationPersistence>,
 }
 
 struct MissionJob {
@@ -149,6 +164,12 @@ struct EventPersistence {
 struct EvidencePersistence {
     path: Option<PathBuf>,
     registry: Arc<Mutex<EvidenceBundleRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct ReconciliationPersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
     lock: Mutex<()>,
 }
 
@@ -237,6 +258,82 @@ impl EvidencePersistence {
             {
                 return Err(format!(
                     "evidence state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
+impl ReconciliationPersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "workflow reconciliation registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "workflow reconciliation persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, &document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "workflow reconciliation persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, document)
+    }
+
+    fn write_snapshot(path: &Path, document: &Value) -> Result<usize, String> {
+        let bytes = serde_json::to_vec_pretty(document).map_err(|error| {
+            format!("workflow reconciliation state could not be serialized: {error}")
+        })?;
+        if bytes.len() > MAX_WORKFLOW_RECONCILIATION_STATE_BYTES {
+            return Err(format!(
+                "workflow reconciliation state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_WORKFLOW_RECONCILIATION_STATE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("workflow reconciliation state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "reconciliation_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(".{filename}.tmp"));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("workflow reconciliation state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "workflow reconciliation state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "workflow reconciliation state snapshot could not be installed: {first_error}"
                 ));
             }
         }
@@ -490,6 +587,8 @@ impl ApiRouter {
         )?));
         let restored_jobs = load_mission_jobs(config.mission_state_path.as_deref())?;
         let restored_evidence = load_evidence_registry(config.evidence_state_path.as_deref())?;
+        let restored_reconciliations =
+            load_workflow_reconciliation_registry(config.reconciliation_state_path.as_deref())?;
         let mut server = bioprism_mcp::Server::new(root);
         let initialize = Request {
             id: Some(json!(0)),
@@ -527,6 +626,12 @@ impl ApiRouter {
             registry: Arc::clone(&evidence_registry),
             lock: Mutex::new(()),
         });
+        let reconciliation_registry = Arc::new(Mutex::new(restored_reconciliations));
+        let reconciliation_persistence = Arc::new(ReconciliationPersistence {
+            path: config.reconciliation_state_path.clone(),
+            registry: Arc::clone(&reconciliation_registry),
+            lock: Mutex::new(()),
+        });
         let router = Self {
             server,
             mission_executor,
@@ -538,6 +643,8 @@ impl ApiRouter {
             event_persistence,
             evidence_registry,
             evidence_persistence,
+            reconciliation_registry,
+            reconciliation_persistence,
         };
         if router.config.mission_state_path.is_some() {
             router.persist_mission_registry()?;
@@ -552,6 +659,14 @@ impl ApiRouter {
                 format!("evidence state checkpoint failed during startup: {error}")
             })?;
         }
+        if router.config.reconciliation_state_path.is_some() {
+            router
+                .reconciliation_persistence
+                .persist()
+                .map_err(|error| {
+                    format!("workflow reconciliation state checkpoint failed during startup: {error}")
+                })?;
+        }
         Ok(router)
     }
 
@@ -561,6 +676,10 @@ impl ApiRouter {
 
     fn persist_evidence_registry(&self) -> Result<usize, String> {
         self.evidence_persistence.persist()
+    }
+
+    fn persist_reconciliation_registry(&self) -> Result<usize, String> {
+        self.reconciliation_persistence.persist()
     }
 
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
@@ -628,6 +747,21 @@ impl ApiRouter {
             }
             ("POST", "/v1/domain-workflows/reconcile") => {
                 self.domain_workflow_reconcile(&request, &request_id)
+            }
+            ("GET", "/v1/domain-workflows/reconciliations") => {
+                self.query_workflow_reconciliations(&request, &request_id)
+            }
+            ("POST", "/v1/domain-workflows/reconciliations") => {
+                self.import_workflow_reconciliation(&request, &request_id)
+            }
+            ("GET", "/v1/domain-workflows/reconciliations/persistence") => {
+                self.reconciliation_persistence_status()
+            }
+            ("POST", "/v1/domain-workflows/reconciliations/persistence/flush") => {
+                self.flush_reconciliation_persistence(&request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/domain-workflows/reconciliations/") => {
+                self.get_workflow_reconciliation(&request, &request_id)
             }
             ("POST", "/v1/domain-workflows/instantiate") => {
                 self.domain_workflow_instantiate(&request, &request_id)
@@ -881,6 +1015,15 @@ impl ApiRouter {
             .get("file_present")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let reconciliation_persistence = response_value(self.reconciliation_persistence_status());
+        let reconciliation_enabled = reconciliation_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let reconciliation_checkpoint_present = reconciliation_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         HttpResponse::json(
             200,
             &json!({
@@ -990,6 +1133,23 @@ impl ApiRouter {
                         "operator_action": "inspect the state_digest and re-submit interrupted execution explicitly; use evidence bundles as audit artifacts only"
                     },
                     {
+                        "id": "workflow_reconciliation_registry",
+                        "configured": reconciliation_enabled,
+                        "checkpoint_present": reconciliation_checkpoint_present,
+                        "schema_version": reconciliation_persistence.get("schema").cloned().unwrap_or(Value::Null),
+                        "state_digest": reconciliation_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": reconciliation_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "registry_size": reconciliation_persistence.get("registry_size").cloned().unwrap_or(json!(0)),
+                        "restores": [
+                            "digest-valid workflow reconciliation reports and deterministic mission/workflow/plan/completion index rows"
+                        ],
+                        "does_not_restore": [
+                            "mission execution, raw outputs omitted from the report, external effects, or evaluator reruns",
+                            "scientific, clinical, operational, regulatory, or release truth"
+                        ],
+                        "operator_action": "inspect the reconciliation_digest and review_required posture; import or reconcile new evidence explicitly after a restart"
+                    },
+                    {
                         "id": "webhook_signing_secrets",
                         "configured": event_enabled,
                         "checkpoint_present": false,
@@ -1045,6 +1205,8 @@ impl ApiRouter {
                     "event_persistence": "/v1/events/persistence",
                     "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
                     "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
+                    "workflow_reconciliation_persistence": "/v1/domain-workflows/reconciliations/persistence",
+                    "workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
                     "event_flush": "/v1/events/persistence/flush",
                     "mission_flush": "/v1/missions/persistence/flush",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts",
@@ -2329,6 +2491,9 @@ impl ApiRouter {
                     "domain_workflows": "/v1/domain-workflows",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
+                    "domain_workflow_reconciliations": "/v1/domain-workflows/reconciliations",
+                    "domain_workflow_reconciliation_persistence": "/v1/domain-workflows/reconciliations/persistence",
+                    "domain_workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
                      "mission_provenance": "/v1/missions/{mission_id}/provenance",
@@ -2391,6 +2556,8 @@ impl ApiRouter {
                     "domain_workflow_catalogue": true,
                     "domain_workflow_instantiate": true,
                     "domain_workflow_reconcile": true,
+                    "domain_workflow_reconciliation_registry": true,
+                    "domain_workflow_reconciliation_persistence": self.config.reconciliation_state_path.is_some(),
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
@@ -2416,6 +2583,9 @@ impl ApiRouter {
                     "evidence_registry_file_bytes": MAX_EVIDENCE_REGISTRY_BYTES,
                     "evidence_registry_max_bundles": bioprism_devplat::MAX_EVIDENCE_REGISTRY_BUNDLES,
                     "evidence_registry_max_query_items": bioprism_devplat::MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+                    "workflow_reconciliation_file_bytes": MAX_WORKFLOW_RECONCILIATION_STATE_BYTES,
+                    "workflow_reconciliation_max_records": bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+                    "workflow_reconciliation_max_query_items": bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
                     "delivery_error_bytes": crate::events::MAX_DELIVERY_ERROR_BYTES,
                     "webhook_filters": MAX_FILTERS
                 }
@@ -2820,6 +2990,237 @@ impl ApiRouter {
             "domain_workflow_reconcile",
             Value::Object(arguments),
         )
+    }
+
+    fn import_workflow_reconciliation(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let record = match arguments.get("record") {
+            Some(record) => record,
+            None => return self.error(422, "invalid_record", "record is required", request_id),
+        };
+        let mut registry = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let report = match registry.import(record) {
+            Ok(report) => report,
+            Err(error) => return self.error(422, "invalid_record", &error.to_string(), request_id),
+        };
+        if self.config.reconciliation_state_path.is_some() {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(503, "reconciliation_persistence_unavailable", &error.to_string(), request_id);
+                }
+            };
+            if let Err(error) = self.reconciliation_persistence.persist_snapshot(&snapshot) {
+                *registry = before;
+                return self.error(503, "reconciliation_persistence_unavailable", &error, request_id);
+            }
+        }
+        HttpResponse::json(
+            if report["created"].as_bool().unwrap_or(false) { 201 } else { 200 },
+            &report,
+        )
+    }
+
+    fn query_workflow_reconciliations(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "mission_id"
+                    | "workflow_id"
+                    | "mission_plan_digest"
+                    | "completion_status"
+                    | "after"
+                    | "limit"
+                    | "include_records"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "workflow reconciliation query accepts only mission_id, workflow_id, mission_plan_digest, completion_status, after, limit, and include_records",
+                    request_id,
+                );
+            }
+        }
+        let mission_id = query.get("mission_id").map(String::as_str);
+        let workflow_id = query.get("workflow_id").map(String::as_str);
+        let mission_plan_digest = query.get("mission_plan_digest").map(String::as_str);
+        let completion_status = query.get("completion_status").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS)
+                    .contains(&value) => value,
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_records = match query_bool(&query, "include_records", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry.query(
+                mission_id,
+                workflow_id,
+                mission_plan_digest,
+                completion_status,
+                after,
+                max_items,
+                include_records,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_workflow_reconciliation(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 4
+            || segments[0] != "v1"
+            || segments[1] != "domain-workflows"
+            || segments[2] != "reconciliations"
+        {
+            return self.error(404, "not_found", "workflow reconciliation route does not exist", request_id);
+        }
+        let digest = &segments[3];
+        if ContentHash::parse(digest.clone()).is_err() {
+            return self.error(422, "invalid_digest", "reconciliation_digest must be a 64-character SHA-256 digest", request_id);
+        }
+        let record = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry.get(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match record {
+            Some(record) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "schema": "bioprism-api/domain-workflow-reconciliation-record/0.1",
+                    "workflow": "domain_workflow_reconciliation_get",
+                    "reconciliation_digest": digest,
+                    "record": record,
+                    "execution": "not_started"
+                }),
+            ),
+            None => self.error(404, "not_found", "workflow reconciliation does not exist", request_id),
+        }
+    }
+
+    fn reconciliation_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.reconciliation_state_path.is_some();
+        let file_bytes = self
+            .config
+            .reconciliation_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry = self.reconciliation_registry.lock();
+        let (registry_size, generation) = registry
+            .as_ref()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .reconciliation_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = DomainWorkflowReconciliationRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::DOMAIN_WORKFLOW_RECONCILIATION_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_reconciliations": bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+                "max_file_bytes": MAX_WORKFLOW_RECONCILIATION_STATE_BYTES,
+                "recovery_policy": "only digest-valid reconciliation reports restore; imported audit records never resume execution",
+                "flush": "/v1/domain-workflows/reconciliations/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_reconciliation_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.reconciliation_state_path.is_none() {
+            return self.error(
+                409,
+                "reconciliation_persistence_disabled",
+                "configure --reconciliation-state before flushing a workflow reconciliation snapshot",
+                request_id,
+            );
+        }
+        match self.persist_reconciliation_registry() {
+            Ok(_) => self.reconciliation_persistence_status(),
+            Err(error) => self.error(503, "reconciliation_persistence_unavailable", &error, request_id),
+        }
     }
 
     fn domain_workflow_tool(
@@ -5075,6 +5476,10 @@ impl ApiRouter {
                     "/v1/domain-workflows": { "get": { "responses": { "200": { "description": "deterministic workflow template for every capability group" } } } },
                     "/v1/domain-workflows/instantiate": { "post": { "responses": { "200": { "description": "group-scoped, authoritative-preflighted, no-dispatch workflow mission" }, "422": { "description": "workflow selection or mission preflight was refused" } } } },
                     "/v1/domain-workflows/reconcile": { "post": { "responses": { "200": { "description": "digest-bound workflow execution and evidence reconciliation" }, "422": { "description": "workflow evidence source or contract was refused" } } } },
+                    "/v1/domain-workflows/reconciliations": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "workflow_id", "in": "query" }, { "name": "mission_plan_digest", "in": "query" }, { "name": "completion_status", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_records", "in": "query" }], "responses": { "200": { "description": "bounded deterministic workflow reconciliation registry index" } } }, "post": { "responses": { "201": { "description": "digest-valid workflow reconciliation imported" }, "200": { "description": "idempotent re-import" }, "422": { "description": "reconciliation record failed digest validation" } } } },
+                    "/v1/domain-workflows/reconciliations/{reconciliation_digest}": { "get": { "parameters": [{ "name": "reconciliation_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one imported workflow reconciliation report" }, "404": { "description": "reconciliation digest is not present" } } } },
+                    "/v1/domain-workflows/reconciliations/persistence": { "get": { "responses": { "200": { "description": "restart-aware workflow reconciliation registry checkpoint status" } } } },
+                    "/v1/domain-workflows/reconciliations/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded workflow reconciliation registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/evidence-bundles": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_bundles", "in": "query" }], "responses": { "200": { "description": "bounded deterministic evidence registry index" } } }, "post": { "responses": { "201": { "description": "verified evidence bundle imported into the registry" }, "200": { "description": "idempotent re-import" }, "413": { "description": "registry capacity or snapshot bound exceeded" }, "422": { "description": "bundle verification failed" } } } },
                     "/v1/evidence-bundles/{bundle_digest}": { "get": { "parameters": [{ "name": "bundle_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one verified evidence bundle" }, "404": { "description": "bundle digest is not present" } } } },
                     "/v1/evidence-bundles/persistence": { "get": { "responses": { "200": { "description": "restart-aware evidence registry checkpoint status" } } } },
@@ -6184,6 +6589,37 @@ fn load_evidence_registry(path: Option<&Path>) -> Result<EvidenceBundleRegistry,
         .map_err(|error| format!("evidence state snapshot is invalid JSON: {error}"))?;
     EvidenceBundleRegistry::from_snapshot(&document)
         .map_err(|error| format!("evidence state snapshot is invalid: {error}"))
+}
+
+fn load_workflow_reconciliation_registry(
+    path: Option<&Path>,
+) -> Result<DomainWorkflowReconciliationRegistry, String> {
+    let Some(path) = path else {
+        return Ok(DomainWorkflowReconciliationRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DomainWorkflowReconciliationRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "workflow reconciliation state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_WORKFLOW_RECONCILIATION_STATE_BYTES {
+        return Err(format!(
+            "workflow reconciliation state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_WORKFLOW_RECONCILIATION_STATE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        format!("workflow reconciliation state snapshot is invalid JSON: {error}")
+    })?;
+    DomainWorkflowReconciliationRegistry::from_snapshot(&document)
+        .map_err(|error| format!("workflow reconciliation state snapshot is invalid: {error}"))
 }
 
 fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
@@ -8324,6 +8760,87 @@ mod tests {
         let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
         assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn workflow_reconciliation_registry_is_idempotent_indexed_and_restart_safe() {
+        let path = test_state_path("workflow-reconciliation-registry");
+        let config = ApiConfig {
+            reconciliation_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let mut record = json!({
+            "ok": true,
+            "schema": "bioprism-devplat-domain-workflow-reconcile/0.1",
+            "workflow": "domain_workflow_reconcile",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "a".repeat(64),
+            "catalog_digest": "b".repeat(64),
+            "domain_contract_digest": "c".repeat(64),
+            "mission_id": "reconciliation-api-mission",
+            "mission_plan_digest": "d".repeat(64),
+            "source": "mission_report",
+            "completion": {"status": "complete", "ready": true, "review_required": true},
+            "evidence": {"evidence_valid": true},
+            "integrity": {"valid": true, "finding_count": 0},
+            "execution": "not_started"
+        });
+        record["reconciliation_digest"] = json!(ContentHash::of_value(&record).unwrap().to_string());
+        let imported = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/reconciliations",
+            json!({"record": record.clone()}),
+        ));
+        assert_eq!(imported.status, 201);
+        let imported: Value = serde_json::from_slice(&imported.body).unwrap();
+        assert_eq!(imported["created"], true);
+        let digest = imported["reconciliation_digest"].as_str().unwrap().to_string();
+
+        let duplicate = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/reconciliations",
+            json!({"record": record}),
+        ));
+        assert_eq!(duplicate.status, 200);
+        let duplicate: Value = serde_json::from_slice(&duplicate.body).unwrap();
+        assert_eq!(duplicate["already_present"], true);
+        let queried = router.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=reconciliation-api-mission&completion_status=complete&limit=10",
+            json!({}),
+        ));
+        assert_eq!(queried.status, 200);
+        let queried: Value = serde_json::from_slice(&queried.body).unwrap();
+        assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(queried["rows"][0]["reconciliation_digest"], digest);
+        let fetched = router.handle(request(
+            "GET",
+            &format!("/v1/domain-workflows/reconciliations/{digest}"),
+            json!({}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert_eq!(fetched["record"]["reconciliation_digest"], digest);
+        let persistence = router.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations/persistence",
+            json!({}),
+        ));
+        let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
+        assert_eq!(persistence["enabled"], true);
+        assert_eq!(persistence["integrity_verified"], true);
+
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=reconciliation-api-mission",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(restored_query["registry_generation"], 1);
     }
 
     #[test]
