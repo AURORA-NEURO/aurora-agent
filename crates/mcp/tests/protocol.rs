@@ -23,6 +23,10 @@ use bioprism_bioevalx::trajectory::{PathProperty, Step, Trajectory};
 use bioprism_bioevalx::worldline::{Decision, Observation as EvalObservation, Worldline};
 use bioprism_biolang::{BioType, CollectionDecl, QuerySchema};
 use bioprism_bundle::{EntryRole, ResultBundle};
+use bioprism_devplat::{
+    build_domain_workflow_catalogue, instantiate_domain_workflow, plan_mission,
+    reconcile_domain_workflow, MissionRequest,
+};
 use bioprism_evalengine::{
     compose, Conclusion, Contribution, CoverageFloor, Observation, ReleaseGate, ScoreTier,
     UnknownPolicy,
@@ -1248,6 +1252,167 @@ fn domain_workflow_catalogue_covers_every_capability_group() {
             && workflow["tool_contracts"].is_array()
             && workflow["recommended_stages"].is_array()
     }));
+}
+
+#[test]
+fn domain_workflow_bindings_cover_every_available_capability_group() {
+    let capabilities = bioprism_mcp::workspace_capabilities();
+    let definitions = Value::Array(tool_definitions());
+    let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
+    let workflows = catalogue["workflows"].as_array().unwrap();
+    assert_eq!(workflows.len(), 29);
+
+    for workflow in workflows {
+        let workflow_id = workflow["workflow_id"].as_str().unwrap();
+        let tool = workflow["tools"]["available"]
+            .as_array()
+            .and_then(|tools| tools.first())
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("workflow {workflow_id} has no available tool"));
+        let mission_id = format!("all-domain-binding-{workflow_id}");
+        let report = instantiate_domain_workflow(
+            &capabilities,
+            &definitions,
+            &json!({
+                "workflow_id": workflow_id,
+                "mission_id": mission_id,
+                "goal": format!("exercise the {workflow_id} contract"),
+                "steps": [{
+                    "id": "contract-probe",
+                    "tool": tool,
+                    "arguments": {}
+                }],
+                "policy": {"execute": false}
+            }),
+        )
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} failed to instantiate: {error}"));
+        let binding = &report["mission"]["workflow_binding"];
+        assert_eq!(binding["workflow_id"], workflow["workflow_id"]);
+        assert_eq!(binding["workflow_digest"], workflow["workflow_digest"]);
+        assert_eq!(binding["catalog_digest"], workflow["catalog_digest"]);
+        assert_eq!(
+            binding["domain_contract_digest"],
+            workflow["domain_contract_digest"]
+        );
+        assert_eq!(binding["domain_contract"], workflow["domain_contract"]);
+        assert_eq!(binding["evidence_plan"], report["evidence_plan"]);
+        assert_eq!(
+            binding["evidence_plan_digest"],
+            ContentHash::of_value(&report["evidence_plan"])
+                .unwrap()
+                .to_string()
+        );
+    }
+}
+
+#[test]
+fn domain_workflow_reconciliation_preserves_outcomes_for_every_capability_group() {
+    let capabilities = bioprism_mcp::workspace_capabilities();
+    let definitions = Value::Array(tool_definitions());
+    let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
+    let workflows = catalogue["workflows"].as_array().unwrap();
+    assert_eq!(workflows.len(), 29);
+
+    for workflow in workflows {
+        let workflow_id = workflow["workflow_id"].as_str().unwrap();
+        let tool = workflow["tools"]["available"]
+            .as_array()
+            .and_then(|tools| tools.first())
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("workflow {workflow_id} has no available tool"));
+        let instantiation = instantiate_domain_workflow(
+            &capabilities,
+            &definitions,
+            &json!({
+                "workflow_id": workflow_id,
+                "mission_id": format!("all-domain-reconcile-{workflow_id}"),
+                "goal": format!("exercise retained evidence states for {workflow_id}"),
+                "steps": [{"id": "outcome", "tool": tool, "arguments": {}}],
+                "policy": {"execute": true}
+            }),
+        )
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} failed to instantiate: {error}"));
+        let request: MissionRequest =
+            serde_json::from_value(instantiation["mission"].clone()).unwrap();
+        let plan = plan_mission(&request).unwrap();
+        let step = &plan.steps[0];
+        let report = |status: &str, wire: Option<Value>| {
+            json!({
+                "ok": true,
+                "workflow": "agent_mission",
+                "schema_version": "bioprism-devplat-mission/0.1",
+                "plan": serde_json::to_value(&plan).unwrap(),
+                "execution": "executed",
+                "mission_status": if status == "succeeded" { "succeeded" } else { "failed" },
+                "succeeded": usize::from(status == "succeeded"),
+                "refused": usize::from(status == "refused"),
+                "blocked": usize::from(status == "blocked"),
+                "cancelled": usize::from(status == "cancelled"),
+                "required_failures": usize::from(status != "succeeded"),
+                "returned_bytes": if wire.is_some() { 12 } else { 0 },
+                "results": [{
+                    "id": step.id,
+                    "tool": step.tool,
+                    "status": status,
+                    "required": step.required,
+                    "arguments_digest": "a".repeat(64),
+                    "bytes": if wire.is_some() { 12 } else { 0 },
+                    "wire": wire,
+                    "error": if status == "succeeded" { Value::Null } else { json!("explicit refusal") }
+                }],
+                "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
+                "execution_trace": [
+                    {"sequence": 0, "event": "mission.started", "wave": null, "step_id": null, "tool": null, "status": "running", "arguments_digest": null, "bytes": 0, "detail": null},
+                    {"sequence": 1, "event": "mission.completed", "wave": null, "step_id": null, "tool": null, "status": if status == "succeeded" { "succeeded" } else { "failed" }, "arguments_digest": null, "bytes": if wire.is_some() { 12 } else { 0 }, "detail": null}
+                ],
+                "claim_requests": [],
+                "claim_lineage": {},
+                "guarantees": [],
+                "limitations": []
+            })
+        };
+
+        let success = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": report("succeeded", Some(json!({"result": {"ok": true}})))
+        }))
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} success reconciliation failed: {error}"));
+        assert_eq!(success["completion"]["status"], "complete");
+        assert_eq!(success["completion"]["ready"], true);
+
+        let refused = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": report("refused", None)
+        }))
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} refusal reconciliation failed: {error}"));
+        assert_eq!(refused["completion"]["status"], "failed");
+        assert_eq!(refused["completion"]["ready"], false);
+        assert_eq!(refused["evidence"]["rows"][0]["evidence_state"], "explicit_refusal");
+
+        let omitted = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": report("succeeded", None)
+        }))
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} omission reconciliation failed: {error}"));
+        assert_eq!(omitted["completion"]["status"], "complete_with_output_omissions");
+        assert_eq!(omitted["completion"]["ready"], false);
+        assert_eq!(omitted["evidence"]["rows"][0]["evidence_state"], "completed_output_omitted");
+
+        let mut mismatched_report = report("succeeded", Some(json!({"result": {"ok": true}})));
+        mismatched_report["plan"]["digest"] = json!("b".repeat(64));
+        let mismatched = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": mismatched_report
+        }))
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} mismatch reconciliation failed: {error}"));
+        assert_eq!(mismatched["integrity"]["valid"], false);
+        assert_eq!(mismatched["completion"]["ready"], false);
+        assert!(mismatched["integrity"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "mission_plan_digest_mismatch"));
+    }
 }
 
 #[test]

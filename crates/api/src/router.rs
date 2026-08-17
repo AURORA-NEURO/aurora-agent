@@ -7992,8 +7992,12 @@ mod tests {
 
     #[test]
     fn operations_gate_reconciliation_matrix_binds_every_workspace_group() {
-        let router =
-            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let reconciliation_path = test_state_path("gate-reconciliation-matrix");
+        let config = ApiConfig {
+            reconciliation_state_path: Some(reconciliation_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
         let group_ids = operations_domain_coverage()["groups"]
             .as_array()
             .unwrap()
@@ -8059,6 +8063,22 @@ mod tests {
             assert_eq!(group["gates"]["reconciliation_evidence"]["readiness_claimed"], false);
             assert_eq!(group["gate_state"], "insufficient_evidence");
         }
+
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?limit=256",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        let restored_rows = restored_query["rows"].as_array().unwrap();
+        assert_eq!(restored_rows.len(), group_ids.len());
+        assert!(restored_rows.iter().all(|row| {
+            row["completion_status"] == "partial" && row["workflow_id"].is_string()
+        }));
+        let _ = std::fs::remove_file(reconciliation_path);
     }
 
     #[test]
@@ -8879,6 +8899,161 @@ mod tests {
         assert_eq!(deleted.status, 200);
         let missing = router.handle(request("GET", "/v1/missions/api-async-1", json!({})));
         assert_eq!(missing.status, 404);
+    }
+
+    #[test]
+    fn asynchronous_workflow_missions_checkpoint_reconciliation_before_terminal_state() {
+        let event_path = test_state_path("async-workflow-events");
+        let mission_path = test_state_path("async-workflow-missions");
+        let reconciliation_path = test_state_path("async-workflow-reconciliation");
+        let config = ApiConfig {
+            event_state_path: Some(event_path.clone()),
+            mission_state_path: Some(mission_path.clone()),
+            reconciliation_state_path: Some(reconciliation_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let instantiated = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/instantiate",
+            json!({
+                "workflow_id": "biological_domains",
+                "mission_id": "async-workflow-reconcile",
+                "goal": "execute a reviewed biological workflow asynchronously",
+                "steps": [{
+                    "id": "catalog",
+                    "domain": "biological",
+                    "capability": "catalogue",
+                    "objective": "inspect modality support",
+                    "tool": "modality_catalog",
+                    "arguments": {}
+                }],
+                "policy": {"execute": true}
+            }),
+        ));
+        assert_eq!(instantiated.status, 200);
+        let instantiated: Value = serde_json::from_slice(&instantiated.body).unwrap();
+        let completed = json!({
+            "result": {
+                "isError": false,
+                "content": [{"type": "text", "text": "{}"}]
+            }
+        });
+        router.record_tool_event("async-workflow-gate-1", "modality_catalog", &completed);
+        router.record_tool_event(
+            "async-workflow-gate-2",
+            "bioeval_reference_audit",
+            &completed,
+        );
+        router.record_tool_event("async-workflow-gate-3", "safety_release_gate", &completed);
+        let gates = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=256",
+            json!({}),
+        ));
+        assert_eq!(gates.status, 200);
+        let gates: Value = serde_json::from_slice(&gates.body).unwrap();
+        let review = router.handle(request(
+            "POST",
+            "/v1/operations/gate-reviews",
+            json!({
+                "gate_digest": gates["gate_digest"],
+                "reviewer": "operator-async-workflow",
+                "rationale": "reviewed the bounded asynchronous workflow dispatch",
+                "group_ids": ["biological_domains"],
+                "accepted_gates": {"biological_domains": operations_required_gates()}
+            }),
+        ));
+        assert_eq!(review.status, 201);
+        let review: Value = serde_json::from_slice(&review.body).unwrap();
+
+        let mut mission = instantiated["mission"].clone();
+        mission["operations_gate_acceptance"] = review["acceptance"].clone();
+        let submitted = router.handle(request("POST", "/v1/missions", mission));
+        assert_eq!(
+            submitted.status,
+            202,
+            "{}",
+            String::from_utf8_lossy(&submitted.body)
+        );
+
+        let mut terminal = Value::Null;
+        for _ in 0..200 {
+            let response = router.handle(request(
+                "GET",
+                "/v1/missions/async-workflow-reconcile",
+                json!({}),
+            ));
+            assert_eq!(response.status, 200);
+            terminal = serde_json::from_slice(&response.body).unwrap();
+            if ["succeeded", "failed", "cancelled"]
+                .iter()
+                .any(|status| terminal["status"] == *status)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(terminal["status"], "succeeded");
+        assert_eq!(terminal["result"]["mission_status"], "succeeded");
+        assert_eq!(terminal["result"]["workflow_reconciliation"]["present"], true);
+        assert_eq!(
+            terminal["result"]["workflow_reconciliation"]["automatic"],
+            true
+        );
+        let reconciliation_digest = terminal["result"]["workflow_reconciliation"]
+            ["reconciliation_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let persisted = std::fs::read_to_string(&reconciliation_path).unwrap();
+        assert!(persisted.contains("async-workflow-reconcile"));
+        let query = router.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=async-workflow-reconcile&completion_status=complete",
+            json!({}),
+        ));
+        assert_eq!(query.status, 200);
+        let query: Value = serde_json::from_slice(&query.body).unwrap();
+        assert_eq!(query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(query["rows"][0]["reconciliation_digest"], reconciliation_digest);
+
+        let flush = router.handle(request(
+            "POST",
+            "/v1/missions/persistence/flush",
+            json!({}),
+        ));
+        assert_eq!(flush.status, 200);
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_status = restored.handle(request(
+            "GET",
+            "/v1/missions/async-workflow-reconcile",
+            json!({}),
+        ));
+        assert_eq!(restored_status.status, 200);
+        let restored_status: Value = serde_json::from_slice(&restored_status.body).unwrap();
+        assert_eq!(restored_status["status"], "succeeded");
+        assert_eq!(
+            restored_status["result"]["workflow_reconciliation"]["reconciliation_digest"],
+            reconciliation_digest
+        );
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=async-workflow-reconcile",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            restored_query["rows"][0]["reconciliation_digest"],
+            reconciliation_digest
+        );
+        let _ = std::fs::remove_file(event_path);
+        let _ = std::fs::remove_file(mission_path);
+        let _ = std::fs::remove_file(reconciliation_path);
     }
 
     #[test]
