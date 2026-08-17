@@ -14,6 +14,9 @@
 use crate::domain_evidence::{
     validate_domain_evidence_harmonization, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
 };
+use crate::domain_evidence_intake::{
+    validate_domain_evidence_intake, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+};
 use crate::domain_report::{validate_domain_report, DOMAIN_REPORT_SCHEMA_VERSION};
 use crate::evidence_bundle::verify_mission_evidence_bundle;
 use bioprism_ids::ContentHash;
@@ -43,6 +46,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "evaluator_replay",
     "domain_report",
     "domain_evidence_harmonization",
+    "domain_evidence_intake",
     "external_reference",
 ];
 
@@ -635,6 +639,24 @@ fn verify_known_artifact(
                     "state": "verified_integrity",
                     "method": "domain_evidence_harmonization",
                     "schema": DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION
+                }),
+            ))
+        }
+        "domain_evidence_intake"
+            if artifact.get("schema").and_then(Value::as_str)
+                == Some(DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION) =>
+        {
+            validate_domain_evidence_intake(artifact).map_err(|error| {
+                ArtifactRegistryError::InvalidInput(format!(
+                    "domain evidence intake verification failed: {error}"
+                ))
+            })?;
+            Ok((
+                None,
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_evidence_intake",
+                    "schema": DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION
                 }),
             ))
         }

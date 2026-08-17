@@ -1301,6 +1301,9 @@ impl ApiRouter {
             ("POST", "/v1/domain-evidence/harmonize") => {
                 self.domain_evidence_harmonize(&request, &request_id)
             }
+            ("POST", "/v1/domain-evidence/intake") => {
+                self.domain_evidence_intake(&request, &request_id)
+            }
             ("GET", "/v1/artifacts") => self.query_artifacts(&request, &request_id),
             ("POST", "/v1/artifacts") => self.register_artifact(&request, &request_id),
             ("GET", "/v1/artifacts/persistence") => self.artifact_persistence_status(),
@@ -3271,6 +3274,7 @@ impl ApiRouter {
                     "domain_reports": "/v1/domain-reports",
                     "domain_report_coverage": "/v1/domain-reports/coverage",
                     "domain_evidence_harmonize": "/v1/domain-evidence/harmonize",
+                    "domain_evidence_intake": "/v1/domain-evidence/intake",
                     "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
@@ -3342,6 +3346,7 @@ impl ApiRouter {
                     "domain_report_projection": true,
                     "domain_report_coverage": true,
                     "domain_evidence_harmonization": true,
+                    "domain_evidence_intake": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -3857,6 +3862,18 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_evidence_harmonize",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_intake(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_intake",
             Value::Object(arguments),
         )
     }
@@ -7081,6 +7098,7 @@ impl ApiRouter {
                     "/v1/domain-reports": { "post": { "responses": { "200": { "description": "bounded domain-report projection" } } } },
                     "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
                     "/v1/domain-evidence/harmonize": { "post": { "responses": { "200": { "description": "digest-addressed domain evidence harmonization" }, "422": { "description": "report identity, catalogue, or traceability input was refused" } } } },
+                    "/v1/domain-evidence/intake": { "post": { "responses": { "200": { "description": "exact-digest raw domain evidence intake" }, "422": { "description": "envelope, outcome, or catalogue input was refused" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/persistence": { "get": { "responses": { "200": { "description": "restart-aware mission snapshot status" } } } },
@@ -11284,7 +11302,7 @@ mod tests {
             artifact_state_path: Some(artifact_path.clone()),
             ..ApiConfig::default()
         };
-        let router = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
         let first = router.handle(request(
             "POST",
             "/v1/domain-reports",
@@ -11363,6 +11381,78 @@ mod tests {
                 "claim": {"id": "api-claim-refused"},
                 "reports": [first["report"].clone()],
                 "links": [{"report_index": 0, "role": "context"}]
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn domain_evidence_intake_route_retains_raw_envelope_and_indexes_exact_digests() {
+        let artifact_path = test_state_path("domain-evidence-intake-route");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let response = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/intake",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-intake-subject",
+                "source_tool": "modality_catalog",
+                "request": {"modality": "single_cell"},
+                "response": {"status": "bounded", "modalities": ["single_cell"]},
+                "outcome": "observed",
+                "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+            }),
+        ));
+        assert_eq!(response.status, 200);
+        let response: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(response["workflow"], "domain_evidence_intake");
+        assert_eq!(response["request_supplied"], true);
+        assert_eq!(response["request_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(response["response_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(response["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            response["artifact_registry"]["verification"]["method"],
+            "domain_evidence_intake"
+        );
+        assert_eq!(
+            response["report"]["report"]["intake"]["response"]["status"],
+            "bounded"
+        );
+        let artifacts = router.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_intake&subject_id=api-intake-subject",
+            json!({}),
+        ));
+        assert_eq!(artifacts.status, 200);
+        let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
+        assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_artifacts = restored.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_intake&subject_id=api-intake-subject",
+            json!({}),
+        ));
+        assert_eq!(restored_artifacts.status, 200);
+        let restored_artifacts: Value = serde_json::from_slice(&restored_artifacts.body).unwrap();
+        assert_eq!(restored_artifacts["rows"].as_array().unwrap().len(), 1);
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/intake",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["not-declared"],
+                "subject_id": "api-intake-refused",
+                "source_tool": "modality_catalog",
+                "response": {},
+                "outcome": "unknown",
+                "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
             }),
         ));
         assert_eq!(refused.status, 422);

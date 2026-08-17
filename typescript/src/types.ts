@@ -4970,6 +4970,43 @@ export interface DomainEvidenceHarmonizationResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export type DomainEvidenceIntakeOutcome = "observed" | "partial" | "refused" | "error" | "unknown";
+
+export interface DomainEvidenceIntakeArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  request?: JsonValue;
+  response: JsonValue;
+  outcome: DomainEvidenceIntakeOutcome;
+  claim_posture: DomainReportClaimPosture;
+  parent_digests?: string[];
+}
+
+export interface DomainEvidenceIntakeResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-intake/0.1";
+  workflow: "domain_evidence_intake";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  request_supplied: boolean;
+  request_digest: string;
+  response_digest: string;
+  intake_digest: string;
+  outcome: DomainEvidenceIntakeOutcome;
+  report: JsonObject;
+  intake: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;
@@ -7866,6 +7903,7 @@ export type ArtifactKind =
   | "evaluator_replay"
   | "domain_report"
   | "domain_evidence_harmonization"
+  | "domain_evidence_intake"
   | "external_reference";
 
 export interface ArtifactRegistrationArgs extends JsonObject {

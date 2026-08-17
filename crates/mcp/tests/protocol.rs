@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 194);
+    assert_eq!(tools.len(), 195);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -963,6 +963,85 @@ fn domain_evidence_harmonization_refuses_subject_or_catalogue_mismatch() {
         }),
     );
     assert_eq!(invalid_catalogue["__isError"], json!(true));
+}
+
+#[test]
+fn domain_evidence_intake_accepts_one_declared_envelope_from_every_capability_group() {
+    let mut server = server();
+    let catalogue = call(&mut server, "workspace_capabilities", json!({}));
+    let groups = catalogue
+        .as_array()
+        .expect("workspace catalogue is an array");
+    assert_eq!(groups.len(), 29);
+    for group in groups {
+        let group_id = group["id"].as_str().expect("group id");
+        let source_tool = group["mcp_tools"][0].as_str().expect("source tool");
+        let domain = group["domains"][0].as_str().expect("domain");
+        let result = call(
+            &mut server,
+            "domain_evidence_intake",
+            json!({
+                "group_id": group_id,
+                "domains": [domain],
+                "subject_id": format!("all-domain-{group_id}"),
+                "source_tool": source_tool,
+                "request": {"probe": "retained"},
+                "response": {"group_id": group_id, "source_tool": source_tool, "status": "bounded"},
+                "outcome": "observed",
+                "claim_posture": {
+                    "status": "observed",
+                    "does_not_claim": ["scientific truth", "execution completion"]
+                }
+            }),
+        );
+        assert_eq!(result["__isError"], json!(false), "group={group_id}");
+        assert_eq!(result["workflow"], json!("domain_evidence_intake"));
+        assert_eq!(result["group_id"], json!(group_id));
+        assert_eq!(result["artifact_registry"]["indexed"], json!(true));
+        assert_eq!(result["report"]["group_id"], json!(group_id));
+        assert_eq!(result["report"]["source_tool"], json!(source_tool));
+        assert_eq!(result["report"]["domains"], json!([domain]));
+    }
+}
+
+#[test]
+fn domain_evidence_intake_replays_idempotently_and_refuses_catalogue_mismatch() {
+    let mut server = server();
+    let arguments = json!({
+        "group_id": "biological_domains",
+        "domains": ["modalities"],
+        "subject_id": "intake-replay",
+        "source_tool": "modality_catalog",
+        "response": {"status": "refused", "reason": "caller withheld execution"},
+        "outcome": "refused",
+        "claim_posture": {"status": "refused", "does_not_claim": ["execution", "truth"]}
+    });
+    let first = call(&mut server, "domain_evidence_intake", arguments.clone());
+    let second = call(&mut server, "domain_evidence_intake", arguments);
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        first["artifact_registry"]["content_digest"],
+        second["artifact_registry"]["content_digest"]
+    );
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+    assert_eq!(first["outcome"], json!("refused"));
+    assert_eq!(first["request_supplied"], json!(false));
+
+    let invalid = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["not-declared"],
+            "subject_id": "intake-invalid",
+            "source_tool": "modality_catalog",
+            "response": {},
+            "outcome": "unknown",
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(invalid["__isError"], json!(true));
+    assert!(invalid["error"].as_str().unwrap().contains("not declared"));
 }
 
 #[test]
@@ -6357,12 +6436,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(194));
-    assert_eq!(result["advertised_tool_count"], json!(194));
+    assert_eq!(result["unique_catalog_tools"], json!(195));
+    assert_eq!(result["advertised_tool_count"], json!(195));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(194));
-    assert_eq!(result["schema_quality"]["valid"], json!(194));
+    assert_eq!(result["schema_quality"]["checked"], json!(195));
+    assert_eq!(result["schema_quality"]["valid"], json!(195));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

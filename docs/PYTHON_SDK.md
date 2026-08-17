@@ -42,6 +42,13 @@ requires exact same-subject reports and explicit support/qualification/contradic
 roles; the typed result preserves traceability state, contradiction posture, catalogue digest,
 and artifact digest without treating report presence or a support link as a scientific or release
 claim.
+`DomainEvidenceIntakeRequest` and `DomainEvidenceIntakeReport` add the raw-envelope boundary for
+every declared capability group. `ApiClient.domain_evidence_intake()` and its `*_tool()` variant,
+plus the `Workspace` and `AsyncWorkspace` helpers, retain optional request JSON, required response
+JSON, explicit observed/partial/refused/error/unknown outcome, separate request/response digests,
+and the indexed `domain_evidence_intake` artifact. The client preserves request omission versus
+supplied null and does not infer execution, provenance completeness, scientific validity, or
+readiness from an intake record.
 
 ## Lifecycle
 

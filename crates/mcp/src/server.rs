@@ -140,7 +140,8 @@ use bioprism_devplat::{
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
     WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
     DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
     DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
     ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
@@ -1367,6 +1368,7 @@ impl Server {
             "artifact_registry_audit" => self.artifact_registry_audit(&arguments),
             "domain_report_project" => self.domain_report_project(&arguments),
             "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
+            "domain_evidence_intake" => self.domain_evidence_intake(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -3126,6 +3128,120 @@ impl Server {
                 "traceability proves any claim or chooses between contradictory reports",
                 "harmonization proves scientific, clinical, regulatory, publication, or release validity",
                 "artifact indexing proves provenance completeness or external effect completion"
+            ]
+        }))
+    }
+
+    /// Intake one raw request/response envelope and bind it to the authoritative catalogue.
+    /// Intake is deliberately separate from execution: callers may submit a retained tool
+    /// response, a refusal, or an externally produced envelope, but this operation never calls
+    /// the named source tool on their behalf.
+    fn domain_evidence_intake(&self, arguments: &Value) -> Result<Value, String> {
+        let intake = bioprism_devplat::intake_domain_evidence(arguments)
+            .map_err(|error| format!("domain evidence intake refused: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group_id = intake
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence intake omitted group_id")?;
+        let source_tool = intake
+            .get("source_tool")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence intake omitted source_tool")?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+        if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+            return Err(format!(
+                "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+            ));
+        }
+        let domains = intake
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("domain evidence intake omitted domains")?;
+        for domain in domains.iter().filter_map(Value::as_str) {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "domain label {domain:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let subject_id = intake
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence intake omitted subject_id")?;
+        let parent_digests = intake
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let projection = self.index_artifact_projection(
+            "domain_evidence_intake",
+            subject_id,
+            domains
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            parent_digests,
+            intake.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain evidence intake could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        let report = intake
+            .get("report")
+            .cloned()
+            .ok_or("domain evidence intake omitted canonical report")?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+            "group_id": intake.get("group_id"),
+            "domains": intake.get("domains"),
+            "subject_id": intake.get("subject_id"),
+            "source_tool": intake.get("source_tool"),
+            "request_supplied": intake.get("request_supplied"),
+            "request_digest": intake.get("request_digest"),
+            "response_digest": intake.get("response_digest"),
+            "intake_digest": intake.get("intake_digest"),
+            "outcome": intake.get("outcome"),
+            "parent_digests": intake.get("parent_digests"),
+            "report": report,
+            "intake": intake,
+            "artifact_registry": projection,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "the source tool and domains were checked against the authoritative workspace capability catalogue",
+                "request and response JSON remain recoverable through the indexed canonical intake artifact",
+                "the intake records a supplied envelope and never executes the named source tool"
+            ],
+            "does_not_claim": [
+                "intake proves that a source tool was executed or that its response is true",
+                "catalogue membership or exact digests prove scientific, clinical, causal, provenance, or release validity",
+                "a refusal or partial response is silently equivalent to a successful observation"
             ]
         }))
     }
@@ -29012,7 +29128,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_intake", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29312,6 +29428,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "required_domains": { "type": "array", "maxItems": 64, "items": { "type": "string" }, "description": "Optional domain labels that must be represented; missing labels remain explicit." }
                 },
                 "required": ["subject_id", "claim", "reports", "links"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_intake",
+            "description": "Normalize a supplied raw request/response envelope from any declared capability-group tool into an exact-digest domain report and indexed intake artifact. The operation checks the source tool and domain labels against the authoritative catalogue, preserves observed, partial, refused, error, and unknown outcomes, and never executes or interprets the named tool; it is a provenance-aware evidence boundary, not a scientific, clinical, causal, release, or readiness decision.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning source_tool." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Domain labels declared by group_id for the supplied envelope." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, run, mission, or report identity." },
+                    "source_tool": { "type": "string", "description": "Exact MCP tool name declared under group_id whose envelope is being retained." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Optional original JSON request; null is retained when omitted and request_supplied distinguishes the cases." },
+                    "response": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Required raw JSON response, refusal, or error envelope to retain." },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"], "description": "Caller-declared envelope outcome; no outcome is inferred from response shape." },
+                    "claim_posture": { "type": "object", "description": "Explicit domain-report claim posture with status, non-claims, and optional limitations." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional lowercase SHA-256 artifact parents already known or intentionally missing." }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "response", "outcome", "claim_posture"]
             }
         }),
         json!({

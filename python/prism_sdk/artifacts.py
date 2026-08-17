@@ -19,6 +19,7 @@ ARTIFACT_KINDS = (
     "evaluator_replay",
     "domain_report",
     "domain_evidence_harmonization",
+    "domain_evidence_intake",
     "external_reference",
 )
 

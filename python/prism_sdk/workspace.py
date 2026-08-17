@@ -33,6 +33,10 @@ from .domain_evidence import (
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
 )
+from .domain_evidence_intake import (
+    DomainEvidenceIntakeReport,
+    DomainEvidenceIntakeRequest,
+)
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
 from .bioql import BioQlCompileRequest
 from .client import Client
@@ -2043,6 +2047,23 @@ class Workspace:
         request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
     ) -> DomainEvidenceHarmonizationReport:
         return DomainEvidenceHarmonizationReport.from_wire(self.domain_evidence_harmonize(request))
+
+    def domain_evidence_intake(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeRequest)
+            else DomainEvidenceIntakeRequest(**dict(request))
+        )
+        return self.tool("domain_evidence_intake", normalized.to_arguments())
+
+    def domain_evidence_intake_report(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        return DomainEvidenceIntakeReport.from_wire(self.domain_evidence_intake(request))
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         """Audit exact identity agreement across the bounded artifact stores."""
@@ -5362,6 +5383,23 @@ class AsyncWorkspace:
         return DomainEvidenceHarmonizationReport.from_wire(
             await self.domain_evidence_harmonize(request)
         )
+
+    async def domain_evidence_intake(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeRequest)
+            else DomainEvidenceIntakeRequest(**dict(request))
+        )
+        return await self.tool("domain_evidence_intake", normalized.to_arguments())
+
+    async def domain_evidence_intake_report(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        return DomainEvidenceIntakeReport.from_wire(await self.domain_evidence_intake(request))
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         return ArtifactCrossStoreAuditReport.from_wire(

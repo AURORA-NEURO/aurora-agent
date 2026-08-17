@@ -34,6 +34,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-reports` | Validate and index one explicit report projection for a declared capability group and source tool |
 | `GET /v1/domain-reports/coverage?group_id=&domain=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
 | `POST /v1/domain-evidence/harmonize` | Join exact same-subject domain reports into an explicit, digest-addressed traceability artifact |
+| `POST /v1/domain-evidence/intake` | Normalize and index one supplied raw request/response envelope from any declared capability-group tool |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
 | `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows |
 | `GET /v1/domain-workflows/reconciliations/{reconciliation_digest}` | Fetch one digest-verified reconciliation report |
@@ -191,6 +192,14 @@ missing required groups/domains and link coverage remain visible in the result. 
 indexes a digest-addressed harmonization artifact with report digests as parents, always keeps
 `readiness_claimed: false`, and does not choose between conflicting reports or claim scientific,
 clinical, causal, provenance, publication, release, or execution validity.
+`POST /v1/domain-evidence/intake` is the raw-envelope boundary for all 29 capability groups. It
+requires a declared group, source tool, domain label, response JSON, explicit outcome, and claim
+posture; an original request is optional and its absence is distinguished from a supplied JSON
+null. Request and response bytes receive separate canonical SHA-256 digests, the normalized
+envelope is embedded in a canonical domain report, and the intake artifact is indexed with any
+declared artifact parents. Outcomes remain `observed`, `partial`, `refused`, `error`, or
+`unknown`; the route never invokes the source tool or promotes a response into truth, execution,
+provenance completeness, scientific/clinical validity, release readiness, or external effects.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

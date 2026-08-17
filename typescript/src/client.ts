@@ -36,6 +36,8 @@ import type {
   DomainReportCoverageResult,
   DomainEvidenceHarmonizeArgs,
   DomainEvidenceHarmonizationResult,
+  DomainEvidenceIntakeArgs,
+  DomainEvidenceIntakeResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -635,6 +637,33 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceHarmonizationResult>> {
     return this.callTool<DomainEvidenceHarmonizationResult>("domain_evidence_harmonize", args, options);
+  }
+
+  /** Normalize one supplied raw source-tool envelope into an exact-digest intake artifact. */
+  async domainEvidenceIntake(
+    args: DomainEvidenceIntakeArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceIntakeResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence intake arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!Object.prototype.hasOwnProperty.call(args, "response")) throw new ArgumentError("response is required");
+    if (!("observed" === args.outcome || "partial" === args.outcome || "refused" === args.outcome || "error" === args.outcome || "unknown" === args.outcome)) throw new ArgumentError("outcome is invalid");
+    if (!isObject(args.claim_posture)) throw new ArgumentError("claim_posture must be an object");
+    if (!(["observed", "derived", "review_required", "refused", "not_applicable"] as const).includes(args.claim_posture.status)) throw new ArgumentError("claim_posture.status is invalid");
+    if (!Array.isArray(args.claim_posture.does_not_claim) || args.claim_posture.does_not_claim.length < 1 || args.claim_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("claim_posture.does_not_claim must be non-empty");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    return this.request<DomainEvidenceIntakeResult>("POST", "/v1/domain-evidence/intake", args, options);
+  }
+
+  /** Invoke raw envelope intake through the REST tool dispatcher. */
+  async domainEvidenceIntakeTool(
+    args: DomainEvidenceIntakeArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceIntakeResult>> {
+    return this.callTool<DomainEvidenceIntakeResult>("domain_evidence_intake", args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

@@ -57,6 +57,13 @@ from .domain_evidence import (
     DomainEvidenceHarmonizeRequest,
     DomainEvidenceLink,
 )
+from .domain_evidence_intake import (
+    DOMAIN_EVIDENCE_INTAKE_OUTCOMES,
+    DOMAIN_EVIDENCE_INTAKE_SCHEMA,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DomainEvidenceIntakeReport,
+    DomainEvidenceIntakeRequest,
+)
 from .biological import (
     AdapterDescriptor,
     AdapterDescriptorReport,
@@ -2687,6 +2694,11 @@ __all__ = [
     "DomainEvidenceLink",
     "DomainEvidenceHarmonizeRequest",
     "DomainEvidenceHarmonizationReport",
+    "DOMAIN_EVIDENCE_INTAKE_OUTCOMES",
+    "DOMAIN_EVIDENCE_INTAKE_SCHEMA",
+    "DOMAIN_EVIDENCE_INTAKE_WORKFLOW",
+    "DomainEvidenceIntakeRequest",
+    "DomainEvidenceIntakeReport",
     "INCIDENT_CLASSES",
     "CONTAINMENT_ACTIONS",
     "AUDIT_EVENTS",

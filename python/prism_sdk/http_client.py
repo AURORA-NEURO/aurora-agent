@@ -38,6 +38,10 @@ from .domain_evidence import (
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
 )
+from .domain_evidence_intake import (
+    DomainEvidenceIntakeReport,
+    DomainEvidenceIntakeRequest,
+)
 from .capability import (
     CapabilityAuditReport,
     CapabilitySearchReport,
@@ -835,6 +839,34 @@ class ApiClient:
         )
         return DomainEvidenceHarmonizationReport.from_wire(
             self.call_tool("domain_evidence_harmonize", normalized.to_arguments())
+        )
+
+    def domain_evidence_intake(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        """Retain one raw source-tool envelope as an exact-digest intake artifact over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeRequest)
+            else DomainEvidenceIntakeRequest(**dict(request))
+        )
+        return DomainEvidenceIntakeReport.from_wire(
+            self.request("POST", "/v1/domain-evidence/intake", normalized.to_arguments())
+        )
+
+    def domain_evidence_intake_tool(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeRequest)
+            else DomainEvidenceIntakeRequest(**dict(request))
+        )
+        return DomainEvidenceIntakeReport.from_wire(
+            self.call_tool("domain_evidence_intake", normalized.to_arguments())
         )
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
@@ -4596,6 +4628,18 @@ class AsyncApiClient:
         request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
     ) -> DomainEvidenceHarmonizationReport:
         return await asyncio.to_thread(self.client.domain_evidence_harmonize_tool, request)
+
+    async def domain_evidence_intake(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        return await asyncio.to_thread(self.client.domain_evidence_intake, request)
+
+    async def domain_evidence_intake_tool(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        return await asyncio.to_thread(self.client.domain_evidence_intake_tool, request)
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

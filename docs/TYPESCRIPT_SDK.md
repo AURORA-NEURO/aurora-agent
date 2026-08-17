@@ -89,6 +89,11 @@ with explicit report-link roles, digest-addressed artifact indexing, catalogue v
 always-review-required posture. The `DomainEvidenceHarmonizationResult` keeps traceability and
 contradiction state typed without converting report presence into scientific, clinical, causal,
 publication, release, or execution validity.
+`domainEvidenceIntake` and `domainEvidenceIntakeTool` expose the raw-envelope boundary with typed
+group/tool/domain membership, explicit outcome states, optional request JSON, required response
+JSON, separate request/response digests, and indexed artifact posture. Request omission remains
+distinct from supplied `null`; the client does not turn intake into execution or scientific,
+clinical, causal, provenance, release, or readiness authority.
 
 Convenience methods currently cover:
 
@@ -233,7 +238,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 194-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 195-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
