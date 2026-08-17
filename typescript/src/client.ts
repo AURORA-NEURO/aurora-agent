@@ -64,6 +64,8 @@ import type {
   DomainEvidenceProviderReplayVerifyResult,
   AdapterPlanArgs,
   AdapterPlanResult,
+  AdapterExecutionEvidenceArgs,
+  AdapterExecutionEvidenceResult,
   DomainAcquisitionArgs,
   DomainAcquisitionResult,
   TabularIngestArgs,
@@ -1747,6 +1749,39 @@ export class ApiClient {
 
   async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterPlanResult>> {
     return this.callTool<AdapterPlanResult>("adapter_plan", args, options);
+  }
+
+  async adapterExecutionEvidence(args: AdapterExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceResult>> {
+    if (!isObject(args)) throw new ArgumentError("adapter execution evidence arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["adapter_id", args.adapter_id], ["adapter_version", args.adapter_version], ["source_id", args.source_id], ["execution_status", args.execution_status], ["conformance_status", args.conformance_status], ["semantic_loss_status", args.semantic_loss_status]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    for (const [name, value] of [["input_digest", args.input_digest], ["output_digest", args.output_digest]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
+    }
+    const executionStatuses = ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown"];
+    const conformanceStatuses = ["verified", "partial", "refused", "not_run", "unknown"];
+    const lossStatuses = ["lossless", "lossy", "unknown", "not_applicable"];
+    if (!executionStatuses.includes(args.execution_status)) throw new ArgumentError("execution_status is invalid");
+    if (!conformanceStatuses.includes(args.conformance_status)) throw new ArgumentError("conformance_status is invalid");
+    if (!lossStatuses.includes(args.semantic_loss_status)) throw new ArgumentError("semantic_loss_status is invalid");
+    const losses = args.losses ?? [];
+    if (!Array.isArray(losses) || losses.length > 128 || losses.some((loss) => !isObject(loss) || typeof loss.kind !== "string" || loss.kind.trim().length === 0 || !["info", "warning", "blocking"].includes(String(loss.severity)) || typeof loss.detail !== "string" || loss.detail.trim().length === 0)) throw new ArgumentError("losses must contain at most 128 valid loss entries");
+    if ((args.semantic_loss_status === "lossless" || args.semantic_loss_status === "not_applicable") && losses.length > 0) throw new ArgumentError("lossless or not_applicable evidence cannot contain losses");
+    if (args.semantic_loss_status === "lossy" && losses.length === 0) throw new ArgumentError("lossy evidence must contain at least one loss");
+    if (args.execution_status === "succeeded" && (typeof args.output_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.output_digest))) throw new ArgumentError("succeeded execution requires output_digest");
+    if ((args.execution_status === "refused" || args.execution_status === "failed") && (typeof args.error_code !== "string" || args.error_code.trim().length === 0)) throw new ArgumentError("refused or failed execution requires error_code");
+    for (const [name, value, maximum] of [["item_count", args.item_count, 2_000_000], ["byte_length", args.byte_length, 68_719_476_736]] as const) {
+      if (value !== undefined && value !== null && (!Number.isSafeInteger(value) || value < 0 || value > maximum)) throw new ArgumentError(`${name} is outside its bound`);
+    }
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if ("credential_material" in args || "credentials" in args) throw new ArgumentError("credential material is not accepted by the adapter evidence boundary");
+    return this.callTool<AdapterExecutionEvidenceResult>("adapter_execution_evidence", { ...args, losses }, options);
+  }
+
+  async adapterExecutionEvidenceTool(args: AdapterExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceResult>> {
+    return this.adapterExecutionEvidence(args, options);
   }
 
   async domainAcquisitionCatalogue(args: DomainAcquisitionArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DomainAcquisitionResult>> {

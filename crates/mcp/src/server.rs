@@ -134,14 +134,15 @@ use bioprism_devplat::{
     normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
     plan_domain_evidence_source, plan_mission,
     query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
-    record_domain_evidence_provider_external_payload, run_workbench, scaffold_domain_workflow,
-    standard_walkthroughs, verify_delivery_receipt,
+    record_adapter_execution_evidence, record_domain_evidence_provider_external_payload,
+    run_workbench, scaffold_domain_workflow, standard_walkthroughs, verify_delivery_receipt,
     verify_domain_evidence_provider_external_payload_replay,
-    verify_domain_evidence_provider_replay, verify_mission_evidence_bundle, ArtifactRegistry,
-    CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
-    DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
-    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    verify_domain_evidence_provider_replay, verify_mission_evidence_bundle,
+    AdapterExecutionEvidenceRequest, ArtifactRegistry, CapabilityCatalogue,
+    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
+    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
+    DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
     DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
     DomainEvidenceProviderExternalPayloadLineageAuditRequest,
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
@@ -1465,6 +1466,7 @@ impl Server {
             "hub_resolve" => self.hub_resolve(&arguments),
             "hub_lock" => self.hub_lock(&arguments),
             "adapter_plan" => self.adapter_plan(&arguments),
+            "adapter_execution_evidence" => self.adapter_execution_evidence(&arguments),
             "tabular_ingest" => self.tabular_ingest(&arguments),
             "observed_world_declare" => self.observed_world_declare(&arguments),
             "world_claim_check" => self.world_claim_check(&arguments),
@@ -8256,6 +8258,78 @@ impl Server {
                 "each lock entry preserves resolution authority, freshness, digest, lifecycle notes, and required-by provenance",
             ],
         }))
+    }
+
+    /// Retain caller-supplied execution and semantic-loss observations for one declared adapter.
+    /// The core validates catalogue/group scope and indexes the evidence, but never runs the
+    /// adapter or imports a delegated dependency.
+    fn adapter_execution_evidence(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode adapter execution evidence: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err("adapter execution evidence exceeds the 1000000-byte safety bound".into());
+        }
+        let request: AdapterExecutionEvidenceRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid adapter execution evidence: {error}"))?;
+        let adapter_registry = AdapterRegistry::default();
+        let adapter = adapter_registry
+            .descriptors()
+            .iter()
+            .find(|descriptor| descriptor.id == request.adapter_id)
+            .ok_or_else(|| {
+                format!(
+                    "adapter_id {:?} is not in the declared adapter registry",
+                    request.adapter_id
+                )
+            })?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == request.group_id)
+            .ok_or_else(|| format!("unknown capability group {:?}", request.group_id))?;
+        for domain in &request.domains {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "domain label {:?} is not declared by capability group {:?}",
+                    domain, request.group_id
+                ));
+            }
+        }
+        let subject_id = request.subject_id.clone();
+        let domains = request.domains.clone();
+        let parent_digests = request.parent_digests.clone();
+        let adapter_summary = json!({
+            "id": adapter.id,
+            "version": adapter.version,
+            "execution": adapter.execution,
+            "conformance_level": adapter.conformance_level,
+            "optional_dependency": adapter.optional_dependency,
+            "declared_loss_kinds": adapter.declared_loss_kinds,
+            "scope_dimensions": adapter.scope_dimensions,
+        });
+        let evidence = record_adapter_execution_evidence(request)
+            .map_err(|error| format!("adapter execution evidence refused: {error}"))?;
+        let evidence_artifact = evidence
+            .get("evidence")
+            .cloned()
+            .ok_or("adapter execution evidence omitted nested evidence")?;
+        let projection = self.index_artifact_projection(
+            "adapter_execution_evidence",
+            &subject_id,
+            domains,
+            parent_digests,
+            evidence_artifact,
+        );
+        let mut result = evidence;
+        result["adapter"] = adapter_summary;
+        result["artifact_registry"] = projection;
+        Ok(result)
     }
 
     fn tabular_ingest(&self, arguments: &Value) -> Result<Value, String> {
@@ -30541,6 +30615,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_provider_external_payload_lineage_audit",
         "domain_evidence_provider_external_payload_execution_evidence",
         "domain_evidence_provider_external_payload_evidence_query",
+        "adapter_execution_evidence",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -31639,6 +31714,40 @@ pub fn tool_definitions() -> Vec<Value> {
                     "available_dependencies": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional caller-checked dependency names, for example pydicom, nibabel, anndata, pysam, or zarr. Omission means unknown, not installed." }
                 },
                 "required": ["source_id", "source_kind"]
+            }
+        }),
+        json!({
+            "name": "adapter_execution_evidence",
+            "description": "Retain a bounded caller-supplied observation for one declared native or Python-delegated adapter. It binds capability-group/domain scope, adapter and source identity, input/output digests, execution and conformance states, semantic-loss entries, and artifact lineage without executing adapters, importing dependencies, fetching sources, or claiming readiness.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "adapter_id": { "type": "string" },
+                    "adapter_version": { "type": "string" },
+                    "source_id": { "type": "string" },
+                    "input_digest": { "type": "string" },
+                    "output_digest": { "type": ["string", "null"] },
+                    "execution_status": { "type": "string", "enum": ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown"] },
+                    "conformance_status": { "type": "string", "enum": ["verified", "partial", "refused", "not_run", "unknown"] },
+                    "semantic_loss_status": { "type": "string", "enum": ["lossless", "lossy", "unknown", "not_applicable"] },
+                    "losses": { "type": "array", "maxItems": 128, "items": { "type": "object", "additionalProperties": false, "properties": {
+                        "kind": { "type": "string" },
+                        "severity": { "type": "string", "enum": ["info", "warning", "blocking"] },
+                        "detail": { "type": "string" },
+                        "source_path": { "type": ["string", "null"] },
+                        "target_path": { "type": ["string", "null"] }
+                    }, "required": ["kind", "severity", "detail"] } },
+                    "item_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 2000000 },
+                    "byte_length": { "type": ["integer", "null"], "minimum": 0, "maximum": 68719476736u64 },
+                    "error_code": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "attempt_id": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "adapter_id", "adapter_version", "source_id", "input_digest", "execution_status", "conformance_status", "semantic_loss_status"]
             }
         }),
         json!({

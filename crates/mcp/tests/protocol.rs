@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 208);
+    assert_eq!(tools.len(), 209);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7423,6 +7423,80 @@ fn adapter_plan_routes_biological_formats_without_sniffing_or_execution() {
 }
 
 #[test]
+fn adapter_execution_evidence_binds_declared_adapter_scope_and_loss_posture() {
+    let mut server = server();
+    let evidence = call(
+        &mut server,
+        "adapter_execution_evidence",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "adapter-subject-1",
+            "adapter_id": "bioprism.python.vcf_text",
+            "adapter_version": "0.1.0",
+            "source_id": "vcf-source-1",
+            "input_digest": "a".repeat(64),
+            "output_digest": "b".repeat(64),
+            "execution_status": "succeeded",
+            "conformance_status": "verified",
+            "semantic_loss_status": "lossless",
+            "item_count": 4,
+            "byte_length": 128,
+            "parent_digests": ["c".repeat(64)]
+        }),
+    );
+    assert_eq!(evidence["ok"], json!(true));
+    assert_eq!(
+        evidence["evidence"]["adapter_id"],
+        json!("bioprism.python.vcf_text")
+    );
+    assert_eq!(
+        evidence["evidence"]["attestation_posture"],
+        json!("caller_asserted")
+    );
+    assert_eq!(evidence["adapter"]["execution"], json!("python_delegated"));
+    assert_eq!(evidence["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(evidence["execution"], json!("not_started"));
+    assert_eq!(evidence["readiness_claimed"], json!(false));
+
+    let inconsistent = call(
+        &mut server,
+        "adapter_execution_evidence",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "adapter-subject-1",
+            "adapter_id": "bioprism.python.vcf_text",
+            "adapter_version": "0.1.0",
+            "source_id": "vcf-source-1",
+            "input_digest": "a".repeat(64),
+            "execution_status": "refused",
+            "conformance_status": "refused",
+            "semantic_loss_status": "lossless"
+        }),
+    );
+    assert_eq!(inconsistent["__isError"], json!(true));
+
+    let out_of_scope = call(
+        &mut server,
+        "adapter_execution_evidence",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["not-a-declared-domain"],
+            "subject_id": "adapter-subject-1",
+            "adapter_id": "bioprism.python.vcf_text",
+            "adapter_version": "0.1.0",
+            "source_id": "vcf-source-1",
+            "input_digest": "a".repeat(64),
+            "execution_status": "unknown",
+            "conformance_status": "unknown",
+            "semantic_loss_status": "unknown"
+        }),
+    );
+    assert_eq!(out_of_scope["__isError"], json!(true));
+}
+
+#[test]
 fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
     let mut server = server();
     let full = call(
@@ -7493,6 +7567,11 @@ fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
                 .unwrap()
                 .iter()
                 .any(|tool| tool == "domain_evidence_provider_external_payload_evidence_query")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "adapter_execution_evidence")
             && route["interpretation"]["status"].is_string()
             && route["limitations"].as_array().is_some()
     }));
@@ -7528,12 +7607,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(208));
-    assert_eq!(result["advertised_tool_count"], json!(208));
+    assert_eq!(result["unique_catalog_tools"], json!(209));
+    assert_eq!(result["advertised_tool_count"], json!(209));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(208));
-    assert_eq!(result["schema_quality"]["valid"], json!(208));
+    assert_eq!(result["schema_quality"]["checked"], json!(209));
+    assert_eq!(result["schema_quality"]["valid"], json!(209));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

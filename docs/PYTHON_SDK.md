@@ -859,6 +859,13 @@ invent defaults:
   scope dimensions, declared semantic-loss kinds, and non-executing limitations. The projection
   reconciles top-level and nested `executable` state and keeps a dependency-blocked candidate
   distinguishable from an unsupported format or source shape.
+- `AdapterExecutionEvidenceRequest`, `AdapterExecutionLoss`, and
+  `AdapterExecutionEvidenceReport` provide the common post-adapter handoff across all declared
+  domains. `Workspace`, `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient` retain adapter/source
+  identity, input/output digests, execution and conformance status, bounded semantic-loss entries,
+  item/byte counts, refusal codes, and artifact registration. The helper records caller evidence;
+  it never executes a Python/native adapter, imports dependencies, fetches bytes, or claims
+  readiness from `verified` or `lossless` labels.
 - `DomainAcquisitionQuery`, `domain_acquisition_report(...)`, and the sync/async
   `Workspace`/`ApiClient` helpers expose the digest-bound `domain_acquisition_catalogue` route.
   Each selected domain keeps bounded transport (`file`/plain `generic_http` versus

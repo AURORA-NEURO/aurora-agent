@@ -201,6 +201,7 @@
 //! six turned out to belong to a crate that already owns the artifact. That asymmetry is worth
 //! stating: a section can look two-thirds unimplemented while the platform underneath it is not.
 
+pub mod adapter_execution_evidence;
 pub mod artifact_registry;
 pub mod audit;
 pub mod capability;
@@ -250,6 +251,13 @@ pub mod workflow;
 pub mod workflow_reconciliation;
 pub mod workflow_reconciliation_registry;
 
+pub use adapter_execution_evidence::{
+    record_adapter_execution_evidence, AdapterExecutionEvidenceRequest, AdapterExecutionLoss,
+    ADAPTER_EXECUTION_EVIDENCE_SCHEMA, ADAPTER_EXECUTION_EVIDENCE_WORKFLOW,
+    MAX_ADAPTER_EXECUTION_EVIDENCE_BYTES, MAX_ADAPTER_EXECUTION_EVIDENCE_DOMAINS,
+    MAX_ADAPTER_EXECUTION_EVIDENCE_ITEMS, MAX_ADAPTER_EXECUTION_EVIDENCE_LOSSES,
+    MAX_ADAPTER_EXECUTION_EVIDENCE_PARENTS, MAX_ADAPTER_EXECUTION_EVIDENCE_TEXT_BYTES,
+};
 pub use artifact_registry::{
     ArtifactRecord, ArtifactRegistry, ArtifactRegistryError, ARTIFACT_REGISTRY_GET_SCHEMA_VERSION,
     ARTIFACT_REGISTRY_LINEAGE_SCHEMA_VERSION, ARTIFACT_REGISTRY_QUERY_SCHEMA_VERSION,

@@ -514,6 +514,12 @@ source-specific conformance.
 `tabularIngest` returns typed `TabularIngestResult` evidence for the real CSV/TSV adapter: explicit
 manifest identity, conformance check outcomes, semantic-loss variant, bounded facts, and omitted
 fact counts. It does not infer a format or turn adapter conformance into source truth.
+`adapterExecutionEvidence` and its `Tool` alias provide the common evidence envelope for native
+and Python-delegated adapters across every domain route. `AdapterExecutionEvidenceArgs` validates
+declared adapter/source identity, digest bindings, execution/conformance states, bounded loss rows,
+counts, and refusal codes; `AdapterExecutionEvidenceResult` retains the indexed artifact and the
+literal `execution: "not_started"`/`readiness_claimed: false` boundary. The Fetch client records
+caller observations only and never imports dependencies or executes an adapter.
 `conformanceRun` returns typed `ConformanceRunResult` suite and release evidence, including fixture
 drift, test-pyramid counts, bounded case outcomes, and all unmet noncompensatory gates. A null
 `results` field means case details were not requested; it is not an empty-suite claim.

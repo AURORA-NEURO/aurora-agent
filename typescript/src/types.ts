@@ -5651,6 +5651,77 @@ export interface DomainEvidenceSourceExecutionResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export type AdapterExecutionEvidenceExecutionStatus = "planned" | "started" | "succeeded" | "partial" | "refused" | "failed" | "unknown";
+export type AdapterExecutionEvidenceConformanceStatus = "verified" | "partial" | "refused" | "not_run" | "unknown";
+export type AdapterExecutionEvidenceSemanticLossStatus = "lossless" | "lossy" | "unknown" | "not_applicable";
+
+export interface AdapterExecutionLossArgs extends JsonObject {
+  kind: string;
+  severity: "info" | "warning" | "blocking";
+  detail: string;
+  source_path?: string | null;
+  target_path?: string | null;
+}
+
+export interface AdapterExecutionEvidenceArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  adapter_id: string;
+  adapter_version: string;
+  source_id: string;
+  input_digest: string;
+  output_digest?: string | null;
+  execution_status: AdapterExecutionEvidenceExecutionStatus;
+  conformance_status: AdapterExecutionEvidenceConformanceStatus;
+  semantic_loss_status: AdapterExecutionEvidenceSemanticLossStatus;
+  losses?: AdapterExecutionLossArgs[];
+  item_count?: number | null;
+  byte_length?: number | null;
+  error_code?: string | null;
+  parent_digests?: string[];
+  attempt_id?: string | null;
+}
+
+export interface AdapterExecutionEvidence extends JsonObject {
+  schema: "bioprism-devplat-adapter-execution-evidence/0.1";
+  workflow: "adapter_execution_evidence";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  adapter_id: string;
+  adapter_version: string;
+  source_id: string;
+  input_digest: string;
+  output_digest: string | null;
+  execution_status: AdapterExecutionEvidenceExecutionStatus;
+  conformance_status: AdapterExecutionEvidenceConformanceStatus;
+  semantic_loss_status: AdapterExecutionEvidenceSemanticLossStatus;
+  losses: AdapterExecutionLossArgs[];
+  item_count: number | null;
+  byte_length: number | null;
+  error_code: string | null;
+  parent_digests: string[];
+  attempt_id: string | null;
+  attestation_posture: "caller_asserted";
+  evidence_digest: string;
+}
+
+export interface AdapterExecutionEvidenceResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-adapter-execution-evidence/0.1";
+  workflow: "adapter_execution_evidence";
+  evidence: AdapterExecutionEvidence;
+  adapter: AdapterDescriptorResult;
+  evidence_digest: string;
+  attestation_posture: "caller_asserted";
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;
@@ -8639,6 +8710,7 @@ export type ArtifactKind =
   | "domain_evidence_harmonization"
   | "domain_evidence_intake"
   | "domain_evidence_source_plan"
+  | "adapter_execution_evidence"
   | "external_reference";
 
 export interface ArtifactRegistrationArgs extends JsonObject {

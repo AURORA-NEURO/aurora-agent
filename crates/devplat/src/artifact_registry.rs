@@ -11,6 +11,7 @@
 //! separate field. That prevents a bundle's internal digest convention from being confused with
 //! the digest used by this cross-domain index.
 
+use crate::adapter_execution_evidence::ADAPTER_EXECUTION_EVIDENCE_SCHEMA;
 use crate::domain_evidence::{
     validate_domain_evidence_harmonization, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
 };
@@ -62,6 +63,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_evidence_provider_external_payload_replay",
     "domain_evidence_provider_external_payload_lineage_audit",
     "domain_evidence_provider_external_payload_execution_evidence",
+    "adapter_execution_evidence",
     "domain_evidence_source_plan",
     "external_reference",
 ];
@@ -881,6 +883,40 @@ fn verify_known_artifact(
                 json!({
                     "state": "verified_integrity",
                     "method": "domain_evidence_provider_external_payload_execution_digest",
+                    "evidence_digest": declared
+                }),
+            ))
+        }
+        "adapter_execution_evidence" => {
+            let object = artifact.as_object().ok_or_else(|| {
+                ArtifactRegistryError::InvalidInput(
+                    "adapter execution evidence must be an object".into(),
+                )
+            })?;
+            if object.get("schema").and_then(Value::as_str)
+                != Some(ADAPTER_EXECUTION_EVIDENCE_SCHEMA)
+            {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "adapter execution evidence schema is unsupported".into(),
+                ));
+            }
+            let declared = required_digest(object, "evidence_digest")?;
+            let mut unsigned = artifact.clone();
+            unsigned
+                .as_object_mut()
+                .expect("adapter execution evidence object was checked above")
+                .remove("evidence_digest");
+            let recomputed = content_digest(&unsigned)?;
+            if declared != recomputed {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "adapter execution evidence_digest does not match the record contents".into(),
+                ));
+            }
+            Ok((
+                Some(declared.clone()),
+                json!({
+                    "state": "verified_integrity",
+                    "method": "adapter_execution_evidence_digest",
                     "evidence_digest": declared
                 }),
             ))

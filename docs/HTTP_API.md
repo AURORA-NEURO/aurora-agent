@@ -309,6 +309,12 @@ group/domain/subject filters, deterministic digest cursors, and optional artifac
 `missing_receipt`, `receipt_only`, partial-join, and `complete` states distinct. It reads one local
 registry snapshot only; it never opens locators, fetches providers, resolves credentials, or turns a
 complete structural join into execution or readiness.
+`POST /v1/tools/adapter_execution_evidence` is the common adapter handoff for native and
+Python-delegated routes. It requires a declared adapter id/version, group/domain scope, source and
+input identity, and explicit execution, conformance, and semantic-loss states; bounded loss rows,
+output/item/byte evidence, refusal codes, parent digests, and an idempotent evidence artifact remain
+visible. The gateway checks adapter and catalogue membership but does not execute adapters, import
+optional packages, fetch sources, or promote caller assertions into readiness.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

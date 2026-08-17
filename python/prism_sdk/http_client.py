@@ -18,6 +18,11 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import quote, urlencode, urlsplit
 
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
+from .adapter_execution_evidence import (
+    AdapterExecutionEvidenceReport,
+    AdapterExecutionEvidenceRequest,
+    adapter_execution_evidence_report,
+)
 from .artifacts import (
     ArtifactCrossStoreAuditReport,
     ArtifactGetReport,
@@ -3002,6 +3007,21 @@ class ApiClient:
                 available_dependencies=available_dependencies,
             )
         )
+
+    def adapter_execution_evidence(
+        self,
+        request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Retain caller-supplied adapter execution evidence through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AdapterExecutionEvidenceRequest) else AdapterExecutionEvidenceRequest.from_wire(request)
+        return self.call_tool("adapter_execution_evidence", normalized.to_mcp_arguments())
+
+    def adapter_execution_evidence_report(
+        self,
+        request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> AdapterExecutionEvidenceReport:
+        return adapter_execution_evidence_report(self.adapter_execution_evidence(request))
 
     def domain_acquisition_catalogue(
         self,
@@ -6955,6 +6975,21 @@ class AsyncApiClient:
                 available_dependencies=available_dependencies,
             )
         )
+
+    async def adapter_execution_evidence(
+        self,
+        request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.adapter_execution_evidence`."""
+
+        normalized = request if isinstance(request, AdapterExecutionEvidenceRequest) else AdapterExecutionEvidenceRequest.from_wire(request)
+        return await self.call_tool("adapter_execution_evidence", normalized.to_mcp_arguments())
+
+    async def adapter_execution_evidence_report(
+        self,
+        request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> AdapterExecutionEvidenceReport:
+        return adapter_execution_evidence_report(await self.adapter_execution_evidence(request))
 
     async def domain_acquisition_catalogue(
         self,

@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 208 callable tools. That count is intentionally
+The MCP integration layer currently exposes 209 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -39,6 +39,11 @@ facades, and webhook cursor lifecycle helpers; it does not clone every Rust doma
 browser secret store. `registry_lifecycle_simulate` adds a continuation-safe local
 publication log and artifact-integrity projection, while `metrics_profile_audit` adds the
 per-capability coverage and uncontested-lead projection used by honest public cards.
+`adapter_execution_evidence` now gives every declared domain one shared adapter handoff: native
+and Python-delegated adapter id/version, source and input/output digests, explicit execution and
+conformance outcomes, bounded semantic-loss rows, and artifact registration are retained through
+MCP and both SDKs. It is caller-supplied evidence only; the core does not import dependencies,
+execute adapters, or convert `verified`/`lossless` labels into readiness.
 `metrics_analytics_audit` adds a bounded domain-neutral arithmetic kernel for scalar summaries,
 paired robustness/cross-modal/translation/design contrasts, cost and latency, replicate spread,
 and probability calibration while keeping declared and missing evidence out of measured values.
