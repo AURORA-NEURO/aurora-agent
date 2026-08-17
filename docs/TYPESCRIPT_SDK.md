@@ -20,6 +20,10 @@ result exposes each match dimension and preserves the mismatch/non-readiness bou
 `domainEvidenceProviderExternalPayloadNormalize()` carries the bounded caller-materialization
 contract into the typed SDK and exposes receipt/materialization/intake lineage while retaining
 the digest, locator, and readiness boundaries.
+`domainEvidenceProviderExternalPayloadLineageAudit()` reconciles the receipt against the retained
+connector handoff and exposes matched, partial, mismatch, and orphaned states plus each boolean
+scope comparison. The result remains registry evidence only: no provider, storage, locator, or
+credential access occurs, and readiness stays false.
 
 The repository ships `typescript/`, a small ESM package for clients that can use the standard
 Fetch API. It is intentionally an integration layer over `bioprism-api`, not a second domain

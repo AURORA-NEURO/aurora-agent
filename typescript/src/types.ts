@@ -5307,6 +5307,44 @@ export interface DomainEvidenceProviderExternalPayloadNormalizationResult extend
   does_not_claim: string[];
 }
 
+export interface DomainEvidenceProviderExternalPayloadLineageAuditArgs extends DomainEvidenceProviderExternalPayloadReceiptArgs {}
+
+export interface DomainEvidenceProviderExternalPayloadLineageAudit extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-lineage/0.1";
+  workflow: "domain_evidence_provider_external_payload_lineage_audit";
+  lineage_status: "matched" | "partial" | "mismatch" | "orphaned";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  handoff: JsonObject | null;
+  matches: Record<string, boolean>;
+  differences: string[];
+  payload_binding_status: "matched" | "mismatch" | "not_declared" | "not_available";
+  lineage_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadLineageAuditResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-lineage/0.1";
+  workflow: "domain_evidence_provider_external_payload_lineage_audit";
+  audit: DomainEvidenceProviderExternalPayloadLineageAudit;
+  lineage_status: DomainEvidenceProviderExternalPayloadLineageAudit["lineage_status"];
+  payload_binding_status: DomainEvidenceProviderExternalPayloadLineageAudit["payload_binding_status"];
+  lineage_digest: string;
+  receipt_registry: JsonObject;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
   candidate_fields: string[];
   present_record_count: number;

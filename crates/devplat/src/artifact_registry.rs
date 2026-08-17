@@ -20,6 +20,7 @@ use crate::domain_evidence_intake::{
 use crate::domain_evidence_provider::DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA;
 use crate::domain_evidence_provider_external::DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA;
 use crate::domain_evidence_provider_external::DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA;
+use crate::domain_evidence_provider_external_lineage::DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA;
 use crate::domain_evidence_provider_handoff::DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA;
 use crate::domain_evidence_source::{
     validate_domain_evidence_source_plan, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
@@ -58,6 +59,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_evidence_provider_handoff",
     "domain_evidence_provider_external_payload",
     "domain_evidence_provider_external_payload_replay",
+    "domain_evidence_provider_external_payload_lineage_audit",
     "domain_evidence_source_plan",
     "external_reference",
 ];
@@ -809,6 +811,42 @@ fn verify_known_artifact(
                 }),
             ))
         }
+        "domain_evidence_provider_external_payload_lineage_audit" => {
+            let object = artifact.as_object().ok_or_else(|| {
+                ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider external payload lineage audit must be an object"
+                        .into(),
+                )
+            })?;
+            if object.get("schema").and_then(Value::as_str)
+                != Some(DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA)
+            {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider external payload lineage schema is unsupported"
+                        .into(),
+                ));
+            }
+            let declared = required_digest(object, "lineage_digest")?;
+            let mut unsigned = artifact.clone();
+            unsigned
+                .as_object_mut()
+                .expect("external payload lineage object was checked above")
+                .remove("lineage_digest");
+            let recomputed = content_digest(&unsigned)?;
+            if declared != recomputed {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "external payload lineage_digest does not match the record contents".into(),
+                ));
+            }
+            Ok((
+                Some(declared.clone()),
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_evidence_provider_external_payload_lineage_digest",
+                    "lineage_digest": declared
+                }),
+            ))
+        }
         "domain_evidence_source_plan"
             if artifact.get("schema").and_then(Value::as_str)
                 == Some(DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION) =>
@@ -1200,6 +1238,35 @@ mod tests {
             "domain_evidence_provider_external_payload_replay",
             "provider-1",
             replay,
+        );
+        request["declared_digest"] = json!(digest);
+        let mut registry = ArtifactRegistry::new();
+        assert_eq!(registry.register(&request).unwrap()["created"], true);
+        let restored = ArtifactRegistry::from_snapshot(&registry.snapshot().unwrap()).unwrap();
+        assert_eq!(restored.len(), 1);
+    }
+
+    #[test]
+    fn external_payload_lineage_audits_reverify_their_declared_digest_on_restore() {
+        let mut audit = json!({
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
+            "workflow": "domain_evidence_provider_external_payload_lineage_audit",
+            "lineage_status": "orphaned",
+            "payload_binding_status": "not_available",
+            "matches": {"handoff_present": false},
+            "differences": ["handoff_not_retained"],
+            "lineage_digest": ""
+        });
+        let digest = {
+            let mut unsigned = audit.clone();
+            unsigned.as_object_mut().unwrap().remove("lineage_digest");
+            ContentHash::of_value(&unsigned).unwrap().to_string()
+        };
+        audit["lineage_digest"] = json!(digest.clone());
+        let mut request = artifact(
+            "domain_evidence_provider_external_payload_lineage_audit",
+            "provider-1",
+            audit,
         );
         request["declared_digest"] = json!(digest);
         let mut registry = ArtifactRegistry::new();

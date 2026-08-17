@@ -77,9 +77,12 @@ from .domain_evidence_provider_external import (
     DomainEvidenceProviderExternalPayloadReplayVerificationReport,
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
     DomainEvidenceProviderExternalPayloadNormalizationReport,
+    DomainEvidenceProviderExternalPayloadLineageAuditRequest,
+    DomainEvidenceProviderExternalPayloadLineageAuditReport,
     domain_evidence_provider_external_payload_receipt_report,
     domain_evidence_provider_external_payload_replay_verification_report,
     domain_evidence_provider_external_payload_normalization_report,
+    domain_evidence_provider_external_payload_lineage_audit_report,
 )
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
@@ -2327,6 +2330,27 @@ class Workspace:
     ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
         return domain_evidence_provider_external_payload_normalization_report(
             self.domain_evidence_provider_external_payload_normalize(request)
+        )
+
+    def domain_evidence_provider_external_payload_lineage_audit(
+        self,
+        request: DomainEvidenceProviderExternalPayloadLineageAuditRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadLineageAuditRequest)
+            else DomainEvidenceProviderExternalPayloadLineageAuditRequest.from_wire(request)
+        )
+        return self.tool(
+            "domain_evidence_provider_external_payload_lineage_audit", normalized.to_mcp_arguments()
+        )
+
+    def domain_evidence_provider_external_payload_lineage_audit_report(
+        self,
+        request: DomainEvidenceProviderExternalPayloadLineageAuditRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadLineageAuditReport:
+        return domain_evidence_provider_external_payload_lineage_audit_report(
+            self.domain_evidence_provider_external_payload_lineage_audit(request)
         )
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
@@ -5911,6 +5935,27 @@ class AsyncWorkspace:
     ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
         return domain_evidence_provider_external_payload_normalization_report(
             await self.domain_evidence_provider_external_payload_normalize(request)
+        )
+
+    async def domain_evidence_provider_external_payload_lineage_audit(
+        self,
+        request: DomainEvidenceProviderExternalPayloadLineageAuditRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadLineageAuditRequest)
+            else DomainEvidenceProviderExternalPayloadLineageAuditRequest.from_wire(request)
+        )
+        return await self.tool(
+            "domain_evidence_provider_external_payload_lineage_audit", normalized.to_mcp_arguments()
+        )
+
+    async def domain_evidence_provider_external_payload_lineage_audit_report(
+        self,
+        request: DomainEvidenceProviderExternalPayloadLineageAuditRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadLineageAuditReport:
+        return domain_evidence_provider_external_payload_lineage_audit_report(
+            await self.domain_evidence_provider_external_payload_lineage_audit(request)
         )
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:

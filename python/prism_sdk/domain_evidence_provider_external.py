@@ -21,6 +21,8 @@ DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA = "bioprism-devplat-doma
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW = "domain_evidence_provider_external_payload_replay_verify"
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA = "bioprism-devplat-domain-evidence-provider-external-payload-normalization/0.1"
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW = "domain_evidence_provider_external_payload_normalize"
+DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA = "bioprism-devplat-domain-evidence-provider-external-payload-lineage/0.1"
+DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW = "domain_evidence_provider_external_payload_lineage_audit"
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_CONNECTOR_KINDS = (
     "literature", "clinical_trial", "fhir", "object_store", "provider_api"
 )
@@ -467,6 +469,103 @@ class DomainEvidenceProviderExternalPayloadNormalizationReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class DomainEvidenceProviderExternalPayloadLineageAuditRequest:
+    """Audit an external receipt against a retained connector handoff without external I/O."""
+
+    receipt: DomainEvidenceProviderExternalPayloadReceiptRequest
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceProviderExternalPayloadLineageAuditRequest":
+        return cls(
+            receipt=DomainEvidenceProviderExternalPayloadReceiptRequest.from_wire(
+                _mapping("external provider payload lineage request", value)
+            )
+        )
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return self.receipt.to_mcp_arguments()
+
+
+@dataclass(frozen=True)
+class DomainEvidenceProviderExternalPayloadLineageAuditReport:
+    raw: dict[str, Any]
+    lineage_status: str
+    payload_binding_status: str
+    group_id: str
+    domains: tuple[str, ...]
+    subject_id: str
+    source_tool: str
+    provider: str
+    connector_kind: str
+    receipt: Mapping[str, Any]
+    handoff: Mapping[str, Any] | None
+    matches: Mapping[str, bool]
+    differences: tuple[str, ...]
+    lineage_digest: str
+    receipt_registry: Mapping[str, Any]
+    artifact_registry: Mapping[str, Any]
+    execution: str
+    readiness_claimed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceProviderExternalPayloadLineageAuditReport":
+        raw = _tool_payload(value, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW)
+        if raw.get("ok") is not True or raw.get("readiness_claimed") is not False:
+            raise ArgumentError("external provider payload lineage audit is not successful or ready")
+        audit = _mapping("external provider payload lineage audit", raw.get("audit"))
+        lineage_status = _route_text("external provider payload lineage status", audit.get("lineage_status"))
+        if lineage_status not in {"matched", "partial", "mismatch", "orphaned"}:
+            raise ArgumentError("external provider payload lineage status is invalid")
+        payload_binding_status = _route_text(
+            "external provider payload binding status", audit.get("payload_binding_status")
+        )
+        if payload_binding_status not in {"matched", "mismatch", "not_declared", "not_available"}:
+            raise ArgumentError("external provider payload binding status is invalid")
+        receipt = _mapping("external provider payload lineage receipt", audit.get("receipt"))
+        handoff_value = audit.get("handoff")
+        handoff = None if handoff_value is None else _mapping("external provider payload lineage handoff", handoff_value)
+        matches_raw = _mapping("external provider payload lineage matches", audit.get("matches"))
+        matches = {name: item for name, item in matches_raw.items() if isinstance(name, str) and isinstance(item, bool)}
+        if len(matches) != len(matches_raw):
+            raise ArgumentError("external provider payload lineage matches must be boolean fields")
+        differences = _bounded_text_list(
+            "external provider payload lineage differences", audit.get("differences", []), maximum=16
+        )
+        receipt_registry = _mapping("external provider payload lineage receipt registry", raw.get("receipt_registry"))
+        artifact_registry = _mapping("external provider payload lineage artifact registry", raw.get("artifact_registry"))
+        for name, registry in (("receipt", receipt_registry), ("audit", artifact_registry)):
+            if registry.get("ok") is not True or not (
+                registry.get("created") is True or registry.get("already_present") is True
+            ):
+                raise ArgumentError(f"external provider payload lineage {name} artifact was not registered")
+        if raw.get("lineage_status") != lineage_status or raw.get("payload_binding_status") != payload_binding_status:
+            raise ArgumentError("external provider payload lineage status fields disagree")
+        return cls(
+            raw=raw,
+            lineage_status=lineage_status,
+            payload_binding_status=payload_binding_status,
+            group_id=_route_text("external provider payload lineage group_id", audit.get("group_id")),
+            domains=_bounded_text_list("external provider payload lineage domains", audit.get("domains"), required=True),
+            subject_id=_route_text("external provider payload lineage subject_id", audit.get("subject_id")),
+            source_tool=_route_text("external provider payload lineage source_tool", audit.get("source_tool")),
+            provider=_route_text("external provider payload lineage provider", audit.get("provider")),
+            connector_kind=_route_text("external provider payload lineage connector_kind", audit.get("connector_kind")),
+            receipt=receipt,
+            handoff=handoff,
+            matches=matches,
+            differences=differences,
+            lineage_digest=_lower_digest("external provider payload lineage_digest", raw.get("lineage_digest")),
+            receipt_registry=receipt_registry,
+            artifact_registry=artifact_registry,
+            execution=_route_text("external provider payload lineage execution", raw.get("execution")),
+            readiness_claimed=False,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def domain_evidence_provider_external_payload_receipt_report(value: Mapping[str, Any]) -> DomainEvidenceProviderExternalPayloadReceiptReport:
     return DomainEvidenceProviderExternalPayloadReceiptReport.from_wire(value)
 
@@ -479,6 +578,10 @@ def domain_evidence_provider_external_payload_normalization_report(value: Mappin
     return DomainEvidenceProviderExternalPayloadNormalizationReport.from_wire(value)
 
 
+def domain_evidence_provider_external_payload_lineage_audit_report(value: Mapping[str, Any]) -> DomainEvidenceProviderExternalPayloadLineageAuditReport:
+    return DomainEvidenceProviderExternalPayloadLineageAuditReport.from_wire(value)
+
+
 __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW",
@@ -486,6 +589,8 @@ __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_CONNECTOR_KINDS",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_STORAGE_BACKENDS",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LOCATOR_KINDS",
@@ -501,4 +606,7 @@ __all__ = [
     "DomainEvidenceProviderExternalPayloadNormalizationRequest",
     "DomainEvidenceProviderExternalPayloadNormalizationReport",
     "domain_evidence_provider_external_payload_normalization_report",
+    "DomainEvidenceProviderExternalPayloadLineageAuditRequest",
+    "DomainEvidenceProviderExternalPayloadLineageAuditReport",
+    "domain_evidence_provider_external_payload_lineage_audit_report",
 ]

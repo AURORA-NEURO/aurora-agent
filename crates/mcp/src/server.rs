@@ -125,9 +125,10 @@ use bioprism_dataops::{
 };
 use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
-    audit_execution_provenance, build_dashboard, build_delivery_receipt,
-    build_domain_acquisition_catalogue, build_domain_workflow_catalogue,
-    execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
+    audit_domain_evidence_provider_external_payload_lineage, audit_execution_provenance,
+    build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
+    build_domain_workflow_catalogue, execute_domain_evidence_source,
+    handoff_domain_evidence_provider, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload,
     normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
     plan_domain_evidence_source, plan_mission, reconcile_domain_workflow,
@@ -138,7 +139,8 @@ use bioprism_devplat::{
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
     CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
     DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
-    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadLineageAuditRequest,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
     DomainEvidenceProviderExternalPayloadReceiptRequest,
     DomainEvidenceProviderExternalPayloadReplayRequest, DomainEvidenceProviderHandoffRequest,
     DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
@@ -152,7 +154,8 @@ use bioprism_devplat::{
     DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
@@ -1411,6 +1414,9 @@ impl Server {
             }
             "domain_evidence_provider_external_payload_normalize" => {
                 self.domain_evidence_provider_external_payload_normalize(&arguments)
+            }
+            "domain_evidence_provider_external_payload_lineage_audit" => {
+                self.domain_evidence_provider_external_payload_lineage_audit(&arguments)
             }
             "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
@@ -3797,6 +3803,100 @@ impl Server {
                 "external-store accessibility, transfer completion, decryption, or byte inspection beyond the supplied materialization",
                 "provider authenticity, payload authenticity, scientific, clinical, causal, provenance, regulatory, or release validity",
                 "execution or external effects; readiness remains false"
+            ]
+        }))
+    }
+
+    /// Audit an external receipt against the retained connector handoff in the local registry.
+    /// Missing or mismatched lineage is reported explicitly and never becomes readiness.
+    fn domain_evidence_provider_external_payload_lineage_audit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode external payload lineage input: {error}"))?;
+        if encoded.len() > 2_000_000 {
+            return Err(
+                "external payload lineage input exceeds the 2000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadLineageAuditRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid external payload lineage input: {error}"))?;
+        let receipt = record_domain_evidence_provider_external_payload(&request.receipt)
+            .map_err(|error| format!("external payload lineage receipt refused: {error}"))?;
+        let handoff_value = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit()
+            .into_iter()
+            .find(|record| {
+                record.kind == "domain_evidence_provider_handoff"
+                    && record
+                        .artifact
+                        .get("handoff_digest")
+                        .and_then(Value::as_str)
+                        == Some(receipt.handoff_digest.as_str())
+            })
+            .map(|record| record.artifact);
+        let handoff = handoff_value
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("retained connector handoff is malformed: {error}"))
+            })
+            .transpose()?;
+        let receipt_artifact = serde_json::to_value(&receipt)
+            .map_err(|error| format!("cannot encode external payload receipt: {error}"))?;
+        let mut receipt_parents = receipt.parent_digests.clone();
+        receipt_parents.push(receipt.handoff_digest.clone());
+        let receipt_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload",
+                "subject_id": receipt.subject_id,
+                "domains": receipt.domains,
+                "parent_digests": receipt_parents,
+                "declared_digest": receipt.receipt_digest,
+                "artifact": receipt_artifact
+            }
+        }))?;
+        let audit = audit_domain_evidence_provider_external_payload_lineage(receipt, handoff)
+            .map_err(|error| format!("external payload lineage audit refused: {error}"))?;
+        let audit_artifact = serde_json::to_value(&audit)
+            .map_err(|error| format!("cannot encode external payload lineage audit: {error}"))?;
+        let audit_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload_lineage_audit",
+                "subject_id": audit.subject_id,
+                "domains": audit.domains,
+                "parent_digests": [audit.receipt.receipt_digest, audit.receipt.handoff_digest],
+                "declared_digest": audit.lineage_digest,
+                "artifact": audit_artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
+            "audit": audit,
+            "lineage_status": audit.lineage_status,
+            "payload_binding_status": audit.payload_binding_status,
+            "lineage_digest": audit.lineage_digest,
+            "receipt_registry": receipt_registry,
+            "artifact_registry": audit_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "receipt identity is checked against a retained connector handoff when present",
+                "orphaned, partial, and mismatched lineage states remain distinct",
+                "the audit never contacts providers, stores, locators, or credential systems"
+            ],
+            "does_not_claim": [
+                "provider authentication, connector execution, transfer completion, or payload availability",
+                "scientific, clinical, causal, provenance, regulatory, or release validity",
+                "readiness; even matched lineage remains not_started"
             ]
         }))
     }
@@ -30294,6 +30394,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_provider_external_payload_receipt",
         "domain_evidence_provider_external_payload_replay_verify",
         "domain_evidence_provider_external_payload_normalize",
+        "domain_evidence_provider_external_payload_lineage_audit",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -30814,6 +30915,37 @@ pub fn tool_definitions() -> Vec<Value> {
                     "source_plan_digest": { "type": ["string", "null"] }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator", "payload"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_lineage_audit",
+            "description": "Audit an external provider payload receipt against the retained connector handoff in the local artifact registry. It distinguishes matched, partial, mismatched, and orphaned lineage, including optional payload-digest binding, without contacting providers, stores, locators, or credential systems.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string" },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string" },
+                    "transfer_id": { "type": "string" },
+                    "payload_digest": { "type": "string" },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string" },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"], "default": "unknown" },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"], "default": "unknown" },
+                    "attempt_id": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator"]
             }
         }),
         json!({

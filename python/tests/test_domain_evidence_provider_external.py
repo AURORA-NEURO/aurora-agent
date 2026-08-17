@@ -15,10 +15,12 @@ from prism_sdk import (
     DomainEvidenceProviderExternalPayloadReceiptRequest,
     DomainEvidenceProviderExternalPayloadReplayRequest,
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DomainEvidenceProviderExternalPayloadLineageAuditRequest,
     Workspace,
     domain_evidence_provider_external_payload_receipt_report,
     domain_evidence_provider_external_payload_replay_verification_report,
     domain_evidence_provider_external_payload_normalization_report,
+    domain_evidence_provider_external_payload_lineage_audit_report,
 )
 from prism_sdk.authoring import content_digest
 
@@ -88,6 +90,10 @@ def replay_request() -> DomainEvidenceProviderExternalPayloadReplayRequest:
         expected_payload_digest=receipt.payload_digest,
         expected_byte_length=receipt.byte_length,
     )
+
+
+def lineage_request() -> DomainEvidenceProviderExternalPayloadLineageAuditRequest:
+    return DomainEvidenceProviderExternalPayloadLineageAuditRequest(receipt=request())
 
 
 def replay_payload() -> dict:
@@ -221,6 +227,45 @@ def normalization_payload() -> dict:
     }
 
 
+def lineage_payload() -> dict:
+    receipt_payload = payload()
+    receipt = receipt_payload["receipt"]
+    audit = {
+        "schema": "bioprism-devplat-domain-evidence-provider-external-payload-lineage/0.1",
+        "workflow": "domain_evidence_provider_external_payload_lineage_audit",
+        "lineage_status": "matched",
+        "group_id": receipt["group_id"],
+        "domains": receipt["domains"],
+        "subject_id": receipt["subject_id"],
+        "source_tool": receipt["source_tool"],
+        "provider": receipt["provider"],
+        "connector_kind": receipt["connector_kind"],
+        "receipt": receipt,
+        "handoff": {"handoff_digest": receipt["handoff_digest"], "status": "prepared"},
+        "matches": {"handoff_present": True, "handoff_digest": True, "payload_digest": True},
+        "differences": [],
+        "payload_binding_status": "matched",
+        "lineage_digest": "1" * 64,
+        "guarantees": [],
+        "limitations": [],
+    }
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-evidence-provider-external-payload-lineage/0.1",
+        "workflow": "domain_evidence_provider_external_payload_lineage_audit",
+        "audit": audit,
+        "lineage_status": "matched",
+        "payload_binding_status": "matched",
+        "lineage_digest": "1" * 64,
+        "receipt_registry": {"ok": True, "created": True},
+        "artifact_registry": {"ok": True, "created": True},
+        "execution": "not_started",
+        "readiness_claimed": False,
+        "guarantees": [],
+        "does_not_claim": ["provider authenticity"],
+    }
+
+
 def test_external_receipt_is_out_of_line_and_rejects_payload_material() -> None:
     arguments = request().to_mcp_arguments()
     assert "payload" not in arguments
@@ -272,6 +317,20 @@ def test_external_materialization_bridge_requires_explicit_digest_match() -> Non
         DomainEvidenceProviderExternalPayloadReplayRequest.from_wire(
             {**arguments, "expected_byte_length": 0}
         )
+
+
+def test_external_lineage_audit_is_registry_bound_and_preserves_orchestration_boundaries() -> None:
+    normalized = DomainEvidenceProviderExternalPayloadLineageAuditRequest.from_wire(request().to_mcp_arguments())
+    assert normalized.to_mcp_arguments()["handoff_digest"] == request().handoff_digest
+    report = domain_evidence_provider_external_payload_lineage_audit_report(lineage_payload())
+    assert report.lineage_status == "matched"
+    assert report.payload_binding_status == "matched"
+    assert report.matches["payload_digest"] is True
+    assert report.readiness_claimed is False
+    with pytest.raises(ArgumentError):
+        DomainEvidenceProviderExternalPayloadLineageAuditRequest.from_wire(
+            {**request().to_mcp_arguments(), "credential_material": "never"}
+        )
 def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes() -> None:
     with patch.object(ApiClient, "request", return_value=payload()) as rest:
         assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_receipt(request()).byte_length == 4096
@@ -297,6 +356,14 @@ def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes()
         assert normalize_tool.call_args.args[0] == "domain_evidence_provider_external_payload_normalize"
     with patch.object(Workspace, "tool", return_value=normalization_payload()):
         assert Workspace(None).domain_evidence_provider_external_payload_normalize_report(normalization_request()).receipt_digest == "e" * 64
+    with patch.object(ApiClient, "request", return_value=lineage_payload()) as lineage_rest:
+        assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_lineage_audit(lineage_request()).lineage_status == "matched"
+        assert lineage_rest.call_args.args[1] == "/v1/tools/domain_evidence_provider_external_payload_lineage_audit"
+    with patch.object(ApiClient, "call_tool", return_value=lineage_payload()) as lineage_tool:
+        assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_lineage_audit_tool(lineage_request()).payload_binding_status == "matched"
+        assert lineage_tool.call_args.args[0] == "domain_evidence_provider_external_payload_lineage_audit"
+    with patch.object(Workspace, "tool", return_value=lineage_payload()):
+        assert Workspace(None).domain_evidence_provider_external_payload_lineage_audit_report(lineage_request()).lineage_status == "matched"
 
     async def run() -> None:
         client = AsyncApiClient(ApiClient("http://127.0.0.1:8787"))
@@ -314,5 +381,9 @@ def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes()
             assert (await client.domain_evidence_provider_external_payload_normalize(normalization_request())).materialized_payload_digest == normalization_request().receipt.payload_digest
         with patch.object(AsyncWorkspace, "tool", new_callable=AsyncMock, return_value=normalization_payload()):
             assert (await AsyncWorkspace(None).domain_evidence_provider_external_payload_normalize_report(normalization_request())).receipt_digest == "e" * 64
+        with patch.object(ApiClient, "request", return_value=lineage_payload()):
+            assert (await client.domain_evidence_provider_external_payload_lineage_audit(lineage_request())).lineage_status == "matched"
+        with patch.object(AsyncWorkspace, "tool", new_callable=AsyncMock, return_value=lineage_payload()):
+            assert (await AsyncWorkspace(None).domain_evidence_provider_external_payload_lineage_audit_report(lineage_request())).payload_binding_status == "matched"
 
     asyncio.run(run())

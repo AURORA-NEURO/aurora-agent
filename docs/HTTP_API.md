@@ -292,6 +292,11 @@ receipt's handoff digest, payload digest, byte length, and canonical receipt dig
 caller-supplied expectations. It is metadata-only, never opens the locator, and records both a
 matching and a mismatch as a value-free, idempotent artifact; a match still does not prove that
 the external object resolves or that its bytes remain authentic.
+`POST /v1/tools/domain_evidence_provider_external_payload_lineage_audit` joins the receipt to the
+retained connector handoff in the local artifact registry. It reports `matched`, `partial`,
+`mismatch`, or `orphaned` lineage, exposes each scope comparison plus optional payload-digest
+binding, and idempotently records the audit. It performs no provider, store, locator, credential,
+or payload operation; even matched lineage remains `execution: not_started` with readiness false.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup
