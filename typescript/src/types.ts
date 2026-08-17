@@ -3890,7 +3890,7 @@ export interface CiExecutionEvidenceArgs extends JsonObject {
 
 export interface CiProviderNormalizationArgs extends JsonObject {
   ci: JsonObject;
-  provider: "github_actions" | "generic";
+  provider: "github_actions" | "gitlab_ci" | "generic";
   payload: JsonObject;
   source?: "caller_attested" | "provider_observed";
 }

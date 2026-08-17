@@ -27,8 +27,8 @@ class CiProviderNormalizationRequest:
     def __post_init__(self) -> None:
         _mapping("ci", self.ci)
         provider = _route_text("provider", self.provider).lower()
-        if provider not in {"github_actions", "generic"}:
-            raise ArgumentError("provider must be github_actions or generic")
+        if provider not in {"github_actions", "gitlab_ci", "generic"}:
+            raise ArgumentError("provider must be github_actions, gitlab_ci, or generic")
         _mapping("payload", self.payload)
         if self.source is not None and self.source not in {"caller_attested", "provider_observed"}:
             raise ArgumentError("source must be caller_attested or provider_observed")

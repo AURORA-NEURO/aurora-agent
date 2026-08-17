@@ -29590,9 +29590,9 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "ci": { "type": "object", "description": "Canonical CiRequest used to regenerate and bind the plan digest: workflow, triggers, rust_toolchain, checks, and optional offline." },
-                    "provider": { "type": "string", "enum": ["github_actions", "generic"], "description": "Provider payload shape to normalize." },
-                    "payload": { "type": "object", "description": "For github_actions: run plus jobs (or a flat run with jobs). For generic: run_id, conclusion, and checks. Provider payloads are caller-supplied and never authenticated here." },
-                    "source": { "type": "string", "enum": ["caller_attested", "provider_observed"], "description": "Optional provenance label. Defaults to provider_observed for github_actions and caller_attested for generic." }
+                    "provider": { "type": "string", "enum": ["github_actions", "gitlab_ci", "generic"], "description": "Provider payload shape to normalize." },
+                    "payload": { "type": "object", "description": "For github_actions: run plus jobs (or a flat run with jobs); for gitlab_ci: pipeline plus jobs; for generic: run_id, conclusion, and checks. Provider payloads are caller-supplied and never authenticated here." },
+                    "source": { "type": "string", "enum": ["caller_attested", "provider_observed"], "description": "Optional provenance label. Defaults to provider_observed for github_actions/gitlab_ci and caller_attested for generic." }
                 },
                 "required": ["ci", "provider", "payload"]
             }

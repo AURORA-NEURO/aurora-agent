@@ -55,7 +55,7 @@ result digest for each check, and preserves provider/caller provenance, missingn
 states, structural-only verification, and the bounded `ci_evidence_ready` signal. It does not
 contact GitHub, verify signatures, fetch logs, execute checks, or approve a release.
 `ci_provider_normalize` provides the provider-shaped ingestion boundary before that audit: it
-accepts bounded GitHub Actions or generic payloads, binds the regenerated plan digest, converts
+accepts bounded GitHub Actions, GitLab CI, or generic payloads, binds the regenerated plan digest, converts
 provider statuses into canonical `CiRunEvidence`, derives absent result digests deterministically,
 and labels those derivations. Invalid supplied digests are refused; unknown and non-passing states
 remain downstream audit findings. The route still does not contact providers or authenticate them.

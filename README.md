@@ -704,7 +704,7 @@ per-check result digests, and keeps provider/caller provenance separate from str
 Complete passing evidence can produce a bounded `ci_evidence_ready` handoff signal, never a claim
 that GitHub was contacted, logs were fetched, a signature was verified, or deployment/scientific
 validity was established.
-`ci_provider_normalize` accepts a bounded GitHub Actions-shaped or generic provider payload and
+`ci_provider_normalize` accepts a bounded GitHub Actions-shaped, GitLab CI, or generic provider payload and
 projects it into the exact `CiRunEvidence` envelope consumed by that audit. Missing provider result
 digests are derived from the supplied check object and labeled, while unknown and non-passing states
 remain visible; normalization never contacts a provider, verifies signatures, fetches logs, or turns

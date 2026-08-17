@@ -4202,6 +4202,25 @@ fn ci_provider_normalize_projects_github_payload_into_auditable_evidence() {
     assert_eq!(normalized["evidence"]["checks"][0]["status"], json!("passed"));
     assert_eq!(normalized["evidence"]["run_url"], json!("https://example.test/runs/9001"));
 
+    let gitlab = call(
+        &mut server,
+        "ci_provider_normalize",
+        json!({
+            "ci": ci.clone(),
+            "provider": "gitlab_ci",
+            "payload": {
+                "pipeline": {"id": 9002, "status": "success", "web_url": "https://gitlab.example/pipelines/9002"},
+                "jobs": [
+                    {"name": "tests", "status": "success", "duration": 1.5},
+                    {"name": "lint", "status": "skipped"}
+                ]
+            }
+        }),
+    );
+    assert_eq!(gitlab["source"], json!("provider_observed"));
+    assert_eq!(gitlab["run_id"], json!("9002"));
+    assert_eq!(gitlab["evidence"]["checks"][0]["duration_ms"], json!(1500));
+
     let audited = call(
         &mut server,
         "ci_execution_evidence_audit",

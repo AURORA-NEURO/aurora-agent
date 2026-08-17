@@ -41,9 +41,10 @@ not cryptographic verification claims.
 ## Provider normalization
 
 `ci_provider_normalize` is the ingestion boundary before the audit. It accepts either a bounded
-GitHub Actions-shaped payload (`run` plus `jobs`) or a generic payload (`run_id`, `conclusion`, and
-`checks`) and returns the exact `CiRunEvidence` shape above, already bound to a regenerated plan
-digest. Provider statuses are mapped to the canonical pass/fail/skipped/cancelled/unknown states.
+GitHub Actions-shaped payload (`run` plus `jobs`), a GitLab CI payload (`pipeline` plus `jobs`), or
+a generic payload (`run_id`, `conclusion`, and `checks`) and returns the exact `CiRunEvidence` shape
+above, already bound to a regenerated plan digest. Provider statuses are mapped to the canonical
+pass/fail/skipped/cancelled/unknown states; GitLab duration seconds are normalized to milliseconds.
 
 Provider payloads commonly lack per-check result digests. In that case the normalizer derives a
 content digest from the supplied check object and emits both `derived_result_digest_count` and

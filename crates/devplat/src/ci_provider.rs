@@ -49,7 +49,7 @@ pub struct CiProviderNormalization {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum CiProviderNormalizationError {
-    #[error("provider must be github_actions or generic")]
+    #[error("provider must be github_actions, gitlab_ci, or generic")]
     UnsupportedProvider,
     #[error("{field} must be a non-empty value no longer than {MAX_TEXT} bytes")]
     InvalidText { field: &'static str },
@@ -164,6 +164,13 @@ fn duration_ms(value: Option<&Value>) -> Option<u64> {
     })
 }
 
+fn duration_seconds_ms(value: Option<&Value>) -> Option<u64> {
+    value
+        .and_then(Value::as_f64)
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map(|seconds| (seconds * 1000.0).round() as u64)
+}
+
 fn check_payload<'a>(
     provider: &str,
     payload: &'a Map<String, Value>,
@@ -171,6 +178,18 @@ fn check_payload<'a>(
     let (run, checks) = if provider == "github_actions" {
         let run = match payload.get("run") {
             Some(run) => object("run", run)?,
+            None => payload,
+        };
+        let checks = payload
+            .get("jobs")
+            .or_else(|| run.get("jobs"))
+            .ok_or(CiProviderNormalizationError::InvalidArray { field: "jobs" })?
+            .as_array()
+            .ok_or(CiProviderNormalizationError::InvalidArray { field: "jobs" })?;
+        (run, checks)
+    } else if provider == "gitlab_ci" {
+        let run = match payload.get("pipeline") {
+            Some(run) => object("pipeline", run)?,
             None => payload,
         };
         let checks = payload
@@ -230,8 +249,12 @@ fn normalize_check(
         }
     };
     let detail = optional_text("check.detail", check.get("detail"))?;
-    let duration_ms = duration_ms(check.get("duration_ms"));
-    if provider == "github_actions" && check.get("result_digest").is_none() {
+    let duration_ms = duration_ms(check.get("duration_ms")).or_else(|| {
+        (provider == "gitlab_ci")
+            .then(|| duration_seconds_ms(check.get("duration")))
+            .flatten()
+    });
+    if provider != "generic" && check.get("result_digest").is_none() {
         warnings.push(format!("provider_result_digest_absent:{name}"));
     }
     Ok(CiCheckEvidence {
@@ -248,7 +271,7 @@ pub fn normalize_ci_provider_payload(
     request: &CiProviderNormalizationRequest,
 ) -> Result<CiProviderNormalization, CiProviderNormalizationError> {
     let provider = bounded_text("provider", request.provider.trim())?.to_ascii_lowercase();
-    if provider != "github_actions" && provider != "generic" {
+    if provider != "github_actions" && provider != "gitlab_ci" && provider != "generic" {
         return Err(CiProviderNormalizationError::UnsupportedProvider);
     }
     let payload = object("payload", &request.payload)?;
@@ -265,7 +288,7 @@ pub fn normalize_ci_provider_payload(
             .or_else(|| run.get("workflow_run_id")),
     )?;
     let conclusion = normalized_conclusion(run.get("conclusion").or_else(|| run.get("result")));
-    let source = request.source.unwrap_or(if provider == "github_actions" {
+    let source = request.source.unwrap_or(if provider != "generic" {
         CiEvidenceSource::ProviderObserved
     } else {
         CiEvidenceSource::CallerAttested
@@ -283,6 +306,7 @@ pub fn normalize_ci_provider_payload(
         "run_url",
         run.get("run_url")
             .or_else(|| run.get("html_url"))
+            .or_else(|| run.get("web_url"))
             .or_else(|| run.get("url")),
     )?;
     let derived_result_digest_count = warnings
@@ -404,6 +428,33 @@ mod tests {
         assert!(normalized
             .warnings
             .contains(&"run_conclusion_unknown_or_missing".into()));
+    }
+
+    #[test]
+    fn gitlab_pipeline_payload_maps_duration_and_pipeline_metadata() {
+        let normalized = normalize_ci_provider_payload(&request(
+            "gitlab_ci",
+            serde_json::json!({
+                "pipeline": {"id": 77, "status": "success", "web_url": "https://gitlab.example/pipelines/77"},
+                "jobs": [
+                    {"name": "unit", "status": "success", "duration": 1.25},
+                    {"name": "lint", "status": "skipped", "duration_ms": 10}
+                ]
+            }),
+        ))
+        .unwrap();
+        assert_eq!(normalized.evidence.run_id, "77");
+        assert_eq!(
+            normalized.evidence.source,
+            CiEvidenceSource::ProviderObserved
+        );
+        assert_eq!(
+            normalized.evidence.run_url.as_deref(),
+            Some("https://gitlab.example/pipelines/77")
+        );
+        assert_eq!(normalized.evidence.checks[0].duration_ms, Some(1250));
+        assert_eq!(normalized.evidence.checks[1].duration_ms, Some(10));
+        assert_eq!(normalized.derived_result_digest_count, 2);
     }
 
     #[test]

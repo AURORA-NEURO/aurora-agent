@@ -245,7 +245,7 @@ missingness, failure, cancellation, and structural-only verification visible. A 
 report can become a bounded handoff signal, but it is not provider authentication, log retrieval,
 deployment approval, or scientific validity.
 `ci_provider_normalize` now closes the provider-shape ingestion gap before that audit: bounded
-GitHub Actions and generic payloads map into canonical `CiRunEvidence`, missing result digests are
+GitHub Actions, GitLab CI, and generic payloads map into canonical `CiRunEvidence`, missing result digests are
 derived and labeled, supplied malformed digests are refused, and unknown/non-passing statuses stay
 visible to the downstream audit. It remains caller-supplied structural normalization rather than
 provider contact, signature verification, log retrieval, or external CI execution.

@@ -400,7 +400,7 @@ invent defaults:
   verification, and the bounded `ci_evidence_ready` handoff. It never executes or authenticates a
   provider run; see [`docs/CI_EVIDENCE.md`](CI_EVIDENCE.md).
 - `CiProviderNormalizationRequest` and `ci_provider_normalize(...)` convert a bounded GitHub
-  Actions-shaped or generic provider payload into the canonical evidence envelope consumed by the
+  Actions-shaped, GitLab CI, or generic provider payload into the canonical evidence envelope consumed by the
   audit. `CiProviderNormalizationReport` preserves provider/source, payload digest, derived-digest
   warnings, and normalized evidence across `Workspace`, `AsyncWorkspace`, `ApiClient`, and
   `AsyncApiClient`; it does not contact or authenticate a provider.

@@ -200,7 +200,7 @@ external execution or create release authority.
 normalizes the raw payload, audits the resulting plan-bound evidence, and returns the intermediate
 normalization alongside `ci_evidence`. It is mutually exclusive with `ci_evidence` and remains
 caller-supplied structural evidence only.
-`ciProviderNormalize` accepts a GitHub Actions-shaped or generic provider payload and returns
+`ciProviderNormalize` accepts a GitHub Actions-shaped, GitLab CI, or generic provider payload and returns
 `CiProviderNormalizationResult` with a plan-bound canonical evidence object, provider/source labels,
 payload and derived-check digest metadata, and warnings for missing provider digests. It is an input
 normalizer only: the caller still supplies the payload, and no provider authentication, log fetch,
