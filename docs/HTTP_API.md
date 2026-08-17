@@ -230,7 +230,13 @@ Successful reads expose an
 exact raw-byte digest and a separate canonical JSON response digest, then automatically retain the
 bounded response through `domain_evidence_intake` with both the plan identity and plan artifact
 content digest as parents. A read is still not source authenticity, scientific validity, or
-provenance completeness.
+provenance completeness. The REST/MCP boundary intentionally returns the bounded transport
+envelope rather than invoking format parsers. The dependency-free Python SDK can pass that exact
+response to `domain_evidence_source_project()` for an explicit inline adapter route; this local
+handoff never fetches the locator again, verifies an optional raw-byte digest, refuses
+omitted/binary/preview/truncated bodies, and preserves source transport digests separately from
+parser provenance. A partial source outcome remains partial even when the nested parser accepts
+the available body.
 `POST /v1/tools/domain_acquisition_catalogue` exposes the cross-domain route registry. Its
 digest-bound report returns one row for every selected declared domain, with transport and
 interpretation kept separate: bounded file/plain-HTTP transport, caller-managed connector

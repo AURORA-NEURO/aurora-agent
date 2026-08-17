@@ -68,6 +68,15 @@ retained plan through the bounded file/plain-HTTP kernel, preserve observed/part
 outcomes and raw-byte versus canonical-response digests, and automatically retain the result as
 intake. The sync/async HTTP clients and `Workspace`/`AsyncWorkspace` expose both REST and MCP
 helpers; unsupported connectors and unsafe transport policy remain explicit refusals.
+`SourceAdapterProjectionRequest`, `SourceAdapterProjectionResult`, and
+`project_source_execution()` form the local handoff from that returned envelope to a concrete
+Python adapter. `ApiClient`, `AsyncApiClient`, `Workspace`, and `AsyncWorkspace` expose the same
+`domain_evidence_source_project()` helper; it performs no second fetch, requires an explicit
+adapter id, refuses omitted/binary/preview/truncated bodies, verifies the expected raw-byte
+digest when supplied, and retains source-plan/response/raw digests in a separate transport
+context rather than mislabeling them as parser provenance. A partial transport outcome remains
+partial even when the nested format audit succeeds; invalid, lossy, blocked, and refused parser
+states remain distinct.
 
 ## Lifecycle
 
@@ -988,6 +997,11 @@ invent defaults:
   invalid, blocked, rejected, and unsupported states, carries the authoritative adapter descriptor,
   preserves the audit document digest, and returns typed unsupported outcomes when a selected raw
   reader is unavailable. Payload values are not echoed in the request envelope.
+- The source-to-adapter bridge is intentionally narrower than the full local runtime registry:
+  only adapters with an inline bounded body binding are eligible. Path-based and dependency-gated
+  readers must be invoked through their explicit local reader contract, because the bridge never
+  reopens a source locator and never silently turns a binary or incomplete transport projection
+  into text.
 - `ProjectionBatchRequest`, `ProjectionBatchResult`, and `execute_projection_batch(...)` compose
   heterogeneous source requests under a bounded ordered envelope. They preserve member-level
   documents, refusal/error states, status counts, adapter/failure counts, validity and publishability

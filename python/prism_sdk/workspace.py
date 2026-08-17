@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Mapping, Sequence
 
 from .async_client import AsyncClient
@@ -44,6 +45,12 @@ from .domain_evidence_source import (
     DomainEvidenceSourceExecutionRequest,
     DomainEvidenceSourcePlanReport,
     DomainEvidenceSourcePlanRequest,
+)
+from .adapter_runtime import AdapterRuntime
+from .source_adapter import (
+    SourceAdapterProjectionRequest,
+    SourceAdapterProjectionResult,
+    project_source_execution,
 )
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
@@ -2129,6 +2136,27 @@ class Workspace:
         request: DomainEvidenceSourceExecutionRequest | Mapping[str, Any],
     ) -> DomainEvidenceSourceExecutionReport:
         return DomainEvidenceSourceExecutionReport.from_wire(self.domain_evidence_source_execute(request))
+
+    def domain_evidence_source_project(
+        self,
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: SourceAdapterProjectionRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> SourceAdapterProjectionResult:
+        """Project a returned bounded source envelope through one local Python adapter."""
+
+        normalized_execution = (
+            execution.to_dict()
+            if isinstance(execution, DomainEvidenceSourceExecutionReport)
+            else dict(execution)
+        )
+        normalized_request = (
+            request
+            if isinstance(request, SourceAdapterProjectionRequest)
+            else SourceAdapterProjectionRequest(**dict(request))
+        )
+        return project_source_execution(normalized_execution, normalized_request, runtime=runtime)
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         """Audit exact identity agreement across the bounded artifact stores."""
@@ -5536,6 +5564,32 @@ class AsyncWorkspace:
     ) -> DomainEvidenceSourceExecutionReport:
         return DomainEvidenceSourceExecutionReport.from_wire(
             await self.domain_evidence_source_execute(request)
+        )
+
+    async def domain_evidence_source_project(
+        self,
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: SourceAdapterProjectionRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> SourceAdapterProjectionResult:
+        """Project a returned source envelope locally without another MCP call."""
+
+        normalized_execution = (
+            execution.to_dict()
+            if isinstance(execution, DomainEvidenceSourceExecutionReport)
+            else dict(execution)
+        )
+        normalized_request = (
+            request
+            if isinstance(request, SourceAdapterProjectionRequest)
+            else SourceAdapterProjectionRequest(**dict(request))
+        )
+        return await asyncio.to_thread(
+            project_source_execution,
+            normalized_execution,
+            normalized_request,
+            runtime=runtime,
         )
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:

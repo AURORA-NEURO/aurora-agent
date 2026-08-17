@@ -92,13 +92,20 @@ def _text(name: str, value: str, maximum: int) -> None:
 
 @dataclass(frozen=True)
 class ProjectionRequest:
-    """A bounded request whose payload shape is owned by the selected adapter route."""
+    """A bounded request whose payload shape is owned by the selected adapter route.
+
+    ``provenance`` is passed to the selected format audit and follows that adapter's accepted
+    provenance schema. ``source_context`` is a separate transport-bound envelope for connector
+    identity and digests; it is retained in the request identity but never passed to a parser as
+    if it were scientific provenance.
+    """
 
     adapter_id: str
     source_id: str
     payload: Mapping[str, Any]
     provenance: Mapping[str, Any] | None = None
     max_items: int = MAX_RUNTIME_ITEMS
+    source_context: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _text("adapter_id", self.adapter_id, MAX_RUNTIME_ADAPTER_ID_BYTES)
@@ -107,17 +114,30 @@ class ProjectionRequest:
             raise ArgumentError("payload must be a mapping; its schema is selected by adapter_id")
         if self.provenance is not None and not isinstance(self.provenance, Mapping):
             raise ArgumentError("provenance must be a mapping when supplied")
+        if self.source_context is not None:
+            if not isinstance(self.source_context, Mapping):
+                raise ArgumentError("source_context must be a mapping when supplied")
+            try:
+                content_digest(dict(self.source_context))
+            except Exception as error:
+                raise ArgumentError(f"source_context must be canonical JSON-safe: {error}") from error
         if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= MAX_RUNTIME_ITEMS:
             raise ArgumentError(f"max_items must be between 1 and {MAX_RUNTIME_ITEMS}")
 
     def to_wire(self) -> dict[str, Any]:
-        return {
+        result = {
             "adapter_id": self.adapter_id,
             "source_id": self.source_id,
             "payload_keys": sorted(str(key) for key in self.payload.keys()),
             "provenance_present": self.provenance is not None,
             "max_items": self.max_items,
         }
+        if self.source_context is not None:
+            result["source_context_present"] = True
+            result["source_context_digest"] = content_digest(dict(self.source_context))
+        else:
+            result["source_context_present"] = False
+        return result
 
 
 @dataclass(frozen=True)

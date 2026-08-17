@@ -50,6 +50,12 @@ from .domain_evidence_source import (
     DomainEvidenceSourcePlanReport,
     DomainEvidenceSourcePlanRequest,
 )
+from .adapter_runtime import AdapterRuntime
+from .source_adapter import (
+    SourceAdapterProjectionRequest,
+    SourceAdapterProjectionResult,
+    project_source_execution,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -969,6 +975,31 @@ class ApiClient:
         return DomainEvidenceSourceExecutionReport.from_wire(
             self.call_tool("domain_evidence_source_execute", normalized.to_arguments())
         )
+
+    def domain_evidence_source_project(
+        self,
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: SourceAdapterProjectionRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> SourceAdapterProjectionResult:
+        """Project a returned bounded source envelope through one local Python adapter.
+
+        This is deliberately a local operation: it never performs another HTTP request or reads
+        the original locator. The source response remains the sole parser input.
+        """
+
+        normalized_execution = (
+            execution.to_dict()
+            if isinstance(execution, DomainEvidenceSourceExecutionReport)
+            else dict(execution)
+        )
+        normalized_request = (
+            request
+            if isinstance(request, SourceAdapterProjectionRequest)
+            else SourceAdapterProjectionRequest(**dict(request))
+        )
+        return project_source_execution(normalized_execution, normalized_request, runtime=runtime)
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
         """Read the deterministic workflow template for every capability group."""
@@ -4796,6 +4827,22 @@ class AsyncApiClient:
         request: DomainEvidenceSourceExecutionRequest | Mapping[str, Any],
     ) -> DomainEvidenceSourceExecutionReport:
         return await asyncio.to_thread(self.client.domain_evidence_source_execute_tool, request)
+
+    async def domain_evidence_source_project(
+        self,
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: SourceAdapterProjectionRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> SourceAdapterProjectionResult:
+        """Project a returned source envelope locally without another network call."""
+
+        return await asyncio.to_thread(
+            self.client.domain_evidence_source_project,
+            execution,
+            request,
+            runtime=runtime,
+        )
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)
