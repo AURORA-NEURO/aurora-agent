@@ -203,9 +203,11 @@ declared artifact parents. Outcomes remain `observed`, `partial`, `refused`, `er
 provenance completeness, scientific/clinical validity, release readiness, or external effects.
 `GET /v1/domain-evidence/coverage` audits that retained intake boundary against the authoritative
 catalogue. It preserves missing groups, intake outcomes, source tools, subjects, reported domains,
-optional exact intake digests, and per-domain counts. A complete row means only that an intake
-artifact was retained for each selected group; it does not mean every declared tool ran or that
-any response is true, complete, safe, reproducible, or release-ready.
+declared tools, missing source tools/domains, optional exact intake digests, and per-domain counts.
+The existing `complete` flag means only that an intake artifact was retained for each selected
+group; `tool_coverage_complete` and `domain_coverage_complete` separately report whether every
+declared source tool and domain has an intake row. None of these flags means a tool ran or that a
+response is true, complete, safe, reproducible, or release-ready.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

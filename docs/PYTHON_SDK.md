@@ -52,8 +52,9 @@ readiness from an intake record.
 `DomainEvidenceIntakeCoverageRequest` and `DomainEvidenceIntakeCoverageReport` expose the
 catalogue-wide intake audit through REST, the REST/MCP dispatcher, `Workspace`, and
 `AsyncWorkspace`. Coverage keeps missing groups, observed/partial/refused/error/unknown
-outcomes, source tools, subjects, reported domains, optional intake digests, and domain-level
-counts explicit; a reported envelope is not treated as executed capability or valid evidence.
+outcomes, source tools, subjects, reported domains, declared-tool/domain gaps, optional intake
+digests, and domain-level counts explicit; group, tool, and domain completeness remain separate,
+and a reported envelope is not treated as executed capability or valid evidence.
 
 ## Lifecycle
 

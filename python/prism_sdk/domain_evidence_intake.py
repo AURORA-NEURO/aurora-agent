@@ -197,6 +197,10 @@ class DomainEvidenceIntakeCoverageReport:
     reported_group_count: int
     missing_group_count: int
     missing_group_ids: tuple[str, ...]
+    tool_coverage_complete: bool
+    missing_tool_group_ids: tuple[str, ...]
+    domain_coverage_complete: bool
+    missing_domain_group_ids: tuple[str, ...]
     groups: tuple[Mapping[str, Any], ...]
     catalogue_digest: str
     coverage_digest: str
@@ -211,6 +215,12 @@ class DomainEvidenceIntakeCoverageReport:
         complete = raw.get("complete")
         if not isinstance(complete, bool):
             raise ArgumentError("domain evidence intake coverage complete must be a boolean")
+        tool_coverage_complete = raw.get("tool_coverage_complete")
+        if not isinstance(tool_coverage_complete, bool):
+            raise ArgumentError("domain evidence intake tool_coverage_complete must be a boolean")
+        domain_coverage_complete = raw.get("domain_coverage_complete")
+        if not isinstance(domain_coverage_complete, bool):
+            raise ArgumentError("domain evidence intake domain_coverage_complete must be a boolean")
         missing = _bounded_text_list(
             "domain evidence intake missing_group_ids", raw.get("missing_group_ids")
         )
@@ -228,6 +238,14 @@ class DomainEvidenceIntakeCoverageReport:
                 "domain evidence intake missing_group_count", raw.get("missing_group_count")
             ),
             missing_group_ids=missing,
+            tool_coverage_complete=tool_coverage_complete,
+            missing_tool_group_ids=_bounded_text_list(
+                "domain evidence intake missing_tool_group_ids", raw.get("missing_tool_group_ids")
+            ),
+            domain_coverage_complete=domain_coverage_complete,
+            missing_domain_group_ids=_bounded_text_list(
+                "domain evidence intake missing_domain_group_ids", raw.get("missing_domain_group_ids")
+            ),
             groups=tuple(_mapping("domain evidence intake coverage group", group) for group in groups),
             catalogue_digest=_digest(
                 "domain evidence intake catalogue digest", raw.get("catalogue_digest")

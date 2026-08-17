@@ -3329,6 +3329,8 @@ impl Server {
 
         let mut groups = Vec::new();
         let mut missing_group_ids = Vec::new();
+        let mut missing_tool_group_ids = Vec::new();
+        let mut missing_domain_group_ids = Vec::new();
         let mut domain_summary: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
         for group in selected {
             let intakes = group_intakes.get(&group.id).cloned().unwrap_or_default();
@@ -3340,12 +3342,18 @@ impl Server {
             let mut outcomes = BTreeSet::new();
             let mut reported_domains = BTreeSet::new();
             let mut intake_digests = BTreeSet::new();
+            let mut tool_intakes: BTreeMap<String, Vec<&bioprism_devplat::ArtifactRecord>> =
+                BTreeMap::new();
             for record in &intakes {
                 subject_ids.insert(record.subject_id.clone());
                 if let Some(source_tool) =
                     record.artifact.get("source_tool").and_then(Value::as_str)
                 {
                     source_tools.insert(source_tool.to_string());
+                    tool_intakes
+                        .entry(source_tool.to_string())
+                        .or_default()
+                        .push(record);
                 }
                 if let Some(outcome) = record.artifact.get("outcome").and_then(Value::as_str) {
                     outcomes.insert(outcome.to_string());
@@ -3379,16 +3387,76 @@ impl Server {
                 }
                 summary.2 += domain_intakes;
             }
+            let missing_domains = group
+                .domains
+                .iter()
+                .filter(|domain| {
+                    !reported_domains
+                        .iter()
+                        .any(|reported| reported.eq_ignore_ascii_case(domain))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let missing_source_tools = group
+                .mcp_tools
+                .iter()
+                .filter(|tool| !tool_intakes.contains_key(*tool))
+                .cloned()
+                .collect::<Vec<_>>();
+            let source_tool_coverage = group
+                .mcp_tools
+                .iter()
+                .map(|tool| {
+                    let rows = tool_intakes.get(tool);
+                    let tool_outcomes = rows
+                        .into_iter()
+                        .flat_map(|records| records.iter())
+                        .filter_map(|record| record.artifact.get("outcome").and_then(Value::as_str))
+                        .collect::<BTreeSet<_>>();
+                    json!({
+                        "tool": tool,
+                        "intake_count": rows.map_or(0, Vec::len),
+                        "outcomes": tool_outcomes.into_iter().collect::<Vec<_>>(),
+                        "coverage_state": if rows.is_some() { "reported" } else { "missing" }
+                    })
+                })
+                .collect::<Vec<_>>();
+            let tool_coverage_state = if missing_source_tools.is_empty() {
+                "complete"
+            } else if tool_intakes.is_empty() {
+                "missing"
+            } else {
+                "partial"
+            };
+            let domain_coverage_state = if missing_domains.is_empty() {
+                "complete"
+            } else if reported_domains.is_empty() {
+                "missing"
+            } else {
+                "partial"
+            };
+            if !missing_source_tools.is_empty() {
+                missing_tool_group_ids.push(group.id.clone());
+            }
+            if !missing_domains.is_empty() {
+                missing_domain_group_ids.push(group.id.clone());
+            }
             let mut row = json!({
                 "id": group.id,
                 "domains": group.domains,
                 "status": group.status,
                 "declared_tool_count": group.mcp_tools.len(),
+                "declared_tools": group.mcp_tools,
                 "intake_count": intakes.len(),
                 "subject_ids": subject_ids.into_iter().collect::<Vec<_>>(),
                 "source_tools": source_tools.into_iter().collect::<Vec<_>>(),
                 "outcomes": outcomes.into_iter().collect::<Vec<_>>(),
                 "reported_domains": reported_domains.into_iter().collect::<Vec<_>>(),
+                "missing_source_tools": missing_source_tools,
+                "source_tool_coverage": source_tool_coverage,
+                "missing_domains": missing_domains,
+                "tool_coverage_state": tool_coverage_state,
+                "domain_coverage_state": domain_coverage_state,
                 "coverage_state": if intakes.is_empty() { "missing" } else { "reported" }
             });
             if include_intake_digests {
@@ -3428,6 +3496,10 @@ impl Server {
             "missing_group_count": missing_group_ids.len(),
             "missing_group_ids": missing_group_ids,
             "complete": missing_group_ids.is_empty(),
+            "tool_coverage_complete": missing_tool_group_ids.is_empty(),
+            "missing_tool_group_ids": missing_tool_group_ids,
+            "domain_coverage_complete": missing_domain_group_ids.is_empty(),
+            "missing_domain_group_ids": missing_domain_group_ids,
             "groups": groups,
             "domain_summary": domain_summary,
             "readiness_claimed": false,
@@ -3435,6 +3507,7 @@ impl Server {
             "guarantees": [
                 "coverage counts only retained, structurally verified domain-evidence-intake artifacts",
                 "group, domain, outcome, subject, source-tool, and digest rows remain separately inspectable",
+                "declared source-tool and domain gaps remain explicit instead of being hidden by one intake",
                 "missing intake remains visible instead of being inferred as absent capability"
             ],
             "does_not_claim": [

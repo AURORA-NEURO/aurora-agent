@@ -5019,11 +5019,22 @@ export interface DomainEvidenceIntakeCoverageGroup extends JsonObject {
   domains: string[];
   status: string;
   declared_tool_count: number;
+  declared_tools: string[];
   intake_count: number;
   subject_ids: string[];
   source_tools: string[];
   outcomes: DomainEvidenceIntakeOutcome[];
   reported_domains: string[];
+  missing_source_tools: string[];
+  source_tool_coverage: {
+    tool: string;
+    intake_count: number;
+    outcomes: DomainEvidenceIntakeOutcome[];
+    coverage_state: "reported" | "missing";
+  }[];
+  missing_domains: string[];
+  tool_coverage_state: "complete" | "partial" | "missing";
+  domain_coverage_state: "complete" | "partial" | "missing";
   intake_digests?: string[];
   coverage_state: "reported" | "missing";
 }
@@ -5040,6 +5051,10 @@ export interface DomainEvidenceIntakeCoverageResult extends JsonObject {
   missing_group_count: number;
   missing_group_ids: string[];
   complete: boolean;
+  tool_coverage_complete: boolean;
+  missing_tool_group_ids: string[];
+  domain_coverage_complete: boolean;
+  missing_domain_group_ids: string[];
   groups: DomainEvidenceIntakeCoverageGroup[];
   domain_summary: JsonObject;
   readiness_claimed: false;

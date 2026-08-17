@@ -95,8 +95,9 @@ JSON, separate request/response digests, and indexed artifact posture. Request o
 distinct from supplied `null`; the client does not turn intake into execution or scientific,
 clinical, causal, provenance, release, or readiness authority.
 `domainEvidenceCoverage` and `domainEvidenceCoverageTool` provide the catalogue-wide raw-intake
-audit. Their typed result keeps missing groups, outcome/source-tool/subject/domain rows, optional
-intake digests, domain summaries, and the coverage digest explicit; complete retained intake is
+audit. Their typed result keeps missing groups, outcome/source-tool/subject/domain rows,
+declared-tool/domain gaps, optional intake digests, domain summaries, and the coverage digest
+explicit; group, tool, and domain completeness remain separate, and complete retained intake is
 not execution, scientific validity, provenance completeness, or release readiness.
 
 Convenience methods currently cover:

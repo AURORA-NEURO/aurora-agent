@@ -1076,6 +1076,8 @@ fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() 
     assert_eq!(coverage["reported_group_count"], json!(1));
     assert_eq!(coverage["missing_group_count"], json!(28));
     assert_eq!(coverage["complete"], json!(false));
+    assert_eq!(coverage["tool_coverage_complete"], json!(false));
+    assert_eq!(coverage["domain_coverage_complete"], json!(false));
     assert_eq!(
         coverage["domain_summary"]["modalities"]["intake_count"],
         json!(1)
@@ -1087,6 +1089,23 @@ fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() 
         .find(|group| group["id"] == "biological_domains")
         .unwrap();
     assert_eq!(group["outcomes"], json!(["partial"]));
+    assert!(group["declared_tools"].as_array().unwrap().len() > 1);
+    assert!(group["missing_source_tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool == "bioworlds_catalog"));
+    assert_eq!(group["tool_coverage_state"], json!("partial"));
+    assert_eq!(group["domain_coverage_state"], json!("partial"));
+    assert_eq!(
+        group["source_tool_coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["tool"] == "modality_catalog")
+            .unwrap()["intake_count"],
+        json!(1)
+    );
     assert_eq!(group["intake_digests"].as_array().unwrap().len(), 1);
     let filtered = call(
         &mut server,
@@ -1096,6 +1115,8 @@ fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() 
     assert_eq!(filtered["group_count"], json!(1));
     assert_eq!(filtered["reported_group_count"], json!(1));
     assert_eq!(filtered["complete"], json!(true));
+    assert_eq!(filtered["tool_coverage_complete"], json!(false));
+    assert_eq!(filtered["domain_coverage_complete"], json!(false));
 }
 
 #[test]

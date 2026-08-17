@@ -70,17 +70,27 @@ def coverage_payload() -> dict:
         "missing_group_count": 0,
         "missing_group_ids": [],
         "complete": True,
+        "tool_coverage_complete": False,
+        "missing_tool_group_ids": ["biological_domains"],
+        "domain_coverage_complete": True,
+        "missing_domain_group_ids": [],
         "groups": [
             {
                 "id": "biological_domains",
                 "domains": ["modalities"],
                 "status": "active",
                 "declared_tool_count": 1,
+                "declared_tools": ["modality_catalog"],
                 "intake_count": 1,
                 "subject_ids": ["subject-python"],
                 "source_tools": ["modality_catalog"],
                 "outcomes": ["observed"],
                 "reported_domains": ["modalities"],
+                "missing_source_tools": [],
+                "source_tool_coverage": [{"tool": "modality_catalog", "intake_count": 1, "outcomes": ["observed"], "coverage_state": "reported"}],
+                "missing_domains": [],
+                "tool_coverage_state": "complete",
+                "domain_coverage_state": "complete",
                 "intake_digests": ["c" * 64],
                 "coverage_state": "reported",
             }
@@ -122,6 +132,7 @@ class DomainEvidenceIntakeModelTests(unittest.TestCase):
         self.assertEqual(request.to_arguments()["group_id"], "biological_domains")
         report = DomainEvidenceIntakeCoverageReport.from_wire(coverage_payload())
         self.assertTrue(report.complete)
+        self.assertFalse(report.tool_coverage_complete)
         self.assertEqual(report.groups[0]["outcomes"], ["observed"])
         with self.assertRaises(ArgumentError):
             DomainEvidenceIntakeCoverageRequest(max_groups=129)
