@@ -4956,6 +4956,10 @@ export interface DomainReportCoverageGroup extends JsonObject {
   subject_ids: string[];
   source_tools: string[];
   claim_statuses: DomainReportClaimStatus[];
+  report_classes?: JsonObject;
+  bridge_modes?: string[];
+  lineage_parent_count?: number;
+  reports_with_lineage_parents?: number;
   report_digests?: string[];
   coverage_state: "reported" | "missing";
 }
@@ -4974,6 +4978,7 @@ export interface DomainReportCoverageResult extends JsonObject {
   complete: boolean;
   groups: DomainReportCoverageGroup[];
   domain_summary: JsonObject;
+  bridge_summary?: JsonObject;
   readiness_claimed: false;
   execution: "not_started";
   guarantees: string[];

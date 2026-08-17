@@ -795,6 +795,19 @@ fn domain_report_projection_checks_catalogue_indexes_idempotently_and_reports_co
     assert_eq!(coverage["missing_group_count"], json!(28));
     assert_eq!(coverage["complete"], json!(false));
     assert_eq!(coverage["readiness_claimed"], json!(false));
+    assert_eq!(
+        coverage["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap()["report_classes"]["ordinary"],
+        json!(1)
+    );
+    assert_eq!(
+        coverage["bridge_summary"]["lineage"]["reports_without_lineage_parents"],
+        json!(1)
+    );
     assert_eq!(coverage["coverage_digest"].as_str().unwrap().len(), 64);
 }
 

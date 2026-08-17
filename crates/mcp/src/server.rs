@@ -3313,6 +3313,10 @@ impl Server {
         let mut groups = Vec::new();
         let mut missing_group_ids = Vec::new();
         let mut domain_summary: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+        let mut report_class_summary: BTreeMap<String, usize> = BTreeMap::new();
+        let mut bridge_parent_digest_count = 0usize;
+        let mut bridge_reports_with_parents = 0usize;
+        let mut bridge_reports_without_parents = 0usize;
         for group in selected {
             let reports = group_reports.get(&group.id).cloned().unwrap_or_default();
             let report_count = reports.len();
@@ -3326,6 +3330,10 @@ impl Server {
             let mut source_tools = BTreeSet::new();
             let mut claim_statuses = BTreeSet::new();
             let mut report_digests = BTreeSet::new();
+            let mut report_classes: BTreeMap<String, usize> = BTreeMap::new();
+            let mut bridge_modes = BTreeSet::new();
+            let mut lineage_parent_count = 0usize;
+            let mut reports_with_lineage_parents = 0usize;
             for record in &reports {
                 subject_ids.insert(record.subject_id.clone());
                 if let Some(source_tool) =
@@ -3341,6 +3349,45 @@ impl Server {
                     claim_statuses.insert(status.to_string());
                 }
                 report_digests.insert(record.content_digest.clone());
+                let report_payload = record.artifact.get("report");
+                let report_kind = report_payload
+                    .and_then(|payload| payload.get("kind"))
+                    .and_then(Value::as_str);
+                let report_mode = report_payload
+                    .and_then(|payload| payload.get("mode"))
+                    .and_then(Value::as_str);
+                let report_class = match (report_kind, report_mode) {
+                    (Some("adapter_execution"), _) => "adapter_execution",
+                    (Some("provider_normalization"), Some("inline")) => {
+                        "provider_normalization_inline"
+                    }
+                    (Some("provider_normalization"), Some("external_payload")) => {
+                        "provider_normalization_external_payload"
+                    }
+                    (Some(kind), _) => kind,
+                    (None, _) => "ordinary",
+                };
+                *report_classes.entry(report_class.to_string()).or_default() += 1;
+                *report_class_summary
+                    .entry(report_class.to_string())
+                    .or_default() += 1;
+                if let Some(mode) = report_mode {
+                    bridge_modes.insert(mode.to_string());
+                }
+                let parent_count = record
+                    .artifact
+                    .get("parent_digests")
+                    .and_then(Value::as_array)
+                    .map(|parents| parents.len())
+                    .unwrap_or(0);
+                lineage_parent_count += parent_count;
+                bridge_parent_digest_count += parent_count;
+                if parent_count > 0 {
+                    reports_with_lineage_parents += 1;
+                    bridge_reports_with_parents += 1;
+                } else {
+                    bridge_reports_without_parents += 1;
+                }
             }
             for domain in &group.domains {
                 let summary = domain_summary.entry(domain.clone()).or_default();
@@ -3359,6 +3406,10 @@ impl Server {
                 "subject_ids": subject_ids.into_iter().collect::<Vec<_>>(),
                 "source_tools": source_tools.into_iter().collect::<Vec<_>>(),
                 "claim_statuses": claim_statuses.into_iter().collect::<Vec<_>>(),
+                "report_classes": report_classes,
+                "bridge_modes": bridge_modes.into_iter().collect::<Vec<_>>(),
+                "lineage_parent_count": lineage_parent_count,
+                "reports_with_lineage_parents": reports_with_lineage_parents,
                 "coverage_state": coverage_state
             });
             if include_report_digests {
@@ -3400,6 +3451,14 @@ impl Server {
             "complete": missing_group_ids.is_empty(),
             "groups": groups,
             "domain_summary": domain_summary,
+            "bridge_summary": {
+                "report_classes": report_class_summary,
+                "lineage": {
+                    "parent_digest_count": bridge_parent_digest_count,
+                    "reports_with_lineage_parents": bridge_reports_with_parents,
+                    "reports_without_lineage_parents": bridge_reports_without_parents
+                }
+            },
             "readiness_claimed": false,
             "execution": "not_started",
             "guarantees": [

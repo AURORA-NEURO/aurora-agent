@@ -1144,6 +1144,9 @@ facades, expose the shared provider-domain composition operations. Their
 ProviderDomainReportResult retains inline shape/index evidence or external receipt/materialization
 evidence while the canonical report stores compact digest-bound evidence and never duplicates the
 caller payload as a second report copy.
+DomainReportCoverageReport.bridge_summary and the optional per-group coverage fields expose
+ordinary versus adapter/provider bridge classes, bridge modes, and parent-link counts without
+collapsing indexed presence into execution, provenance, or scientific validity.
 - `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
   installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full

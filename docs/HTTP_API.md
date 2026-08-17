@@ -201,6 +201,10 @@ second payload copy, explicit artifact parents, and readiness_claimed: false.
 subject/source/status summaries, missing group ids, and an exact coverage digest. Coverage means
 local indexed projection presence only; it is not execution coverage, scientific validity,
 provenance completeness, reproducibility, release readiness, or external-effect completion.
+Each coverage group also reports classified projection counts for ordinary, adapter-execution,
+inline-provider, and external-provider report bridges when present, plus bridge modes and lineage
+parent counts. The top-level bridge summary makes those classes and linked/unlinked parent counts
+auditable without treating any of them as execution or validity.
 `POST /v1/domain-evidence/harmonize` accepts canonical domain-report bodies or projection wrappers,
 requires exact subject identity, validates each report's source tool and domain labels against the
 authoritative catalogue, and requires every report to have an explicit `supports`, `qualifies`,

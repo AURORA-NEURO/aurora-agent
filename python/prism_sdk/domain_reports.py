@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 from .artifacts import _digest, _mapping, _text
@@ -170,6 +170,7 @@ class DomainReportCoverageReport:
     groups: tuple[Mapping[str, Any], ...]
     catalogue_digest: str
     coverage_digest: str
+    bridge_summary: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "DomainReportCoverageReport":
@@ -195,6 +196,9 @@ class DomainReportCoverageReport:
             groups=tuple(_mapping("domain report coverage group", item) for item in groups),
             catalogue_digest=_digest("domain report catalogue digest", raw.get("catalogue_digest")),
             coverage_digest=_digest("domain report coverage digest", raw.get("coverage_digest")),
+            bridge_summary=_mapping(
+                "domain report bridge summary", raw.get("bridge_summary", {})
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:

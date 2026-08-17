@@ -38,6 +38,10 @@ const coverage = {
   complete: false,
   groups: [],
   domain_summary: {},
+  bridge_summary: {
+    report_classes: { ordinary: 1 },
+    lineage: { parent_digest_count: 0, reports_with_lineage_parents: 0, reports_without_lineage_parents: 1 },
+  },
   readiness_claimed: false,
   execution: "not_started",
   guarantees: [],
@@ -66,7 +70,9 @@ test("domain report REST and tool clients preserve bounded projection semantics"
     claim_posture: { status: "review_required", does_not_claim: ["truth"] },
   };
   assert.equal((await client.domainReportProject(args)).artifact_registry.content_digest, "a".repeat(64));
-  assert.equal((await client.domainReportCoverage({ include_report_digests: true })).missing_group_count, 28);
+  const coverageResult = await client.domainReportCoverage({ include_report_digests: true });
+  assert.equal(coverageResult.missing_group_count, 28);
+  assert.equal(coverageResult.bridge_summary.report_classes.ordinary, 1);
   assert.equal((await client.domainReportProjectTool(args)).mcp.result.structuredContent.workflow, "domain_report_project");
   assert.equal(seen[0].url.pathname, "/v1/domain-reports");
   assert.equal(seen[1].url.searchParams.get("include_report_digests"), "true");

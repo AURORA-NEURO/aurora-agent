@@ -47,8 +47,23 @@ def coverage_payload() -> dict:
         "missing_group_count": 28,
         "missing_group_ids": ["documentation_and_knowledge"],
         "complete": False,
-        "groups": [{"id": "biological_domains", "coverage_state": "reported"}],
+        "groups": [{
+            "id": "biological_domains",
+            "coverage_state": "reported",
+            "report_classes": {"ordinary": 1},
+            "bridge_modes": [],
+            "lineage_parent_count": 0,
+            "reports_with_lineage_parents": 0,
+        }],
         "domain_summary": {},
+        "bridge_summary": {
+            "report_classes": {"ordinary": 1},
+            "lineage": {
+                "parent_digest_count": 0,
+                "reports_with_lineage_parents": 0,
+                "reports_without_lineage_parents": 1,
+            },
+        },
         "readiness_claimed": False,
         "execution": "not_started",
     }
@@ -69,6 +84,7 @@ class DomainReportModelTests(unittest.TestCase):
         coverage = DomainReportCoverageReport.from_wire(coverage_payload())
         self.assertFalse(coverage.complete)
         self.assertEqual(coverage.missing_group_count, 28)
+        self.assertEqual(coverage.bridge_summary["report_classes"]["ordinary"], 1)
         with self.assertRaises(ArgumentError):
             DomainReportProjectRequest(
                 group_id="biological_domains",

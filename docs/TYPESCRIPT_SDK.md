@@ -125,6 +125,10 @@ audit. Their typed result keeps missing groups, outcome/source-tool/subject/doma
 declared-tool/domain gaps, optional intake digests, domain summaries, and the coverage digest
 explicit; group, tool, and domain completeness remain separate, and complete retained intake is
 not execution, scientific validity, provenance completeness, or release readiness.
+Coverage rows optionally expose report-class counts, bridge modes, and lineage-parent counts, while
+the top-level bridge summary aggregates ordinary, adapter, inline-provider, and external-provider
+projections. These are retained-index diagnostics only; linked parents and bridge classification
+do not prove execution, provenance completeness, or scientific validity.
 `domainEvidenceSourcePlan` and `domainEvidenceSourcePlanTool` expose the corresponding typed
 external-source planning boundary. The result preserves connector/locator classes, retrieval
 mode, expected digest, policy, parent links, and non-fetching posture; it does not turn a URI,
