@@ -2617,19 +2617,20 @@ test("client exposes asynchronous mission submission, status, and cancellation",
           state_digest: "q".repeat(64),
           integrity_verified: true,
           max_file_bytes: 64 * 1024 * 1024,
+          admission_policy: { max_jobs: 4096, max_active_leases: 64, observed_active_leases: 0, max_jobs_by_class: { evaluate: 4096 }, max_active_leases_by_class: { evaluate: 64 }, backpressure: "refuse_before_checkpoint_mutation" },
           registry_size: 1,
           jobs: [{ mission_id: "async-1", resource_class: "evaluate", idempotency: "idempotent", idempotency_key: "k".repeat(64), priority: 8, max_attempts: 3, state: "succeeded", attempts: 1, attempts_remaining: 2, reason: null, spec_returned: false }],
           startup_recoveries: [],
           automatic_resume: false,
           execution_scope: "single-process-api-worker",
           recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
-          does_not_claim: ["distributed scheduling or lease fencing", "external effect completion"],
+          does_not_claim: ["distributed scheduling or cross-node lease fencing", "external effect completion", "provider authentication or tenant isolation"],
           flush: "/v1/missions/queue/persistence/flush",
         };
         return jsonResponse({ ok: true, schema: "bioprism-mission-queue/0.1", queue, guarantees: ["queue state is projected from the typed factory lifecycle"], links: { persistence: "/v1/missions/queue/persistence", flush: "/v1/missions/queue/persistence/flush", mission_inventory: "/v1/missions" } });
       }
       if (path === "/v1/missions/queue/persistence" && init.method === "GET") {
-        return jsonResponse({ ok: true, enabled: true, file_present: true, file_bytes: 128, schema_version: 1, state_digest: "q".repeat(64), integrity_verified: true, max_file_bytes: 64 * 1024 * 1024, registry_size: 0, jobs: [], startup_recoveries: [], automatic_resume: false, execution_scope: "single-process-api-worker", recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched", does_not_claim: ["distributed scheduling or lease fencing"], flush: "/v1/missions/queue/persistence/flush" });
+        return jsonResponse({ ok: true, enabled: true, file_present: true, file_bytes: 128, schema_version: 1, state_digest: "q".repeat(64), integrity_verified: true, max_file_bytes: 64 * 1024 * 1024, admission_policy: { max_jobs: 4096, max_active_leases: 64, observed_active_leases: 0, max_jobs_by_class: { evaluate: 4096 }, max_active_leases_by_class: { evaluate: 64 }, backpressure: "refuse_before_checkpoint_mutation" }, registry_size: 0, jobs: [], startup_recoveries: [], automatic_resume: false, execution_scope: "single-process-api-worker", recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched", does_not_claim: ["distributed scheduling or cross-node lease fencing", "provider authentication or tenant isolation"], flush: "/v1/missions/queue/persistence/flush" });
       }
       if (path === "/v1/missions/async-1" && init.method === "GET") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "succeeded", cancel_requested: false, progress: { phase: "succeeded", current_wave: 0, total_steps: 1, completed_steps: 1, active_steps: 0, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, trace_sequence: 4, last_event: "mission.completed" }, result: { mission_status: "succeeded" } });
@@ -2653,7 +2654,7 @@ test("client exposes asynchronous mission submission, status, and cancellation",
         return jsonResponse({ ok: true, missions: [{ mission_id: "async-1", status: "succeeded", cancel_requested: false, progress: { phase: "succeeded", current_wave: 0, total_steps: 1, completed_steps: 1, active_steps: 0, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, trace_sequence: 4, last_event: "mission.completed" }, summary: { total_steps: 1, completed_steps: 1, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, result_available: true }, poll: "/v1/missions/async-1", cancel: "/v1/missions/async-1/cancel" }], returned: 1, total_matching: 1, limit: 5, truncated: false, status_filter: "succeeded" });
       }
       if (path === "/v1/missions/queue/persistence/flush" && init.method === "POST") {
-        return jsonResponse({ ok: true, bytes: 128, queue: { ok: true, enabled: true, file_present: true, file_bytes: 128, schema_version: 1, state_digest: "q".repeat(64), integrity_verified: true, max_file_bytes: 64 * 1024 * 1024, registry_size: 0, jobs: [], startup_recoveries: [], automatic_resume: false, execution_scope: "single-process-api-worker", recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched", does_not_claim: ["external effect completion"], flush: "/v1/missions/queue/persistence/flush" }, request_id: "queue-flush-1", guarantees: ["the checkpoint is content-addressed and atomically replaced"] });
+        return jsonResponse({ ok: true, bytes: 128, queue: { ok: true, enabled: true, file_present: true, file_bytes: 128, schema_version: 1, state_digest: "q".repeat(64), integrity_verified: true, max_file_bytes: 64 * 1024 * 1024, admission_policy: { max_jobs: 4096, max_active_leases: 64, observed_active_leases: 0, max_jobs_by_class: { evaluate: 4096 }, max_active_leases_by_class: { evaluate: 64 }, backpressure: "refuse_before_checkpoint_mutation" }, registry_size: 0, jobs: [], startup_recoveries: [], automatic_resume: false, execution_scope: "single-process-api-worker", recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched", does_not_claim: ["external effect completion", "distributed scheduling or cross-node lease fencing", "provider authentication or tenant isolation"], flush: "/v1/missions/queue/persistence/flush" }, request_id: "queue-flush-1", guarantees: ["the checkpoint is content-addressed and atomically replaced"] });
       }
       return jsonResponse({ ok: false, error: { code: "not_found", message: path } }, 404);
     },

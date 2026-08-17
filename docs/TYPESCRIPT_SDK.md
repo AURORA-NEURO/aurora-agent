@@ -197,8 +197,10 @@ and explicit flush/readiness check for operator tooling.
 resource class, idempotency, attempt counters, terminal state, and the deliberate
 `spec_returned: false` omission. `missionQueuePersistence()` exposes `MissionQueueStatus` with
 the content digest, integrity result, startup recovery rows, and explicit `automatic_resume: false`.
+Its admission policy projection preserves total-job/active-lease backpressure and resource-class
+occupancy. Queue attempt numbers are local fencing tokens, not distributed lease authority.
 `flushMissionQueuePersistence()` returns the atomic checkpoint byte count plus the resulting queue
-status. These are local checkpoint controls, not distributed scheduling, lease fencing, provider
+status. These are local checkpoint controls, not distributed scheduling, cross-node lease fencing, provider
 authentication, tenant isolation, or external-effect completion.
 `eventPersistence()` and `flushEventPersistence()` provide the event-cursor equivalent while
 typing the explicit non-durability of webhook subscriptions and pending deliveries.

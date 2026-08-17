@@ -26,17 +26,20 @@
 //! the lifecycle is deterministically testable. It now provides a bounded, content-addressed JSON
 //! checkpoint with cross-index validation and atomic replacement, plus an explicit startup sweep
 //! for expired leases. A durable multi-node deployment still needs the append-only event ledger of
-//! 40.09, a transactional backend, distributed lease fencing, and an authenticated worker
-//! identity. There is no backpressure model or fair-share scheduling across tenants — 35's
-//! million-scale concerns beyond enqueue and recovery remain absent rather than stubbed.
+//! 40.09, a transactional backend, cross-node lease fencing, and an authenticated worker
+//! identity. The local controller now has explicit queue admission and per-resource-class
+//! fair-share limits, but cross-node scheduling and tenant fairness remain absent rather than
+//! stubbed.
 
 pub mod error;
+pub mod admission;
 pub mod job;
 pub mod lease;
 pub mod snapshot;
 pub mod store;
 
 pub use error::FactoryError;
+pub use admission::QueueAdmissionPolicy;
 pub use job::{Idempotency, Job, JobState, ResourceClass};
 pub use lease::{Lease, WorkerCapability};
 pub use snapshot::{

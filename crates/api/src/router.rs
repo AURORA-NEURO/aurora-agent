@@ -17,7 +17,7 @@ use bioprism_devplat::{
     MissionEvaluatorReplayRequest, MAX_EVIDENCE_REGISTRY_BYTES,
 };
 use bioprism_factory::{
-    Idempotency as FactoryIdempotency, Job as FactoryJob, JobStore,
+    Idempotency as FactoryIdempotency, Job as FactoryJob, JobStore, QueueAdmissionPolicy,
     Lease as FactoryLease, Recovery as FactoryRecovery, ResourceClass, WorkerCapability,
     JOB_STORE_SNAPSHOT_SCHEMA_VERSION, MAX_JOB_STORE_SNAPSHOT_BYTES,
 };
@@ -73,6 +73,10 @@ pub struct ApiConfig {
     /// observed, while the queue checkpoint answers which lease/idempotency branch is recoverable.
     /// It never enables automatic resumption of an in-process worker.
     pub mission_queue_state_path: Option<PathBuf>,
+    /// Maximum total checkpointed queue jobs admitted before backpressure is returned.
+    pub mission_queue_max_jobs: usize,
+    /// Maximum concurrent leased mission jobs in this API process.
+    pub mission_queue_max_active_leases: usize,
     /// Optional atomic JSON checkpoint for the bounded event cursor, subscription metadata, and
     /// signed pending webhook outbox.
     pub event_state_path: Option<PathBuf>,
@@ -91,6 +95,8 @@ impl Default for ApiConfig {
             bearer_token: None,
             mission_state_path: None,
             mission_queue_state_path: None,
+            mission_queue_max_jobs: MAX_MISSION_JOBS,
+            mission_queue_max_active_leases: 64,
             event_state_path: None,
             evidence_state_path: None,
             reconciliation_state_path: None,
@@ -127,6 +133,19 @@ impl ApiConfig {
             .is_some_and(|path| path.as_os_str().is_empty())
         {
             return Err("mission_queue_state_path must not be empty".into());
+        }
+        if self.mission_queue_max_jobs == 0 || self.mission_queue_max_jobs > MAX_MISSION_JOBS {
+            return Err(format!(
+                "mission_queue_max_jobs must be between 1 and {MAX_MISSION_JOBS}"
+            ));
+        }
+        if self.mission_queue_max_active_leases == 0
+            || self.mission_queue_max_active_leases > self.mission_queue_max_jobs
+        {
+            return Err(
+                "mission_queue_max_active_leases must be between 1 and mission_queue_max_jobs"
+                    .into(),
+            );
         }
         if self
             .event_state_path
@@ -185,6 +204,7 @@ struct MissionQueuePersistence {
     queue: Arc<Mutex<JobStore>>,
     lock: Mutex<()>,
     startup_recoveries: Vec<FactoryRecovery>,
+    admission_policy: QueueAdmissionPolicy,
 }
 
 struct EventPersistence {
@@ -206,7 +226,10 @@ struct ReconciliationPersistence {
 }
 
 impl MissionQueuePersistence {
-    fn new(path: Option<PathBuf>) -> Result<Self, String> {
+    fn new(path: Option<PathBuf>, admission_policy: QueueAdmissionPolicy) -> Result<Self, String> {
+        admission_policy
+            .validate()
+            .map_err(|error| format!("invalid mission queue admission policy: {error}"))?;
         let mut queue = match path.as_deref() {
             Some(path) => JobStore::load_from_path(path)
                 .map_err(|error| format!("mission queue checkpoint could not be loaded: {error}"))?,
@@ -228,6 +251,7 @@ impl MissionQueuePersistence {
             queue: Arc::new(Mutex::new(queue)),
             lock: Mutex::new(()),
             startup_recoveries,
+            admission_policy,
         })
     }
 
@@ -282,7 +306,9 @@ impl MissionQueuePersistence {
     ) -> Result<FactoryLease, String> {
         let mission_id = job.id.clone();
         self.mutate("enqueue", move |queue| {
-            let accepted = queue.enqueue(job).map_err(|error| error.to_string())?;
+            let accepted = queue
+                .enqueue_with_policy(job, &self.admission_policy)
+                .map_err(|error| error.to_string())?;
             if accepted != mission_id {
                 return Err(format!("duplicate work is already represented by {accepted}"));
             }
@@ -292,19 +318,20 @@ impl MissionQueuePersistence {
             )
             .with_lease_duration_nanos(MISSION_QUEUE_LEASE_DURATION_NANOS);
             queue
-                .lease(&worker, now)
+                .lease_with_policy(&worker, now, &self.admission_policy)
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| "no compatible mission worker capacity is available".to_string())
         })
     }
 
-    fn heartbeat(&self, mission_id: &str, now: Timestamp) -> Result<(), String> {
+    fn heartbeat(&self, mission_id: &str, attempt: u32, now: Timestamp) -> Result<(), String> {
         let mission_id = mission_id.to_string();
         self.mutate("heartbeat", move |queue| {
             queue
                 .heartbeat(
                     &mission_id,
                     MISSION_QUEUE_WORKER_ID,
+                    attempt,
                     now,
                     MISSION_QUEUE_LEASE_DURATION_NANOS,
                 )
@@ -312,21 +339,33 @@ impl MissionQueuePersistence {
         })
     }
 
-    fn commit_success(&self, mission_id: &str, result: Value, now: Timestamp) -> Result<(), String> {
+    fn commit_success(
+        &self,
+        mission_id: &str,
+        attempt: u32,
+        result: Value,
+        now: Timestamp,
+    ) -> Result<(), String> {
         let mission_id = mission_id.to_string();
         self.mutate("commit", move |queue| {
             queue
-                .stage(&mission_id, MISSION_QUEUE_WORKER_ID, now, result)
-                .and_then(|_| queue.commit(&mission_id, MISSION_QUEUE_WORKER_ID, now))
+                .stage(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now, result)
+                .and_then(|_| queue.commit(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now))
                 .map_err(|error| error.to_string())
         })
     }
 
-    fn record_failure(&self, mission_id: &str, reason: String, now: Timestamp) -> Result<(), String> {
+    fn record_failure(
+        &self,
+        mission_id: &str,
+        attempt: u32,
+        reason: String,
+        now: Timestamp,
+    ) -> Result<(), String> {
         let mission_id = mission_id.to_string();
         self.mutate("failure", move |queue| {
             queue
-                .fail(&mission_id, MISSION_QUEUE_WORKER_ID, now, reason)
+                .fail(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now, reason)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         })
@@ -369,12 +408,21 @@ impl MissionQueuePersistence {
             "max_file_bytes": MAX_JOB_STORE_SNAPSHOT_BYTES,
             "registry_size": jobs.len(),
             "jobs": jobs,
+            "admission_policy": {
+                "max_jobs": self.admission_policy.max_jobs,
+                "max_active_leases": self.admission_policy.max_active_leases,
+                "max_jobs_by_class": self.admission_policy.max_jobs_by_class,
+                "max_active_leases_by_class": self.admission_policy.max_active_leases_by_class,
+                "observed_active_leases": queue.active_lease_count(),
+                "observed_active_leases_by_class": queue.active_lease_counts_by_class(),
+                "backpressure": "refuse_before_checkpoint_mutation"
+            },
             "startup_recoveries": self.startup_recoveries,
             "automatic_resume": false,
             "execution_scope": "single-process-api-worker",
             "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
             "does_not_claim": [
-                "distributed scheduling or lease fencing",
+                "distributed scheduling or cross-node lease fencing",
                 "external effect completion",
                 "automatic resume of an interrupted mission",
                 "provider authentication or tenant isolation"
@@ -812,8 +860,18 @@ impl MissionJobState {
 impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
         config.validate()?;
+        let mission_queue_policy = QueueAdmissionPolicy::new(
+            config.mission_queue_max_jobs,
+            config.mission_queue_max_active_leases,
+        )
+        .with_resource_class_limit(
+            ResourceClass::Evaluate,
+            config.mission_queue_max_jobs,
+            config.mission_queue_max_active_leases,
+        );
         let mission_queue_persistence = Arc::new(MissionQueuePersistence::new(
             config.mission_queue_state_path.clone(),
+            mission_queue_policy,
         )?);
         let events = Arc::new(Mutex::new(EventLog::from_checkpoint_path(
             config.event_capacity,
@@ -1397,7 +1455,7 @@ impl ApiRouter {
                         "does_not_restore": [
                             "an in-process worker thread",
                             "external effect completion or rollback",
-                            "distributed lease fencing, fair-share scheduling, provider authentication, or automatic dispatch"
+                            "cross-node lease fencing, tenant/fair-share scheduling, provider authentication, or automatic dispatch"
                         ],
                         "operator_action": "inspect /v1/missions/queue and explicitly resubmit interrupted work after reviewing quarantine or requeue evidence"
                     },
@@ -3831,11 +3889,15 @@ impl ApiRouter {
             {
                 return self.error(409, "mission_duplicate_work", &error, request_id)
             }
+            Err(error) if error.contains("admission limit") => {
+                return self.error(429, "mission_queue_backpressure", &error, request_id)
+            }
             Err(error) => {
                 return self.error(503, "mission_queue_unavailable", &error, request_id)
             }
         };
 
+        let queue_attempt = queue_lease.attempt;
         let cancellation = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(MissionJobState {
             total_steps,
@@ -3984,7 +4046,7 @@ impl ApiRouter {
                 current.record_trace(event.clone());
             }
             if let Ok(now) = current_timestamp() {
-                let _ = mission_queue_persistence.heartbeat(&mission_subject, now);
+                let _ = mission_queue_persistence.heartbeat(&mission_subject, queue_attempt, now);
             }
             let _ = persistence.persist();
             if let Ok(mut events) = mission_events.lock() {
@@ -4022,7 +4084,12 @@ impl ApiRouter {
                         Ok(result) => {
                             let queue_commit = current_timestamp().and_then(|now| {
                                 worker_queue_persistence
-                                    .commit_success(&worker_mission_id, result.clone(), now)
+                                    .commit_success(
+                                        &worker_mission_id,
+                                        queue_attempt,
+                                        result.clone(),
+                                        now,
+                                    )
                             });
                             if let Err(queue_error) = queue_commit {
                                 current.status = "failed".into();
@@ -4048,11 +4115,14 @@ impl ApiRouter {
                         }
                         Err(error) => {
                             let queue_error = current_timestamp()
-                                .and_then(|now| worker_queue_persistence.record_failure(
-                                    &worker_mission_id,
-                                    error.clone(),
-                                    now,
-                                ))
+                                .and_then(|now| {
+                                    worker_queue_persistence.record_failure(
+                                        &worker_mission_id,
+                                        queue_attempt,
+                                        error.clone(),
+                                        now,
+                                    )
+                                })
                                 .err();
                             current.status = "failed".into();
                             current.progress.phase = "failed".into();
@@ -9536,6 +9606,45 @@ mod tests {
         assert_eq!(restored_queue["integrity_verified"], true);
         assert_eq!(restored_queue["jobs"][0]["state"], "succeeded");
         let _ = std::fs::remove_file(queue_path);
+    }
+
+    #[test]
+    fn mission_queue_returns_backpressure_before_accepting_over_capacity_work() {
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_queue_max_jobs: 1,
+                mission_queue_max_active_leases: 1,
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let first = router.handle(request(
+            "POST",
+            "/v1/missions",
+            json!({
+                "mission_id": "backpressure-1",
+                "goal": "fill the bounded queue",
+                "steps": [{"id": "step-1", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}]
+            }),
+        ));
+        assert_eq!(first.status, 202);
+        let second = router.handle(request(
+            "POST",
+            "/v1/missions",
+            json!({
+                "mission_id": "backpressure-2",
+                "goal": "must be refused before queue mutation",
+                "steps": [{"id": "step-1", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}]
+            }),
+        ));
+        assert_eq!(second.status, 429);
+        let second: Value = serde_json::from_slice(&second.body).unwrap();
+        assert_eq!(second["error"]["code"], "mission_queue_backpressure");
+        let status = router.handle(request("GET", "/v1/missions/queue/persistence", json!({})));
+        let status: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status["admission_policy"]["max_jobs"], 1);
+        assert_eq!(status["registry_size"], 1);
     }
 
     #[test]

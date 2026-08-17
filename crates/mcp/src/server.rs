@@ -2113,13 +2113,14 @@ impl Server {
                         .get("worker_id")
                         .and_then(Value::as_str)
                         .ok_or("heartbeat requires worker_id")?;
+                    let attempt = json_u32(raw_action.get("attempt"), "attempt")?;
                     let now = FactoryTimestamp::from_nanos_utc(json_i128(
                         raw_action.get("now_nanos"),
                         "now_nanos",
                     )?);
                     let duration = json_i128(raw_action.get("duration_nanos"), "duration_nanos")?;
                     store
-                        .heartbeat(job_id, worker_id, now, duration)
+                        .heartbeat(job_id, worker_id, attempt, now, duration)
                         .map_err(|error| format!("heartbeat refused: {error}"))?;
                     Ok(json!({ "job_id": job_id, "worker_id": worker_id }))
                 }
@@ -2132,6 +2133,7 @@ impl Server {
                         .get("worker_id")
                         .and_then(Value::as_str)
                         .ok_or("stage requires worker_id")?;
+                    let attempt = json_u32(raw_action.get("attempt"), "attempt")?;
                     let now = FactoryTimestamp::from_nanos_utc(json_i128(
                         raw_action.get("now_nanos"),
                         "now_nanos",
@@ -2141,7 +2143,7 @@ impl Server {
                         .cloned()
                         .ok_or("stage requires output")?;
                     store
-                        .stage(job_id, worker_id, now, output)
+                        .stage(job_id, worker_id, attempt, now, output)
                         .map_err(|error| format!("stage refused: {error}"))?;
                     Ok(json!({ "job_id": job_id, "visible_before_commit": false }))
                 }
@@ -2154,12 +2156,13 @@ impl Server {
                         .get("worker_id")
                         .and_then(Value::as_str)
                         .ok_or("commit requires worker_id")?;
+                    let attempt = json_u32(raw_action.get("attempt"), "attempt")?;
                     let now = FactoryTimestamp::from_nanos_utc(json_i128(
                         raw_action.get("now_nanos"),
                         "now_nanos",
                     )?);
                     store
-                        .commit(job_id, worker_id, now)
+                        .commit(job_id, worker_id, attempt, now)
                         .map_err(|error| format!("commit refused: {error}"))?;
                     Ok(json!({ "job_id": job_id, "committed": true }))
                 }
@@ -2172,6 +2175,7 @@ impl Server {
                         .get("worker_id")
                         .and_then(Value::as_str)
                         .ok_or("fail requires worker_id")?;
+                    let attempt = json_u32(raw_action.get("attempt"), "attempt")?;
                     let now = FactoryTimestamp::from_nanos_utc(json_i128(
                         raw_action.get("now_nanos"),
                         "now_nanos",
@@ -2181,7 +2185,7 @@ impl Server {
                         .and_then(Value::as_str)
                         .ok_or("fail requires reason")?;
                     let recovery = store
-                        .fail(job_id, worker_id, now, reason)
+                        .fail(job_id, worker_id, attempt, now, reason)
                         .map_err(|error| format!("failure report refused: {error}"))?;
                     serde_json::to_value(recovery)
                         .map_err(|error| format!("cannot serialize recovery: {error}"))
@@ -27133,6 +27137,14 @@ fn json_i128(raw: Option<&Value>, field: &str) -> Result<i128, String> {
     Err(format!("{field} is required and must be an integer"))
 }
 
+fn json_u32(raw: Option<&Value>, field: &str) -> Result<u32, String> {
+    let value = raw
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("{field} is required and must be a non-negative 32-bit integer"))?;
+    u32::try_from(value)
+        .map_err(|_| format!("{field} is required and must be a non-negative 32-bit integer"))
+}
+
 fn content_hash_argument(
     raw: Option<&Value>,
     field: &str,
@@ -28072,7 +28084,7 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "jobs": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Serialized bioprism-factory Job values initially enqueued into the simulation." },
                     "workers": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Serialized WorkerCapability values; worker_id values must be unique." },
-                    "actions": { "type": "array", "maxItems": 2000, "description": "Ordered actions: enqueue, lease, heartbeat, stage, commit, fail, recover_expired, compensate, release_quarantine, or cancel." }
+                    "actions": { "type": "array", "maxItems": 2000, "description": "Ordered actions: enqueue, lease, heartbeat, stage, commit, fail, recover_expired, compensate, release_quarantine, or cancel. Heartbeat, stage, commit, and fail require the attempt returned by the corresponding lease; the attempt is a fencing token." }
                 },
                 "required": ["jobs", "workers", "actions"]
             }

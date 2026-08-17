@@ -1,7 +1,8 @@
 //! The four non-negotiable invariants of blueprint 40.30, each asserted by name.
 
 use bioprism_factory::{
-    FactoryError, Idempotency, Job, JobState, JobStore, Recovery, ResourceClass, WorkerCapability,
+    FactoryError, Idempotency, Job, JobState, JobStore, QueueAdmissionPolicy, Recovery,
+    ResourceClass, WorkerCapability,
 };
 use bioprism_scope::Timestamp;
 use serde_json::json;
@@ -34,10 +35,10 @@ fn a_job_runs_enqueue_lease_stage_commit() {
     assert_eq!(lease.attempt, 1);
     assert_eq!(store.job("j1").unwrap().state, JobState::Leased);
 
-    store.stage("j1", "w1", at(5), json!({ "certificate": "abc" })).unwrap();
+    store.stage("j1", "w1", 1, at(5), json!({ "certificate": "abc" })).unwrap();
     assert_eq!(store.job("j1").unwrap().state, JobState::Staged);
 
-    store.commit("j1", "w1", at(6)).unwrap();
+    store.commit("j1", "w1", 1, at(6)).unwrap();
     assert_eq!(store.job("j1").unwrap().state, JobState::Succeeded);
     assert_eq!(store.result("j1"), Some(&json!({ "certificate": "abc" })));
 }
@@ -55,11 +56,11 @@ fn one_active_lease_per_attempt() {
     );
 
     assert!(matches!(
-        store.commit("j1", "w2", at(2)),
+        store.commit("j1", "w2", 1, at(2)),
         Err(FactoryError::LeaseHeldByAnother { .. })
     ));
     assert!(matches!(
-        store.heartbeat("j1", "w2", at(2), 30 * SECOND),
+        store.heartbeat("j1", "w2", 1, at(2), 30 * SECOND),
         Err(FactoryError::LeaseHeldByAnother { .. })
     ));
 }
@@ -70,10 +71,10 @@ fn staged_output_is_not_readable_before_commit() {
     let mut store = JobStore::new();
     store.enqueue(job("j1", Idempotency::Idempotent)).unwrap();
     store.lease(&worker("w1"), at(0)).unwrap();
-    store.stage("j1", "w1", at(1), json!({ "partial": true })).unwrap();
+    store.stage("j1", "w1", 1, at(1), json!({ "partial": true })).unwrap();
 
     assert_eq!(store.result("j1"), None, "a reader must not see uncommitted work");
-    store.commit("j1", "w1", at(2)).unwrap();
+    store.commit("j1", "w1", 1, at(2)).unwrap();
     assert!(store.result("j1").is_some());
 }
 
@@ -84,7 +85,7 @@ fn a_success_with_nothing_staged_is_refused() {
     store.lease(&worker("w1"), at(0)).unwrap();
 
     assert!(matches!(
-        store.commit("j1", "w1", at(1)),
+        store.commit("j1", "w1", 1, at(1)),
         Err(FactoryError::NothingStaged { .. })
     ));
 }
@@ -103,6 +104,33 @@ fn an_expired_lease_on_idempotent_work_requeues() {
     );
     assert_eq!(store.job("j1").unwrap().state, JobState::Queued);
     assert!(store.lease(&worker("w2"), at(32)).unwrap().is_some());
+}
+
+/// Lease attempts are fencing tokens: a stale worker with the same identity cannot commit after
+/// recovery has handed the job to a later attempt.
+#[test]
+fn a_stale_attempt_is_fenced_even_when_the_worker_identity_is_reused() {
+    let mut store = JobStore::new();
+    store.enqueue(job("j1", Idempotency::Idempotent)).unwrap();
+    let first = store.lease(&worker("w1"), at(0)).unwrap().unwrap();
+    assert_eq!(first.attempt, 1);
+    store.recover_expired(at(31));
+    let second = store.lease(&worker("w1"), at(32)).unwrap().unwrap();
+    assert_eq!(second.attempt, 2);
+
+    assert!(matches!(
+        store.stage("j1", "w1", first.attempt, at(33), json!({ "stale": true })),
+        Err(FactoryError::StaleLease {
+            expected_attempt: 1,
+            active_attempt: 2,
+            ..
+        })
+    ));
+    store
+        .stage("j1", "w1", second.attempt, at(33), json!({ "fresh": true }))
+        .unwrap();
+    store.commit("j1", "w1", second.attempt, at(34)).unwrap();
+    assert_eq!(store.result("j1"), Some(&json!({ "fresh": true })));
 }
 
 /// Invariant 2, the case a naive queue gets wrong.
@@ -164,7 +192,7 @@ fn a_reported_failure_retries_where_an_expired_lease_would_not() {
     store.enqueue(job("j1", Idempotency::NonIdempotent)).unwrap();
     store.lease(&worker("w1"), at(0)).unwrap();
 
-    let recovery = store.fail("j1", "w1", at(5), "upstream returned 503").unwrap();
+    let recovery = store.fail("j1", "w1", 1, at(5), "upstream returned 503").unwrap();
     assert!(matches!(recovery, Recovery::Requeued { .. }));
     assert_eq!(
         store.job("j1").unwrap().state,
@@ -213,7 +241,7 @@ fn cancellation_is_explicit_and_drops_staged_work() {
     let mut store = JobStore::new();
     store.enqueue(job("j1", Idempotency::Idempotent)).unwrap();
     store.lease(&worker("w1"), at(0)).unwrap();
-    store.stage("j1", "w1", at(1), json!({ "partial": true })).unwrap();
+    store.stage("j1", "w1", 1, at(1), json!({ "partial": true })).unwrap();
 
     store.cancel("j1", "superseded by a newer world").unwrap();
     assert_eq!(store.job("j1").unwrap().state, JobState::Cancelled);
@@ -230,14 +258,14 @@ fn a_heartbeat_extends_a_lease_but_cannot_resurrect_an_expired_one() {
     store.enqueue(job("j1", Idempotency::Idempotent)).unwrap();
     store.lease(&worker("w1"), at(0)).unwrap();
 
-    store.heartbeat("j1", "w1", at(20), 30 * SECOND).unwrap();
+    store.heartbeat("j1", "w1", 1, at(20), 30 * SECOND).unwrap();
     assert!(
         store.recover_expired(at(31)).is_empty(),
         "a heartbeat at t=20 extends the lease past t=31"
     );
 
     assert!(matches!(
-        store.heartbeat("j1", "w1", at(100), 30 * SECOND),
+        store.heartbeat("j1", "w1", 1, at(100), 30 * SECOND),
         Err(FactoryError::LeaseExpired { .. })
     ));
 }
@@ -247,10 +275,10 @@ fn a_worker_cannot_commit_after_its_lease_expired() {
     let mut store = JobStore::new();
     store.enqueue(job("j1", Idempotency::Idempotent)).unwrap();
     store.lease(&worker("w1"), at(0)).unwrap();
-    store.stage("j1", "w1", at(1), json!({ "x": 1 })).unwrap();
+    store.stage("j1", "w1", 1, at(1), json!({ "x": 1 })).unwrap();
 
     assert!(matches!(
-        store.commit("j1", "w1", at(31)),
+        store.commit("j1", "w1", 1, at(31)),
         Err(FactoryError::LeaseExpired { .. })
     ));
 }
@@ -290,6 +318,34 @@ fn a_worker_is_only_offered_classes_it_declares() {
     );
     let sandboxed = WorkerCapability::new("w2", vec![ResourceClass::Sandbox]);
     assert!(store.lease(&sandboxed, at(0)).unwrap().is_some());
+}
+
+#[test]
+fn admission_policy_refuses_total_class_and_active_lease_overflow() {
+    let policy = QueueAdmissionPolicy::new(2, 1)
+        .with_resource_class_limit(ResourceClass::Compile, 1, 1);
+    let mut store = JobStore::new();
+    store
+        .enqueue_with_policy(job("j1", Idempotency::Idempotent), &policy)
+        .unwrap();
+    assert!(matches!(
+        store.enqueue_with_policy(
+            Job::new("j2", ResourceClass::Compile, Idempotency::Idempotent, json!({})),
+            &policy,
+        ),
+        Err(FactoryError::AdmissionLimit { dimension, .. }) if dimension == "jobs_by_class:Compile"
+    ));
+    store
+        .enqueue_with_policy(
+            Job::new("j3", ResourceClass::Evaluate, Idempotency::Idempotent, json!({})),
+            &policy,
+        )
+        .unwrap();
+    store.lease_with_policy(&worker("w1"), at(0), &policy).unwrap();
+    assert!(matches!(
+        store.lease_with_policy(&worker("w2"), at(1), &policy),
+        Err(FactoryError::AdmissionLimit { dimension, .. }) if dimension == "active_leases"
+    ));
 }
 
 #[test]

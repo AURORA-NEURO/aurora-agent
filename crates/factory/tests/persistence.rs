@@ -34,13 +34,13 @@ fn snapshot_round_trip_preserves_leases_outputs_and_deduplication() {
     store.enqueue(job("done", "two")).unwrap();
     store.lease(&worker("w1"), at(0)).unwrap();
     store
-        .stage("staged", "w1", at(1), json!({ "partial": true }))
+        .stage("staged", "w1", 1, at(1), json!({ "partial": true }))
         .unwrap();
     store.lease(&worker("w2"), at(2)).unwrap();
     store
-        .stage("done", "w2", at(3), json!({ "answer": 42 }))
+        .stage("done", "w2", 1, at(3), json!({ "answer": 42 }))
         .unwrap();
-    store.commit("done", "w2", at(4)).unwrap();
+    store.commit("done", "w2", 1, at(4)).unwrap();
 
     let snapshot = store.snapshot().unwrap();
     assert_eq!(snapshot.schema_version, 1);

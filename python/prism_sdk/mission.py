@@ -1731,6 +1731,7 @@ class MissionQueueStatus:
     state_digest: str
     integrity_verified: bool | None
     max_file_bytes: int
+    admission_policy: Mapping[str, Any]
     registry_size: int
     jobs: tuple[MissionQueueJob, ...]
     startup_recoveries: tuple[Mapping[str, Any], ...]
@@ -1776,6 +1777,14 @@ class MissionQueueStatus:
         integrity_verified = raw.get("integrity_verified")
         if integrity_verified is not None and not isinstance(integrity_verified, bool):
             raise ArgumentError("mission queue integrity_verified must be a boolean or null")
+        admission_policy_value = raw.get("admission_policy")
+        if not isinstance(admission_policy_value, Mapping):
+            raise ArgumentError("mission queue admission_policy must be an object")
+        admission_policy = dict(admission_policy_value)
+        for name in ("max_jobs", "max_active_leases", "observed_active_leases"):
+            candidate = admission_policy.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission queue admission_policy {name} must be a non-negative integer")
         values = raw.get("jobs")
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
             raise ArgumentError("mission queue jobs must be an array")
@@ -1815,6 +1824,7 @@ class MissionQueueStatus:
             state_digest,
             integrity_verified,
             non_negative("max_file_bytes"),
+            admission_policy,
             non_negative("registry_size"),
             jobs,
             tuple(startup_recoveries),

@@ -210,12 +210,15 @@ execution separately from the mission read model. Each accepted mission is repre
 `Evaluate` job with an explicit idempotency class, leased to the local API worker, and committed
 only after the executor report is staged. Queue checkpoint writes are bounded, digest-verified,
 cross-index validated, and atomically replaced. A failed checkpoint does not replace the live
-queue projection.
+queue projection. Configure `--mission-queue-max-jobs <n>` and
+`--mission-queue-max-active-leases <n>` to apply explicit backpressure before queue mutation;
+the status route reports those limits and observed active leases. Factory lease attempts are
+fencing tokens, so a stale worker attempt cannot mutate a later attempt with the same worker ID.
 
 On startup, expired leases are classified by the factory policy: idempotent jobs are requeued,
 non-idempotent jobs are quarantined, and compensable jobs await compensation. This is recovery
 classification, not automatic resumption. The API never dispatches a recovered job without a new
-explicit submission, and the queue does not claim distributed scheduling, lease fencing, provider
+explicit submission, and the queue does not claim distributed scheduling, cross-node lease fencing, provider
 authentication, tenant isolation, or external-effect completion. The queue inventory intentionally
 returns job metadata and an idempotency digest while omitting the original mission specification.
 

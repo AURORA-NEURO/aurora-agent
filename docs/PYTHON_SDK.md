@@ -639,9 +639,12 @@ invent defaults:
   idempotency class, attempt counters, recovery metadata, and links while keeping the checkpointed
   job specification out of the inventory. `mission_queue_persistence()` returns a typed
   `MissionQueueStatus` with the content digest, atomic-checkpoint integrity result, and startup
-  recovery rows. `flush_mission_queue_persistence()` returns a typed `MissionQueueFlushResult`.
+  recovery rows plus admission/backpressure limits and observed lease occupancy.
+  `flush_mission_queue_persistence()` returns a typed `MissionQueueFlushResult`. Queue attempt
+  numbers are local fencing tokens; a stale attempt is refused even when a worker identity is
+  reused.
   These methods expose the bounded single-process factory checkpoint; `automatic_resume` is
-  explicitly false and no method claims distributed scheduling, lease fencing, authentication,
+  explicitly false and no method claims distributed scheduling, cross-node lease fencing, authentication,
   tenant isolation, or external-effect completion.
   `recovery_matrix()` and its async counterpart provide one typed matrix that keeps mission,
   event, subscription, outbox, secret, and external-effect recovery boundaries separate.

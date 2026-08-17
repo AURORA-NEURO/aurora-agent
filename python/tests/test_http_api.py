@@ -81,6 +81,7 @@ def mission_queue_status_payload() -> dict:
         "state_digest": "a" * 64,
         "integrity_verified": True,
         "max_file_bytes": 64 * 1024 * 1024,
+        "admission_policy": {"max_jobs": 4096, "max_active_leases": 64, "observed_active_leases": 0, "max_jobs_by_class": {"evaluate": 4096}, "max_active_leases_by_class": {"evaluate": 64}, "backpressure": "refuse_before_checkpoint_mutation"},
         "registry_size": 1,
         "jobs": [{
             "mission_id": "async-1",
@@ -99,7 +100,7 @@ def mission_queue_status_payload() -> dict:
         "automatic_resume": False,
         "execution_scope": "single-process-api-worker",
         "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
-        "does_not_claim": ["distributed scheduling or lease fencing", "external effect completion"],
+        "does_not_claim": ["distributed scheduling or cross-node lease fencing", "external effect completion", "provider authentication or tenant isolation"],
         "flush": "/v1/missions/queue/persistence/flush",
     }
 
@@ -577,6 +578,7 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertIsInstance(queue_status, MissionQueueStatus)
         self.assertFalse(queue_status.automatic_resume)
         self.assertTrue(queue_status.integrity_verified)
+        self.assertEqual(queue_status.admission_policy["max_active_leases"], 64)
         self.assertIsInstance(client.flush_mission_queue_persistence(), MissionQueueFlushResult)
         with self.assertRaises(ArgumentError):
             client.wait_mission("async-1", timeout=0)

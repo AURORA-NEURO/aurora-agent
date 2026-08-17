@@ -7860,6 +7860,7 @@ export interface MissionQueueStatus extends JsonObject {
   state_digest: string;
   integrity_verified: boolean | null;
   max_file_bytes: number;
+  admission_policy: JsonObject;
   registry_size: number;
   jobs: MissionQueueJob[];
   startup_recoveries: JsonObject[];

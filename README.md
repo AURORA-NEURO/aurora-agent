@@ -339,6 +339,11 @@ accepted for migration and rewritten after startup, while tampered schema-2 stat
 Persistence status reports both the digest and observation-time `integrity_verified` state.
 `--mission-queue-state` adds a separate content-addressed factory checkpoint for mission leases,
 idempotency class, attempts, staged/committed output boundaries, and explicit startup recovery.
+`--mission-queue-max-jobs` and `--mission-queue-max-active-leases` add explicit local queue
+backpressure; the queue status reports per-resource-class fair-share limits and observed lease
+occupancy. Each lease attempt is also a fencing token, preventing stale attempts from committing
+after recovery. These controls are process-local and do not provide tenant isolation or
+cross-node fencing.
 `GET /v1/missions/queue` exposes that queue projection without returning the original mission
 specification. Expired idempotent work is requeued and ambiguous non-idempotent work is quarantined,
 but no recovered job is automatically dispatched; the checkpoint is a single-process recovery

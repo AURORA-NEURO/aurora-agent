@@ -151,8 +151,9 @@ is an atomic, 64 MiB-bounded mission
 checkpoint. Terminal jobs restore their retained progress, traces, and size-limited reports;
 queued/running jobs become explicit `failed` records with `recovered_after_restart` after a
 restart, never falsely claiming that interrupted work resumed. The latter checkpoints the typed
-factory lease/idempotency lifecycle and classifies expired work without automatic dispatch. This
-is restart-aware mission inspection plus bounded local queue recovery, not durable event ledger
+factory lease/idempotency lifecycle and classifies expired work without automatic dispatch. It also
+enforces configured total-job and active-lease backpressure, exposes per-resource-class occupancy,
+and uses lease attempts as local fencing tokens. This is restart-aware mission inspection plus bounded local queue recovery, not durable event ledger
 storage, distributed scheduling, provider execution, or effect rollback.
 Mission-state schema 2 now carries a content SHA-256 digest and rejects tampered snapshots before
 restoration; schema 1 remains a migration input and is rewritten with a digest after startup.

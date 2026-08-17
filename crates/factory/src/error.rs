@@ -18,6 +18,14 @@ pub enum FactoryError {
     #[error("the lease on job {job_id} has expired; the store may already have recovered it")]
     LeaseExpired { job_id: String },
 
+    /// The caller presented an older attempt after the job was recovered and fenced.
+    #[error("stale lease fence for job {job_id}: expected attempt {expected_attempt}, active attempt {active_attempt}")]
+    StaleLease {
+        job_id: String,
+        expected_attempt: u32,
+        active_attempt: u32,
+    },
+
     /// Invariant 3: a success with nothing staged would record a job as succeeded with no output.
     #[error("job {job_id} reported success but staged no output")]
     NothingStaged { job_id: String },
@@ -37,6 +45,16 @@ pub enum FactoryError {
 
     #[error("job {job_id} is already terminal ({state})")]
     AlreadyTerminal { job_id: String, state: String },
+
+    #[error("queue admission policy is invalid: {reason}")]
+    InvalidAdmissionPolicy { reason: String },
+
+    #[error("queue admission limit {dimension} is {limit}; observed {observed}")]
+    AdmissionLimit {
+        dimension: String,
+        limit: usize,
+        observed: usize,
+    },
 
     #[error("job-store snapshot is invalid: {reason}")]
     InvalidSnapshot { reason: String },

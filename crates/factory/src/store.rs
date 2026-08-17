@@ -10,9 +10,10 @@
 //!
 //! The live store is single-process. [`JobStore::checkpoint_to_path`] provides a bounded recovery
 //! image, but a multi-node deployment still needs the event ledger of 40.09, a transactional
-//! backend, and distributed lease fencing; the checkpoint is not a substitute for those.
+//! backend, and cross-node lease fencing; the checkpoint is not a substitute for those.
 
 use crate::error::FactoryError;
+use crate::admission::QueueAdmissionPolicy;
 use crate::job::{Idempotency, Job, JobState, ResourceClass};
 use crate::lease::{Lease, WorkerCapability};
 use crate::snapshot::{
@@ -422,6 +423,86 @@ impl JobStore {
         Ok(id)
     }
 
+    /// Enqueue only when the deployment's explicit backpressure and class fair-share policy has
+    /// capacity. Existing active idempotent work is deduplicated before admission, so a retry of
+    /// accepted work does not consume another slot.
+    pub fn enqueue_with_policy(
+        &mut self,
+        job: Job,
+        policy: &QueueAdmissionPolicy,
+    ) -> Result<String, FactoryError> {
+        let key = job.idempotency_key().as_str().to_string();
+        if let Some(existing) = self.by_key.get(&key) {
+            if self.jobs.get(existing).is_some_and(|j| !j.state.is_terminal()) {
+                return Ok(existing.clone());
+            }
+        }
+        policy.check_enqueue(self, &job)?;
+        self.enqueue(job)
+    }
+
+    /// Lease through the policy-controlled path. The class is checked before any mutation, so a
+    /// full active-lease budget is an explicit backpressure refusal rather than an accidental
+    /// second worker race.
+    pub fn lease_with_policy(
+        &mut self,
+        worker: &WorkerCapability,
+        now: Timestamp,
+        policy: &QueueAdmissionPolicy,
+    ) -> Result<Option<Lease>, FactoryError> {
+        policy.validate()?;
+        let compatible_classes = self
+            .jobs
+            .values()
+            .filter(|job| job.state.is_claimable() && worker.can_run(job.resource_class))
+            .map(|job| job.resource_class)
+            .collect::<Vec<_>>();
+        if compatible_classes.is_empty() {
+            return Ok(None);
+        }
+        if self.active_lease_count() >= policy.max_active_leases {
+            return Err(FactoryError::AdmissionLimit {
+                dimension: "active_leases".into(),
+                limit: policy.max_active_leases,
+                observed: self.active_lease_count(),
+            });
+        }
+        let active_by_class = self.active_lease_counts_by_class();
+        let mut candidates: Vec<&mut Job> = self
+            .jobs
+            .values_mut()
+            .filter(|job| {
+                if !job.state.is_claimable() || !worker.can_run(job.resource_class) {
+                    return false;
+                }
+                match policy.max_active_leases_by_class.get(&job.resource_class) {
+                    Some(limit) => active_by_class.get(&job.resource_class).copied().unwrap_or(0) < *limit,
+                    None => true,
+                }
+            })
+            .collect();
+        if candidates.is_empty() {
+            policy.check_lease(self, compatible_classes[0])?;
+            return Ok(None);
+        }
+        candidates.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
+        let job = candidates.into_iter().next().expect("candidate list is non-empty");
+        job.attempts += 1;
+        job.state = JobState::Leased;
+        let lease = Lease {
+            job_id: job.id.clone(),
+            worker_id: worker.worker_id.clone(),
+            attempt: job.attempts,
+            granted_at: now,
+            expires_at: Timestamp::from_nanos_utc(
+                now.as_nanos_utc() + worker.lease_duration_nanos,
+            ),
+            last_heartbeat: now,
+        };
+        self.leases.insert(job.id.clone(), lease.clone());
+        Ok(Some(lease))
+    }
+
     /// Grants a lease to a compatible worker, highest priority first.
     ///
     /// Enforces invariant 1: a job already leased is not claimable, so a second worker cannot take
@@ -462,6 +543,7 @@ impl JobStore {
         &mut self,
         job_id: &str,
         worker_id: &str,
+        attempt: u32,
         now: Timestamp,
         duration_nanos: i128,
     ) -> Result<(), FactoryError> {
@@ -477,6 +559,13 @@ impl JobStore {
                 holder: lease.worker_id.clone(),
             });
         }
+        if lease.attempt != attempt {
+            return Err(FactoryError::StaleLease {
+                job_id: job_id.to_string(),
+                expected_attempt: attempt,
+                active_attempt: lease.attempt,
+            });
+        }
         if !lease.heartbeat(now, duration_nanos) {
             return Err(FactoryError::LeaseExpired {
                 job_id: job_id.to_string(),
@@ -490,10 +579,11 @@ impl JobStore {
         &mut self,
         job_id: &str,
         worker_id: &str,
+        attempt: u32,
         now: Timestamp,
         output: Value,
     ) -> Result<(), FactoryError> {
-        self.require_live_lease(job_id, worker_id, now)?;
+        self.require_live_lease(job_id, worker_id, attempt, now)?;
         self.staged.insert(job_id.to_string(), output);
         if let Some(job) = self.jobs.get_mut(job_id) {
             job.state = JobState::Staged;
@@ -509,9 +599,10 @@ impl JobStore {
         &mut self,
         job_id: &str,
         worker_id: &str,
+        attempt: u32,
         now: Timestamp,
     ) -> Result<(), FactoryError> {
-        self.require_live_lease(job_id, worker_id, now)?;
+        self.require_live_lease(job_id, worker_id, attempt, now)?;
         let output = self
             .staged
             .remove(job_id)
@@ -534,10 +625,11 @@ impl JobStore {
         &mut self,
         job_id: &str,
         worker_id: &str,
+        attempt: u32,
         now: Timestamp,
         reason: impl Into<String>,
     ) -> Result<Recovery, FactoryError> {
-        self.require_live_lease(job_id, worker_id, now)?;
+        self.require_live_lease(job_id, worker_id, attempt, now)?;
         self.staged.remove(job_id);
         self.leases.remove(job_id);
 
@@ -725,10 +817,25 @@ impl JobStore {
         counts
     }
 
+    pub fn active_lease_count(&self) -> usize {
+        self.leases.len()
+    }
+
+    pub fn active_lease_counts_by_class(&self) -> BTreeMap<ResourceClass, usize> {
+        let mut counts = BTreeMap::new();
+        for lease in self.leases.values() {
+            if let Some(job) = self.jobs.get(&lease.job_id) {
+                *counts.entry(job.resource_class).or_insert(0) += 1;
+            }
+        }
+        counts
+    }
+
     fn require_live_lease(
         &self,
         job_id: &str,
         worker_id: &str,
+        attempt: u32,
         now: Timestamp,
     ) -> Result<(), FactoryError> {
         let lease = self
@@ -741,6 +848,13 @@ impl JobStore {
             return Err(FactoryError::LeaseHeldByAnother {
                 job_id: job_id.to_string(),
                 holder: lease.worker_id.clone(),
+            });
+        }
+        if lease.attempt != attempt {
+            return Err(FactoryError::StaleLease {
+                job_id: job_id.to_string(),
+                expected_attempt: attempt,
+                active_attempt: lease.attempt,
             });
         }
         if lease.is_expired(now) {
