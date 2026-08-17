@@ -521,6 +521,13 @@ invent defaults:
   (`mission_evidence_bundle_verify_tool`). REST uses `POST /v1/evidence-bundles/verify`. A tampered
   but well-formed bundle returns `valid=False` with failure codes instead of being mistaken for a
   transport error.
+- `MissionEvidenceBundleImportRequest`, `MissionEvidenceBundleQueryRequest`, and
+  `MissionEvidenceBundleGetRequest` expose the bounded evidence registry. The corresponding typed
+  import/query/get reports preserve idempotency, digest-ordered cursor rows, mission/domain filters,
+  and the explicit non-executing posture. `ApiClient`/`AsyncApiClient` use the durable REST routes;
+  `Workspace`/`AsyncWorkspace` and the `*_tool` methods use MCP's process-local registry bridge.
+  Configure the API's `--evidence-state` path for restart-safe persistence; restored bundles are
+  reverified and never resume execution or become scientific, clinical, provenance, or release claims.
 - `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
   `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
   ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool

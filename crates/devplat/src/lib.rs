@@ -217,6 +217,7 @@ pub mod engineering;
 pub mod engineering_plan;
 pub mod evaluator;
 pub mod evidence_bundle;
+pub mod evidence_registry;
 pub mod execution_provenance;
 pub mod mission;
 pub mod operational_readiness;
@@ -294,6 +295,12 @@ pub use evaluator::{
 pub use evidence_bundle::{
     verify_mission_evidence_bundle, EvidenceBundleError, MAX_EVIDENCE_BUNDLE_VERIFY_BYTES,
     MISSION_EVIDENCE_BUNDLE_SCHEMA_VERSION, MISSION_EVIDENCE_BUNDLE_VERIFY_SCHEMA_VERSION,
+};
+pub use evidence_registry::{
+    EvidenceBundleRegistry, EvidenceRegistryError, EVIDENCE_REGISTRY_IMPORT_SCHEMA_VERSION,
+    EVIDENCE_REGISTRY_QUERY_SCHEMA_VERSION, EVIDENCE_REGISTRY_SCHEMA_VERSION,
+    MAX_EVIDENCE_REGISTRY_BUNDLES, MAX_EVIDENCE_REGISTRY_BYTES,
+    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
 };
 pub use execution_provenance::{
     audit_execution_provenance, DelegatedCheckEvidence, ExecutionProvenanceAudit,

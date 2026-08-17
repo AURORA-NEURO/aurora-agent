@@ -36,6 +36,12 @@ from .capability import (
     MissionEvaluatorReplayQueryRequest,
     MissionEvidenceBundleReport,
     MissionEvidenceBundleRequest,
+    MissionEvidenceBundleImportReport,
+    MissionEvidenceBundleImportRequest,
+    MissionEvidenceBundleQueryReport,
+    MissionEvidenceBundleQueryRequest,
+    MissionEvidenceBundleGetReport,
+    MissionEvidenceBundleGetRequest,
     MissionEvidenceBundleVerificationReport,
     MissionEvidenceBundleVerifyRequest,
     MissionEvaluatorReviewReport,
@@ -760,6 +766,74 @@ class ApiClient:
         """Return typed portable mission evidence verification evidence."""
 
         return mission_evidence_bundle_verification_report(self.mission_evidence_bundle_verify(request))
+
+    def mission_evidence_bundle_import(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Import one verified evidence bundle into the durable REST registry."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleImportRequest)
+            else MissionEvidenceBundleImportRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/evidence-bundles", normalized.to_http_body())
+
+    def mission_evidence_bundle_import_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        """Return typed idempotent evidence registry import evidence."""
+
+        return MissionEvidenceBundleImportReport.from_wire(self.mission_evidence_bundle_import(request))
+
+    def mission_evidence_bundle_query(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query deterministic mission/domain rows in the durable REST registry."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleQueryRequest)
+            else MissionEvidenceBundleQueryRequest(**dict(request or {}))
+        )
+        query = urlencode(normalized.to_query_params())
+        return self.request("GET", f"/v1/evidence-bundles?{query}")
+
+    def mission_evidence_bundle_query_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        """Return typed deterministic evidence registry index evidence."""
+
+        return MissionEvidenceBundleQueryReport.from_wire(self.mission_evidence_bundle_query(request))
+
+    def mission_evidence_bundle_get(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Fetch one verified evidence bundle from the durable REST registry."""
+
+        if isinstance(request, MissionEvidenceBundleGetRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvidenceBundleGetRequest(request)
+        else:
+            normalized = MissionEvidenceBundleGetRequest(**dict(request))
+        return self.request(
+            "GET",
+            f"/v1/evidence-bundles/{quote(normalized.bundle_digest, safe='')}",
+        )
+
+    def mission_evidence_bundle_get_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        """Return typed lookup evidence for one registry bundle."""
+
+        return MissionEvidenceBundleGetReport.from_wire(self.mission_evidence_bundle_get(request))
 
     def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Read a bounded cursor page from the authoritative clock-free mission trace."""
@@ -1639,6 +1713,64 @@ class ApiClient:
         """Return typed MCP portable mission evidence verification evidence."""
 
         return mission_evidence_bundle_verification_report(self.mission_evidence_bundle_verify_tool(request))
+
+    def mission_evidence_bundle_import_tool(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Import one verified evidence bundle through the MCP bridge."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleImportRequest)
+            else MissionEvidenceBundleImportRequest(**dict(request))
+        )
+        return self.call_tool("mission_evidence_bundle_import", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_import_tool_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        return MissionEvidenceBundleImportReport.from_wire(self.mission_evidence_bundle_import_tool(request))
+
+    def mission_evidence_bundle_query_tool(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query the process-local MCP evidence registry."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleQueryRequest)
+            else MissionEvidenceBundleQueryRequest(**dict(request or {}))
+        )
+        return self.call_tool("mission_evidence_bundle_query", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_query_tool_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        return MissionEvidenceBundleQueryReport.from_wire(self.mission_evidence_bundle_query_tool(request))
+
+    def mission_evidence_bundle_get_tool(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Fetch one verified bundle through the MCP bridge."""
+
+        if isinstance(request, MissionEvidenceBundleGetRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvidenceBundleGetRequest(request)
+        else:
+            normalized = MissionEvidenceBundleGetRequest(**dict(request))
+        return self.call_tool("mission_evidence_bundle_get", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_get_tool_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        return MissionEvidenceBundleGetReport.from_wire(self.mission_evidence_bundle_get_tool(request))
 
     def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         if not isinstance(include_groups, bool):
@@ -3987,6 +4119,42 @@ class AsyncApiClient:
 
         return mission_evidence_bundle_verification_report(await self.mission_evidence_bundle_verify(request))
 
+    async def mission_evidence_bundle_import(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_import, request)
+
+    async def mission_evidence_bundle_import_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        return MissionEvidenceBundleImportReport.from_wire(await self.mission_evidence_bundle_import(request))
+
+    async def mission_evidence_bundle_query(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_query, request)
+
+    async def mission_evidence_bundle_query_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        return MissionEvidenceBundleQueryReport.from_wire(await self.mission_evidence_bundle_query(request))
+
+    async def mission_evidence_bundle_get(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_get, request)
+
+    async def mission_evidence_bundle_get_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        return MissionEvidenceBundleGetReport.from_wire(await self.mission_evidence_bundle_get(request))
+
     async def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Async bounded cursor page over the authoritative mission trace."""
 
@@ -5010,6 +5178,48 @@ class AsyncApiClient:
 
         return mission_evidence_bundle_verification_report(
             await self.mission_evidence_bundle_verify_tool(request)
+        )
+
+    async def mission_evidence_bundle_import_tool(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_import_tool, request)
+
+    async def mission_evidence_bundle_import_tool_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        return MissionEvidenceBundleImportReport.from_wire(
+            await self.mission_evidence_bundle_import_tool(request)
+        )
+
+    async def mission_evidence_bundle_query_tool(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_query_tool, request)
+
+    async def mission_evidence_bundle_query_tool_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        return MissionEvidenceBundleQueryReport.from_wire(
+            await self.mission_evidence_bundle_query_tool(request)
+        )
+
+    async def mission_evidence_bundle_get_tool(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_get_tool, request)
+
+    async def mission_evidence_bundle_get_tool_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        return MissionEvidenceBundleGetReport.from_wire(
+            await self.mission_evidence_bundle_get_tool(request)
         )
 
     async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:

@@ -7456,6 +7456,58 @@ export interface MissionEvidenceBundleVerifyResult extends JsonObject {
   execution: "not_started";
 }
 
+export interface MissionEvidenceBundleImportArgs extends JsonObject {
+  bundle: JsonObject;
+}
+
+export interface MissionEvidenceBundleImportResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evidence_bundle_import";
+  bundle_digest: string;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface MissionEvidenceBundleQueryOptions extends JsonObject {
+  mission_id?: string;
+  domain?: string;
+  after?: string;
+  max_items?: number;
+  include_bundles?: boolean;
+}
+
+export interface MissionEvidenceBundleQueryResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evidence_bundle_query";
+  filters: MissionEvidenceBundleQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface MissionEvidenceBundleGetResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evidence_bundle_get";
+  bundle_digest: string;
+  bundle: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface MissionJob extends JsonObject {
   ok: boolean;
   mission_id: string;

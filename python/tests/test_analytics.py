@@ -39,6 +39,12 @@ from prism_sdk import (
     MissionEvaluatorReplayQueryRequest,
     MissionEvidenceBundleReport,
     MissionEvidenceBundleRequest,
+    MissionEvidenceBundleImportReport,
+    MissionEvidenceBundleImportRequest,
+    MissionEvidenceBundleQueryReport,
+    MissionEvidenceBundleQueryRequest,
+    MissionEvidenceBundleGetReport,
+    MissionEvidenceBundleGetRequest,
     MissionEvidenceBundleVerificationReport,
     MissionEvidenceBundleVerifyRequest,
     MissionEvaluatorReviewReport,
@@ -557,6 +563,52 @@ def mission_evidence_bundle_verification_payload(*, valid: bool = True) -> dict:
         },
         "failures": [] if valid else ["bundle_digest_mismatch"],
         "execution": "not_started",
+    }
+
+
+def mission_evidence_bundle_import_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-evidence-bundle-import/0.1",
+        "workflow": "mission_evidence_bundle_import",
+        "bundle_digest": "b" * 64,
+        "created": True,
+        "already_present": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+        "execution": "not_started",
+        "guarantees": ["verified before import"],
+        "limitations": ["bounded local registry"],
+    }
+
+
+def mission_evidence_bundle_query_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-evidence-bundle-query/0.1",
+        "workflow": "mission_evidence_bundle_query",
+        "filters": {"domain": "oncology", "max_items": 10, "include_bundles": False},
+        "registry_generation": 1,
+        "registry_size": 1,
+        "rows": [{"bundle_digest": "b" * 64, "domains": ["oncology"]}],
+        "next_after": None,
+        "has_more": False,
+        "execution": "not_started",
+        "guarantees": ["digest ordered"],
+        "limitations": ["bounded retention"],
+    }
+
+
+def mission_evidence_bundle_get_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-mcp/mission-evidence-bundle-record/0.1",
+        "workflow": "mission_evidence_bundle_get",
+        "bundle_digest": "b" * 64,
+        "bundle": {"bundle_digest": "b" * 64},
+        "execution": "not_started",
+        "guarantees": ["verified before import"],
+        "limitations": ["bounded local registry"],
     }
 
 
@@ -1732,6 +1784,45 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(failed.failures, ("bundle_digest_mismatch",))
         with self.assertRaises(ArgumentError):
             MissionEvidenceBundleVerifyRequest([])  # type: ignore[arg-type]
+
+    def test_mission_evidence_registry_requests_and_reports_preserve_bounds(self) -> None:
+        bundle = {"bundle_digest": "b" * 64}
+        imported_request = MissionEvidenceBundleImportRequest(bundle)
+        self.assertEqual(imported_request.to_http_body(), {"bundle": bundle})
+        imported = MissionEvidenceBundleImportReport.from_wire(mission_evidence_bundle_import_payload())
+        self.assertTrue(imported.created)
+        query_request = MissionEvidenceBundleQueryRequest(domain="oncology", max_items=10)
+        self.assertEqual(query_request.to_query_params()["domain"], "oncology")
+        queried = MissionEvidenceBundleQueryReport.from_wire(mission_evidence_bundle_query_payload())
+        self.assertEqual(queried.rows[0]["domains"], ["oncology"])
+        fetched_request = MissionEvidenceBundleGetRequest("b" * 64)
+        self.assertEqual(fetched_request.to_mcp_arguments(), {"bundle_digest": "b" * 64})
+        fetched = MissionEvidenceBundleGetReport.from_wire(mission_evidence_bundle_get_payload())
+        self.assertEqual(fetched.bundle_digest, "b" * 64)
+        with self.assertRaises(ArgumentError):
+            MissionEvidenceBundleQueryRequest(max_items=257)
+
+    def test_sync_http_mission_evidence_registry_uses_rest_routes(self) -> None:
+        bundle = {"bundle_digest": "b" * 64}
+        with patch.object(ApiClient, "request", side_effect=[mission_evidence_bundle_import_payload(), mission_evidence_bundle_query_payload(), mission_evidence_bundle_get_payload()]) as request:
+            client = ApiClient("http://127.0.0.1:8787")
+            self.assertTrue(client.mission_evidence_bundle_import_report(MissionEvidenceBundleImportRequest(bundle)).created)
+            self.assertEqual(client.mission_evidence_bundle_query_report({"domain": "oncology"}).rows[0]["domains"], ["oncology"])
+            self.assertEqual(client.mission_evidence_bundle_get_report("b" * 64).bundle_digest, "b" * 64)
+        self.assertEqual(request.call_args_list[0].args[0:2], ("POST", "/v1/evidence-bundles"))
+        self.assertEqual(request.call_args_list[1].args[0:2], ("GET", "/v1/evidence-bundles?max_items=100&include_bundles=false&domain=oncology"))
+        self.assertEqual(request.call_args_list[2].args[0:2], ("GET", f"/v1/evidence-bundles/{'b' * 64}"))
+
+    def test_sync_http_mission_evidence_registry_uses_mcp_bridge(self) -> None:
+        bundle = MissionEvidenceBundleImportRequest({"bundle_digest": "b" * 64})
+        with patch.object(ApiClient, "call_tool", side_effect=[mission_evidence_bundle_import_payload(), mission_evidence_bundle_query_payload(), mission_evidence_bundle_get_payload()]) as tool:
+            client = ApiClient("http://127.0.0.1:8787")
+            self.assertTrue(client.mission_evidence_bundle_import_tool_report(bundle).created)
+            self.assertFalse(client.mission_evidence_bundle_query_tool_report({}).has_more)
+            self.assertEqual(client.mission_evidence_bundle_get_tool_report("b" * 64).bundle_digest, "b" * 64)
+        self.assertEqual(tool.call_args_list[0].args[0], "mission_evidence_bundle_import")
+        self.assertEqual(tool.call_args_list[1].args[0], "mission_evidence_bundle_query")
+        self.assertEqual(tool.call_args_list[2].args[0], "mission_evidence_bundle_get")
 
     def test_sync_http_mission_evaluator_replay_query_uses_bounded_route(self) -> None:
         payload = mission_evaluator_replay_query_payload(summary_only=True)

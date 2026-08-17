@@ -34,6 +34,12 @@ from .capability import (
     MissionEvaluatorReviewRequest,
     MissionEvidenceBundleVerificationReport,
     MissionEvidenceBundleVerifyRequest,
+    MissionEvidenceBundleImportReport,
+    MissionEvidenceBundleImportRequest,
+    MissionEvidenceBundleQueryReport,
+    MissionEvidenceBundleQueryRequest,
+    MissionEvidenceBundleGetReport,
+    MissionEvidenceBundleGetRequest,
     MissionEvaluatorSearchReport,
     capability_audit_report,
     capability_discover_report,
@@ -1585,6 +1591,62 @@ class Workspace:
         """Return typed workspace MCP mission evidence verification evidence."""
 
         return mission_evidence_bundle_verification_report(self.mission_evidence_bundle_verify(request))
+
+    def mission_evidence_bundle_import(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Import one verified evidence bundle into the workspace MCP registry."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleImportRequest)
+            else MissionEvidenceBundleImportRequest(**dict(request))
+        )
+        return self.tool("mission_evidence_bundle_import", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_import_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        return MissionEvidenceBundleImportReport.from_wire(self.mission_evidence_bundle_import(request))
+
+    def mission_evidence_bundle_query(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query deterministic mission/domain rows in the workspace MCP registry."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleQueryRequest)
+            else MissionEvidenceBundleQueryRequest(**dict(request or {}))
+        )
+        return self.tool("mission_evidence_bundle_query", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_query_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        return MissionEvidenceBundleQueryReport.from_wire(self.mission_evidence_bundle_query(request))
+
+    def mission_evidence_bundle_get(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        if isinstance(request, MissionEvidenceBundleGetRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvidenceBundleGetRequest(request)
+        else:
+            normalized = MissionEvidenceBundleGetRequest(**dict(request))
+        return self.tool("mission_evidence_bundle_get", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_get_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        return MissionEvidenceBundleGetReport.from_wire(self.mission_evidence_bundle_get(request))
 
     def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         """Verify catalogue membership against the authoritative MCP schema set."""
@@ -4598,6 +4660,58 @@ class AsyncWorkspace:
         return mission_evidence_bundle_verification_report(
             await self.mission_evidence_bundle_verify(request)
         )
+
+    async def mission_evidence_bundle_import(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleImportRequest)
+            else MissionEvidenceBundleImportRequest(**dict(request))
+        )
+        return await self.tool("mission_evidence_bundle_import", normalized.to_mcp_arguments())
+
+    async def mission_evidence_bundle_import_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        return MissionEvidenceBundleImportReport.from_wire(await self.mission_evidence_bundle_import(request))
+
+    async def mission_evidence_bundle_query(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleQueryRequest)
+            else MissionEvidenceBundleQueryRequest(**dict(request or {}))
+        )
+        return await self.tool("mission_evidence_bundle_query", normalized.to_mcp_arguments())
+
+    async def mission_evidence_bundle_query_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        return MissionEvidenceBundleQueryReport.from_wire(await self.mission_evidence_bundle_query(request))
+
+    async def mission_evidence_bundle_get(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        if isinstance(request, MissionEvidenceBundleGetRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvidenceBundleGetRequest(request)
+        else:
+            normalized = MissionEvidenceBundleGetRequest(**dict(request))
+        return await self.tool("mission_evidence_bundle_get", normalized.to_mcp_arguments())
+
+    async def mission_evidence_bundle_get_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        return MissionEvidenceBundleGetReport.from_wire(await self.mission_evidence_bundle_get(request))
 
     async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.capability_audit`."""

@@ -14,7 +14,7 @@ mod exit;
 mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
-use bioprism_devplat::verify_mission_evidence_bundle;
+use bioprism_devplat::{EvidenceBundleRegistry, verify_mission_evidence_bundle};
 use bioprism_fiber::compile;
 use bioprism_scope::DimensionRegistry;
 use bioprism_section::{CertificateProfile, ContextCertificate, OracleStatus};
@@ -121,6 +121,24 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             context_compare(world, query, *markdown)
         }
         Command::EvidenceBundleVerify { bundle } => evidence_bundle_verify(bundle),
+        Command::EvidenceBundleImport { bundle, store, dry_run } => {
+            evidence_bundle_import(bundle, store, *dry_run)
+        }
+        Command::EvidenceBundleQuery {
+            store,
+            mission_id,
+            domain,
+            after,
+            limit,
+            include_bundles,
+        } => evidence_bundle_query(
+            store,
+            mission_id.as_deref(),
+            domain.as_deref(),
+            after.as_deref(),
+            *limit,
+            *include_bundles,
+        ),
     }
 }
 
@@ -158,6 +176,98 @@ fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {
         bundle_path.display()
     );
     Ok(Outcome::ok(report, human).failing_if(!valid))
+}
+
+fn load_evidence_registry(store_path: &Path) -> CliResult<EvidenceBundleRegistry> {
+    if !store_path.exists() {
+        return Ok(EvidenceBundleRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    EvidenceBundleRegistry::from_snapshot(&snapshot)
+        .map_err(|error| CliError::invalid(error.to_string()).about(store_path.display().to_string()))
+}
+
+fn evidence_bundle_import(
+    bundle_path: &Path,
+    store_path: &Path,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let bundle = io::read_json(bundle_path)?;
+    let mut registry = load_evidence_registry(store_path)?;
+    let report = registry.import(&bundle).map_err(|error| {
+        CliError::invalid(error.to_string()).about(bundle_path.display().to_string())
+    })?;
+    let snapshot = registry
+        .snapshot()
+        .map_err(|error| CliError::internal(error.to_string()).about(store_path.display().to_string()))?;
+    let artifact = if report.get("created").and_then(Value::as_bool) == Some(true) {
+        Some(io::write_artifact(store_path, &snapshot, dry_run)?)
+    } else {
+        None
+    };
+    let mut document = report;
+    document["store"] = json!(store_path.display().to_string());
+    document["dry_run"] = json!(dry_run);
+    document["state_digest"] = snapshot.get("state_digest").cloned().unwrap_or(Value::Null);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let digest = document
+        .get("bundle_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "mission evidence bundle {}\n  digest: {}\n  registry: {} (generation {})\n  state: {}\n\nNext: bioprism evidence query --store {}\n",
+        if document.get("created").and_then(Value::as_bool) == Some(true) {
+            if dry_run { "planned for import" } else { "imported" }
+        } else {
+            "already present"
+        },
+        digest,
+        store_path.display(),
+        document
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        if dry_run { "not written (dry run)" } else { "checkpoint updated" },
+        store_path.display()
+    );
+    Ok(Outcome::ok(document, human))
+}
+
+fn evidence_bundle_query(
+    store_path: &Path,
+    mission_id: Option<&str>,
+    domain: Option<&str>,
+    after: Option<&str>,
+    limit: usize,
+    include_bundles: bool,
+) -> CliResult<Outcome> {
+    let registry = load_evidence_registry(store_path)?;
+    let report = registry
+        .query(mission_id, domain, after, limit, include_bundles)
+        .map_err(|error| CliError::invalid(error.to_string()).about(store_path.display().to_string()))?;
+    let rows = report.get("rows").and_then(Value::as_array).map_or(0, Vec::len);
+    let next_after = report
+        .get("next_after")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let human = format!(
+        "mission evidence registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism evidence query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        next_after,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
 }
 
 fn world_validate(world_path: &Path) -> CliResult<Outcome> {

@@ -11,8 +11,9 @@ use crate::events::{
 };
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
-    verify_mission_evidence_bundle, EvidenceBundleError, MissionEvaluatorCatalogue,
-    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    verify_mission_evidence_bundle, EvidenceBundleError, EvidenceBundleRegistry,
+    EvidenceRegistryError, MissionEvaluatorCatalogue, MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayRequest, MAX_EVIDENCE_REGISTRY_BYTES,
 };
 use bioprism_ids::ContentHash;
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
@@ -56,6 +57,8 @@ pub struct ApiConfig {
     /// Optional atomic JSON checkpoint for the bounded event cursor, subscription metadata, and
     /// signed pending webhook outbox.
     pub event_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for imported, independently verified evidence bundles.
+    pub evidence_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -67,6 +70,7 @@ impl Default for ApiConfig {
             bearer_token: None,
             mission_state_path: None,
             event_state_path: None,
+            evidence_state_path: None,
         }
     }
 }
@@ -101,6 +105,13 @@ impl ApiConfig {
         {
             return Err("event_state_path must not be empty".into());
         }
+        if self
+            .evidence_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("evidence_state_path must not be empty".into());
+        }
         Ok(())
     }
 }
@@ -114,6 +125,8 @@ pub struct ApiRouter {
     mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
     mission_persistence: Arc<MissionPersistence>,
     event_persistence: Arc<EventPersistence>,
+    evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+    evidence_persistence: Arc<EvidencePersistence>,
 }
 
 struct MissionJob {
@@ -133,6 +146,12 @@ struct EventPersistence {
     lock: Mutex<()>,
 }
 
+struct EvidencePersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<EvidenceBundleRegistry>>,
+    lock: Mutex<()>,
+}
+
 impl EventPersistence {
     fn persist(&self) -> Result<usize, String> {
         let Some(path) = self.path.as_deref() else {
@@ -147,6 +166,81 @@ impl EventPersistence {
             .lock()
             .map_err(|_| "event log is unavailable".to_string())?;
         events.checkpoint_to_path(path)
+    }
+}
+
+impl EvidencePersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "evidence registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "evidence persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, &document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "evidence persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, document)
+    }
+
+    fn write_snapshot(path: &Path, document: &Value) -> Result<usize, String> {
+        let bytes = serde_json::to_vec_pretty(&document)
+            .map_err(|error| format!("evidence state could not be serialized: {error}"))?;
+        if bytes.len() > MAX_EVIDENCE_REGISTRY_BYTES {
+            return Err(format!(
+                "evidence state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_EVIDENCE_REGISTRY_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("evidence state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "evidence_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(".{filename}.tmp"));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("evidence state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "evidence state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "evidence state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
     }
 }
 
@@ -395,6 +489,7 @@ impl ApiRouter {
             config.event_state_path.as_deref(),
         )?));
         let restored_jobs = load_mission_jobs(config.mission_state_path.as_deref())?;
+        let restored_evidence = load_evidence_registry(config.evidence_state_path.as_deref())?;
         let mut server = bioprism_mcp::Server::new(root);
         let initialize = Request {
             id: Some(json!(0)),
@@ -426,6 +521,12 @@ impl ApiRouter {
             events: Arc::clone(&events),
             lock: Mutex::new(()),
         });
+        let evidence_registry = Arc::new(Mutex::new(restored_evidence));
+        let evidence_persistence = Arc::new(EvidencePersistence {
+            path: config.evidence_state_path.clone(),
+            registry: Arc::clone(&evidence_registry),
+            lock: Mutex::new(()),
+        });
         let router = Self {
             server,
             mission_executor,
@@ -435,6 +536,8 @@ impl ApiRouter {
             mission_jobs,
             mission_persistence,
             event_persistence,
+            evidence_registry,
+            evidence_persistence,
         };
         if router.config.mission_state_path.is_some() {
             router.persist_mission_registry()?;
@@ -444,11 +547,20 @@ impl ApiRouter {
                 format!("event state checkpoint failed during startup: {error}")
             })?;
         }
+        if router.config.evidence_state_path.is_some() {
+            router.evidence_persistence.persist().map_err(|error| {
+                format!("evidence state checkpoint failed during startup: {error}")
+            })?;
+        }
         Ok(router)
     }
 
     fn persist_mission_registry(&self) -> Result<(), String> {
         self.mission_persistence.persist()
+    }
+
+    fn persist_evidence_registry(&self) -> Result<usize, String> {
+        self.evidence_persistence.persist()
     }
 
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
@@ -513,6 +625,21 @@ impl ApiRouter {
             ("POST", "/v1/operations/handoff") => self.operations_handoff(&request, &request_id),
             ("POST", "/v1/evidence-bundles/verify") => {
                 self.verify_evidence_bundle(&request, &request_id)
+            }
+            ("GET", "/v1/evidence-bundles") => {
+                self.query_evidence_bundles(&request, &request_id)
+            }
+            ("POST", "/v1/evidence-bundles") => {
+                self.import_evidence_bundle(&request, &request_id)
+            }
+            ("GET", "/v1/evidence-bundles/persistence") => {
+                self.evidence_persistence_status()
+            }
+            ("POST", "/v1/evidence-bundles/persistence/flush") => {
+                self.flush_evidence_persistence(&request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/evidence-bundles/") => {
+                self.get_evidence_bundle(&request, &request_id)
             }
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
@@ -736,6 +863,15 @@ impl ApiRouter {
             self.config.event_state_path.as_deref(),
             EVENT_STATE_SCHEMA_VERSION,
         );
+        let evidence_persistence = response_value(self.evidence_persistence_status());
+        let evidence_enabled = evidence_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let evidence_checkpoint_present = evidence_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         HttpResponse::json(
             200,
             &json!({
@@ -827,6 +963,24 @@ impl ApiRouter {
                         "operator_action": "query /v1/webhooks/subscriptions/{id}/attempts and correlate attempt_id with delivery_id"
                     },
                     {
+                        "id": "evidence_bundle_registry",
+                        "configured": evidence_enabled,
+                        "checkpoint_present": evidence_checkpoint_present,
+                        "schema_version": evidence_persistence.get("schema").cloned().unwrap_or(Value::Null),
+                        "state_digest": evidence_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": evidence_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "registry_size": evidence_persistence.get("registry_size").cloned().unwrap_or(json!(0)),
+                        "restores": [
+                            "independently verified, content-addressed mission evidence bundles and deterministic mission/domain index rows"
+                        ],
+                        "does_not_restore": [
+                            "queued or running execution",
+                            "external effects, evaluator reruns, provenance beyond the supplied bundle",
+                            "scientific validity, clinical safety, release approval, or distributed registry consensus"
+                        ],
+                        "operator_action": "inspect the state_digest and re-submit interrupted execution explicitly; use evidence bundles as audit artifacts only"
+                    },
+                    {
                         "id": "webhook_signing_secrets",
                         "configured": event_enabled,
                         "checkpoint_present": false,
@@ -880,6 +1034,8 @@ impl ApiRouter {
                 "links": {
                     "mission_persistence": "/v1/missions/persistence",
                     "event_persistence": "/v1/events/persistence",
+                    "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
+                    "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
                     "event_flush": "/v1/events/persistence/flush",
                     "mission_flush": "/v1/missions/persistence/flush",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts",
@@ -944,6 +1100,7 @@ impl ApiRouter {
         };
         let mission_persistence = response_value(self.mission_persistence_status());
         let event_persistence = response_value(self.event_persistence_status());
+        let evidence_persistence = response_value(self.evidence_persistence_status());
         let recovery = response_value(self.recovery_matrix());
         let mut operator_actions = vec![
             "advance the event cursor with recent_events.next_after and inspect gap before claiming continuity".to_string(),
@@ -963,6 +1120,12 @@ impl ApiRouter {
         if self.config.mission_state_path.is_none() {
             operator_actions.push(
                 "configure mission_state_path if terminal mission snapshots must survive restart"
+                .to_string(),
+            );
+        }
+        if self.config.evidence_state_path.is_none() {
+            operator_actions.push(
+                "configure evidence_state_path if independently verified evidence bundles must survive an API restart"
                     .to_string(),
             );
         }
@@ -982,7 +1145,8 @@ impl ApiRouter {
                 "mission_summary": mission_summary,
                 "persistence": {
                     "missions": mission_persistence,
-                    "events": event_persistence
+                    "events": event_persistence,
+                    "evidence_bundles": evidence_persistence
                 },
                 "recovery": recovery,
                 "domain_coverage": operations_domain_coverage(),
@@ -1007,6 +1171,10 @@ impl ApiRouter {
                     "mission_evaluator_replay_compare": true,
                     "mission_evidence_bundle_export": true,
                     "mission_evidence_bundle_verify": true,
+                    "mission_evidence_bundle_registry": true,
+                    "mission_evidence_bundle_import": true,
+                    "mission_evidence_bundle_query": true,
+                    "mission_evidence_bundle_persistence": self.config.evidence_state_path.is_some(),
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -1041,6 +1209,9 @@ impl ApiRouter {
                     "mission_evaluator_replay_compare": "/v1/missions/{mission_id}/evaluator-replay/compare",
                     "mission_evidence_bundle": "/v1/missions/{mission_id}/evidence-bundle",
                     "mission_evidence_bundle_verify": "/v1/evidence-bundles/verify",
+                    "evidence_bundles": "/v1/evidence-bundles",
+                    "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
+                    "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -2154,6 +2325,9 @@ impl ApiRouter {
                      "mission_evaluator_replay_compare": "/v1/missions/{mission_id}/evaluator-replay/compare",
                      "mission_evidence_bundle": "/v1/missions/{mission_id}/evidence-bundle",
                      "mission_evidence_bundle_verify": "/v1/evidence-bundles/verify",
+                     "evidence_bundles": "/v1/evidence-bundles",
+                     "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
+                     "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
@@ -2191,6 +2365,10 @@ impl ApiRouter {
                     "delivery_receipt_events": true,
                     "delivery_receipt_attempt_provenance": true,
                     "route_review_evidence": true,
+                    "mission_evidence_bundle_registry": true,
+                    "mission_evidence_bundle_import": true,
+                    "mission_evidence_bundle_query": true,
+                    "mission_evidence_bundle_persistence": self.config.evidence_state_path.is_some(),
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -2220,6 +2398,9 @@ impl ApiRouter {
                     "persisted_mission_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
                     "persisted_mission_provenance_bytes": MAX_PERSISTED_MISSION_PROVENANCE_BYTES,
                     "event_state_file_bytes": MAX_EVENT_STATE_FILE_BYTES,
+                    "evidence_registry_file_bytes": MAX_EVIDENCE_REGISTRY_BYTES,
+                    "evidence_registry_max_bundles": bioprism_devplat::MAX_EVIDENCE_REGISTRY_BUNDLES,
+                    "evidence_registry_max_query_items": bioprism_devplat::MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
                     "delivery_error_bytes": crate::events::MAX_DELIVERY_ERROR_BYTES,
                     "webhook_filters": MAX_FILTERS
                 }
@@ -3283,6 +3464,212 @@ impl ApiRouter {
                 request_id,
             ),
             Err(error) => self.error(422, "invalid_evidence_bundle", &error.to_string(), request_id),
+        }
+    }
+
+    fn import_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let Some(bundle) = arguments.get("bundle") else {
+            return self.error(
+                422,
+                "invalid_evidence_bundle",
+                "request body must contain a bundle object",
+                request_id,
+            );
+        };
+        let mut registry = match self.evidence_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "evidence_registry_unavailable",
+                    "evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let report = registry.import(bundle);
+        let report = match report {
+            Ok(report) => report,
+            Err(EvidenceRegistryError::Full { maximum }) => {
+                return self.error(
+                    413,
+                    "evidence_registry_full",
+                    &format!("evidence registry has reached its {maximum}-bundle limit"),
+                    request_id,
+                )
+            }
+            Err(EvidenceRegistryError::Verification(reason)) => {
+                return self.error(422, "evidence_bundle_not_verified", &reason, request_id)
+            }
+            Err(error) => return self.error(422, "invalid_evidence_bundle", &error.to_string(), request_id),
+        };
+        let created = report.get("created").and_then(Value::as_bool).unwrap_or(false);
+        if created {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(503, "evidence_persistence_unavailable", &error.to_string(), request_id);
+                }
+            };
+            if let Err(error) = self.evidence_persistence.persist_snapshot(&snapshot) {
+                *registry = before;
+                return self.error(503, "evidence_persistence_unavailable", &error, request_id);
+            }
+        }
+        let status = if created { 201 } else { 200 };
+        HttpResponse::json(status, &report)
+    }
+
+    fn query_evidence_bundles(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "mission_id" | "domain" | "after" | "limit" | "include_bundles"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "evidence bundle query accepts only mission_id, domain, after, limit, and include_bundles",
+                    request_id,
+                );
+            }
+        }
+        let mission_id = query.get("mission_id").map(String::as_str);
+        let domain = query.get("domain").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value) if (1..=bioprism_devplat::MAX_EVIDENCE_REGISTRY_QUERY_ITEMS).contains(&value) => value,
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_bundles = match query_bool(&query, "include_bundles", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.evidence_registry.lock() {
+            Ok(registry) => registry.query(mission_id, domain, after, max_items, include_bundles),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "evidence_registry_unavailable",
+                    "evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 3 || segments[0] != "v1" || segments[1] != "evidence-bundles" {
+            return self.error(404, "not_found", "evidence bundle route does not exist", request_id);
+        }
+        let digest = &segments[2];
+        if ContentHash::parse(digest.clone()).is_err() {
+            return self.error(422, "invalid_digest", "bundle digest must be a 64-character SHA-256 digest", request_id);
+        }
+        let bundle = match self.evidence_registry.lock() {
+            Ok(registry) => registry.get(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "evidence_registry_unavailable",
+                    "evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match bundle {
+            Some(bundle) => HttpResponse::json(200, &json!({
+                "ok": true,
+                "schema": "bioprism-api/evidence-bundle-record/0.1",
+                "workflow": "mission_evidence_bundle_get",
+                "bundle_digest": digest,
+                "bundle": bundle,
+                "execution": "not_started"
+            })),
+            None => self.error(404, "not_found", "verified evidence bundle does not exist", request_id),
+        }
+    }
+
+    fn evidence_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.evidence_state_path.is_some();
+        let file_bytes = self
+            .config
+            .evidence_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry = self.evidence_registry.lock();
+        let (registry_size, generation) = registry
+            .as_ref()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .evidence_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = EvidenceBundleRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(200, &json!({
+            "ok": true,
+            "enabled": enabled,
+            "file_present": file_bytes.is_some(),
+            "file_bytes": file_bytes,
+            "schema": bioprism_devplat::EVIDENCE_REGISTRY_SCHEMA_VERSION,
+            "state_digest": state_digest,
+            "integrity_verified": integrity_verified,
+            "registry_size": registry_size,
+            "registry_generation": generation,
+            "max_bundles": bioprism_devplat::MAX_EVIDENCE_REGISTRY_BUNDLES,
+            "max_file_bytes": MAX_EVIDENCE_REGISTRY_BYTES,
+            "recovery_policy": "only independently verified bundles restore; imported evidence never resumes execution",
+            "flush": "/v1/evidence-bundles/persistence/flush"
+        }))
+    }
+
+    fn flush_evidence_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.evidence_state_path.is_none() {
+            return self.error(
+                409,
+                "evidence_persistence_disabled",
+                "configure --evidence-state before flushing an evidence registry snapshot",
+                request_id,
+            );
+        }
+        match self.persist_evidence_registry() {
+            Ok(_) => self.evidence_persistence_status(),
+            Err(error) => self.error(503, "evidence_persistence_unavailable", &error, request_id),
         }
     }
 
@@ -4588,6 +4975,10 @@ impl ApiRouter {
                     "/v1/operations/gate-reviews": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }], "responses": { "200": { "description": "durable cursor page of replayable operations gate reviews" } } }, "post": { "responses": { "201": { "description": "content-addressed operations gate review record" } } } },
                     "/v1/operations/handoff": { "post": { "responses": { "200": { "description": "content-addressed, non-executing domain routing handoff" } } } },
                     "/v1/evidence-bundles/verify": { "post": { "responses": { "200": { "description": "content-addressed mission evidence bundle verification report" }, "413": { "description": "bundle exceeds verification bound" }, "422": { "description": "bundle is malformed" } } } },
+                    "/v1/evidence-bundles": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_bundles", "in": "query" }], "responses": { "200": { "description": "bounded deterministic evidence registry index" } } }, "post": { "responses": { "201": { "description": "verified evidence bundle imported into the registry" }, "200": { "description": "idempotent re-import" }, "413": { "description": "registry capacity or snapshot bound exceeded" }, "422": { "description": "bundle verification failed" } } } },
+                    "/v1/evidence-bundles/{bundle_digest}": { "get": { "parameters": [{ "name": "bundle_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one verified evidence bundle" }, "404": { "description": "bundle digest is not present" } } } },
+                    "/v1/evidence-bundles/persistence": { "get": { "responses": { "200": { "description": "restart-aware evidence registry checkpoint status" } } } },
+                    "/v1/evidence-bundles/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded evidence registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
@@ -5669,6 +6060,30 @@ fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> 
         return Some(false);
     };
     Some(computed == stored)
+}
+
+fn load_evidence_registry(path: Option<&Path>) -> Result<EvidenceBundleRegistry, String> {
+    let Some(path) = path else {
+        return Ok(EvidenceBundleRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(EvidenceBundleRegistry::new())
+        }
+        Err(error) => return Err(format!("evidence state snapshot could not be read: {error}")),
+    };
+    if bytes.len() > MAX_EVIDENCE_REGISTRY_BYTES {
+        return Err(format!(
+            "evidence state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_EVIDENCE_REGISTRY_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("evidence state snapshot is invalid JSON: {error}"))?;
+    EvidenceBundleRegistry::from_snapshot(&document)
+        .map_err(|error| format!("evidence state snapshot is invalid: {error}"))
 }
 
 fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
@@ -7734,6 +8149,81 @@ mod tests {
         assert_eq!(deleted.status, 200);
         let missing = router.handle(request("GET", "/v1/missions/api-async-1", json!({})));
         assert_eq!(missing.status, 404);
+    }
+
+    #[test]
+    fn evidence_registry_import_is_idempotent_indexed_and_restart_safe() {
+        let path = test_state_path("evidence-registry");
+        let config = ApiConfig {
+            evidence_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let mut bundle = json!({
+            "schema": "bioprism-api/mission-evidence-bundle/0.1",
+            "workflow": "mission_evidence_bundle_export",
+            "mission_id": "registry-mission",
+            "retention": {"mode": "summary_only", "result_retained": false, "result_included": false},
+            "result": null,
+            "result_digest": null,
+            "evaluator_replay": {"workflow": "mission_evaluator_replay_summary", "bindings": [{"domain": "oncology", "adapter_id": "oncoworlds.assay_fidelity"}]},
+            "catalog_drift": {"status": "unchanged"},
+            "trace": [],
+            "export": {"format": "json", "include_result": false, "include_trace": true, "trace_included": true, "include_fixtures": false, "max_items": 16, "digest_algorithm": "sha256", "execution": "not_started"},
+            "execution": "not_started"
+        });
+        bundle["bundle_digest"] = json!(ContentHash::of_value(&bundle).unwrap().to_string());
+        let imported = router.handle(request(
+            "POST",
+            "/v1/evidence-bundles",
+            json!({"bundle": bundle.clone()}),
+        ));
+        assert_eq!(imported.status, 201);
+        let imported: Value = serde_json::from_slice(&imported.body).unwrap();
+        assert_eq!(imported["workflow"], "mission_evidence_bundle_import");
+        assert_eq!(imported["created"], true);
+        let digest = imported["bundle_digest"].as_str().unwrap().to_string();
+        let duplicate = router.handle(request(
+            "POST",
+            "/v1/evidence-bundles",
+            json!({"bundle": bundle}),
+        ));
+        assert_eq!(duplicate.status, 200);
+        let duplicate: Value = serde_json::from_slice(&duplicate.body).unwrap();
+        assert_eq!(duplicate["already_present"], true);
+        let queried = router.handle(request(
+            "GET",
+            "/v1/evidence-bundles?mission_id=registry-mission&domain=oncology&limit=10",
+            json!({}),
+        ));
+        assert_eq!(queried.status, 200);
+        let queried: Value = serde_json::from_slice(&queried.body).unwrap();
+        assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(queried["rows"][0]["bundle_digest"], digest);
+        assert_eq!(queried["rows"][0]["domains"], json!(["oncology"]));
+        let fetched = router.handle(request(
+            "GET",
+            &format!("/v1/evidence-bundles/{digest}"),
+            json!({}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert_eq!(fetched["bundle"]["bundle_digest"], digest);
+        assert_eq!(router.handle(request("POST", "/v1/evidence-bundles/persistence/flush", json!({}))).status, 200);
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let status = restored.handle(request("GET", "/v1/evidence-bundles/persistence", json!({})));
+        let status: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status["integrity_verified"], true);
+        assert_eq!(status["registry_size"], 1);
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/evidence-bundles?mission_id=registry-mission&limit=10",
+            json!({}),
+        ));
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

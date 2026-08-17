@@ -1337,6 +1337,168 @@ class MissionEvidenceBundleVerifyRequest:
 
 
 @dataclass(frozen=True)
+class MissionEvidenceBundleImportRequest:
+    """Import one independently verified bundle into the bounded evidence registry."""
+
+    bundle: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bundle", dict(_route_mapping("mission evidence bundle", self.bundle)))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"bundle": dict(self.bundle)}
+
+    def to_http_body(self) -> dict[str, Any]:
+        return {"bundle": dict(self.bundle)}
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleQueryRequest:
+    """Bounded mission/domain index query for the evidence registry."""
+
+    mission_id: str | None = None
+    domain: str | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_bundles: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (("mission_id", self.mission_id), ("domain", self.domain), ("after", self.after)):
+            if value is not None:
+                _route_text(f"mission evidence bundle query {name}", value)
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("mission evidence bundle query max_items must be between 1 and 256")
+        if not isinstance(self.include_bundles, bool):
+            raise ArgumentError("mission evidence bundle query include_bundles must be a boolean")
+
+    def to_query_params(self) -> dict[str, str]:
+        params: dict[str, str] = {"max_items": str(self.max_items), "include_bundles": "true" if self.include_bundles else "false"}
+        if self.mission_id is not None:
+            params["mission_id"] = self.mission_id
+        if self.domain is not None:
+            params["domain"] = self.domain
+        if self.after is not None:
+            params["after"] = self.after
+        return params
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return self.to_query_params()
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleImportReport:
+    """Typed idempotent registry import result."""
+
+    raw: dict[str, Any]
+    bundle_digest: str
+    created: bool
+    already_present: bool
+    registry_generation: int
+    registry_size: int
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleImportReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_import")
+        if raw.get("workflow") != "mission_evidence_bundle_import":
+            raise ArgumentError("mission evidence bundle import workflow is invalid")
+        created = raw.get("created")
+        already_present = raw.get("already_present")
+        if not isinstance(created, bool) or not isinstance(already_present, bool):
+            raise ArgumentError("mission evidence bundle import flags must be booleans")
+        return cls(
+            raw=raw,
+            bundle_digest=_route_text("mission evidence bundle import digest", raw.get("bundle_digest")),
+            created=created,
+            already_present=already_present,
+            registry_generation=_route_count("mission evidence bundle import generation", raw.get("registry_generation")),
+            registry_size=_route_count("mission evidence bundle import size", raw.get("registry_size")),
+            execution=_route_text("mission evidence bundle import execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleQueryReport:
+    """Typed deterministic evidence registry index page."""
+
+    raw: dict[str, Any]
+    rows: tuple[Mapping[str, Any], ...]
+    next_after: str | None
+    has_more: bool
+    registry_generation: int
+    registry_size: int
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleQueryReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_query")
+        if raw.get("workflow") != "mission_evidence_bundle_query":
+            raise ArgumentError("mission evidence bundle query workflow is invalid")
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("mission evidence bundle query rows must be an array")
+        next_after = raw.get("next_after")
+        if next_after is not None:
+            _route_text("mission evidence bundle query next cursor", next_after)
+        has_more = raw.get("has_more")
+        if not isinstance(has_more, bool):
+            raise ArgumentError("mission evidence bundle query has_more must be a boolean")
+        return cls(
+            raw=raw,
+            rows=tuple(_route_mapping("mission evidence bundle query row", row) for row in rows),
+            next_after=next_after,
+            has_more=has_more,
+            registry_generation=_route_count("mission evidence bundle query generation", raw.get("registry_generation")),
+            registry_size=_route_count("mission evidence bundle query size", raw.get("registry_size")),
+            execution=_route_text("mission evidence bundle query execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleGetRequest:
+    """Fetch one registry bundle by its content hash."""
+
+    bundle_digest: str
+
+    def __post_init__(self) -> None:
+        _route_text("mission evidence bundle digest", self.bundle_digest)
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"bundle_digest": self.bundle_digest}
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleGetReport:
+    """Typed lookup result for one verified registry bundle."""
+
+    raw: dict[str, Any]
+    bundle_digest: str
+    bundle: Mapping[str, Any]
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleGetReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_get")
+        if raw.get("workflow") != "mission_evidence_bundle_get":
+            raise ArgumentError("mission evidence bundle get workflow is invalid")
+        return cls(
+            raw=raw,
+            bundle_digest=_route_text("mission evidence bundle get digest", raw.get("bundle_digest")),
+            bundle=_route_mapping("mission evidence bundle get bundle", raw.get("bundle")),
+            execution=_route_text("mission evidence bundle get execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class MissionEvidenceBundleVerificationReport:
     """Typed digest, retention, and result-integrity verification evidence."""
 
@@ -1638,8 +1800,14 @@ __all__ = [
     "MissionEvaluatorReplayQueryRequest",
     "MissionEvaluatorReplayQueryReport",
     "MissionEvidenceBundleRequest",
+    "MissionEvidenceBundleImportRequest",
+    "MissionEvidenceBundleQueryRequest",
+    "MissionEvidenceBundleGetRequest",
     "MissionEvidenceBundleVerifyRequest",
     "MissionEvidenceBundleReport",
+    "MissionEvidenceBundleImportReport",
+    "MissionEvidenceBundleQueryReport",
+    "MissionEvidenceBundleGetReport",
     "MissionEvidenceBundleVerificationReport",
     "MissionEvaluatorAdapterReport",
     "MissionEvaluatorMatchReport",

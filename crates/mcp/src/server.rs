@@ -142,7 +142,9 @@ use bioprism_devplat::{
     MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayRequest,
     MissionEvaluatorReviewRequest,
+    EvidenceBundleRegistry,
     verify_mission_evidence_bundle,
+    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
     MISSION_EVALUATOR_SCHEMA_VERSION,
     WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
@@ -380,7 +382,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub use bioprism_devplat::MISSION_TRACE_SCHEMA_VERSION;
 
@@ -416,6 +418,7 @@ pub struct Server {
     root: PathBuf,
     lifecycle: Lifecycle,
     mission_trace_observer: Option<MissionTraceObserver>,
+    evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
 }
 
 enum ParallelPending<'a> {
@@ -1030,6 +1033,7 @@ impl Server {
             root: std::fs::canonicalize(&root).unwrap_or(root),
             lifecycle: Lifecycle::New,
             mission_trace_observer: None,
+            evidence_registry: Arc::new(Mutex::new(EvidenceBundleRegistry::new())),
         }
     }
 
@@ -1515,6 +1519,9 @@ impl Server {
             "mission_evaluator_replay" => self.mission_evaluator_replay(&arguments),
             "mission_evaluator_replay_compare" => self.mission_evaluator_replay_compare(&arguments),
             "mission_evidence_bundle_verify" => self.mission_evidence_bundle_verify(&arguments),
+            "mission_evidence_bundle_import" => self.mission_evidence_bundle_import(&arguments),
+            "mission_evidence_bundle_query" => self.mission_evidence_bundle_query(&arguments),
+            "mission_evidence_bundle_get" => self.mission_evidence_bundle_get(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
@@ -22417,6 +22424,105 @@ impl Server {
         Ok(output)
     }
 
+    /// Import a verified evidence bundle into the bounded in-process registry.
+    ///
+    /// The MCP surface intentionally shares the same verifier and registry kernel as REST. It
+    /// is a process-local index (REST can add restart persistence); importing never turns an
+    /// evidence artifact into execution state or a scientific/release claim.
+    fn mission_evidence_bundle_import(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode mission evidence bundle import input: {error}"))?;
+        if encoded.len() > bioprism_devplat::MAX_EVIDENCE_REGISTRY_BYTES {
+            return Err(format!(
+                "mission evidence bundle import input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_EVIDENCE_REGISTRY_BYTES
+            ));
+        }
+        let bundle = arguments.get("bundle").ok_or("bundle is required")?;
+        self.evidence_registry
+            .lock()
+            .map_err(|_| "mission evidence registry lock is poisoned".to_string())?
+            .import(bundle)
+            .map_err(|error| format!("mission evidence bundle import refused: {error}"))
+    }
+
+    /// Query deterministic, digest-ordered registry rows without executing anything.
+    fn mission_evidence_bundle_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode mission evidence bundle query input: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err("mission evidence bundle query input exceeds the 1000000-byte safety bound".into());
+        }
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| value.as_str().ok_or_else(|| format!("{name} must be a string")))
+                .transpose()
+        };
+        let mission_id = optional_string("mission_id")?;
+        let domain = optional_string("domain")?;
+        let after = optional_string("after")?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        if !(1..=MAX_EVIDENCE_REGISTRY_QUERY_ITEMS).contains(&max_items) {
+            return Err(format!(
+                "max_items must be between 1 and {MAX_EVIDENCE_REGISTRY_QUERY_ITEMS}"
+            ));
+        }
+        let include_bundles = arguments
+            .get("include_bundles")
+            .map(|value| value.as_bool().ok_or("include_bundles must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.evidence_registry
+            .lock()
+            .map_err(|_| "mission evidence registry lock is poisoned".to_string())?
+            .query(mission_id, domain, after, max_items, include_bundles)
+            .map_err(|error| format!("mission evidence bundle query refused: {error}"))
+    }
+
+    /// Fetch one imported bundle by its content hash.
+    fn mission_evidence_bundle_get(&self, arguments: &Value) -> Result<Value, String> {
+        let digest = arguments
+            .get("bundle_digest")
+            .and_then(Value::as_str)
+            .ok_or("bundle_digest is required and must be a content hash")?;
+        bioprism_ids::ContentHash::parse(digest.to_string())
+            .map_err(|error| format!("bundle_digest is invalid: {error}"))?;
+        let bundle = self
+            .evidence_registry
+            .lock()
+            .map_err(|_| "mission evidence registry lock is poisoned".to_string())?
+            .get(digest)
+            .ok_or_else(|| format!("bundle {digest:?} is not present in the registry"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/mission-evidence-bundle-record/0.1",
+            "workflow": "mission_evidence_bundle_get",
+            "bundle_digest": digest,
+            "bundle": bundle,
+            "execution": "not_started",
+            "guarantees": [
+                "the returned bundle was accepted by the shared independent verifier before import",
+                "lookup does not execute a mission, evaluator, domain tool, or external effect"
+            ],
+            "limitations": [
+                "the process-local registry is bounded and is not a distributed object store",
+                "bundle presence does not establish scientific validity or release approval"
+            ]
+        }))
+    }
+
     /// Verify that the explicit cross-domain catalogue and authoritative MCP tool definitions
     /// describe the same callable surface.
     ///
@@ -27391,7 +27497,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29848,6 +29954,43 @@ pub fn tool_definitions() -> Vec<Value> {
                     "bundle": { "type": "object", "description": "The complete JSON object returned by the mission evidence bundle export route, including bundle_digest." }
                 },
                 "required": ["bundle"]
+            }
+        }),
+        json!({
+            "name": "mission_evidence_bundle_import",
+            "description": "Import a portable mission evidence bundle after independently verifying its schema, retention contract, and content digests. Re-imports of the same canonical bundle are idempotent. The process-local bounded registry indexes evidence only; import does not execute a mission, evaluator, domain tool, or external effect and does not establish scientific validity or release approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle": { "type": "object", "description": "The complete JSON object returned by mission evidence bundle export, including bundle_digest." }
+                },
+                "required": ["bundle"]
+            }
+        }),
+        json!({
+            "name": "mission_evidence_bundle_query",
+            "description": "Query the bounded process-local mission evidence registry by mission id or evaluator domain. Rows are ordered by canonical bundle digest, cursor-paginated, and omit full bundle bodies unless explicitly requested. Query is an index operation only and never executes a mission, evaluator, domain tool, or external effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission_id": { "type": "string", "description": "Optional exact mission identity filter." },
+                    "domain": { "type": "string", "description": "Optional exact evaluator-domain filter." },
+                    "after": { "type": "string", "description": "Optional last-seen bundle digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_bundles": { "type": "boolean", "default": false, "description": "Include complete verified bundle bodies in each row." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "mission_evidence_bundle_get",
+            "description": "Fetch one previously imported mission evidence bundle by its content hash from the bounded process-local registry. Lookup does not execute a mission, evaluator, domain tool, or external effect and bundle presence is not a scientific or release claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle_digest": { "type": "string", "description": "The sha256 content hash returned by evidence bundle import or query." }
+                },
+                "required": ["bundle_digest"]
             }
         }),
         json!({

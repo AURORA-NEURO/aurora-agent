@@ -85,6 +85,12 @@ COMMANDS
   evidence verify   --bundle <path>
                     Verify a portable mission evidence bundle's schema, retention claims and
                     content digests. Exit 1 when the bundle is well-formed but unverifiable.
+  evidence import   --bundle <path> --store <path> [--dry-run]
+                    Verify and idempotently add a bundle to a bounded digest-protected local
+                    registry checkpoint. --dry-run reports the checkpoint without writing it.
+  evidence query    --store <path> [--mission-id <id>] [--domain <name>] [--after <digest>]
+                    [--limit <n>] [--include-bundles]
+                    Query a local registry checkpoint without executing any mission or tool.
 
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
@@ -130,6 +136,15 @@ pub enum Command {
     PrismMinimize { world: PathBuf },
     MutateFamily { world: PathBuf, out_dir: Option<PathBuf> },
     EvidenceBundleVerify { bundle: PathBuf },
+    EvidenceBundleImport { bundle: PathBuf, store: PathBuf, dry_run: bool },
+    EvidenceBundleQuery {
+        store: PathBuf,
+        mission_id: Option<String>,
+        domain: Option<String>,
+        after: Option<String>,
+        limit: usize,
+        include_bundles: bool,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -260,6 +275,24 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         ("evidence", "verify") => Command::EvidenceBundleVerify {
             bundle: options.take_path("--bundle")?,
         },
+        ("evidence", "import") => Command::EvidenceBundleImport {
+            bundle: options.take_path("--bundle")?,
+            store: options.take_path("--store")?,
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("evidence", "query") => Command::EvidenceBundleQuery {
+            store: options.take_path("--store")?,
+            mission_id: options.take_optional("--mission-id"),
+            domain: options.take_optional("--domain"),
+            after: options.take_optional("--after"),
+            limit: match options.take_optional("--limit") {
+                None => 100,
+                Some(text) => text
+                    .parse()
+                    .map_err(|_| usage(format!("--limit must be a number, got {text:?}")))?,
+            },
+            include_bundles: options.take_switch("--include-bundles"),
+        },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
 
@@ -364,5 +397,41 @@ mod tests {
     #[test]
     fn help_documents_evidence_bundle_verification() {
         assert!(super::help().contains("evidence verify   --bundle <path>"));
+    }
+
+    #[test]
+    fn evidence_registry_commands_parse_bounded_options() {
+        let parsed = parse(
+            [
+                "evidence",
+                "query",
+                "--store",
+                "registry.json",
+                "--mission-id",
+                "m-1",
+                "--domain",
+                "oncology",
+                "--limit",
+                "7",
+                "--include-bundles",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse evidence query");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::EvidenceBundleQuery {
+                    store: PathBuf::from("registry.json"),
+                    mission_id: Some("m-1".into()),
+                    domain: Some("oncology".into()),
+                    after: None,
+                    limit: 7,
+                    include_bundles: true,
+                },
+            })
+        );
     }
 }

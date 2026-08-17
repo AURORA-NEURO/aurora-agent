@@ -273,6 +273,11 @@ import type {
   MissionExecutionProvenanceResponse,
   MissionEvidenceBundleOptions,
   MissionEvidenceBundleResult,
+  MissionEvidenceBundleImportArgs,
+  MissionEvidenceBundleImportResult,
+  MissionEvidenceBundleQueryOptions,
+  MissionEvidenceBundleQueryResult,
+  MissionEvidenceBundleGetResult,
   MissionEvidenceBundleVerifyArgs,
   MissionEvidenceBundleVerifyResult,
   MissionJob,
@@ -885,6 +890,45 @@ export class ApiClient {
 
   async missionEvidenceBundleVerify(args: MissionEvidenceBundleVerifyArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleVerifyResult>> {
     return this.callTool<MissionEvidenceBundleVerifyResult>("mission_evidence_bundle_verify", args, options);
+  }
+
+  async missionEvidenceBundleImport(args: MissionEvidenceBundleImportArgs, options?: ClientRequestOptions): Promise<MissionEvidenceBundleImportResult> {
+    if (!isObject(args) || !isObject(args.bundle)) throw new ArgumentError("bundle must be a JSON object");
+    return this.request<MissionEvidenceBundleImportResult>("POST", "/v1/evidence-bundles", args, options);
+  }
+
+  async missionEvidenceBundleQuery(args: MissionEvidenceBundleQueryOptions = {}, options?: ClientRequestOptions): Promise<MissionEvidenceBundleQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("evidence bundle query arguments must be a JSON object");
+    for (const [name, value] of [["mission_id", args.mission_id], ["domain", args.domain], ["after", args.after]] as const) {
+      if (value !== undefined && typeof value !== "string") throw new ArgumentError(`${name} must be a string`);
+    }
+    if (args.include_bundles !== undefined && typeof args.include_bundles !== "boolean") throw new ArgumentError("include_bundles must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    const query = new URLSearchParams({ max_items: String(maxItems), include_bundles: String(args.include_bundles ?? false) });
+    if (args.mission_id !== undefined) query.set("mission_id", args.mission_id);
+    if (args.domain !== undefined) query.set("domain", args.domain);
+    if (args.after !== undefined) query.set("after", args.after);
+    return this.request<MissionEvidenceBundleQueryResult>("GET", `/v1/evidence-bundles?${query.toString()}`, undefined, options);
+  }
+
+  async missionEvidenceBundleGet(bundleDigest: string, options?: ClientRequestOptions): Promise<MissionEvidenceBundleGetResult> {
+    const digest = pathSegment(bundleDigest, "bundle digest");
+    return this.request<MissionEvidenceBundleGetResult>("GET", `/v1/evidence-bundles/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  async missionEvidenceBundleImportTool(args: MissionEvidenceBundleImportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleImportResult>> {
+    if (!isObject(args) || !isObject(args.bundle)) throw new ArgumentError("bundle must be a JSON object");
+    return this.callTool<MissionEvidenceBundleImportResult>("mission_evidence_bundle_import", args, options);
+  }
+
+  async missionEvidenceBundleQueryTool(args: MissionEvidenceBundleQueryOptions = {}, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleQueryResult>> {
+    return this.callTool<MissionEvidenceBundleQueryResult>("mission_evidence_bundle_query", args, options);
+  }
+
+  async missionEvidenceBundleGetTool(bundleDigest: string, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleGetResult>> {
+    const digest = pathSegment(bundleDigest, "bundle digest");
+    return this.callTool<MissionEvidenceBundleGetResult>("mission_evidence_bundle_get", { bundle_digest: digest }, options);
   }
 
   async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityAuditResult>> {

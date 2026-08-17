@@ -36,6 +36,11 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/missions/{mission_id}/evaluator-replay/compare` | Compare retained evaluator provenance with the current catalogue |
 | `GET /v1/missions/{mission_id}/evidence-bundle` | Export a bounded, content-addressed mission evidence bundle |
 | `POST /v1/evidence-bundles/verify` | Verify a portable evidence bundle without executing a mission or evaluator |
+| `POST /v1/evidence-bundles` | Independently verify and idempotently import a bundle into the bounded registry |
+| `GET /v1/evidence-bundles?mission_id=&domain=&after=&limit=&include_bundles=` | Query digest-ordered mission/domain evidence index rows |
+| `GET /v1/evidence-bundles/{bundle_digest}` | Fetch one verified bundle by content hash |
+| `GET /v1/evidence-bundles/persistence` | Inspect restart-safe evidence registry checkpoint integrity and bounds |
+| `POST /v1/evidence-bundles/persistence/flush` | Force an atomic evidence registry checkpoint |
 | `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
@@ -295,6 +300,17 @@ have to interpret `null` as an ambiguous omission. `POST /v1/evidence-bundles/ve
 schema, retention, trace, and export-contract checks. It returns a verification report with
 `valid: false` for digest tampering and a 422/413 response for malformed or oversized input. Neither
 route executes a domain tool or evaluator, and neither silently truncates an oversized artifact.
+
+`POST /v1/evidence-bundles` applies that verifier before inserting the artifact into a bounded,
+content-addressed registry. Re-importing the same canonical bundle is idempotent. The indexed
+`GET /v1/evidence-bundles` query is deterministic by bundle digest, supports mission/domain filters,
+and returns compact rows by default; `include_bundles=true` is explicit because full bodies consume
+the registry's 32 MiB checkpoint bound. Configure `--evidence-state <file>` to make the registry
+restart-safe. Startup rechecks the checkpoint digest and independently re-verifies every stored
+bundle; corrupted snapshots are rejected rather than partially restored. Restored evidence never
+resumes a mission, reruns an evaluator, authenticates provenance, or becomes a scientific, clinical,
+or release claim. The `persistence/flush` route is an explicit operator checkpoint and returns 409
+when no evidence-state path was configured.
 
 ## Asynchronous missions
 

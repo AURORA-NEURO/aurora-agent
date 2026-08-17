@@ -790,6 +790,11 @@ provenance, navigable links, and a deterministic bundle digest in one bounded ar
 artifact's canonical and retained-result digests without executing any domain or evaluator tool.
 Both routes remain structural and non-executing, and the Python/TypeScript SDKs expose the same
 comparison, export, and verification contracts.
+The registry continuation adds `POST /v1/evidence-bundles` for independently verified, idempotent
+import; digest-ordered mission/domain queries; content-hash lookup; and an atomic restart-safe
+checkpoint enabled with `--evidence-state <file>`. MCP exposes the same import/query/get kernel and
+the CLI provides `evidence import` and `evidence query`. Restored bundles are reverified but never
+resume execution or become provenance, scientific, clinical, or release claims.
 `capability_dashboard` provides the bounded operator view beneath those routes: it binds the live
 catalogue to authoritative MCP schemas, reports callable/partial/declared-only groups, keeps
 crate/CLI/Python/MCP surface counts separate, and labels missing transports without pretending a

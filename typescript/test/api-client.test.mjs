@@ -4129,3 +4129,80 @@ test("client exposes portable mission evidence bundle verification over MCP and 
   assert.equal(restResult.workflow, "mission_evidence_bundle_verify");
   assert.equal(restResult.verification_status, "verified");
 });
+
+test("client exposes evidence registry import, query, and get over REST and MCP", async () => {
+  const bundle = { schema: "bioprism-api/mission-evidence-bundle/0.1", bundle_digest: "c".repeat(64) };
+  const imported = {
+    ok: true,
+    schema: "bioprism-devplat-evidence-bundle-import/0.1",
+    workflow: "mission_evidence_bundle_import",
+    bundle_digest: "c".repeat(64),
+    created: true,
+    already_present: false,
+    registry_generation: 1,
+    registry_size: 1,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const queried = {
+    ok: true,
+    schema: "bioprism-devplat-evidence-bundle-query/0.1",
+    workflow: "mission_evidence_bundle_query",
+    filters: { domain: "oncology", max_items: 10, include_bundles: false },
+    registry_generation: 1,
+    registry_size: 1,
+    rows: [{ bundle_digest: "c".repeat(64), domains: ["oncology"] }],
+    next_after: null,
+    has_more: false,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const fetched = {
+    ok: true,
+    schema: "bioprism-mcp/mission-evidence-bundle-record/0.1",
+    workflow: "mission_evidence_bundle_get",
+    bundle_digest: "c".repeat(64),
+    bundle,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const restClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/evidence-bundles" && init.method === "POST") {
+        assert.deepEqual(JSON.parse(init.body), { bundle });
+        return jsonResponse(imported, 201);
+      }
+      if (url.pathname === "/v1/evidence-bundles") {
+        assert.equal(url.searchParams.get("domain"), "oncology");
+        assert.equal(url.searchParams.get("max_items"), "10");
+        return jsonResponse(queried);
+      }
+      assert.equal(url.pathname, `/v1/evidence-bundles/${"c".repeat(64)}`);
+      return jsonResponse(fetched);
+    },
+  });
+  assert.equal((await restClient.missionEvidenceBundleImport({ bundle })).workflow, "mission_evidence_bundle_import");
+  assert.equal((await restClient.missionEvidenceBundleQuery({ domain: "oncology", max_items: 10 })).rows.length, 1);
+  assert.equal((await restClient.missionEvidenceBundleGet("c".repeat(64))).bundle_digest.length, 64);
+
+  const mcpClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, `/v1/tools/${url.pathname.split("/").at(-1)}`);
+      const name = url.pathname.split("/").at(-1);
+      const body = JSON.parse(init.body);
+      const response = name === "mission_evidence_bundle_import" ? imported : name === "mission_evidence_bundle_query" ? queried : fetched;
+      if (name === "mission_evidence_bundle_import") assert.deepEqual(body, { bundle });
+      return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: response } } });
+    },
+  });
+  assert.equal((await mcpClient.missionEvidenceBundleImportTool({ bundle })).mcp.result.structuredContent.created, true);
+  assert.equal((await mcpClient.missionEvidenceBundleQueryTool({ domain: "oncology" })).mcp.result.structuredContent.rows.length, 1);
+  assert.equal((await mcpClient.missionEvidenceBundleGetTool("c".repeat(64))).mcp.result.structuredContent.workflow, "mission_evidence_bundle_get");
+});

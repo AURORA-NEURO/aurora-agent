@@ -733,6 +733,13 @@ the exported artifact with `missionEvidenceBundleVerify({ bundle })` through MCP
 `missionEvidenceBundleVerifyQuery(bundle)` through REST. Both return the typed
 `MissionEvidenceBundleVerifyResult`, including canonical digest recomputation, retained-result checks,
 retention/trace/export checks, and explicit failure codes; verification is non-executing.
+The registry routes are exposed as `missionEvidenceBundleImport(bundle)`,
+`missionEvidenceBundleQuery({ mission_id, domain, after, max_items, include_bundles })`, and
+`missionEvidenceBundleGet(bundleDigest)`; the corresponding `*Tool` methods use MCP directly.
+Import is independently verified and idempotent, query rows are digest-ordered and bounded, and
+get validates the content-hash lookup. Configure the API's `--evidence-state` file for restart-safe
+REST persistence; registry presence never resumes execution or asserts scientific, clinical, or
+release validity.
 
 ```typescript
 const page = await api.events(0, 100);
