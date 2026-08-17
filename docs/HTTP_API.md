@@ -303,6 +303,12 @@ and observed byte length with the retained receipt. `matched`, `partial`, `misma
 `orphaned` remain distinct; `execution_status`, `executor_id`, and `locator_opened` are explicit
 caller assertions, not cryptographic attestations. The core performs no transfer or external I/O,
 and every response remains not-started and not-ready.
+`POST /v1/tools/domain_evidence_provider_external_payload_evidence_query` is the bounded read-only
+projection over those three retained artifact families. It joins rows by receipt digest, supports
+group/domain/subject filters, deterministic digest cursors, and optional artifact bodies, and keeps
+`missing_receipt`, `receipt_only`, partial-join, and `complete` states distinct. It reads one local
+registry snapshot only; it never opens locators, fetches providers, resolves credentials, or turns a
+complete structural join into execution or readiness.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

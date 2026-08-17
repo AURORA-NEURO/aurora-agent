@@ -132,7 +132,8 @@ use bioprism_devplat::{
     handoff_domain_evidence_provider, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload,
     normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
-    plan_domain_evidence_source, plan_mission, reconcile_domain_workflow,
+    plan_domain_evidence_source, plan_mission,
+    query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
     record_domain_evidence_provider_external_payload, run_workbench, scaffold_domain_workflow,
     standard_walkthroughs, verify_delivery_receipt,
     verify_domain_evidence_provider_external_payload_replay,
@@ -140,7 +141,8 @@ use bioprism_devplat::{
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
     CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
     DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
-    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
+    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
     DomainEvidenceProviderExternalPayloadLineageAuditRequest,
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
     DomainEvidenceProviderExternalPayloadReceiptRequest,
@@ -1424,6 +1426,9 @@ impl Server {
             }
             "domain_evidence_provider_external_payload_execution_evidence" => {
                 self.domain_evidence_provider_external_payload_execution_evidence(&arguments)
+            }
+            "domain_evidence_provider_external_payload_evidence_query" => {
+                self.domain_evidence_provider_external_payload_evidence_query(&arguments)
             }
             "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
@@ -4008,6 +4013,36 @@ impl Server {
                 "readiness; every response remains not_started"
             ]
         }))
+    }
+
+    /// Return a deterministic joined receipt/lineage/execution projection from the local registry.
+    /// This is read-only and never treats a complete join as external execution or readiness.
+    fn domain_evidence_provider_external_payload_evidence_query(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode external payload evidence query: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "external payload evidence query exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid external payload evidence query: {error}"))?;
+        let (records, generation) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            (registry.records_for_audit(), registry.generation())
+        };
+        let report =
+            query_domain_evidence_provider_external_payload_evidence(&records, generation, request)
+                .map_err(|error| format!("external payload evidence query refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode external payload evidence query: {error}"))
     }
 
     /// Intake one raw request/response envelope and bind it to the authoritative catalogue.
@@ -30505,6 +30540,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_provider_external_payload_normalize",
         "domain_evidence_provider_external_payload_lineage_audit",
         "domain_evidence_provider_external_payload_execution_evidence",
+        "domain_evidence_provider_external_payload_evidence_query",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -31094,6 +31130,23 @@ pub fn tool_definitions() -> Vec<Value> {
                     "observation_digest": { "type": ["string", "null"] }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator", "expected_receipt_digest", "execution_status", "executor_id"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_evidence_query",
+            "description": "Return a bounded read-only joined projection of external payload receipt, lineage-audit, and caller execution-evidence artifacts. It preserves receipt-only, missing-receipt, partial-join, and complete-join states with deterministic cursors and never contacts providers, stores, locators, credentials, or payloads.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": ["string", "null"] },
+                    "domain": { "type": ["string", "null"] },
+                    "subject_id": { "type": ["string", "null"] },
+                    "after": { "type": ["string", "null"] },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 128, "default": 100 },
+                    "include_artifacts": { "type": "boolean", "default": false }
+                },
+                "required": []
             }
         }),
         json!({

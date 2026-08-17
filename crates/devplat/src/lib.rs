@@ -221,6 +221,7 @@ pub mod domain_evidence_provider_external;
 pub mod domain_evidence_provider_external_execution;
 pub mod domain_evidence_provider_external_lineage;
 pub mod domain_evidence_provider_external_normalization;
+pub mod domain_evidence_provider_external_query;
 pub mod domain_evidence_provider_handoff;
 pub mod domain_evidence_source;
 pub mod domain_evidence_source_execution;
@@ -367,6 +368,15 @@ pub use domain_evidence_provider_external_normalization::{
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
+};
+pub use domain_evidence_provider_external_query::{
+    query_domain_evidence_provider_external_payload_evidence,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryReport,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    DomainEvidenceProviderExternalPayloadEvidenceRow,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_ITEMS,
 };
 pub use domain_evidence_provider_handoff::{
     handoff_domain_evidence_provider, DomainEvidenceProviderAuthPosture,

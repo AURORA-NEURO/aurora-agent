@@ -87,6 +87,11 @@ from .domain_evidence_provider_external import (
     domain_evidence_provider_external_payload_lineage_audit_report,
     domain_evidence_provider_external_payload_execution_evidence_report,
 )
+from .domain_evidence_provider_external_query import (
+    DomainEvidenceProviderExternalPayloadEvidenceQueryReport,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    domain_evidence_provider_external_payload_evidence_query_report,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -2375,6 +2380,27 @@ class Workspace:
     ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
         return domain_evidence_provider_external_payload_execution_evidence_report(
             self.domain_evidence_provider_external_payload_execution_evidence(request)
+        )
+
+    def domain_evidence_provider_external_payload_evidence_query(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest)
+            else DomainEvidenceProviderExternalPayloadEvidenceQueryRequest.from_wire(request or {})
+        )
+        return self.tool(
+            "domain_evidence_provider_external_payload_evidence_query", normalized.to_mcp_arguments()
+        )
+
+    def domain_evidence_provider_external_payload_evidence_query_report(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        return domain_evidence_provider_external_payload_evidence_query_report(
+            self.domain_evidence_provider_external_payload_evidence_query(request)
         )
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
@@ -6001,6 +6027,27 @@ class AsyncWorkspace:
     ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
         return domain_evidence_provider_external_payload_execution_evidence_report(
             await self.domain_evidence_provider_external_payload_execution_evidence(request)
+        )
+
+    async def domain_evidence_provider_external_payload_evidence_query(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest)
+            else DomainEvidenceProviderExternalPayloadEvidenceQueryRequest.from_wire(request or {})
+        )
+        return await self.tool(
+            "domain_evidence_provider_external_payload_evidence_query", normalized.to_mcp_arguments()
+        )
+
+    async def domain_evidence_provider_external_payload_evidence_query_report(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        return domain_evidence_provider_external_payload_evidence_query_report(
+            await self.domain_evidence_provider_external_payload_evidence_query(request)
         )
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:

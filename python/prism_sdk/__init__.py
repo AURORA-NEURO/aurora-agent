@@ -109,6 +109,14 @@ from .domain_evidence_provider_external import (
     domain_evidence_provider_external_payload_lineage_audit_report,
     domain_evidence_provider_external_payload_execution_evidence_report,
 )
+from .domain_evidence_provider_external_query import (
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_ITEMS,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryReport,
+    domain_evidence_provider_external_payload_evidence_query_report,
+)
 from .analytics import (
     AnalyticsDirection,
     AnalyticsEvidence,
@@ -2129,6 +2137,9 @@ __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_STATUSES",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_SCHEMA",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_WORKFLOW",
+    "MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_ITEMS",
     "DomainEvidenceProviderExternalPayloadReceiptRequest",
     "DomainEvidenceProviderExternalPayloadReceiptReport",
     "DomainEvidenceProviderExternalPayloadReplayRequest",
@@ -2139,6 +2150,8 @@ __all__ = [
     "DomainEvidenceProviderExternalPayloadLineageAuditReport",
     "DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest",
     "DomainEvidenceProviderExternalPayloadExecutionEvidenceReport",
+    "DomainEvidenceProviderExternalPayloadEvidenceQueryRequest",
+    "DomainEvidenceProviderExternalPayloadEvidenceQueryReport",
     "DomainEvidenceProviderRecordIndex",
     "DOMAIN_ACQUISITION_SCHEMA",
     "DOMAIN_ACQUISITION_WORKFLOW",
@@ -3800,6 +3813,7 @@ __all__ = [
     "domain_evidence_provider_external_payload_normalization_report",
     "domain_evidence_provider_external_payload_lineage_audit_report",
     "domain_evidence_provider_external_payload_execution_evidence_report",
+    "domain_evidence_provider_external_payload_evidence_query_report",
     "DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_SHAPE_STATUSES",
     "DomainEvidenceProviderShapeAudit",

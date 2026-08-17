@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 207);
+    assert_eq!(tools.len(), 208);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1950,6 +1950,91 @@ fn domain_evidence_provider_external_payload_execution_evidence_is_observation_b
         orphaned_request,
     );
     assert_eq!(orphaned["evidence_status"], json!("orphaned"));
+}
+
+#[test]
+fn domain_evidence_provider_external_payload_evidence_query_joins_rows_and_paginates_deterministically(
+) {
+    let mut server = server();
+    let first = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "query-subject-1",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "a".repeat(64),
+        "transfer_id": "query-transfer-1",
+        "payload_digest": "b".repeat(64),
+        "byte_length": 4096,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/query/1",
+        "availability": "available",
+        "retention": "durable"
+    });
+    let second = json!({
+        "group_id": "biological_domains",
+        "domains": ["genomics"],
+        "subject_id": "query-subject-2",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "c".repeat(64),
+        "transfer_id": "query-transfer-2",
+        "payload_digest": "d".repeat(64),
+        "byte_length": 2048,
+        "storage_backend": "caller_managed",
+        "locator_kind": "opaque",
+        "locator": "caller://query/2",
+        "availability": "unknown",
+        "retention": "unknown"
+    });
+    let first_receipt = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        first,
+    );
+    let _second_receipt = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        second,
+    );
+    let page = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_evidence_query",
+        json!({"max_items": 1, "include_artifacts": true}),
+    );
+    assert_eq!(page["ok"], json!(true));
+    assert_eq!(
+        page["workflow"],
+        json!("domain_evidence_provider_external_payload_evidence_query")
+    );
+    assert_eq!(page["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(page["rows"][0]["join_status"], json!("receipt_only"));
+    assert!(page["rows"][0].get("receipt_artifact").is_some());
+    assert_eq!(page["has_more"], json!(true));
+    let next_after = page["next_after"].clone();
+    assert_ne!(next_after, Value::Null);
+    let next = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_evidence_query",
+        json!({"after": next_after, "max_items": 2}),
+    );
+    assert_eq!(next["ok"], json!(true));
+    assert_eq!(next["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(next["has_more"], json!(false));
+    let filtered = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_evidence_query",
+        json!({"subject_id": "query-subject-1"}),
+    );
+    assert_eq!(filtered["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        filtered["rows"][0]["receipt_digest"],
+        first_receipt["receipt_digest"]
+    );
+    assert_eq!(filtered["readiness_claimed"], json!(false));
 }
 
 #[test]
@@ -7403,6 +7488,11 @@ fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
                 .unwrap()
                 .iter()
                 .any(|tool| tool == "domain_evidence_provider_external_payload_execution_evidence")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_external_payload_evidence_query")
             && route["interpretation"]["status"].is_string()
             && route["limitations"].as_array().is_some()
     }));
@@ -7438,12 +7528,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(207));
-    assert_eq!(result["advertised_tool_count"], json!(207));
+    assert_eq!(result["unique_catalog_tools"], json!(208));
+    assert_eq!(result["advertised_tool_count"], json!(208));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(207));
-    assert_eq!(result["schema_quality"]["valid"], json!(207));
+    assert_eq!(result["schema_quality"]["checked"], json!(208));
+    assert_eq!(result["schema_quality"]["valid"], json!(208));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

@@ -91,6 +91,11 @@ from .domain_evidence_provider_external import (
     domain_evidence_provider_external_payload_lineage_audit_report,
     domain_evidence_provider_external_payload_execution_evidence_report,
 )
+from .domain_evidence_provider_external_query import (
+    DomainEvidenceProviderExternalPayloadEvidenceQueryReport,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    domain_evidence_provider_external_payload_evidence_query_report,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -1319,6 +1324,40 @@ class ApiClient:
         return domain_evidence_provider_external_payload_execution_evidence_report(
             self.call_tool(
                 "domain_evidence_provider_external_payload_execution_evidence", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_evidence_query(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        """Return a joined receipt/lineage/execution projection through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest)
+            else DomainEvidenceProviderExternalPayloadEvidenceQueryRequest.from_wire(request or {})
+        )
+        return domain_evidence_provider_external_payload_evidence_query_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_evidence_query",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_evidence_query_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest)
+            else DomainEvidenceProviderExternalPayloadEvidenceQueryRequest.from_wire(request or {})
+        )
+        return domain_evidence_provider_external_payload_evidence_query_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_evidence_query", normalized.to_mcp_arguments()
             )
         )
 
@@ -5301,6 +5340,22 @@ class AsyncApiClient:
     ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
         return await asyncio.to_thread(
             self.client.domain_evidence_provider_external_payload_execution_evidence_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_evidence_query(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_evidence_query, request
+        )
+
+    async def domain_evidence_provider_external_payload_evidence_query_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_evidence_query_tool, request
         )
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:

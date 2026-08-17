@@ -135,6 +135,13 @@ the locator or turn a registry match into provider authenticity or readiness.
 expected receipt identity, executor status, optional observed digest/size, and observation digest
 are retained separately. Missing and conflicting observations remain typed evidence states, while
 the SDK never executes a transfer or treats `locator_opened` as an authenticated attestation.
+`DomainEvidenceProviderExternalPayloadEvidenceQueryRequest` and
+`DomainEvidenceProviderExternalPayloadEvidenceQueryReport` provide the joined read model through
+sync/async HTTP, MCP-tool, and workspace helpers. The bounded query filters and cursor through one
+registry snapshot, joins receipt/lineage/execution artifacts by receipt digest, optionally retains
+the artifact bodies, and preserves missing, receipt-only, partial, and complete joins. It is a
+structural projection only: it does not fetch external storage, validate provider authenticity, or
+claim transfer execution/readiness.
 
 ## Lifecycle
 

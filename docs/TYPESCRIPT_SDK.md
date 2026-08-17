@@ -150,6 +150,11 @@ omission counts for digest-only deduplication; row digests do not expose identif
 against the retained payload, request, shape, normalization, and intake digests. The typed result
 keeps every match dimension and the idempotent value-free replay artifact visible; a mismatch is
 not promoted to a provider success or authenticity claim.
+`domainEvidenceProviderExternalPayloadEvidenceQuery` and its `Tool` alias expose the joined
+receipt/lineage/execution projection. The bounded request supports group/domain/subject filters,
+digest cursors, and optional artifact bodies; typed rows preserve missing, receipt-only, partial,
+and complete join status. The client validates cursor and page bounds and refuses credential
+fields, while the server remains read-only and does not fetch, open, or authenticate external data.
 
 Convenience methods currently cover:
 

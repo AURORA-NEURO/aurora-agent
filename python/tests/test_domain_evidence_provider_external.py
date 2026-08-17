@@ -17,12 +17,14 @@ from prism_sdk import (
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
     DomainEvidenceProviderExternalPayloadLineageAuditRequest,
     DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
     Workspace,
     domain_evidence_provider_external_payload_receipt_report,
     domain_evidence_provider_external_payload_replay_verification_report,
     domain_evidence_provider_external_payload_normalization_report,
     domain_evidence_provider_external_payload_lineage_audit_report,
     domain_evidence_provider_external_payload_execution_evidence_report,
+    domain_evidence_provider_external_payload_evidence_query_report,
 )
 from prism_sdk.authoring import content_digest
 
@@ -325,6 +327,55 @@ def execution_payload() -> dict:
     }
 
 
+def query_request() -> DomainEvidenceProviderExternalPayloadEvidenceQueryRequest:
+    return DomainEvidenceProviderExternalPayloadEvidenceQueryRequest(
+        group_id="biological_domains",
+        domain="oncology",
+        subject_id="external-provider-subject",
+        max_items=1,
+        include_artifacts=True,
+    )
+
+
+def query_payload() -> dict:
+    receipt_payload = payload()
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-evidence-provider-external-payload-query/0.1",
+        "workflow": "domain_evidence_provider_external_payload_evidence_query",
+        "filters": query_request().to_mcp_arguments(),
+        "registry_generation": 4,
+        "registry_size": 3,
+        "rows": [
+            {
+                "row_digest": "2" * 64,
+                "receipt_digest": "e" * 64,
+                "subject_id": receipt_payload["receipt"]["subject_id"],
+                "group_id": receipt_payload["receipt"]["group_id"],
+                "domains": receipt_payload["receipt"]["domains"],
+                "receipt_present": True,
+                "lineage_status": "matched",
+                "lineage_digest": "1" * 64,
+                "execution_evidence_status": "matched",
+                "execution_status": "transferred",
+                "evidence_digest": "1" * 64,
+                "join_status": "complete",
+                "parent_digests": receipt_payload["receipt"]["parent_digests"],
+                "receipt_artifact": receipt_payload["receipt"],
+                "lineage_artifact": lineage_payload()["audit"],
+                "execution_artifact": execution_payload()["evidence"],
+            }
+        ],
+        "next_after": None,
+        "has_more": False,
+        "query_digest": "3" * 64,
+        "execution": "not_started",
+        "readiness_claimed": False,
+        "guarantees": [],
+        "limitations": ["registry snapshot only"],
+    }
+
+
 def test_external_receipt_is_out_of_line_and_rejects_payload_material() -> None:
     arguments = request().to_mcp_arguments()
     assert "payload" not in arguments
@@ -405,6 +456,22 @@ def test_external_execution_evidence_preserves_caller_observation_and_attestatio
         DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest.from_wire(
             {**arguments, "expected_receipt_digest": "not-a-digest"}
         )
+
+
+def test_external_evidence_query_is_bounded_and_preserves_join_state() -> None:
+    normalized = query_request()
+    arguments = normalized.to_mcp_arguments()
+    assert arguments["max_items"] == 1
+    assert arguments["include_artifacts"] is True
+    report = domain_evidence_provider_external_payload_evidence_query_report(query_payload())
+    assert report.rows[0]["join_status"] == "complete"
+    assert report.rows[0]["execution_status"] == "transferred"
+    assert report.registry_generation == 4
+    assert report.readiness_claimed is False
+    with pytest.raises(ArgumentError):
+        DomainEvidenceProviderExternalPayloadEvidenceQueryRequest.from_wire({**arguments, "max_items": 0})
+    with pytest.raises(ArgumentError):
+        DomainEvidenceProviderExternalPayloadEvidenceQueryRequest.from_wire({**arguments, "credential_material": "never"})
 def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes() -> None:
     with patch.object(ApiClient, "request", return_value=payload()) as rest:
         assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_receipt(request()).byte_length == 4096
@@ -446,6 +513,14 @@ def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes()
         assert execution_tool.call_args.args[0] == "domain_evidence_provider_external_payload_execution_evidence"
     with patch.object(Workspace, "tool", return_value=execution_payload()):
         assert Workspace(None).domain_evidence_provider_external_payload_execution_evidence_report(execution_request()).evidence_status == "matched"
+    with patch.object(ApiClient, "request", return_value=query_payload()) as query_rest:
+        assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_evidence_query(query_request()).rows[0]["join_status"] == "complete"
+        assert query_rest.call_args.args[1] == "/v1/tools/domain_evidence_provider_external_payload_evidence_query"
+    with patch.object(ApiClient, "call_tool", return_value=query_payload()) as query_tool:
+        assert ApiClient("http://127.0.0.1:8787").domain_evidence_provider_external_payload_evidence_query_tool(query_request()).rows[0]["execution_status"] == "transferred"
+        assert query_tool.call_args.args[0] == "domain_evidence_provider_external_payload_evidence_query"
+    with patch.object(Workspace, "tool", return_value=query_payload()):
+        assert Workspace(None).domain_evidence_provider_external_payload_evidence_query_report(query_request()).rows[0]["join_status"] == "complete"
 
     async def run() -> None:
         client = AsyncApiClient(ApiClient("http://127.0.0.1:8787"))
@@ -471,5 +546,9 @@ def test_sync_and_async_external_receipt_helpers_preserve_rest_and_tool_routes()
             assert (await client.domain_evidence_provider_external_payload_execution_evidence(execution_request())).evidence_status == "matched"
         with patch.object(AsyncWorkspace, "tool", new_callable=AsyncMock, return_value=execution_payload()):
             assert (await AsyncWorkspace(None).domain_evidence_provider_external_payload_execution_evidence_report(execution_request())).execution_status == "transferred"
+        with patch.object(ApiClient, "request", return_value=query_payload()):
+            assert (await client.domain_evidence_provider_external_payload_evidence_query(query_request())).rows[0]["join_status"] == "complete"
+        with patch.object(AsyncWorkspace, "tool", new_callable=AsyncMock, return_value=query_payload()):
+            assert (await AsyncWorkspace(None).domain_evidence_provider_external_payload_evidence_query_report(query_request())).rows[0]["execution_status"] == "transferred"
 
     asyncio.run(run())

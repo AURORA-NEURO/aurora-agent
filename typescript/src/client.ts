@@ -58,6 +58,8 @@ import type {
   DomainEvidenceProviderExternalPayloadLineageAuditResult,
   DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs,
   DomainEvidenceProviderExternalPayloadExecutionEvidenceResult,
+  DomainEvidenceProviderExternalPayloadEvidenceQueryArgs,
+  DomainEvidenceProviderExternalPayloadEvidenceQueryResult,
   DomainEvidenceProviderReplayVerifyArgs,
   DomainEvidenceProviderReplayVerifyResult,
   AdapterPlanArgs,
@@ -1081,6 +1083,31 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadExecutionEvidenceResult>> {
     return this.domainEvidenceProviderExternalPayloadExecutionEvidence(args, options);
+  }
+
+  /** Join retained external payload receipts, lineage audits, and execution evidence without external I/O. */
+  async domainEvidenceProviderExternalPayloadEvidenceQuery(
+    args: DomainEvidenceProviderExternalPayloadEvidenceQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadEvidenceQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("external payload evidence query arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain], ["subject_id", args.subject_id]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string or null`);
+    }
+    if (args.after !== undefined && args.after !== null && (typeof args.after !== "string" || !/^[0-9a-f]{64}$/.test(args.after))) throw new ArgumentError("after must be a lowercase SHA-256 digest or null");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 128) throw new ArgumentError("max_items must be 1..=128");
+    if (args.include_artifacts !== undefined && typeof args.include_artifacts !== "boolean") throw new ArgumentError("include_artifacts must be a boolean");
+    if ("credential_material" in args || "credentials" in args) throw new ArgumentError("credential material is not accepted by the external evidence query boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadEvidenceQueryResult>("domain_evidence_provider_external_payload_evidence_query", { ...args, max_items: maxItems, include_artifacts: args.include_artifacts ?? false }, options);
+  }
+
+  /** Explicit alias for the joined external payload evidence query MCP tool. */
+  async domainEvidenceProviderExternalPayloadEvidenceQueryTool(
+    args: DomainEvidenceProviderExternalPayloadEvidenceQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadEvidenceQueryResult>> {
+    return this.domainEvidenceProviderExternalPayloadEvidenceQuery(args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

@@ -5399,6 +5399,53 @@ export interface DomainEvidenceProviderExternalPayloadExecutionEvidenceResult ex
   does_not_claim: string[];
 }
 
+export interface DomainEvidenceProviderExternalPayloadEvidenceQueryArgs extends JsonObject {
+  group_id?: string | null;
+  domain?: string | null;
+  subject_id?: string | null;
+  after?: string | null;
+  max_items?: number;
+  include_artifacts?: boolean;
+}
+
+export type DomainEvidenceProviderExternalPayloadEvidenceQueryJoinStatus = "missing_receipt" | "receipt_only" | "receipt_and_lineage" | "receipt_and_execution" | "complete";
+
+export interface DomainEvidenceProviderExternalPayloadEvidenceQueryRow extends JsonObject {
+  row_digest: string;
+  receipt_digest: string;
+  subject_id: string;
+  group_id: string;
+  domains: string[];
+  receipt_present: boolean;
+  lineage_status: string | null;
+  lineage_digest: string | null;
+  execution_evidence_status: string | null;
+  execution_status: DomainEvidenceProviderExternalPayloadExecutionStatus | null;
+  evidence_digest: string | null;
+  join_status: DomainEvidenceProviderExternalPayloadEvidenceQueryJoinStatus;
+  parent_digests: string[];
+  receipt_artifact?: JsonObject | null;
+  lineage_artifact?: JsonObject | null;
+  execution_artifact?: JsonObject | null;
+}
+
+export interface DomainEvidenceProviderExternalPayloadEvidenceQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-query/0.1";
+  workflow: "domain_evidence_provider_external_payload_evidence_query";
+  filters: DomainEvidenceProviderExternalPayloadEvidenceQueryArgs;
+  registry_generation: number;
+  registry_size: number;
+  rows: DomainEvidenceProviderExternalPayloadEvidenceQueryRow[];
+  next_after: string | null;
+  has_more: boolean;
+  query_digest: string;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
   candidate_fields: string[];
   present_record_count: number;
