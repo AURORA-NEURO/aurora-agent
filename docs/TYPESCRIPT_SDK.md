@@ -524,6 +524,8 @@ caller observations only and never imports dependencies or executes an adapter.
 adapter rows. `AdapterExecutionEvidenceQueryResult` preserves cursor state, status filters, and
 explicit source/workflow parent-join posture, including missing and unclassified parents; it does
 not infer provenance or convert a complete join into readiness.
+Its `page_summary` keeps execution, conformance, semantic-loss, join, output, and missing-parent
+counts separate and explicitly page-scoped.
 `conformanceRun` returns typed `ConformanceRunResult` suite and release evidence, including fixture
 drift, test-pyramid counts, bounded case outcomes, and all unmet noncompensatory gates. A null
 `results` field means case details were not requested; it is not an empty-suite claim.

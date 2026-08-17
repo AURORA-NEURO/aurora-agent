@@ -9,6 +9,18 @@ const queryResult = {
   filters: { adapter_id: "bioprism.python.vcf_text", max_items: 1 },
   registry_generation: 4,
   registry_size: 3,
+  page_summary: {
+    page_row_count: 1,
+    execution_status_counts: { succeeded: 1 },
+    conformance_status_counts: { verified: 1 },
+    semantic_loss_status_counts: { lossless: 1 },
+    join_status_counts: { source_bound: 1 },
+    source_bound_rows: 1,
+    workflow_bound_rows: 0,
+    rows_with_missing_parents: 0,
+    output_digest_present_rows: 1,
+    total_loss_entries: 0,
+  },
   rows: [{
     row_digest: "a".repeat(64),
     content_digest: "b".repeat(64),
@@ -60,6 +72,7 @@ test("client exposes bounded adapter evidence queries and explicit joins", async
   const report = (await client.adapterExecutionEvidenceQuery({ adapter_id: "bioprism.python.vcf_text", max_items: 1 })).mcp.result.structuredContent;
   assert.equal(report.rows[0].join_status, "source_bound");
   assert.equal(report.rows[0].joins.source_bound, true);
+  assert.equal(report.page_summary.output_digest_present_rows, 1);
   const alias = (await client.adapterExecutionEvidenceQueryTool({})).mcp.result.structuredContent;
   assert.equal(alias.has_more, false);
   await assert.rejects(client.adapterExecutionEvidenceQuery({ after: "not-a-digest" }), ArgumentError);

@@ -5772,6 +5772,19 @@ export interface AdapterExecutionEvidenceQueryRow extends JsonObject {
   evidence_artifact?: JsonObject | null;
 }
 
+export interface AdapterExecutionEvidenceQuerySummary extends JsonObject {
+  page_row_count: number;
+  execution_status_counts: Record<string, number>;
+  conformance_status_counts: Record<string, number>;
+  semantic_loss_status_counts: Record<string, number>;
+  join_status_counts: Record<string, number>;
+  source_bound_rows: number;
+  workflow_bound_rows: number;
+  rows_with_missing_parents: number;
+  output_digest_present_rows: number;
+  total_loss_entries: number;
+}
+
 export interface AdapterExecutionEvidenceQueryResult extends JsonObject {
   ok: boolean;
   schema: "bioprism-devplat-adapter-execution-evidence-query/0.1";
@@ -5780,6 +5793,7 @@ export interface AdapterExecutionEvidenceQueryResult extends JsonObject {
   registry_generation: number;
   registry_size: number;
   rows: AdapterExecutionEvidenceQueryRow[];
+  page_summary: AdapterExecutionEvidenceQuerySummary;
   next_after: string | null;
   has_more: boolean;
   query_digest: string;

@@ -870,7 +870,9 @@ readiness from `verified` or `lossless` labels.
   read-only adapter evidence index through all four sync/async HTTP and workspace facades. Queries
   are bounded and cursorable, preserve execution/conformance/loss filters, and classify explicit
   source-plan, intake/external-payload, and workflow-reconciliation parent joins while keeping
-  missing parents visible. They do not infer provenance or execute adapters.
+missing parents visible. They do not infer provenance or execute adapters.
+The typed report also exposes the page-scoped `page_summary` mapping so callers can render
+separate status, loss, join, output, and missing-parent counts without inventing a readiness score.
 - `DomainAcquisitionQuery`, `domain_acquisition_report(...)`, and the sync/async
   `Workspace`/`ApiClient` helpers expose the digest-bound `domain_acquisition_catalogue` route.
   Each selected domain keeps bounded transport (`file`/plain `generic_http` versus

@@ -7478,6 +7478,11 @@ fn adapter_execution_evidence_binds_declared_adapter_scope_and_loss_posture() {
         queried["rows"][0]["evidence_artifact"]["evidence_digest"],
         evidence["evidence_digest"]
     );
+    assert_eq!(queried["page_summary"]["page_row_count"], json!(1));
+    assert_eq!(
+        queried["page_summary"]["rows_with_missing_parents"],
+        json!(1)
+    );
     assert_eq!(queried["readiness_claimed"], json!(false));
 
     let inconsistent = call(

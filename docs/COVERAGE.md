@@ -49,6 +49,8 @@ cursoring and status filters over retained adapter artifacts, with explicit sour
 external-payload/workflow-reconciliation parent joins plus missing and unclassified parent states.
 It never infers provenance from matching labels, and a complete join remains review evidence rather
 than execution, scientific validity, or readiness.
+Its page summary keeps execution, conformance, semantic-loss, join, output-digest, and
+missing-parent counts separate; there is deliberately no composite adapter score.
 `metrics_analytics_audit` adds a bounded domain-neutral arithmetic kernel for scalar summaries,
 paired robustness/cross-modal/translation/design contrasts, cost and latency, replicate spread,
 and probability calibration while keeping declared and missing evidence out of measured values.

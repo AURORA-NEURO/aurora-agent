@@ -320,6 +320,9 @@ retained adapter rows, filters by adapter/source/status identity, and classifies
 parent-digest joins to source plans, intake/external-payload projections, and workflow
 reconciliations. Missing and unclassified parents remain visible; the query does not infer
 provenance from labels, execute adapters, fetch sources, or change workflow state.
+Each page also carries separate counts for execution, conformance, semantic-loss, join status,
+missing parents, output digests, and loss entries; these are page summaries, not a composite score
+or readiness claim.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

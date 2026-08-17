@@ -10,6 +10,7 @@ use crate::artifact_registry::ArtifactRecord;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 pub const ADAPTER_EXECUTION_EVIDENCE_QUERY_SCHEMA: &str =
     "bioprism-devplat-adapter-execution-evidence-query/0.1";
@@ -102,6 +103,20 @@ pub struct AdapterExecutionEvidenceQueryRow {
     pub evidence_artifact: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct AdapterExecutionEvidenceQuerySummary {
+    pub page_row_count: usize,
+    pub execution_status_counts: BTreeMap<String, usize>,
+    pub conformance_status_counts: BTreeMap<String, usize>,
+    pub semantic_loss_status_counts: BTreeMap<String, usize>,
+    pub join_status_counts: BTreeMap<String, usize>,
+    pub source_bound_rows: usize,
+    pub workflow_bound_rows: usize,
+    pub rows_with_missing_parents: usize,
+    pub output_digest_present_rows: usize,
+    pub total_loss_entries: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AdapterExecutionEvidenceQueryReport {
     pub ok: bool,
@@ -111,6 +126,7 @@ pub struct AdapterExecutionEvidenceQueryReport {
     pub registry_generation: u64,
     pub registry_size: usize,
     pub rows: Vec<AdapterExecutionEvidenceQueryRow>,
+    pub page_summary: AdapterExecutionEvidenceQuerySummary,
     pub next_after: Option<String>,
     pub has_more: bool,
     pub query_digest: String,
@@ -118,6 +134,43 @@ pub struct AdapterExecutionEvidenceQueryReport {
     pub readiness_claimed: bool,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
+}
+
+fn increment(counts: &mut BTreeMap<String, usize>, value: &str) {
+    *counts.entry(value.to_string()).or_default() += 1;
+}
+
+fn summarize(rows: &[AdapterExecutionEvidenceQueryRow]) -> AdapterExecutionEvidenceQuerySummary {
+    let mut summary = AdapterExecutionEvidenceQuerySummary {
+        page_row_count: rows.len(),
+        ..AdapterExecutionEvidenceQuerySummary::default()
+    };
+    for row in rows {
+        increment(&mut summary.execution_status_counts, &row.execution_status);
+        increment(
+            &mut summary.conformance_status_counts,
+            &row.conformance_status,
+        );
+        increment(
+            &mut summary.semantic_loss_status_counts,
+            &row.semantic_loss_status,
+        );
+        increment(&mut summary.join_status_counts, &row.join_status);
+        if row.joins.source_bound {
+            summary.source_bound_rows += 1;
+        }
+        if row.joins.workflow_bound {
+            summary.workflow_bound_rows += 1;
+        }
+        if !row.joins.missing_parent_digests.is_empty() {
+            summary.rows_with_missing_parents += 1;
+        }
+        if row.output_digest.is_some() {
+            summary.output_digest_present_rows += 1;
+        }
+        summary.total_loss_entries += row.loss_count;
+    }
+    summary
 }
 
 fn validate_text(name: &str, value: &str) -> Result<(), String> {
@@ -341,6 +394,7 @@ pub fn query_adapter_execution_evidence(
     } else {
         None
     };
+    let page_summary = summarize(&rows);
     let filters = serde_json::to_value(&request).map_err(|error| error.to_string())?;
     let query_digest = ContentHash::of_value(&json!({
         "schema": ADAPTER_EXECUTION_EVIDENCE_QUERY_SCHEMA,
@@ -358,6 +412,7 @@ pub fn query_adapter_execution_evidence(
         registry_generation: generation,
         registry_size: records.len(),
         rows,
+        page_summary,
         next_after,
         has_more,
         query_digest,
@@ -438,6 +493,12 @@ mod tests {
         assert_eq!(report.rows[0].join_status, "source_and_workflow_bound");
         assert!(report.rows[0].joins.source_bound);
         assert!(report.rows[0].joins.workflow_bound);
+        assert_eq!(report.page_summary.page_row_count, 1);
+        assert_eq!(
+            report.page_summary.join_status_counts["source_and_workflow_bound"],
+            1
+        );
+        assert_eq!(report.page_summary.output_digest_present_rows, 1);
         assert!(!report.readiness_claimed);
     }
 

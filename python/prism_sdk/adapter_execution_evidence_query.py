@@ -100,6 +100,7 @@ class AdapterExecutionEvidenceQueryRequest:
 class AdapterExecutionEvidenceQueryReport:
     raw: dict[str, Any]
     rows: tuple[Mapping[str, Any], ...]
+    page_summary: Mapping[str, Any]
     next_after: str | None
     has_more: bool
     query_digest: str
@@ -129,6 +130,7 @@ class AdapterExecutionEvidenceQueryReport:
         return cls(
             raw=raw,
             rows=tuple(_mapping("adapter execution evidence query row", row) for row in rows),
+            page_summary=_mapping("adapter execution evidence query page_summary", raw.get("page_summary", {})),
             next_after=next_after,
             has_more=raw["has_more"],
             query_digest=_digest("adapter execution evidence query_digest", raw.get("query_digest")),
