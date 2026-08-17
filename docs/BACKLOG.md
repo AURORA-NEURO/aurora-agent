@@ -258,6 +258,11 @@ The delivery audit and content-addressed receipt now accept this conformance res
 `ci_provider_evidence` target/evidence row. Receipt verification recomputes the complete retained
 projection and distinguishes provider-evidence tampering from target or canonical CI tampering; this
 still does not create a remote artifact verifier or external CI authority.
+The bounded HTTP event checkpoint now also restores subscription metadata and signed pending
+outbox envelopes. Restored subscriptions are paused, pending rows expose
+`secret_rebind_required`, and an explicit in-memory rebind re-signs them before activation; webhook
+secrets are never checkpointed. This is restart-aware local recovery, not distributed event storage,
+consensus, or an external delivery worker.
 The delivery audit now accepts that request directly as `ci_provider`, returning the normalized
 projection and downstream CI evidence audit together while refusing mixed canonical/provider
 evidence inputs. This closes the local composition gap without claiming that an external runner,
