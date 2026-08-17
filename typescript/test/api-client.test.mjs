@@ -2382,8 +2382,8 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
       if (path.endsWith("/deliveries")) {
         return jsonResponse({ ok: true, page: { deliveries: [{ delivery_id: 1, subscription_id: "sub", attempt: 1, state: "failed", last_error: "blocked", last_error_retryable: false, event_id: 2, event_type: "tool.completed", signature: "sha256=x", envelope: { delivery_id: 1, subscription_id: "sub", attempt: 1, event: { id: 2, event_type: "tool.completed", subject: "tool", request_id: "req", payload: {} }, signature: "sha256=x" } }], after: 0, next_after: 1, pending_count: 1, dropped_deliveries: 0 } });
       }
-      if (path.endsWith("/attempts")) {
-        return jsonResponse({ ok: true, page: { attempts: [{ attempt_id: 1, delivery_id: 1, subscription_id: "sub", event_id: 2, event_type: "tool.completed", attempt: 1, action: "send", outcome: "accepted", receiver_accepted: true, retryable: null, error: null, signature: "sha256=x" }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_attempts: 0 } });
+      if (path.includes("/v1/webhooks/subscriptions/") && path.endsWith("/attempts")) {
+        return jsonResponse({ ok: true, page: { attempts: [{ attempt_id: 1, delivery_id: 1, subscription_id: "sub", event_id: 2, event_type: "tool.completed", attempt: 1, action: "send", outcome: "accepted", receiver_accepted: true, retryable: null, error: null, signature: "sha256=x", receipt_id: "receipt-ts-1", receipt_digest: "c".repeat(64) }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_attempts: 0 } });
       }
       if (path.endsWith("/replay") && init.method === "POST") {
         return jsonResponse({ ok: true, replayed: [{ delivery_id: 1, subscription_id: "sub", attempt: 1, state: "pending", last_error: null, last_error_retryable: null, event_id: 2, event_type: "tool.completed", signature: "sha256=x", envelope: {} }] });
@@ -2405,7 +2405,8 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
           links: { event_persistence: "/v1/events/persistence" },
         });
       }
-      if (path.startsWith("/v1/delivery-receipts/")) return jsonResponse({ ok: true, workflow: "developer_delivery_receipt_events", receipt_id: "receipt-ts-1", found: true, page: { events: [{ id: 2, event_type: "tool.completed", subject: "developer_delivery_receipt", request_id: "req-2", payload: { delivery_receipt: { receipt_id: "receipt-ts-1" } } }], after: 0, next_after: 2, oldest: 1, newest: 2, gap: false, dropped_events: 0 } });
+      if (path.startsWith("/v1/delivery-receipts/") && path.endsWith("/events")) return jsonResponse({ ok: true, workflow: "developer_delivery_receipt_events", receipt_id: "receipt-ts-1", found: true, page: { events: [{ id: 2, event_type: "tool.completed", subject: "developer_delivery_receipt", request_id: "req-2", payload: { delivery_receipt: { receipt_id: "receipt-ts-1" } } }], after: 0, next_after: 2, oldest: 1, newest: 2, gap: false, dropped_events: 0 } });
+      if (path.startsWith("/v1/delivery-receipts/") && path.endsWith("/attempts")) return jsonResponse({ ok: true, workflow: "developer_delivery_receipt_attempts", receipt_id: "receipt-ts-1", found: true, page: { attempts: [{ attempt_id: 1, delivery_id: 1, subscription_id: "sub", event_id: 2, event_type: "tool.completed", attempt: 1, action: "send", outcome: "accepted", receiver_accepted: true, retryable: null, error: null, signature: "sha256=x", receipt_id: "receipt-ts-1", receipt_digest: "c".repeat(64) }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_attempts: 0 } });
       if (path.startsWith("/v1/route-reviews/")) return jsonResponse({ ok: true, workflow: "capability_route_review_evidence", review_id: "a".repeat(64), found: true, page: { events: [{ id: 1, event_type: "tool.completed", subject: "capability_route_review", request_id: "req-1", payload: {} }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0 } });
       return new Response("id: 4\nevent: tool.completed\ndata: {\"ok\":true}\n\nevent: cursor_gap\ndata: {\"after\":0}\n\n", {
       headers: { "content-type": "text/event-stream", "x-next-after": "4" },
@@ -2424,6 +2425,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   assert.equal(receiptEvents.workflow, "developer_delivery_receipt_events");
   assert.equal(receiptEvents.found, true);
   assert.equal(receiptEvents.page.events[0].payload.delivery_receipt.receipt_id, "receipt-ts-1");
+  const receiptAttempts = await client.deliveryReceiptAttempts("receipt-ts-1");
+  assert.equal(receiptAttempts.found, true);
+  assert.equal(receiptAttempts.page.attempts[0].receipt_digest, "c".repeat(64));
   await assert.rejects(client.deliveryReceiptEvents("bad\nreceipt"), ArgumentError);
   await assert.rejects(client.routeReviewEvidence("invalid"), ArgumentError);
   assert.deepEqual(parseSse("data: a\ndata: b\n\n"), [{ data: "a\nb" }]);

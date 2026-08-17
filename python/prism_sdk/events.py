@@ -69,6 +69,18 @@ def _optional_bool(name: str, value: Any) -> bool | None:
     return value
 
 
+def _optional_digest(name: str, value: Any) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ArgumentError(f"{name} must be a 64-character lowercase hexadecimal digest")
+    return value
+
+
 @dataclass(frozen=True)
 class ApiEvent:
     """One retained, sequence-addressed event emitted by the HTTP boundary."""
@@ -218,6 +230,8 @@ class EventPersistenceStatus:
     dropped_events: int
     subscriptions_durable: bool
     webhook_deliveries_durable: bool
+    delivery_attempts_durable: bool
+    delivery_receipt_metadata_durable: bool
     secrets_persisted: bool
     retained_delivery_attempts: int
     dropped_delivery_attempts: int
@@ -252,8 +266,15 @@ class EventPersistenceStatus:
             raise ArgumentError("event persistence integrity_verified must be a boolean or null")
         subscriptions_durable = raw.get("subscriptions_durable")
         webhook_deliveries_durable = raw.get("webhook_deliveries_durable")
+        delivery_attempts_durable = raw.get("delivery_attempts_durable", False)
+        delivery_receipt_metadata_durable = raw.get("delivery_receipt_metadata_durable", False)
         secrets_persisted = raw.get("secrets_persisted", False)
-        if not isinstance(subscriptions_durable, bool) or not isinstance(webhook_deliveries_durable, bool):
+        if (
+            not isinstance(subscriptions_durable, bool)
+            or not isinstance(webhook_deliveries_durable, bool)
+            or not isinstance(delivery_attempts_durable, bool)
+            or not isinstance(delivery_receipt_metadata_durable, bool)
+        ):
             raise ArgumentError("event persistence durability fields must be booleans")
         if not isinstance(secrets_persisted, bool):
             raise ArgumentError("event persistence secrets_persisted must be a boolean")
@@ -274,6 +295,8 @@ class EventPersistenceStatus:
             non_negative("dropped_events"),
             subscriptions_durable,
             webhook_deliveries_durable,
+            delivery_attempts_durable,
+            delivery_receipt_metadata_durable,
             secrets_persisted,
             _non_negative(
                 "event persistence retained_delivery_attempts",
@@ -495,6 +518,8 @@ class DeliveryAttempt:
     retryable: bool | None
     error: str | None
     signature: str
+    receipt_id: str | None
+    receipt_digest: str | None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "DeliveryAttempt":
@@ -502,6 +527,16 @@ class DeliveryAttempt:
         error = raw.get("error")
         if error is not None:
             error = _text("delivery attempt error", error)
+        receipt_id = (
+            validate_receipt_id(raw["receipt_id"])
+            if raw.get("receipt_id") is not None
+            else None
+        )
+        receipt_digest = _optional_digest(
+            "delivery attempt receipt_digest", raw.get("receipt_digest")
+        )
+        if receipt_digest is not None and receipt_id is None:
+            raise ArgumentError("delivery attempt receipt_digest requires receipt_id")
         return cls(
             raw=raw,
             attempt_id=_non_negative("delivery attempt attempt_id", raw.get("attempt_id")),
@@ -520,6 +555,8 @@ class DeliveryAttempt:
             retryable=_optional_bool("delivery attempt retryable", raw.get("retryable")),
             error=error,
             signature=_text("delivery attempt signature", raw.get("signature")),
+            receipt_id=receipt_id,
+            receipt_digest=receipt_digest,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -574,6 +611,33 @@ class DeliveryAttemptPage:
                 "delivery attempt page dropped_attempts", raw.get("dropped_attempts")
             ),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DeliveryReceiptAttempts:
+    """Typed attempt provenance correlated to one content-addressed receipt."""
+
+    raw: dict[str, Any]
+    receipt_id: str
+    found: bool
+    page: DeliveryAttemptPage
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DeliveryReceiptAttempts":
+        raw = _mapping("delivery receipt attempts", value)
+        if raw.get("workflow") != "developer_delivery_receipt_attempts":
+            raise ArgumentError("delivery receipt attempts workflow is invalid")
+        receipt_id = validate_receipt_id(raw.get("receipt_id"))
+        found = raw.get("found")
+        if not isinstance(found, bool):
+            raise ArgumentError("delivery receipt attempts found must be a boolean")
+        page = DeliveryAttemptPage.from_wire(raw.get("page"))
+        if found != bool(page.attempts):
+            raise ArgumentError("delivery receipt attempts found must match page attempts")
+        return cls(raw=raw, receipt_id=receipt_id, found=found, page=page)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -660,6 +724,7 @@ __all__ = [
     "DeliveryPage",
     "DeliveryAttempt",
     "DeliveryAttemptPage",
+    "DeliveryReceiptAttempts",
     "SseEvent",
     "SseSnapshot",
     "parse_sse",

@@ -17,10 +17,11 @@ pub const MAX_ENDPOINT_BYTES: usize = 2048;
 pub const MAX_SECRET_BYTES: usize = 4096;
 pub const MAX_FILTERS: usize = 32;
 pub const MAX_RETRY_ATTEMPTS: u32 = 10;
-pub const EVENT_STATE_SCHEMA_VERSION: u64 = 4;
+pub const EVENT_STATE_SCHEMA_VERSION: u64 = 5;
 const LEGACY_EVENT_STATE_SCHEMA_VERSION: u64 = 1;
-const EARLIER_EVENT_STATE_SCHEMA_VERSION: u64 = 2;
-const PREVIOUS_EVENT_STATE_SCHEMA_VERSION: u64 = 3;
+const EARLIEST_DURABLE_EVENT_STATE_SCHEMA_VERSION: u64 = 2;
+const CONTENT_ADDRESSED_EVENT_STATE_SCHEMA_VERSION: u64 = 3;
+const PREVIOUS_EVENT_STATE_SCHEMA_VERSION: u64 = 4;
 pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_DELIVERY_WORKER_BATCH: usize = 100;
 pub const MAX_DELIVERY_ERROR_BYTES: usize = 8 * 1024;
@@ -117,6 +118,10 @@ pub struct DeliveryAttempt {
     pub retryable: Option<bool>,
     pub error: Option<String>,
     pub signature: String,
+    #[serde(default)]
+    pub receipt_id: Option<String>,
+    #[serde(default)]
+    pub receipt_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -232,11 +237,10 @@ impl EventLog {
         })
     }
 
-    /// Restore only the retained event cursor from an optional bounded checkpoint.
-    ///
-    /// Subscriptions, signing secrets, and pending deliveries are intentionally not restored.
-    /// They are operator-owned delivery state and must be re-established explicitly after a
-    /// process restart rather than silently resurrecting credentials from a JSON snapshot.
+    /// Restore bounded event rows, non-secret subscription/outbox metadata, and delivery-attempt
+    /// provenance from an optional checkpoint. Signing secrets are intentionally never restored;
+    /// subscriptions remain paused until an operator explicitly rebinds each secret rather than
+    /// silently resurrecting credentials from a JSON snapshot.
     pub fn from_checkpoint_path(
         capacity: usize,
         path: Option<&std::path::Path>,
@@ -266,15 +270,17 @@ impl EventLog {
             .ok_or_else(|| "event state snapshot has no schema_version".to_string())?;
         if schema_version != EVENT_STATE_SCHEMA_VERSION
             && schema_version != PREVIOUS_EVENT_STATE_SCHEMA_VERSION
-            && schema_version != EARLIER_EVENT_STATE_SCHEMA_VERSION
+            && schema_version != CONTENT_ADDRESSED_EVENT_STATE_SCHEMA_VERSION
+            && schema_version != EARLIEST_DURABLE_EVENT_STATE_SCHEMA_VERSION
             && schema_version != LEGACY_EVENT_STATE_SCHEMA_VERSION
         {
             return Err(format!(
-                "unsupported event state schema version {schema_version}; expected {LEGACY_EVENT_STATE_SCHEMA_VERSION}, {EARLIER_EVENT_STATE_SCHEMA_VERSION}, {PREVIOUS_EVENT_STATE_SCHEMA_VERSION}, or {EVENT_STATE_SCHEMA_VERSION}"
+                "unsupported event state schema version {schema_version}; expected {LEGACY_EVENT_STATE_SCHEMA_VERSION}, {EARLIEST_DURABLE_EVENT_STATE_SCHEMA_VERSION}, {CONTENT_ADDRESSED_EVENT_STATE_SCHEMA_VERSION}, {PREVIOUS_EVENT_STATE_SCHEMA_VERSION}, or {EVENT_STATE_SCHEMA_VERSION}"
             ));
         }
         if schema_version == EVENT_STATE_SCHEMA_VERSION
             || schema_version == PREVIOUS_EVENT_STATE_SCHEMA_VERSION
+            || schema_version == CONTENT_ADDRESSED_EVENT_STATE_SCHEMA_VERSION
         {
             verify_checkpoint_digest(&document)?;
         }
@@ -325,7 +331,8 @@ impl EventLog {
         if log.next_event_id == 0 {
             return Err("event state snapshot next_event_id must not overflow".into());
         }
-        if schema_version == EARLIER_EVENT_STATE_SCHEMA_VERSION
+        if schema_version == EARLIEST_DURABLE_EVENT_STATE_SCHEMA_VERSION
+            || schema_version == CONTENT_ADDRESSED_EVENT_STATE_SCHEMA_VERSION
             || schema_version == PREVIOUS_EVENT_STATE_SCHEMA_VERSION
             || schema_version == EVENT_STATE_SCHEMA_VERSION
         {
@@ -428,7 +435,9 @@ impl EventLog {
             if log.next_delivery_id == 0 {
                 return Err("event state snapshot next_delivery_id must not overflow".into());
             }
-            if schema_version == EVENT_STATE_SCHEMA_VERSION {
+            if schema_version == EVENT_STATE_SCHEMA_VERSION
+                || schema_version == PREVIOUS_EVENT_STATE_SCHEMA_VERSION
+            {
                 if document
                     .get("delivery_attempts_durable")
                     .and_then(Value::as_bool)
@@ -436,6 +445,17 @@ impl EventLog {
                 {
                     return Err(
                         "event state snapshot must explicitly declare durable delivery attempts"
+                            .into(),
+                    );
+                }
+                if schema_version == EVENT_STATE_SCHEMA_VERSION
+                    && document
+                        .get("delivery_receipt_metadata_durable")
+                        .and_then(Value::as_bool)
+                        != Some(true)
+                {
+                    return Err(
+                        "event state snapshot must explicitly declare durable delivery receipt metadata"
                             .into(),
                     );
                 }
@@ -523,6 +543,7 @@ impl EventLog {
                 "subscriptions_durable": true,
                 "webhook_deliveries_durable": true,
                 "delivery_attempts_durable": true,
+                "delivery_receipt_metadata_durable": true,
                 "secrets_persisted": false,
                 "recovery_policy": "restored subscriptions are paused until explicit secret rebind; signed outbox rows remain inspectable and are re-signed only after rebind",
             });
@@ -870,6 +891,43 @@ impl EventLog {
         })
     }
 
+    /// Return durable delivery-attempt provenance correlated to one content-addressed developer
+    /// delivery receipt. The attempt cursor remains global so a caller can resume one stable
+    /// sequence even when multiple subscriptions delivered the same receipt-bearing event.
+    pub fn delivery_attempts_for_receipt(
+        &self,
+        receipt_id: &str,
+        after: u64,
+        limit: usize,
+    ) -> Result<DeliveryAttemptPage, String> {
+        validate_receipt_id(receipt_id)?;
+        let limit = checked_limit(limit)?;
+        let matching = self
+            .attempts
+            .iter()
+            .filter(|attempt| attempt.receipt_id.as_deref() == Some(receipt_id))
+            .collect::<Vec<_>>();
+        let oldest = matching.first().map(|attempt| attempt.attempt_id);
+        let newest = matching.last().map(|attempt| attempt.attempt_id);
+        let attempts = matching
+            .into_iter()
+            .filter(|attempt| attempt.attempt_id > after)
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_after = attempts.last().map_or(after, |attempt| attempt.attempt_id);
+        let gap = oldest.is_some_and(|oldest| after.saturating_add(1) < oldest);
+        Ok(DeliveryAttemptPage {
+            attempts,
+            after,
+            next_after,
+            oldest,
+            newest,
+            gap,
+            dropped_attempts: self.dropped_attempts,
+        })
+    }
+
     pub fn acknowledge(&mut self, subscription_id: &str, ids: &[u64]) -> Result<usize, String> {
         self.require_subscription(subscription_id)?;
         if ids.len() > 1000 {
@@ -1159,19 +1217,20 @@ impl EventLog {
         retryable: Option<bool>,
         error: Option<String>,
     ) -> Result<(), String> {
-        let envelope = WebhookEnvelope {
-            delivery_id: delivery.delivery_id,
-            subscription_id: delivery.subscription_id.clone(),
-            attempt: delivery.attempt,
-            event: ApiEvent {
-                id: delivery.event_id,
-                event_type: delivery.event_type.clone(),
-                subject: String::new(),
-                request_id: String::new(),
-                payload: Value::Null,
-            },
-            signature: delivery.signature.clone(),
-        };
+        let envelope = serde_json::from_value::<WebhookEnvelope>(delivery.envelope.clone())
+            .unwrap_or_else(|_| WebhookEnvelope {
+                delivery_id: delivery.delivery_id,
+                subscription_id: delivery.subscription_id.clone(),
+                attempt: delivery.attempt,
+                event: ApiEvent {
+                    id: delivery.event_id,
+                    event_type: delivery.event_type.clone(),
+                    subject: String::new(),
+                    request_id: String::new(),
+                    payload: Value::Null,
+                },
+                signature: delivery.signature.clone(),
+            });
         self.record_attempt(
             &envelope,
             action,
@@ -1196,6 +1255,7 @@ impl EventLog {
         if envelope.delivery_id == 0 || envelope.event.id == 0 {
             return Err("delivery attempt ids must be positive".into());
         }
+        let (receipt_id, receipt_digest) = delivery_receipt_metadata(&envelope.event.payload)?;
         let bounded_error = error.map(bounded_error);
         let attempt = DeliveryAttempt {
             attempt_id: self.next_attempt_id,
@@ -1210,6 +1270,8 @@ impl EventLog {
             retryable,
             error: bounded_error,
             signature: envelope.signature.clone(),
+            receipt_id,
+            receipt_digest,
         };
         self.next_attempt_id = self.next_attempt_id.saturating_add(1);
         if self.attempts.len() >= self.attempt_capacity {
@@ -1441,6 +1503,15 @@ fn validate_delivery_attempt(attempt: &DeliveryAttempt) -> Result<(), String> {
             return Err("delivery attempt error is unbounded or contains control bytes".into());
         }
     }
+    if let Some(receipt_id) = &attempt.receipt_id {
+        validate_receipt_id(receipt_id)?;
+    }
+    if let Some(receipt_digest) = &attempt.receipt_digest {
+        validate_receipt_digest(receipt_digest)?;
+        if attempt.receipt_id.is_none() {
+            return Err("delivery attempt receipt_digest requires receipt_id".into());
+        }
+    }
     Ok(())
 }
 
@@ -1507,6 +1578,38 @@ fn validate_review_id(review_id: &str) -> Result<(), String> {
 
 fn validate_receipt_id(receipt_id: &str) -> Result<(), String> {
     validate_token(receipt_id, 128, "receipt_id")
+}
+
+fn validate_receipt_digest(receipt_digest: &str) -> Result<(), String> {
+    if receipt_digest.len() != 64
+        || !receipt_digest
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err("receipt_digest must be 64 lowercase hexadecimal characters".into());
+    }
+    Ok(())
+}
+
+fn delivery_receipt_metadata(payload: &Value) -> Result<(Option<String>, Option<String>), String> {
+    let Some(projection) = payload.get("delivery_receipt") else {
+        return Ok((None, None));
+    };
+    let receipt_id = projection
+        .get("receipt_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            "delivery_receipt projection must contain a string receipt_id".to_string()
+        })?;
+    validate_receipt_id(receipt_id)?;
+    let receipt_digest = projection
+        .get("receipt_digest")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    if let Some(digest) = receipt_digest.as_deref() {
+        validate_receipt_digest(digest)?;
+    }
+    Ok((Some(receipt_id.to_owned()), receipt_digest))
 }
 
 fn event_matches_review_id(payload: &Value, review_id: &str) -> bool {
@@ -1718,6 +1821,24 @@ mod tests {
         assert_eq!(restored.metrics().subscriptions, 0);
         assert_eq!(restored.metrics().pending_deliveries, 0);
 
+        let mut schema_four =
+            serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap();
+        schema_four["schema_version"] = json!(4);
+        schema_four
+            .as_object_mut()
+            .unwrap()
+            .remove("delivery_receipt_metadata_durable");
+        schema_four.as_object_mut().unwrap().remove("state_digest");
+        let digest = checkpoint_digest(&schema_four).unwrap();
+        schema_four
+            .as_object_mut()
+            .unwrap()
+            .insert("state_digest".into(), Value::String(digest));
+        std::fs::write(&path, serde_json::to_vec_pretty(&schema_four).unwrap()).unwrap();
+        let migrated_four = EventLog::from_checkpoint_path(2, Some(&path)).unwrap();
+        assert_eq!(migrated_four.metrics().next_event_id, 4);
+        assert_eq!(migrated_four.metrics().retained_events, 2);
+
         let mut schema_three =
             serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap();
         schema_three["schema_version"] = json!(3);
@@ -1776,8 +1897,19 @@ mod tests {
             "a-secret-key",
         )
         .unwrap();
-        log.emit("tool.completed", "tool", "req", json!({"ok": true}))
-            .unwrap();
+        log.emit(
+            "tool.completed",
+            "tool",
+            "req",
+            json!({
+                "ok": true,
+                "delivery_receipt": {
+                    "receipt_id": "receipt-worker-1",
+                    "receipt_digest": "a".repeat(64)
+                }
+            }),
+        )
+        .unwrap();
         let mut sender = TestSender {
             calls: 0,
             fail_once: true,
@@ -1798,6 +1930,19 @@ mod tests {
         assert_eq!(attempts.attempts[1].outcome, "retryable_failure");
         assert_eq!(attempts.attempts[2].action, "retry");
         assert_eq!(attempts.attempts[3].outcome, "accepted");
+        assert_eq!(
+            attempts.attempts[0].receipt_id.as_deref(),
+            Some("receipt-worker-1")
+        );
+        let receipt_digest = "a".repeat(64);
+        assert_eq!(
+            attempts.attempts[3].receipt_digest.as_deref(),
+            Some(receipt_digest.as_str())
+        );
+        let receipt_attempts = log
+            .delivery_attempts_for_receipt("receipt-worker-1", 0, 10)
+            .unwrap();
+        assert_eq!(receipt_attempts.attempts.len(), 4);
     }
 
     #[test]

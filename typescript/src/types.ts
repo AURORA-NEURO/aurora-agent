@@ -264,6 +264,8 @@ export interface DeliveryAttempt extends JsonObject {
   retryable: boolean | null;
   error: string | null;
   signature: string;
+  receipt_id: string | null;
+  receipt_digest: string | null;
 }
 
 export interface DeliveryAttemptPage extends JsonObject {
@@ -278,6 +280,14 @@ export interface DeliveryAttemptPage extends JsonObject {
 
 export interface DeliveryAttemptsResponse extends JsonObject {
   ok: boolean;
+  page: DeliveryAttemptPage;
+}
+
+export interface DeliveryReceiptAttemptsResponse extends JsonObject {
+  ok: boolean;
+  workflow: "developer_delivery_receipt_attempts";
+  receipt_id: string;
+  found: boolean;
   page: DeliveryAttemptPage;
 }
 
@@ -7126,6 +7136,8 @@ export interface EventPersistenceStatus extends JsonObject {
   dropped_events: number;
   subscriptions_durable: boolean;
   webhook_deliveries_durable: boolean;
+  delivery_attempts_durable: boolean;
+  delivery_receipt_metadata_durable: boolean;
   secrets_persisted: false;
   retained_delivery_attempts: number;
   dropped_delivery_attempts: number;

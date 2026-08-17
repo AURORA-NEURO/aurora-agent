@@ -661,6 +661,7 @@ claim of distributed consensus.
 const page = await api.events(0, 100);
 const stream = await api.eventStream(page.page.next_after, 100);
 const receiptEvents = await api.deliveryReceiptEvents("receipt-2026-08-1", 0, 100);
+const receiptAttempts = await api.deliveryReceiptAttempts("receipt-2026-08-1", 0, 100);
 for (const event of stream.events) {
   console.log(event.id, event.event, JSON.parse(event.data));
 }
@@ -673,6 +674,7 @@ const subscription = await api.subscribe(
 const deliveries = await api.deliveries(subscription.subscription.id);
 const attempts = await api.deliveryAttempts(subscription.subscription.id, 0, 100);
 console.log(attempts.page.attempts.map((attempt) => [attempt.attempt_id, attempt.outcome]));
+console.log(receiptAttempts.found, receiptAttempts.page.attempts.length);
 // An operator-owned worker sends the signed envelope, then acknowledges only accepted ids.
 await api.acknowledge(subscription.subscription.id, deliveries.page.deliveries.map((d) => d.delivery_id));
 // After an event-state restart, restore the signing secret in memory before retry/replay.

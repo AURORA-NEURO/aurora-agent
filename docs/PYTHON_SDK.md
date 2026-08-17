@@ -863,8 +863,11 @@ Delivery rows also type `state`, `last_error`, and `last_error_retryable`; `deli
 its async counterpart expose durable enqueue/send/retry/replay/acknowledgement provenance with
 explicit cursor gaps and dropped-row counts. `replay()` resets selected rows to attempt one while
 preserving their delivery IDs, so an operator can distinguish retryable, permanent, and exhausted
-transport outcomes before choosing recovery. These records report gateway/worker observations and
-never imply external receiver state beyond an explicit sender success result.
+transport outcomes before choosing recovery. `delivery_receipt_attempts()` adds the cross-
+subscription exact receipt join and returns a typed `DeliveryReceiptAttempts` wrapper with
+`found` and the same retention evidence; the async client exposes the matching method. These
+records report gateway/worker observations and never imply external receiver state beyond an
+explicit sender success result.
 
 ## Metrics analytics across domains
 

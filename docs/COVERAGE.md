@@ -159,9 +159,10 @@ excludes webhook secrets: restored subscriptions pause with `secret_rebind_requi
 rows until an explicit in-memory rebind re-signs them. The API and both SDKs expose status/flush
 and rebind checks so operators can verify the recovery boundary instead of inferring it from a
 2xx response.
-Schema 4 adds a content SHA-256 digest over the unsigned checkpoint document plus a bounded,
-cursor-addressable delivery-attempt journal; schema 1, schema 2, and schema 3 are accepted as
-migration inputs, while tampered current/schema-3 files are rejected before any state is restored.
+Schema 5 adds validated receipt identity/digest fields to the bounded delivery-attempt journal
+while retaining the content SHA-256 digest over the unsigned checkpoint document; schema 1 through
+schema 4 are accepted as migration inputs, while tampered current/content-addressed files are
+rejected before any state is restored.
 The `/v1/recovery` matrix and SDK projections now join those surfaces into explicit rows for
 mission jobs, event rows, subscription metadata, pending outbox rows, delivery-attempt provenance,
 secrets, and external effects without collapsing their guarantees.

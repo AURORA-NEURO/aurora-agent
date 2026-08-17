@@ -33,6 +33,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/events?after=N&limit=M&review_id=H` | Cursor page with retention-gap and dropped-event evidence; optional exact route-review or receipt filter |
 | `GET /v1/events/stream?after=N&limit=M&review_id=H` | A bounded Server-Sent Events snapshot, optionally filtered by an exact route-review or receipt id |
 | `GET /v1/route-reviews/{review_id}/evidence?after=N&limit=M` | Typed retained route-review evidence lookup |
+| `GET /v1/delivery-receipts/{receipt_id}/attempts?after=N&limit=M` | Exact receipt-correlated delivery-attempt provenance |
 | `GET /v1/events/persistence` | Inspect bounded event cursor checkpoint status |
 | `POST /v1/events/persistence/flush` | Force an event cursor checkpoint and verify its write |
 | `GET /v1/webhooks/subscriptions` | Subscription catalogue with secrets omitted |
@@ -91,15 +92,18 @@ envelopes, but never writes webhook secrets. Restored subscriptions are paused a
 report `secret_rebind_required` until `POST /v1/webhooks/subscriptions/{id}/rebind` receives a
 fresh secret in memory; rebind re-signs pending envelopes and reactivates that subscription.
 `GET /v1/events/persistence` and its authenticated `POST /v1/events/persistence/flush` counterpart
-expose the file bound, cursor metrics, durability fields, and explicit secret policy.
+expose the file bound, cursor metrics, delivery-attempt and receipt-metadata durability fields,
+and explicit secret policy.
 Both persistence status responses include `integrity_verified`: `true` means the current-schema
 file digest matches at observation time, `false` means a present current-schema file is malformed
 or tampered, and `null` means no file or a legacy schema without a digest.
-The writer currently emits event-state schema 4, which binds every persisted field except the
+The writer currently emits event-state schema 5, which binds every persisted field except the
 digest itself to a lowercase SHA-256 `state_digest`; startup rejects a modified, truncated, or
-partially rewritten current or schema-3 document before restoring any rows. Schema 1 and schema 2
-snapshots remain readable as bounded migrations without a digest, and the next successful flush
-upgrades them to schema 4. Schema 4 additionally persists a bounded delivery-attempt journal;
+partially rewritten current or content-addressed legacy document before restoring any rows. Schema 1
+and schema 2 snapshots remain readable as bounded migrations without a digest, while schema 3 and
+schema 4 retain their digest checks; the next successful flush upgrades every legacy version to
+schema 5. Schema 4 added a bounded delivery-attempt journal, and schema 5 additionally persists
+validated receipt IDs and content digests on receipt-bearing attempts;
 each row records the signed envelope identity and local outcome classification, while
 `receiver_accepted` is only true when the operator-owned sender reports success. Event persistence
 and mission persistence are independent: an operator can enable either, both, or neither.
@@ -201,6 +205,9 @@ outcome, retryability, bounded error, and whether the operator-owned sender expl
 receiver acceptance. `gap` and `dropped_attempts` make journal retention loss visible. The journal
 is evidence of gateway/worker observations, not a claim that an external receiver committed an
 effect beyond the sender's explicit success result.
+`GET /v1/delivery-receipts/{receipt_id}/attempts?after=N&limit=M` applies the same cursor to all
+subscriptions and returns only exact receipt-correlated attempts, including `found`, receipt
+identity, and the same explicit non-claim about external effects.
 
 ## Explicit nonclaims
 

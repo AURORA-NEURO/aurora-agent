@@ -491,6 +491,11 @@ impl ApiRouter {
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
+            ("GET", path)
+                if path.starts_with("/v1/delivery-receipts/") && path.ends_with("/attempts") =>
+            {
+                self.delivery_receipt_attempts(&request, &request_id)
+            }
             ("GET", path) if path.starts_with("/v1/delivery-receipts/") => {
                 self.delivery_receipt_events(&request, &request_id)
             }
@@ -645,6 +650,8 @@ impl ApiRouter {
                 "next_attempt_id": metrics.next_attempt_id,
                 "subscriptions_durable": true,
                 "webhook_deliveries_durable": true,
+                "delivery_attempts_durable": true,
+                "delivery_receipt_metadata_durable": true,
                 "secrets_persisted": false,
                 "recovery_policy": "events, subscription metadata, and signed outbox rows restore; subscriptions pause until explicit in-memory secret rebind",
                 "flush": "/v1/events/persistence/flush"
@@ -825,7 +832,8 @@ impl ApiRouter {
                     "event_persistence": "/v1/events/persistence",
                     "event_flush": "/v1/events/persistence/flush",
                     "mission_flush": "/v1/missions/persistence/flush",
-                    "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
+                    "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts",
+                    "delivery_receipt_attempts": "/v1/delivery-receipts/{receipt_id}/attempts"
                 }
             }),
         )
@@ -927,6 +935,7 @@ impl ApiRouter {
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
                     "delivery_receipt_events": "/v1/delivery-receipts/{receipt_id}/events",
+                    "delivery_receipt_attempts": "/v1/delivery-receipts/{receipt_id}/attempts",
                     "route_review_evidence": "/v1/route-reviews/{review_id}/evidence",
                     "event_persistence": "/v1/events/persistence",
                     "webhooks": "/v1/webhooks/subscriptions",
@@ -955,6 +964,7 @@ impl ApiRouter {
                     "mission_inventory": true,
                     "mission_trace": true,
                     "delivery_receipt_events": true,
+                    "delivery_receipt_attempt_provenance": true,
                     "route_review_evidence": true,
                     "recovery_matrix": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
@@ -1141,6 +1151,58 @@ impl ApiRouter {
                         "after is an exclusive event cursor and next_after is the last returned event id",
                         "retention gaps are reported instead of silently presented as complete history",
                         "an empty result means no matching retained event was found in the requested cursor window"
+                    ]
+                }),
+            ),
+            Err(error) => self.error(400, "invalid_query", &error, request_id),
+        }
+    }
+
+    fn delivery_receipt_attempts(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(receipt_id) = delivery_receipt_attempts_id(&request.path_segments()) else {
+            return self.error(
+                404,
+                "not_found",
+                "delivery-receipt attempt route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let after = match query_u64(&query, "after", 0) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let limit = match query_usize(&query, "limit", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match events.delivery_attempts_for_receipt(&receipt_id, after, limit) {
+            Ok(page) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "workflow": "developer_delivery_receipt_attempts",
+                    "receipt_id": receipt_id,
+                    "found": !page.attempts.is_empty(),
+                    "page": page,
+                    "guarantees": [
+                        "provenance is limited to retained attempt rows with an exact receipt_id match",
+                        "receiver acceptance is reported only when the operator-owned sender returned success",
+                        "retention gaps are reported instead of silently presented as complete history"
                     ]
                 }),
             ),
@@ -2421,6 +2483,7 @@ impl ApiRouter {
                     "/v1/events": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }, { "name": "receipt_id", "in": "query" }], "responses": { "200": { "description": "cursor page; review_id and receipt_id are mutually exclusive" } } } },
                     "/v1/events/stream": { "get": { "parameters": [{ "name": "review_id", "in": "query" }, { "name": "receipt_id", "in": "query" }], "responses": { "200": { "description": "bounded Server-Sent Events snapshot" } } } },
                     "/v1/delivery-receipts/{receipt_id}/events": { "get": { "parameters": [{ "name": "receipt_id", "in": "path", "required": true }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "retained delivery-receipt event page" } } } },
+                    "/v1/delivery-receipts/{receipt_id}/attempts": { "get": { "parameters": [{ "name": "receipt_id", "in": "path", "required": true }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "retained delivery-attempt provenance correlated to a receipt" } } } },
                     "/v1/route-reviews/{review_id}/evidence": { "get": { "parameters": [{ "name": "review_id", "in": "path", "required": true }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "retained route-review evidence page" } } } },
                     "/v1/events/persistence": { "get": { "responses": { "200": { "description": "event cursor checkpoint status" } } } },
                     "/v1/events/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded event cursor checkpoint" } } } },
@@ -2950,6 +3013,20 @@ fn delivery_receipt_id(segments: &Result<Vec<String>, crate::http::HttpError>) -
     Some(segments[2].clone())
 }
 
+fn delivery_receipt_attempts_id(
+    segments: &Result<Vec<String>, crate::http::HttpError>,
+) -> Option<String> {
+    let segments = segments.as_ref().ok()?;
+    if segments.len() != 4
+        || segments[0] != "v1"
+        || segments[1] != "delivery-receipts"
+        || segments[3] != "attempts"
+    {
+        return None;
+    }
+    Some(segments[2].clone())
+}
+
 fn query_u64(
     query: &std::collections::BTreeMap<String, String>,
     name: &str,
@@ -3323,6 +3400,8 @@ mod tests {
         assert_eq!(persistence["integrity_verified"], true);
         assert_eq!(persistence["subscriptions_durable"], true);
         assert_eq!(persistence["webhook_deliveries_durable"], true);
+        assert_eq!(persistence["delivery_attempts_durable"], true);
+        assert_eq!(persistence["delivery_receipt_metadata_durable"], true);
         assert_eq!(persistence["secrets_persisted"], false);
         assert_eq!(router.event_metrics().retained_events, 1);
         assert_eq!(router.event_metrics().pending_deliveries, 1);
@@ -3438,6 +3517,16 @@ mod tests {
     fn delivery_receipt_events_keep_a_bounded_join_projection_and_cursor_filter() {
         let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let subscription = router.handle(request(
+            "POST",
+            "/v1/webhooks/subscriptions",
+            json!({
+                "id": "receipt-sub",
+                "endpoint": "https://example.test/hook",
+                "secret": "a-secret-key"
+            }),
+        ));
+        assert_eq!(subscription.status, 201);
         let output = json!({
             "ok": true,
             "workflow": "developer_delivery_receipt",
@@ -3470,6 +3559,22 @@ mod tests {
         assert_eq!(
             filtered["page"]["events"][0]["payload"]["delivery_receipt"]["receipt_id"],
             "receipt-api-1"
+        );
+        let attempts = router.handle(request(
+            "GET",
+            "/v1/delivery-receipts/receipt-api-1/attempts?after=0&limit=10",
+            json!({}),
+        ));
+        assert_eq!(attempts.status, 200);
+        let attempts: Value = serde_json::from_slice(&attempts.body).unwrap();
+        assert_eq!(attempts["found"], true);
+        assert_eq!(
+            attempts["page"]["attempts"][0]["receipt_id"],
+            "receipt-api-1"
+        );
+        assert_eq!(
+            attempts["page"]["attempts"][0]["receipt_digest"],
+            "a".repeat(64)
         );
         assert_eq!(
             filtered["page"]["events"][0]["payload"]["response_omitted"],

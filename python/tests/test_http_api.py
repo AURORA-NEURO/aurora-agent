@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -330,6 +330,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/v1/route-reviews/"):
             review_id = "a" * 64
             self._send(200, {"ok": True, "workflow": "capability_route_review_evidence", "review_id": review_id, "found": True, "page": {"events": [{"id": 1, "event_type": "tool.completed", "subject": "capability_route_review", "request_id": "req-1", "payload": {}}], "after": 0, "next_after": 1, "oldest": 1, "newest": 1, "gap": False, "dropped_events": 0}})
+        elif self.path.startswith("/v1/delivery-receipts/") and (self.path.endswith("/attempts") or "/attempts?" in self.path):
+            self._send(200, {"ok": True, "workflow": "developer_delivery_receipt_attempts", "receipt_id": "receipt-http-1", "found": True, "page": {"attempts": [{"attempt_id": 1, "delivery_id": 1, "subscription_id": "sub", "event_id": 2, "event_type": "tool.completed", "attempt": 1, "action": "send", "outcome": "accepted", "receiver_accepted": True, "retryable": None, "error": None, "signature": "sha256=x", "receipt_id": "receipt-http-1", "receipt_digest": "a" * 64}], "after": 0, "next_after": 1, "oldest": 1, "newest": 1, "gap": False, "dropped_attempts": 0}})
         elif self.path.startswith("/v1/delivery-receipts/"):
             self._send(200, {"ok": True, "workflow": "developer_delivery_receipt_events", "receipt_id": "receipt-http-1", "found": True, "page": {"events": [{"id": 2, "event_type": "tool.completed", "subject": "developer_delivery_receipt", "request_id": "req-2", "payload": {"delivery_receipt": {"receipt_id": "receipt-http-1"}}}], "after": 0, "next_after": 2, "oldest": 1, "newest": 2, "gap": False, "dropped_events": 0}})
         elif self.path.startswith("/v1/webhooks/subscriptions/") and "/attempts" in self.path:
@@ -887,6 +889,9 @@ class HttpApiClientTests(unittest.TestCase):
         attempts = client.delivery_attempts("sub")
         self.assertIsInstance(attempts, DeliveryAttemptPage)
         self.assertEqual(attempts.attempts[0].outcome, "accepted")
+        receipt_attempts = client.delivery_receipt_attempts("receipt-http-1")
+        self.assertIsInstance(receipt_attempts, DeliveryReceiptAttempts)
+        self.assertEqual(receipt_attempts.page.attempts[0].receipt_id, "receipt-http-1")
         recovery = client.recovery_matrix()
         self.assertIsInstance(recovery, RecoveryMatrix)
         self.assertFalse(recovery.automatic_resume)

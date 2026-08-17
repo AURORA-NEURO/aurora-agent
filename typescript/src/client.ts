@@ -175,6 +175,7 @@ import type {
   DeveloperDeliveryReceiptVerificationArgs,
   DeveloperDeliveryReceiptVerificationResult,
   DeliveryReceiptEventsResponse,
+  DeliveryReceiptAttemptsResponse,
   DeveloperPlatformStatusArgs,
   DeveloperPlatformStatusResult,
   EpistemicVoiArgs,
@@ -1234,6 +1235,24 @@ export class ApiClient {
     return this.request(
       "GET",
       "/v1/delivery-receipts/" + encodeURIComponent(receiptId) + "/events?after=" + after + "&limit=" + limit,
+      undefined,
+      options,
+    );
+  }
+
+  /** Retrieve durable webhook-attempt provenance correlated to one content-addressed receipt. */
+  async deliveryReceiptAttempts(
+    receiptId: string,
+    after = 0,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<DeliveryReceiptAttemptsResponse> {
+    visible(receiptId, "receipt id", 128);
+    cursor(after, "after");
+    pageLimit(limit);
+    return this.request(
+      "GET",
+      "/v1/delivery-receipts/" + encodeURIComponent(receiptId) + "/attempts?after=" + after + "&limit=" + limit,
       undefined,
       options,
     );

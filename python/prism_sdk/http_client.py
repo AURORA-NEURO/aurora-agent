@@ -73,6 +73,7 @@ from .events import (
     MAX_EVENT_PAGE,
     DeliveryAttemptPage,
     DeliveryPage,
+    DeliveryReceiptAttempts,
     DeliveryReceiptEvents,
     EventPage,
     EventPersistenceStatus,
@@ -3354,6 +3355,23 @@ class ApiClient:
             )
         )
 
+    def delivery_receipt_attempts(
+        self, receipt_id: str, *, after: int = 0, limit: int = 100
+    ) -> DeliveryReceiptAttempts:
+        """Retrieve durable webhook-attempt provenance correlated to one receipt."""
+
+        receipt_id = validate_receipt_id(receipt_id)
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_EVENT_PAGE:
+            raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
+        return DeliveryReceiptAttempts.from_wire(
+            self.request(
+                "GET",
+                f"/v1/delivery-receipts/{quote(receipt_id, safe='')}/attempts?after={after}&limit={limit}",
+            )
+        )
+
     def event_persistence(self) -> EventPersistenceStatus:
         """Inspect the optional restart-aware event cursor checkpoint."""
 
@@ -3640,6 +3658,15 @@ class AsyncApiClient:
 
         return await asyncio.to_thread(
             self.client.delivery_receipt_events, receipt_id, after=after, limit=limit
+        )
+
+    async def delivery_receipt_attempts(
+        self, receipt_id: str, *, after: int = 0, limit: int = 100
+    ) -> DeliveryReceiptAttempts:
+        """Async durable webhook-attempt provenance lookup for one receipt."""
+
+        return await asyncio.to_thread(
+            self.client.delivery_receipt_attempts, receipt_id, after=after, limit=limit
         )
 
     async def event_persistence(self) -> EventPersistenceStatus:

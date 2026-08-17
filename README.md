@@ -321,11 +321,12 @@ are marked failed after restart instead of being falsely resumed. Mission checkp
 accepted for migration and rewritten after startup, while tampered schema-2 state is rejected.
 Persistence status reports both the digest and observation-time `integrity_verified` state.
 `--event-state` checkpoints retained events, subscription metadata, and signed pending outbox rows while never persisting
-webhook secrets; the current schema-4 checkpoint is content-addressed with a SHA-256
+webhook secrets; the current schema-5 checkpoint is content-addressed with a SHA-256
 `state_digest`, and startup rejects tampering before restoring rows. It also retains a bounded,
 cursor-addressable delivery-attempt journal for enqueue, send, retry, replay, acknowledgement,
-and secret-rebind outcomes without claiming receiver state beyond explicit worker acknowledgement.
-Schema-1, schema-2, and schema-3 checkpoints remain readable for migration and are upgraded on the next flush. Restored
+and secret-rebind outcomes without claiming receiver state beyond explicit worker acknowledgement;
+receipt-bearing attempts also retain the validated receipt ID and content digest for exact joins.
+Schema-1 through schema-4 checkpoints remain readable for migration and are upgraded on the next flush. Restored
 subscriptions pause until an explicit in-memory `/rebind` call. It deliberately reports
 gRPC, TLS termination, distributed scheduling, and external delivery as absent rather than
 inferring them from an HTTP listener.
@@ -333,7 +334,9 @@ inferring them from an HTTP listener.
 one operator matrix that keeps mission restoration, event rows, subscription metadata, pending
 outbox evidence, delivery-attempt provenance, secrets, and external effects separate. The
 `GET /v1/webhooks/subscriptions/{id}/attempts` route and matching SDK helpers expose the
-provenance cursor with explicit retention gaps and dropped-row accounting.
+provenance cursor with explicit retention gaps and dropped-row accounting. Receipt-bearing rows
+are also available through `/v1/delivery-receipts/{receipt_id}/attempts`, which joins the same
+evidence across subscriptions without claiming external receiver state.
 Embedded Rust consumers can plug an egress-controlled `DeliverySender` into
 `ApiRouter::deliver_once(...)` to acknowledge successful signed webhook sends and classify bounded
 retryable/permanent failures without giving the gateway arbitrary network access.
