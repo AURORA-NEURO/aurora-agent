@@ -4677,6 +4677,16 @@ export interface DomainWorkflowEvidencePlan extends JsonObject {
   completion: JsonObject;
 }
 
+export interface DomainWorkflowBinding extends JsonObject {
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  domain_contract_digest: string;
+  domain_contract: DomainWorkflowContract;
+  evidence_plan: DomainWorkflowEvidencePlan;
+  evidence_plan_digest: string;
+}
+
 export interface DomainWorkflowCatalogueResult extends JsonObject {
   ok: boolean;
   schema: string;
@@ -4698,7 +4708,7 @@ export interface DomainWorkflowInstantiateResult extends JsonObject {
   workflow_id: string;
   workflow_digest: string;
   catalog_digest: string;
-  mission: JsonObject;
+  mission: JsonObject & { workflow_binding?: DomainWorkflowBinding };
   selection: JsonObject;
   domain_contract: DomainWorkflowContract;
   domain_contract_digest: string;
@@ -7373,6 +7383,8 @@ export interface AgentMissionArgs extends JsonObject {
   operations_gate_acceptance?: OperationsGateAcceptance;
   claim_requests?: MissionClaimRequest[];
   evaluator_review?: JsonObject;
+  /** Digest-bound domain workflow instantiation contract carried through dispatch. */
+  workflow_binding?: DomainWorkflowBinding;
 }
 
 export type MissionTraceEventName =
@@ -7417,6 +7429,7 @@ export interface AgentMissionReport extends JsonObject {
   claim_lineage?: JsonObject;
   preflight?: boolean;
   dispatch?: "not_started";
+  workflow_reconciliation?: JsonObject;
   plan: JsonObject;
   results: JsonObject[];
   [key: string]: JsonValue | undefined;

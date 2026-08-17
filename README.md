@@ -783,6 +783,10 @@ validates the mission DAG, derives a least-scope allow-list for requested execut
 step-level evidence plan, and attaches authoritative no-dispatch MCP schema preflight. MCP, REST,
 CLI, Python, and TypeScript all expose the same kernel. A valid workflow remains a plan, not
 permission, scientific evidence, clinical guidance, deployment readiness, or execution.
+The instantiated mission also carries a bounded `workflow_binding` containing the workflow,
+catalogue, domain-contract, and evidence-plan digests plus the contract snapshots needed to
+reconstruct that exact scope after dispatch. The binding is validated as structure and provenance;
+it is not an authorization token, readiness claim, or domain conclusion.
 `domain_workflow_reconcile` is the corresponding post-execution audit: it binds a retained
 `agent_mission` report or verified evidence bundle back to the instantiation, checks plan/result/
 trace consistency, preserves refusals and omissions, and makes structural completion readiness
@@ -798,6 +802,16 @@ the CLI provides `workflow reconciliation-import` and `workflow reconciliation-q
 Python/TypeScript SDKs expose typed REST and MCP helpers. Registry presence is an audit lookup only:
 it never resumes, retries, or re-evaluates a mission and never authenticates provenance or a
 scientific, clinical, safety, or release claim.
+When an executable mission includes a valid `workflow_binding`, the authoritative MCP executor
+automatically runs this structural reconciliation after terminal execution and imports the full
+digest-valid record into the shared REST/MCP registry. The mission response exposes only a compact
+`workflow_reconciliation` link, completion/evidence/integrity posture, and idempotent import result;
+the full record remains available through the reconciliation lookup route. A reconciliation failure
+is retained as an explicit `fail_closed` response and never upgrades mission success into readiness.
+API synchronous calls checkpoint this shared registry before returning when reconciliation
+persistence is configured; asynchronous mission workers checkpoint it before publishing terminal
+job state. This makes the same post-dispatch audit visible to operations gates and restart recovery
+without making a gate pass automatic.
 `mission_evaluator_discover` complements tool routing with a digest-bound catalogue of explicit
 evaluator candidates for every workspace capability group. It filters by intent, group, domain,
 mission level, or adapter ID and returns purpose, candidate evidence tools, and RFC 6901 pointer

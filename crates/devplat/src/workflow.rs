@@ -776,7 +776,7 @@ pub fn instantiate_domain_workflow(
         policy["allowed_tools"] = json!(selected_tools.iter().cloned().collect::<Vec<_>>());
         allow_list_derived = true;
     }
-    let mission = json!({
+    let mut mission = json!({
         "mission_id": mission_id,
         "goal": goal,
         "steps": steps,
@@ -784,12 +784,6 @@ pub fn instantiate_domain_workflow(
         "claim_requests": object.get("claim_requests").cloned().unwrap_or_else(|| json!([])),
         "evaluator_review": object.get("evaluator_review").cloned().unwrap_or(Value::Null),
     });
-    let parsed: MissionRequest = serde_json::from_value(mission.clone()).map_err(|error| {
-        DomainWorkflowError::InvalidRequest(format!("mission shape is invalid: {error}"))
-    })?;
-    parsed.validate().map_err(|error| {
-        DomainWorkflowError::InvalidRequest(format!("mission validation failed: {error}"))
-    })?;
     let selected_tools = selected_tools.into_iter().collect::<Vec<_>>();
     let evidence_plan = steps
         .iter()
@@ -813,6 +807,31 @@ pub fn instantiate_domain_workflow(
             })
         })
         .collect::<Vec<_>>();
+    let workflow_evidence_plan = json!({
+        "schema": DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION,
+        "steps": evidence_plan,
+        "completion": workflow["domain_contract"]["completion_contract"],
+    });
+    let evidence_plan_digest = ContentHash::of_value(&workflow_evidence_plan)
+        .map_err(|error| {
+            DomainWorkflowError::InvalidRequest(format!("evidence plan cannot be hashed: {error}"))
+        })?
+        .to_string();
+    mission["workflow_binding"] = json!({
+        "workflow_id": workflow_id,
+        "workflow_digest": workflow["workflow_digest"],
+        "catalog_digest": catalogue_report["catalog_digest"],
+        "domain_contract_digest": workflow["domain_contract_digest"],
+        "domain_contract": workflow["domain_contract"],
+        "evidence_plan": workflow_evidence_plan,
+        "evidence_plan_digest": evidence_plan_digest,
+    });
+    let parsed: MissionRequest = serde_json::from_value(mission.clone()).map_err(|error| {
+        DomainWorkflowError::InvalidRequest(format!("mission shape is invalid: {error}"))
+    })?;
+    parsed.validate().map_err(|error| {
+        DomainWorkflowError::InvalidRequest(format!("mission validation failed: {error}"))
+    })?;
     let output = json!({
         "ok": true,
         "schema": DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION,
@@ -830,11 +849,7 @@ pub fn instantiate_domain_workflow(
         },
         "domain_contract": workflow["domain_contract"],
         "domain_contract_digest": workflow["domain_contract_digest"],
-        "evidence_plan": {
-            "schema": DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION,
-            "steps": evidence_plan,
-            "completion": workflow["domain_contract"]["completion_contract"],
-        },
+        "evidence_plan": workflow_evidence_plan,
         "preflight": {
             "required": true,
             "dispatch": "not_started",
@@ -935,6 +950,16 @@ mod tests {
         assert_eq!(report["selection"]["all_selected_tools_declared"], true);
         assert_eq!(report["selection"]["all_selected_tools_available"], true);
         assert_eq!(report["evidence_plan"]["steps"][0]["step_id"], "boundary");
+        assert_eq!(
+            report["mission"]["workflow_binding"]["evidence_plan"],
+            report["evidence_plan"]
+        );
+        assert_eq!(
+            report["mission"]["workflow_binding"]["evidence_plan_digest"],
+            ContentHash::of_value(&report["evidence_plan"])
+                .unwrap()
+                .to_string()
+        );
         assert_eq!(
             report["evidence_plan"]["steps"][0]["tool_contract"]["schema_state"],
             "missing"

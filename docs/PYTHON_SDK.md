@@ -462,6 +462,10 @@ invent defaults:
   serial execution is the default and the executor reserves the worst-case wave output budget before
   launching work. `MissionBinding` can route a JSON-pointer field from a
   successful direct prerequisite into an existing argument slot.
+  A `MissionRequest` may also carry the `workflow_binding` returned inside a domain-workflow
+  instantiation. The typed `MissionExecutionReport.workflow_reconciliation` property exposes the
+  compact automatic reconciliation link after execution; the full digest-bound record remains
+  available through the domain-workflow reconciliation helpers.
 - `mission_preflight(request, catalogue=...)` adds a no-side-effect client review before mission
   dispatch. It returns a request digest, live-catalogue digest, deterministic waves, per-step
   schema reports, binding/dependency findings, execution authorization issues, and explicit

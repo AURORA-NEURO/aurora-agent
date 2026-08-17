@@ -1033,14 +1033,30 @@ fn validate_static_mission_schemas(request: &MissionRequest) -> Result<(), Strin
 
 impl Server {
     pub fn new(root: PathBuf) -> Self {
+        Self::with_registries(
+            root,
+            Arc::new(Mutex::new(EvidenceBundleRegistry::new())),
+            Arc::new(Mutex::new(DomainWorkflowReconciliationRegistry::new())),
+        )
+    }
+
+    /// Construct a server over caller-owned registries.
+    ///
+    /// The HTTP adapter and MCP dispatcher must share these indexes: otherwise a reconciliation
+    /// imported or produced through one transport is invisible to the other transport's gate and
+    /// operator projections. The registries remain bounded and mutex-protected at the process
+    /// boundary; this constructor only joins their ownership graph.
+    pub fn with_registries(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    ) -> Self {
         Server {
             root: std::fs::canonicalize(&root).unwrap_or(root),
             lifecycle: Lifecycle::New,
             mission_trace_observer: None,
-            evidence_registry: Arc::new(Mutex::new(EvidenceBundleRegistry::new())),
-            workflow_reconciliation_registry: Arc::new(Mutex::new(
-                DomainWorkflowReconciliationRegistry::new(),
-            )),
+            evidence_registry,
+            workflow_reconciliation_registry,
         }
     }
 
@@ -1113,7 +1129,8 @@ impl Server {
         arguments: &Value,
         cancellation: &AtomicBool,
     ) -> Result<Value, String> {
-        self.agent_mission_with_cancellation(arguments, Some(cancellation))
+        let result = self.agent_mission_with_cancellation(arguments, Some(cancellation));
+        self.attach_workflow_reconciliation(arguments, result)
     }
 
     /// Resolves a client-supplied path inside the root.
@@ -23703,8 +23720,103 @@ impl Server {
     /// MCP boundary, but only after the typed mission contract has required an allow-list and
     /// applied side-effect and output budgets. Nested results remain raw MCP envelopes so a
     /// refusal cannot be silently converted into a successful scientific conclusion.
+    fn attach_workflow_reconciliation(
+        &self,
+        arguments: &Value,
+        result: Result<Value, String>,
+    ) -> Result<Value, String> {
+        let Ok(mut result) = result else {
+            return result;
+        };
+        if arguments.pointer("/policy/execute").and_then(Value::as_bool) != Some(true) {
+            return Ok(result);
+        }
+        let Some(binding) = arguments.get("workflow_binding") else {
+            return Ok(result);
+        };
+        let Some(binding_object) = binding.as_object() else {
+            return Ok(result);
+        };
+        let instantiation = json!({
+            "ok": true,
+            "schema": bioprism_devplat::DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION,
+            "workflow": "domain_workflow_instantiate",
+            "workflow_id": binding_object.get("workflow_id").cloned().unwrap_or(Value::Null),
+            "workflow_digest": binding_object.get("workflow_digest").cloned().unwrap_or(Value::Null),
+            "catalog_digest": binding_object.get("catalog_digest").cloned().unwrap_or(Value::Null),
+            "domain_contract_digest": binding_object.get("domain_contract_digest").cloned().unwrap_or(Value::Null),
+            "domain_contract": binding_object.get("domain_contract").cloned().unwrap_or(Value::Null),
+            "mission": arguments,
+            "evidence_plan": binding_object.get("evidence_plan").cloned().unwrap_or(Value::Null),
+        });
+        let reconciliation_request = json!({
+            "instantiation": instantiation,
+            "mission_report": result,
+        });
+        let reconciliation = match reconcile_domain_workflow(&reconciliation_request) {
+            Ok(record) => record,
+            Err(error) => {
+                result["workflow_reconciliation"] = json!({
+                    "present": false,
+                    "automatic": true,
+                    "error": error.to_string(),
+                    "fail_closed": true,
+                    "readiness_claimed": false,
+                });
+                return Ok(result);
+            }
+        };
+        let import_response = match self.workflow_reconciliation_registry.lock() {
+            Ok(mut registry) => registry.import(&reconciliation),
+            Err(_) => Err(
+                bioprism_devplat::DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                    "workflow reconciliation registry lock is poisoned".into(),
+                ),
+            ),
+        };
+        match import_response {
+            Ok(import_response) => {
+                let digest = reconciliation
+                    .get("reconciliation_digest")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                result["workflow_reconciliation"] = json!({
+                    "present": true,
+                    "automatic": true,
+                    "reconciliation_digest": digest,
+                    "workflow_id": reconciliation.get("workflow_id").cloned().unwrap_or(Value::Null),
+                    "mission_id": reconciliation.get("mission_id").cloned().unwrap_or(Value::Null),
+                    "completion": reconciliation.get("completion").cloned().unwrap_or(Value::Null),
+                    "evidence": {
+                        "evidence_valid": reconciliation.pointer("/evidence/evidence_valid").cloned().unwrap_or(Value::Null),
+                        "required_success": reconciliation.pointer("/evidence/required_success").cloned().unwrap_or(Value::Null),
+                        "required_outputs_retained": reconciliation.pointer("/evidence/required_outputs_retained").cloned().unwrap_or(Value::Null),
+                    },
+                    "integrity": reconciliation.get("integrity").cloned().unwrap_or(Value::Null),
+                    "registry_import": import_response,
+                    "lookup": format!(
+                        "/v1/domain-workflows/reconciliations/{}",
+                        reconciliation.get("reconciliation_digest").and_then(Value::as_str).unwrap_or("unknown")
+                    ),
+                    "readiness_claimed": false,
+                });
+            }
+            Err(error) => {
+                result["workflow_reconciliation"] = json!({
+                    "present": false,
+                    "automatic": true,
+                    "error": error.to_string(),
+                    "fail_closed": true,
+                    "readiness_claimed": false,
+                });
+            }
+        }
+        Ok(result)
+    }
+
     fn agent_mission(&self, arguments: &Value) -> Result<Value, String> {
-        self.agent_mission_with_cancellation(arguments, None)
+        let result = self.agent_mission_with_cancellation(arguments, None);
+        self.attach_workflow_reconciliation(arguments, result)
     }
 
     fn agent_mission_with_cancellation(
@@ -30202,7 +30314,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_workflow_instantiate",
-            "description": "Instantiate a caller-selected domain workflow template into a bounded, group-scoped mission, explicit per-step evidence plan, and authoritative no-dispatch mission preflight. Every selected tool must be both declared and available in tools/list; policy allow-lists cannot escape the selected group. This never dispatches a tool, infers domain semantics, or turns a valid plan into a readiness or truth claim.",
+            "description": "Instantiate a caller-selected domain workflow template into a bounded, group-scoped mission, explicit per-step evidence plan, digest-bound workflow_binding, and authoritative no-dispatch mission preflight. Every selected tool must be both declared and available in tools/list; policy allow-lists cannot escape the selected group. This never dispatches a tool, infers domain semantics, or turns a valid plan into a readiness or truth claim.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -30320,7 +30432,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "agent_mission",
-            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. Optional caller-authored claim_requests produce a bounded claim-to-step evidence lineage projection with explicit refusal, omission, disagreement, and non-claim posture; they never become semantic truth assertions. An optional ready evaluator_review binds those claims to the digest-fresh discovery/review checkpoint and is revalidated before dispatch. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
+            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. An optional workflow_binding carries the digest-bound workflow, domain contract, and evidence plan from domain_workflow_instantiate; executed bound missions automatically produce a structural reconciliation record in the shared audit registry. Optional caller-authored claim_requests produce a bounded claim-to-step evidence lineage projection with explicit refusal, omission, disagreement, and non-claim posture; they never become semantic truth assertions. An optional ready evaluator_review binds those claims to the digest-fresh discovery/review checkpoint and is revalidated before dispatch. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -30363,6 +30475,11 @@ pub fn tool_definitions() -> Vec<Value> {
                     "evaluator_review": {
                         "type": "object",
                         "description": "Optional ready, non-executing mission_evaluator_review response. When supplied, every evaluator binding must match its reviewed claim, adapter, domain, step, pointer, and required posture; stale or blocked reviews refuse before nested dispatch."
+                    },
+                    "workflow_binding": {
+                        "type": "object",
+                        "description": "Optional digest-bound domain_workflow_instantiate mission.workflow_binding. It binds workflow_id, workflow/catalogue/domain-contract digests, contract snapshots, and evidence_plan_digest; it is structural provenance, not permission or readiness.",
+                        "required": ["workflow_id", "workflow_digest", "catalog_digest", "domain_contract_digest", "domain_contract", "evidence_plan", "evidence_plan_digest"]
                     },
                     "steps": {
                         "type": "array",

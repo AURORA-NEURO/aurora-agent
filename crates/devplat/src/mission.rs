@@ -32,6 +32,11 @@ pub const MAX_PARALLEL_WAVE_WIDTH: usize = 16;
 pub const MAX_CLAIM_REQUESTS: usize = 64;
 pub const MAX_CLAIM_REFERENCES: usize = 32;
 pub const MAX_CLAIM_EVALUATORS: usize = 16;
+/// Maximum serialized size of the workflow instantiation contract carried by a mission.
+///
+/// This is deliberately below the larger workflow/reconciliation envelopes: a mission must be
+/// able to carry its provenance through dispatch without becoming an unbounded transport cache.
+pub const MAX_WORKFLOW_BINDING_BYTES: usize = 2_000_000;
 
 fn default_true() -> bool {
     true
@@ -78,6 +83,104 @@ fn require_text(field: &'static str, value: &str) -> Result<(), MissionError> {
         .any(|character| character == '\0' || character == '\n' || character == '\r')
     {
         return Err(MissionError::ControlCharacter { field });
+    }
+    Ok(())
+}
+
+fn validate_workflow_binding(binding: &Value) -> Result<(), MissionError> {
+    let encoded = serde_json::to_vec(binding)
+        .map_err(|error| MissionError::InvalidWorkflowBinding {
+            reason: format!("cannot measure binding: {error}"),
+        })?;
+    if encoded.len() > MAX_WORKFLOW_BINDING_BYTES {
+        return Err(MissionError::InvalidWorkflowBinding {
+            reason: format!(
+                "serialized binding is {} bytes; maximum is {}",
+                encoded.len(),
+                MAX_WORKFLOW_BINDING_BYTES
+            ),
+        });
+    }
+    let object = binding
+        .as_object()
+        .ok_or_else(|| MissionError::InvalidWorkflowBinding {
+            reason: "binding must be an object".into(),
+        })?;
+    let required = [
+        "workflow_id",
+        "workflow_digest",
+        "catalog_digest",
+        "domain_contract_digest",
+        "domain_contract",
+        "evidence_plan",
+        "evidence_plan_digest",
+    ];
+    for key in required {
+        if !object.contains_key(key) {
+            return Err(MissionError::InvalidWorkflowBinding {
+                reason: format!("missing required field `{key}`"),
+            });
+        }
+    }
+    for key in [
+        "workflow_digest",
+        "catalog_digest",
+        "domain_contract_digest",
+        "evidence_plan_digest",
+    ] {
+        let value = object.get(key).and_then(Value::as_str).ok_or_else(|| {
+            MissionError::InvalidWorkflowBinding {
+                reason: format!("`{key}` must be a string"),
+            }
+        })?;
+        ContentHash::parse(value.to_owned()).map_err(|_| MissionError::InvalidWorkflowBinding {
+            reason: format!("`{key}` must be a 64-character hexadecimal digest"),
+        })?;
+    }
+    let workflow_id = object
+        .get("workflow_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| MissionError::InvalidWorkflowBinding {
+            reason: "`workflow_id` must be a string".into(),
+        })?;
+    require_text("workflow_id", workflow_id).map_err(|error| {
+        MissionError::InvalidWorkflowBinding {
+            reason: error.to_string(),
+        }
+    })?;
+    if !object.get("domain_contract").is_some_and(Value::is_object) {
+        return Err(MissionError::InvalidWorkflowBinding {
+            reason: "`domain_contract` must be an object".into(),
+        });
+    }
+    let evidence_plan = object
+        .get("evidence_plan")
+        .and_then(Value::as_object)
+        .ok_or_else(|| MissionError::InvalidWorkflowBinding {
+            reason: "`evidence_plan` must be an object".into(),
+        })?;
+    let steps = evidence_plan
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| MissionError::InvalidWorkflowBinding {
+            reason: "`evidence_plan.steps` must be an array".into(),
+        })?;
+    if steps.is_empty() || steps.len() > MAX_STEPS {
+        return Err(MissionError::InvalidWorkflowBinding {
+            reason: format!("`evidence_plan.steps` must contain 1..{MAX_STEPS} entries"),
+        });
+    }
+    let expected_digest = ContentHash::of_value(&Value::Object(evidence_plan.clone()))
+        .map_err(|error| MissionError::InvalidWorkflowBinding {
+            reason: format!("cannot hash evidence plan: {error}"),
+        })?
+        .to_string();
+    if object.get("evidence_plan_digest").and_then(Value::as_str)
+        != Some(expected_digest.as_str())
+    {
+        return Err(MissionError::InvalidWorkflowBinding {
+            reason: "`evidence_plan_digest` does not match `evidence_plan`".into(),
+        });
     }
     Ok(())
 }
@@ -765,6 +868,10 @@ pub struct MissionRequest {
     /// selected through `mission_evaluator_review`.
     #[serde(default)]
     pub evaluator_review: Option<Value>,
+    /// The workflow instantiation contract that produced this mission, when the mission was
+    /// created from the domain-workflow surface.
+    #[serde(default)]
+    pub workflow_binding: Option<Value>,
 }
 
 impl MissionRequest {
@@ -825,6 +932,9 @@ impl MissionRequest {
         }
         if let Some(review) = &self.evaluator_review {
             validate_evaluator_review(review, &self.claim_requests)?;
+        }
+        if let Some(binding) = &self.workflow_binding {
+            validate_workflow_binding(binding)?;
         }
         for step in &self.steps {
             let mut dependencies = BTreeSet::new();
@@ -945,6 +1055,8 @@ pub struct MissionPlan {
     pub execution: String,
     pub execution_mode: String,
     pub max_parallelism: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_binding: Option<Value>,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
 }
@@ -1425,6 +1537,8 @@ pub enum MissionError {
     UnknownClaimStep { claim: String, step: String },
     #[error("invalid evaluator review: {reason}")]
     InvalidEvaluatorReview { reason: String },
+    #[error("invalid workflow binding: {reason}")]
+    InvalidWorkflowBinding { reason: String },
 }
 
 /// Build a deterministic plan from a mission request.
@@ -1501,6 +1615,7 @@ pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionErro
         .into(),
         execution_mode: request.policy.execution_mode.clone(),
         max_parallelism: request.policy.max_parallelism,
+        workflow_binding: request.workflow_binding.clone(),
         guarantees: vec![
             "step dependencies are validated and ordered deterministically".into(),
             "execution requires an explicit tool allow-list and is opt-in".into(),
@@ -1553,6 +1668,7 @@ mod tests {
             policy: MissionPolicy::default(),
             claim_requests: Vec::new(),
             evaluator_review: None,
+            workflow_binding: None,
         }
     }
 
@@ -1575,6 +1691,33 @@ mod tests {
         assert_eq!(plan.critical_path_length, 2);
         assert_eq!(plan.digest.len(), 64);
         assert_eq!(plan.execution, "planned");
+    }
+
+    #[test]
+    fn workflow_binding_is_bounded_and_evidence_plan_digest_bound() {
+        let evidence_plan = serde_json::json!({
+            "schema": "workflow-contract/0.1",
+            "steps": [{"step_id": "one", "tool": "metrics_analytics_audit"}],
+            "completion": {"required_steps": "succeeded"}
+        });
+        let evidence_plan_digest = ContentHash::of_value(&evidence_plan).unwrap().to_string();
+        let mut value = request(vec![step("one", "metrics_analytics_audit", &[])]);
+        value.workflow_binding = Some(serde_json::json!({
+            "workflow_id": "metrics_and_analytics",
+            "workflow_digest": "a".repeat(64),
+            "catalog_digest": "b".repeat(64),
+            "domain_contract_digest": "c".repeat(64),
+            "domain_contract": {"posture": "advisory_review_gated"},
+            "evidence_plan": evidence_plan,
+            "evidence_plan_digest": evidence_plan_digest,
+        }));
+        assert!(plan_mission(&value).is_ok());
+        value.workflow_binding.as_mut().unwrap()["evidence_plan"]["steps"][0]["tool"] =
+            serde_json::json!("tampered_tool");
+        assert!(matches!(
+            plan_mission(&value),
+            Err(MissionError::InvalidWorkflowBinding { .. })
+        ));
     }
 
     #[test]

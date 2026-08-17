@@ -511,6 +511,7 @@ class DomainWorkflowInstantiationReport:
     domain_contract: Mapping[str, Any]
     domain_contract_digest: str
     evidence_plan: Mapping[str, Any]
+    workflow_binding: Mapping[str, Any]
     preflight: Mapping[str, Any]
     preflight_report: Mapping[str, Any] | None
     execution: str
@@ -518,6 +519,7 @@ class DomainWorkflowInstantiationReport:
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowInstantiationReport":
         raw = _tool_payload(value, "domain_workflow_instantiate")
+        mission = _route_mapping("domain workflow mission", raw.get("mission"))
         preflight_report = raw.get("preflight_report")
         if preflight_report is not None:
             preflight_report = _route_mapping("domain workflow preflight report", preflight_report)
@@ -526,7 +528,7 @@ class DomainWorkflowInstantiationReport:
             workflow_id=_route_text("domain workflow id", raw.get("workflow_id")),
             workflow_digest=_route_text("domain workflow digest", raw.get("workflow_digest")),
             catalog_digest=_route_text("domain workflow catalog digest", raw.get("catalog_digest")),
-            mission=_route_mapping("domain workflow mission", raw.get("mission")),
+            mission=mission,
             selection=_route_mapping("domain workflow selection", raw.get("selection")),
             domain_contract=_route_mapping("domain workflow domain contract", raw.get("domain_contract", {})),
             domain_contract_digest=_route_text(
@@ -534,6 +536,10 @@ class DomainWorkflowInstantiationReport:
                 raw.get("domain_contract_digest", raw.get("workflow_digest")),
             ),
             evidence_plan=_route_mapping("domain workflow evidence plan", raw.get("evidence_plan", {})),
+            workflow_binding=_route_mapping(
+                "domain workflow mission workflow binding",
+                mission.get("workflow_binding", {}),
+            ),
             preflight=_route_mapping("domain workflow preflight", raw.get("preflight")),
             preflight_report=preflight_report,
             execution=_route_text("domain workflow execution", raw.get("execution")),

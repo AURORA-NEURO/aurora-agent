@@ -1322,7 +1322,10 @@ fn domain_workflow_reconciliation_binds_execution_results_to_the_instantiated_co
         imported["workflow"],
         json!("domain_workflow_reconciliation_import")
     );
-    assert_eq!(imported["created"], json!(true));
+    // Executed workflow-bound missions are reconciled and indexed automatically; the explicit
+    // import below must therefore exercise the registry's idempotent re-import path.
+    assert_eq!(imported["created"], json!(false));
+    assert_eq!(imported["already_present"], json!(true));
     let digest = imported["reconciliation_digest"].as_str().unwrap();
     let queried = call(
         &mut server,

@@ -27,6 +27,7 @@ MAX_MISSION_POLL_INTERVAL_SECONDS = 60.0
 MAX_MISSION_CLAIM_REQUESTS = 64
 MAX_MISSION_CLAIM_REFERENCES = 32
 MAX_MISSION_CLAIM_EVALUATORS = 16
+MAX_WORKFLOW_BINDING_BYTES = 2_000_000
 OPERATIONS_REQUIRED_GATES = (
     "catalogue",
     "observed_activity",
@@ -495,6 +496,7 @@ class MissionRequest:
     operations_gate_acceptance: OperationsGateAcceptance | Mapping[str, Any] | None = None
     claim_requests: Sequence[MissionClaimRequest | Mapping[str, Any]] = ()
     evaluator_review: Mapping[str, Any] | None = None
+    workflow_binding: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _text("mission_id", self.mission_id)
@@ -545,6 +547,36 @@ class MissionRequest:
                 raise ArgumentError("evaluator_review must have a ready binding posture")
             if review.get("execution") != "not_started":
                 raise ArgumentError("evaluator_review must be non-executing")
+        if self.workflow_binding is not None:
+            binding = _mapping("workflow_binding", self.workflow_binding)
+            if len(str(binding).encode("utf-8")) > MAX_WORKFLOW_BINDING_BYTES:
+                raise ArgumentError(
+                    f"workflow_binding may contain at most {MAX_WORKFLOW_BINDING_BYTES} serialized bytes"
+                )
+            required = (
+                "workflow_id",
+                "workflow_digest",
+                "catalog_digest",
+                "domain_contract_digest",
+                "domain_contract",
+                "evidence_plan",
+                "evidence_plan_digest",
+            )
+            missing = [name for name in required if name not in binding]
+            if missing:
+                raise ArgumentError(f"workflow_binding is missing required fields: {', '.join(missing)}")
+            _text("workflow_binding.workflow_id", binding["workflow_id"])
+            for name in ("workflow_digest", "catalog_digest", "domain_contract_digest", "evidence_plan_digest"):
+                digest = binding[name]
+                if not isinstance(digest, str) or len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+                    raise ArgumentError(f"workflow_binding.{name} must be a lowercase 64-character digest")
+            if not isinstance(binding["domain_contract"], Mapping):
+                raise ArgumentError("workflow_binding.domain_contract must be a mapping")
+            evidence_plan = binding["evidence_plan"]
+            if not isinstance(evidence_plan, Mapping) or not isinstance(evidence_plan.get("steps"), Sequence) or isinstance(evidence_plan.get("steps"), (str, bytes)):
+                raise ArgumentError("workflow_binding.evidence_plan.steps must be a sequence")
+            if not 0 < len(evidence_plan["steps"]) <= MAX_MISSION_STEPS:
+                raise ArgumentError(f"workflow_binding.evidence_plan.steps must contain 1..{MAX_MISSION_STEPS} entries")
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         arguments: dict[str, Any] = {
@@ -568,6 +600,8 @@ class MissionRequest:
             arguments["claim_requests"] = [_claim_request(value) for value in self.claim_requests]
         if self.evaluator_review is not None:
             arguments["evaluator_review"] = _mapping("evaluator_review", self.evaluator_review)
+        if self.workflow_binding is not None:
+            arguments["workflow_binding"] = _mapping("workflow_binding", self.workflow_binding)
         return arguments
 
 
@@ -1071,6 +1105,15 @@ class MissionExecutionReport:
         if value is None:
             return {}
         return _mapping("mission evaluator review", value)
+
+    @property
+    def workflow_reconciliation(self) -> Mapping[str, Any]:
+        """Return the automatic post-execution reconciliation link, when present."""
+
+        value = self.raw.get("workflow_reconciliation")
+        if value is None:
+            return {}
+        return _mapping("mission workflow reconciliation", value)
 
     @property
     def cancelled(self) -> int:
@@ -1817,6 +1860,7 @@ __all__ = [
     "MAX_MISSION_CLAIM_REQUESTS",
     "MAX_MISSION_CLAIM_REFERENCES",
     "MAX_MISSION_CLAIM_EVALUATORS",
+    "MAX_WORKFLOW_BINDING_BYTES",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
     "OPERATIONS_REQUIRED_GATES",

@@ -82,7 +82,8 @@ Convenience methods currently cover:
 - `domainWorkflowInstantiate` / `domainWorkflowInstantiateQuery`: group-scoped mission
   instantiation with explicit bounded steps, selected-tool scope, typed step-level evidence plan,
   authoritative no-dispatch preflight, and `execution: "not_started"`. These methods do not infer
-  domain arguments or authorize tool execution;
+  domain arguments or authorize tool execution. The returned mission carries a digest-bound
+  `workflow_binding` so the exact workflow/contract/evidence scope survives dispatch;
 - `domainWorkflowReconcileQuery` / `domainWorkflowReconcile`: correlate a retained mission report
   or evidence bundle with an instantiation and return typed integrity, per-step evidence, trace,
   completion, and omission posture. The result remains review-required and non-executing.
@@ -168,6 +169,10 @@ remains the default. Executed `agentMission()` responses type the authoritative 
 `execution_trace` with contiguous lifecycle, wave, refusal, block, and byte-accounting events. Pass
 the earlier `ToolCatalogue` snapshot to guarantee that mission review and subsequent checked calls
 refer to the same live schema set; the Rust `agent_mission` tool remains the execution authority.
+When a mission carries an instantiation `workflow_binding`, the report additionally exposes a typed
+`workflow_reconciliation` compact link after terminal execution. REST and MCP share the indexed
+record, while the full digest-bound report remains available through reconciliation lookup; the
+link is evidence posture only and never an authorization or readiness claim.
 `MissionJob` makes queued, running, planned, succeeded, partial, failed, and cancelled states
 explicit; cancellation is a request to stop future dispatch, not a force-kill or rollback claim.
 Its optional `progress: MissionProgress` field provides one bounded shape for queued, live, and

@@ -11,6 +11,7 @@ import {
   ToolCatalogue,
   ToolSchemaError,
   ToolRefusalError,
+  digestJson,
   parseSse,
 } from "../dist/index.js";
 
@@ -1581,6 +1582,37 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.deepEqual(preflight.waves, [["prepare"], ["consume"]]);
   assert.equal(preflight.steps[1].status, "ready");
   assert.equal(seen.length, callsBeforeMissionPreflight);
+  const boundEvidencePlan = {
+    schema: "workflow-contract/0.1",
+    steps: [{ step_id: "prepare", tool: "echo", required: true }],
+    completion: { required_steps: "succeeded" },
+  };
+  const workflowBinding = {
+    workflow_id: "workspace_workflows",
+    workflow_digest: "a".repeat(64),
+    catalog_digest: "b".repeat(64),
+    domain_contract_digest: "c".repeat(64),
+    domain_contract: { posture: "advisory_review_gated" },
+    evidence_plan: boundEvidencePlan,
+    evidence_plan_digest: await digestJson(boundEvidencePlan),
+  };
+  const boundPreflight = await client.missionPreflight({
+    mission_id: "mission-bound-workflow",
+    goal: "retain workflow scope",
+    steps: [{ id: "prepare", domain: "workspace", capability: "discovery", objective: "prepare", tool: "echo", arguments: { value: 3 } }],
+    workflow_binding: workflowBinding,
+  }, catalogue);
+  assert.equal(boundPreflight.ok, true);
+  const tamperedBinding = structuredClone(workflowBinding);
+  tamperedBinding.evidence_plan.steps[0].tool = "tampered";
+  const tamperedPreflight = await client.missionPreflight({
+    mission_id: "mission-bound-workflow-tampered",
+    goal: "reject a changed evidence contract",
+    steps: [{ id: "prepare", domain: "workspace", capability: "discovery", objective: "prepare", tool: "echo", arguments: { value: 3 } }],
+    workflow_binding: tamperedBinding,
+  }, catalogue);
+  assert.equal(tamperedPreflight.ok, false);
+  assert.equal(tamperedPreflight.issues.some((issue) => issue.includes("evidence_plan_digest")), true);
   const parallel = await client.missionPreflight({
     mission_id: "mission-parallel",
     goal: "prepare independent checks",

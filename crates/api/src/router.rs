@@ -589,7 +589,13 @@ impl ApiRouter {
         let restored_evidence = load_evidence_registry(config.evidence_state_path.as_deref())?;
         let restored_reconciliations =
             load_workflow_reconciliation_registry(config.reconciliation_state_path.as_deref())?;
-        let mut server = bioprism_mcp::Server::new(root);
+        let evidence_registry = Arc::new(Mutex::new(restored_evidence));
+        let reconciliation_registry = Arc::new(Mutex::new(restored_reconciliations));
+        let mut server = bioprism_mcp::Server::with_registries(
+            root,
+            Arc::clone(&evidence_registry),
+            Arc::clone(&reconciliation_registry),
+        );
         let initialize = Request {
             id: Some(json!(0)),
             method: "initialize".into(),
@@ -620,13 +626,11 @@ impl ApiRouter {
             events: Arc::clone(&events),
             lock: Mutex::new(()),
         });
-        let evidence_registry = Arc::new(Mutex::new(restored_evidence));
         let evidence_persistence = Arc::new(EvidencePersistence {
             path: config.evidence_state_path.clone(),
             registry: Arc::clone(&evidence_registry),
             lock: Mutex::new(()),
         });
-        let reconciliation_registry = Arc::new(Mutex::new(restored_reconciliations));
         let reconciliation_persistence = Arc::new(ReconciliationPersistence {
             path: config.reconciliation_state_path.clone(),
             registry: Arc::clone(&reconciliation_registry),
@@ -2960,6 +2964,10 @@ impl ApiRouter {
             if let Some(tool) = tool {
                 self.record_tool_event(request_id, &tool, &wire);
             }
+            // A synchronous MCP call may execute a workflow-bound mission directly rather than
+            // through the asynchronous mission worker. The server writes the shared registry;
+            // checkpoint it before returning the transport response when durability is enabled.
+            let _ = self.reconciliation_persistence.persist();
         }
         HttpResponse::json(response_status(&wire), &wire)
     }
@@ -2993,6 +3001,7 @@ impl ApiRouter {
         };
         let wire = response.to_json();
         self.record_tool_event(request_id, tool, &wire);
+        let _ = self.reconciliation_persistence.persist();
         let transport_ok = wire.get("error").is_none();
         HttpResponse::json(
             if transport_ok {
@@ -3299,6 +3308,7 @@ impl ApiRouter {
         };
         let wire = response.to_json();
         self.record_tool_event(request_id, tool, &wire);
+        let _ = self.reconciliation_persistence.persist();
         let is_error = wire
             .pointer("/result/isError")
             .and_then(Value::as_bool)
@@ -3545,6 +3555,7 @@ impl ApiRouter {
         });
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
         let worker_persistence = Arc::clone(&self.mission_persistence);
+        let worker_reconciliation_persistence = Arc::clone(&self.reconciliation_persistence);
         let worker_id = mission_id.clone();
         let worker_mission_id = mission_id.clone();
         let worker_arguments = arguments;
@@ -3558,6 +3569,9 @@ impl ApiRouter {
                 let _ = worker_persistence.persist();
                 let outcome = executor
                     .execute_agent_mission_with_cancellation(&worker_arguments, &cancellation);
+                // The MCP executor has already imported any workflow reconciliation. Checkpoint
+                // it before publishing the terminal mission state to the in-memory job registry.
+                let _ = worker_reconciliation_persistence.persist();
                 if let Ok(mut current) = job.state.lock() {
                     match outcome {
                         Ok(result) => {
@@ -9025,8 +9039,12 @@ mod tests {
 
     #[test]
     fn domain_workflow_routes_expose_catalogue_and_scoped_preflight() {
-        let router =
-            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let reconciliation_path = test_state_path("domain-workflow-auto-reconciliation");
+        let config = ApiConfig {
+            reconciliation_state_path: Some(reconciliation_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
         let catalogue = router.handle(request("GET", "/v1/domain-workflows", json!({})));
         assert_eq!(catalogue.status, 200);
         let catalogue: Value = serde_json::from_slice(&catalogue.body).unwrap();
@@ -9073,6 +9091,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(mission_report["mission_status"], "succeeded");
+        assert_eq!(mission_report["workflow_reconciliation"]["present"], true);
+        assert_eq!(mission_report["workflow_reconciliation"]["automatic"], true);
+        let automatic_digest = mission_report["workflow_reconciliation"]["reconciliation_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let automatic_query = router.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=api-workflow-1",
+            json!({}),
+        ));
+        assert_eq!(automatic_query.status, 200);
+        let automatic_query: Value = serde_json::from_slice(&automatic_query.body).unwrap();
+        assert_eq!(automatic_query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(automatic_query["rows"][0]["reconciliation_digest"], automatic_digest);
         let reconciled = router.handle(request(
             "POST",
             "/v1/domain-workflows/reconcile",
@@ -9097,6 +9130,18 @@ mod tests {
         assert_eq!(refused.status, 422);
         let refused: Value = serde_json::from_slice(&refused.body).unwrap();
         assert_eq!(refused["error"]["code"], "invalid_domain_workflow");
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=api-workflow-1",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(restored_query["rows"][0]["reconciliation_digest"], automatic_digest);
+        let _ = std::fs::remove_file(reconciliation_path);
     }
 
     #[test]

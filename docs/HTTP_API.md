@@ -107,6 +107,10 @@ ledger, workflow and catalogue digests, the selected `domain_contract`, an `evid
 every step, and the authoritative MCP `preflight_report`. `execution` and `dispatch` remain
 `not_started`; this route never invokes a domain tool. Domain-specific arguments still require the
 authoritative schema report, and a valid plan is not a readiness, truth, clinical, or release claim.
+The returned `mission.workflow_binding` is a bounded digest-bound handoff containing the selected
+workflow/catalogue/contract identities, the full domain contract, and the exact evidence plan with
+its own digest. It is structural provenance carried into `agent_mission`; it is never a permission
+or readiness credential.
 
 `POST /v1/domain-workflows/reconcile` closes the execution handoff without becoming an executor.
 It accepts the exact accepted instantiation result plus either an `agent_mission` report or a
@@ -128,6 +132,14 @@ startup rejects a tampered snapshot or report, and `/persistence/flush` is an ex
 operation. Neither import, query, lookup, nor restore dispatches, retries, resumes, or re-evaluates a
 mission, and registry presence is not provenance, scientific validity, clinical safety, or release
 approval.
+An executable mission produced by instantiation is automatically reconciled at the authoritative
+MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
+record digest, completion/evidence/integrity posture, registry import result, and a REST lookup
+link; the full report is indexed in the same registry used by REST gates. Automatic reconciliation
+is fail-closed: a missing binding, failed reconciliation, incomplete evidence, or invalid integrity
+never becomes readiness. Synchronous REST/JSON-RPC calls checkpoint this shared registry before
+returning when `--reconciliation-state` is enabled, and asynchronous `/v1/missions` workers
+checkpoint it before storing terminal job state.
 
 `GET /v1/operations/snapshot` composes this registry into the control-plane read model. Its
 `reconciliation_summary` reports digest-valid registry size and generation, completion-status

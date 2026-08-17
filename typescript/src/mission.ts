@@ -33,6 +33,7 @@ export const MAX_ALLOWED_TOOLS = 512;
 export const MAX_STEP_OUTPUT_BYTES = 20_000_000;
 export const MAX_TOTAL_OUTPUT_BYTES = 20_000_000;
 export const MAX_PARALLEL_WAVE_WIDTH = 16;
+export const MAX_WORKFLOW_BINDING_BYTES = 2_000_000;
 
 export class MissionPreflightError extends ArgumentError {
   override readonly name: string = "MissionPreflightError";
@@ -91,6 +92,55 @@ export async function preflightMission(
     requestDigest = await digestJson(request);
   } catch (error) {
     issues.push(`request cannot be canonically digested: ${String(error)}`);
+  }
+
+  const workflowBinding = request.workflow_binding;
+  if (workflowBinding !== undefined) {
+    if (!isObject(workflowBinding)) {
+      issues.push("workflow_binding must be a JSON object");
+    } else {
+      const bindingBytes = new TextEncoder().encode(JSON.stringify(workflowBinding)).byteLength;
+      if (bindingBytes > MAX_WORKFLOW_BINDING_BYTES) {
+        issues.push(`workflow_binding exceeds ${MAX_WORKFLOW_BINDING_BYTES} serialized bytes`);
+      }
+      for (const field of [
+        "workflow_id",
+        "workflow_digest",
+        "catalog_digest",
+        "domain_contract_digest",
+        "domain_contract",
+        "evidence_plan",
+        "evidence_plan_digest",
+      ]) {
+        if (!(field in workflowBinding)) issues.push(`workflow_binding is missing ${field}`);
+      }
+      for (const field of ["workflow_digest", "catalog_digest", "domain_contract_digest", "evidence_plan_digest"]) {
+        const value = workflowBinding[field];
+        if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
+          issues.push(`workflow_binding.${field} must be a lowercase 64-character digest`);
+        }
+      }
+      if (typeof workflowBinding.workflow_id !== "string" || !workflowBinding.workflow_id.trim()) {
+        issues.push("workflow_binding.workflow_id must be a non-empty string");
+      }
+      if (!isObject(workflowBinding.domain_contract)) {
+        issues.push("workflow_binding.domain_contract must be a JSON object");
+      }
+      if (!isObject(workflowBinding.evidence_plan) || !Array.isArray(workflowBinding.evidence_plan.steps)) {
+        issues.push("workflow_binding.evidence_plan.steps must be an array");
+      } else if (workflowBinding.evidence_plan.steps.length === 0 || workflowBinding.evidence_plan.steps.length > MAX_MISSION_STEPS) {
+        issues.push(`workflow_binding.evidence_plan.steps must contain 1..${MAX_MISSION_STEPS} entries`);
+      } else {
+        try {
+          const evidencePlanDigest = await digestJson(workflowBinding.evidence_plan);
+          if (workflowBinding.evidence_plan_digest !== evidencePlanDigest) {
+            issues.push("workflow_binding.evidence_plan_digest does not match evidence_plan");
+          }
+        } catch (error) {
+          issues.push(`workflow_binding.evidence_plan cannot be canonically digested: ${String(error)}`);
+        }
+      }
+    }
   }
 
   const policyIssueStart = issues.length;
