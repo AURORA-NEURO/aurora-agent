@@ -24,6 +24,10 @@ from prism_sdk import (
     CapabilityMatchReport,
     CapabilityQuery,
     CapabilitySearchReport,
+    MissionEvaluatorAdapterReport,
+    MissionEvaluatorCoverageReport,
+    MissionEvaluatorQuery,
+    MissionEvaluatorSearchReport,
     CapabilityRouteReport,
     CapabilityRouteNeed,
     CapabilityRouteRequest,
@@ -64,6 +68,7 @@ from prism_sdk import (
     capability_discover_report,
     capability_route_report,
     capability_route_review_report,
+    mission_evaluator_discover_report,
     adapter_plan_report,
     Client,
     MetricObservation,
@@ -238,6 +243,46 @@ def capability_discover_payload() -> dict:
             "missing": [],
             "authoritative_source": "tools/list definition set",
         },
+    }
+
+
+def mission_evaluator_discover_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "mission_evaluator_discover",
+        "mission_evaluator_schema_version": "bioprism-devplat-mission-evaluator/0.1",
+        "schema_version": "bioprism-devplat-mission-evaluator/0.1",
+        "catalog_digest": "e" * 64,
+        "total_adapters": 29,
+        "query": {"query": "oncology fidelity", "level": "evaluation", "max_items": 4},
+        "result_count": 1,
+        "selection_posture": "candidate_only",
+        "coverage": {
+            "capability_group_count": 29,
+            "evaluator_group_count": 29,
+            "uncovered_groups": [],
+            "unbound_groups": [],
+            "complete": True,
+            "posture": "catalogue coverage evidence only; no evaluator was executed",
+        },
+        "matches": [
+            {
+                "adapter": {
+                    "id": "oncoworlds.assay_fidelity",
+                    "group_id": "oncoworlds_models_and_assays",
+                    "domains": ["oncology models", "assays", "fidelity"],
+                    "levels": ["evaluation", "observation"],
+                    "purpose": "Compare model and assay fidelity axes with their declared evidence and split conditions.",
+                    "candidate_tools": ["onco_model_audit", "assay_fidelity_check"],
+                    "output_pointer_examples": ["/fidelity", "/evidence"],
+                    "status": "candidate_only",
+                },
+                "score": 700,
+                "matched_fields": ["domains", "purpose", "levels"],
+            }
+        ],
+        "guarantees": ["candidate tools are suggestions and were not executed"],
+        "limitations": ["the catalogue does not execute adapters or validate domain semantics"],
     }
 
 
@@ -1265,6 +1310,30 @@ class AnalyticsModelTests(unittest.TestCase):
         )
         self.assertEqual(report.catalog_digest, "c" * 64)
 
+    def test_mission_evaluator_discover_report_preserves_candidate_posture(self) -> None:
+        report = MissionEvaluatorSearchReport.from_wire(mission_evaluator_discover_payload())
+        self.assertIsInstance(report.matches[0].adapter, MissionEvaluatorAdapterReport)
+        self.assertIsInstance(report.coverage, MissionEvaluatorCoverageReport)
+        self.assertTrue(report.coverage.complete)
+        self.assertTrue(report.all_candidates_only)
+        self.assertEqual(report.adapters[0].id, "oncoworlds.assay_fidelity")
+        self.assertEqual(report.adapters[0].group_id, "oncoworlds_models_and_assays")
+        self.assertEqual(report.catalog_digest, "e" * 64)
+        self.assertEqual(
+            mission_evaluator_discover_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evaluator_discover_payload()}}}
+            ).adapters[0].levels,
+            ("evaluation", "observation"),
+        )
+
+    def test_mission_evaluator_query_is_bounded_and_serializable(self) -> None:
+        query = MissionEvaluatorQuery(query="oncology fidelity", level="evaluation", max_items=4)
+        self.assertEqual(query.to_mcp_arguments()["level"], "evaluation")
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorQuery(level="invalid")
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorQuery(max_items=257)
+
     def test_capability_audit_report_reconciles_parity_and_quality(self) -> None:
         report = CapabilityAuditReport.from_wire(capability_audit_payload())
         self.assertTrue(report.healthy)
@@ -1823,6 +1892,19 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             include_tools=False,
         )
 
+    def test_sync_workspace_typed_mission_evaluator_discovery(self) -> None:
+        with patch.object(
+            Workspace,
+            "mission_evaluator_discover",
+            return_value=mission_evaluator_discover_payload(),
+        ) as discover:
+            report = Workspace(None).mission_evaluator_discover_report(  # type: ignore[arg-type]
+                MissionEvaluatorQuery(query="oncology fidelity", level="evaluation", max_items=4)
+            )
+        self.assertTrue(report.all_candidates_only)
+        self.assertEqual(report.adapters[0].id, "oncoworlds.assay_fidelity")
+        discover.assert_called_once()
+
     def test_sync_workspace_exposes_capability_audit(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).capability_audit(include_groups=False)
@@ -2070,6 +2152,20 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             max_items=50,
             include_tools=False,
         )
+
+    async def test_async_workspace_typed_mission_evaluator_discovery(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "mission_evaluator_discover",
+            new_callable=AsyncMock,
+            return_value=mission_evaluator_discover_payload(),
+        ) as discover:
+            report = await AsyncWorkspace(None).mission_evaluator_discover_report(  # type: ignore[arg-type]
+                {"query": "oncology fidelity", "level": "evaluation", "max_items": 4}
+            )
+        self.assertTrue(report.all_candidates_only)
+        self.assertEqual(report.adapters[0].id, "oncoworlds.assay_fidelity")
+        discover.assert_awaited_once()
 
     async def test_async_workspace_exposes_capability_audit(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

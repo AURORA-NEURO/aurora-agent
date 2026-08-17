@@ -471,6 +471,14 @@ invent defaults:
   lifecycle sequence while preserving the raw report.
 - `capability_discover(...)` searches the complete domain catalogue by intent, domain, group, or
   tool and can attach authoritative MCP schemas for the returned routing matches.
+- `mission_evaluator_discover(...)` searches the explicit non-executing evaluator catalogue across
+  every capability group. `MissionEvaluatorQuery` bounds intent, group, domain, mission level,
+  adapter ID, and result count; `MissionEvaluatorSearchReport` preserves the catalogue digest,
+  purpose, candidate tools, RFC 6901 pointer examples, and `candidate_only` selection posture.
+  `mission_evaluator_discover_report(...)` accepts either direct MCP data or an HTTP REST envelope,
+  and sync/async Workspace and HTTP clients expose the same typed helper. Discovery is routing
+  evidence only: it does not execute an adapter or make a claim semantic, calibrated, clinical, or
+  release-ready.
 - `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
   `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
   ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool

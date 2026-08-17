@@ -1078,6 +1078,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         limitations: ["this is not an OTLP exporter"],
       } } } });
       if (path === "/v1/tools/capability_discover") return jsonResponse({ ok: true, tool: "capability_discover", request_id: "r6", mcp: { result: { structuredContent: { workflow: "capability_discover", capability_schema_version: "bioprism-devplat-capability/0.1", schema_version: "bioprism-devplat-capability/0.1", catalog_digest: "c".repeat(64), total_groups: 1, query: {}, result_count: 1, matches: [{ group: { id: "testing", domains: ["verification"], crates: ["bioprism-devplat"], mcp_tools: ["echo"], cli_entrypoints: ["bioprism test"], python_artifacts: ["prism_sdk.testing"], status: "implemented" }, score: 100, matched_fields: ["domains"], matched_tools: ["echo"], tool_schemas: [] }], schema_attachment: { requested: false, returned: 0, missing: [] } } } } });
+      if (path === "/v1/tools/mission_evaluator_discover") return jsonResponse({ ok: true, tool: "mission_evaluator_discover", request_id: "r6evaluator", mcp: { result: { structuredContent: { ok: true, workflow: "mission_evaluator_discover", mission_evaluator_schema_version: "bioprism-devplat-mission-evaluator/0.1", schema_version: "bioprism-devplat-mission-evaluator/0.1", catalog_digest: "e".repeat(64), total_adapters: 29, query: {}, result_count: 1, selection_posture: "candidate_only", coverage: { capability_group_count: 29, evaluator_group_count: 29, uncovered_groups: [], unbound_groups: [], complete: true, posture: "catalogue coverage evidence only" }, matches: [{ adapter: { id: "oncoworlds.assay_fidelity", group_id: "oncoworlds_models_and_assays", domains: ["fidelity"], levels: ["evaluation"], purpose: "inspect assay fidelity", candidate_tools: ["assay_fidelity_check"], output_pointer_examples: ["/fidelity"], status: "candidate_only" }, score: 700, matched_fields: ["domains"] }], guarantees: [], limitations: [] } } } });
       if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "capability_audit",
@@ -2045,6 +2046,10 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(operational.mcp.result.structuredContent.audit.dependency_audits[0].fallback_present, true);
   assert.equal(operational.mcp.result.structuredContent.audit.incident_audits[0].postmortem_present, true);
   const capabilities = await client.capabilityDiscover({ query: "oncology evidence", include_tools: true });
+  const evaluators = await client.missionEvaluatorDiscover({ query: "oncology fidelity", level: "evaluation", max_items: 4 });
+  assert.equal(evaluators.mcp.result.structuredContent.workflow, "mission_evaluator_discover");
+  assert.equal(evaluators.mcp.result.structuredContent.selection_posture, "candidate_only");
+  assert.equal(evaluators.mcp.result.structuredContent.matches[0].adapter.id, "oncoworlds.assay_fidelity");
   const evidenceAudit = await client.bioCapabilityEvidenceAudit({ evidence: [], claim_requests: [], metrics: {} });
   const publicationAudit = await client.bioAtlasPublicationAudit({ atlas: { atlas_id: "atlas-1" }, release_request: { id: "publication-1", targets: ["atlas_profile"] } });
   const capabilityAudit = await client.capabilityAudit({ include_groups: false });

@@ -4235,6 +4235,57 @@ export interface CapabilityDiscoverResult extends JsonObject {
   schema_attachment: JsonObject;
 }
 
+export interface MissionEvaluatorDiscoverArgs extends JsonObject {
+  query?: string;
+  group_id?: string;
+  domain?: string;
+  level?: "observation" | "evaluation" | "operational" | "release" | string;
+  adapter_id?: string;
+  max_items?: number;
+}
+
+export interface MissionEvaluatorAdapterResult extends JsonObject {
+  id: string;
+  group_id: string;
+  domains: string[];
+  levels: string[];
+  purpose: string;
+  candidate_tools: string[];
+  output_pointer_examples: string[];
+  status: "candidate_only" | string;
+}
+
+export interface MissionEvaluatorMatchResult extends JsonObject {
+  adapter: MissionEvaluatorAdapterResult;
+  score: number;
+  matched_fields: string[];
+}
+
+export interface MissionEvaluatorCoverageResult extends JsonObject {
+  capability_group_count: number;
+  evaluator_group_count: number;
+  uncovered_groups: string[];
+  unbound_groups: string[];
+  complete: boolean;
+  posture: string;
+}
+
+export interface MissionEvaluatorDiscoverResult extends JsonObject {
+  ok: boolean;
+  workflow: "mission_evaluator_discover";
+  mission_evaluator_schema_version: string;
+  schema_version: string;
+  catalog_digest: string;
+  total_adapters: number;
+  query: JsonObject;
+  result_count: number;
+  matches: MissionEvaluatorMatchResult[];
+  coverage: MissionEvaluatorCoverageResult;
+  selection_posture: "candidate_only";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CapabilityAuditGroupResult extends JsonObject {
   id: string;
   domains: string[];

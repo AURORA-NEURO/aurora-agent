@@ -139,6 +139,7 @@ use bioprism_devplat::{
     DeliveryReceiptVerificationRequest,
     DevPlatReport, ExecutionProvenanceRequest, MissionReport, mission_claim_lineage,
     MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
+    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MISSION_EVALUATOR_SCHEMA_VERSION,
     WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
     SecurityPrivacyManifest,
@@ -1501,6 +1502,7 @@ impl Server {
             "capability_audit" => self.capability_audit(&arguments),
             "capability_dashboard" => self.capability_dashboard(&arguments),
             "capability_discover" => self.capability_discover(&arguments),
+            "mission_evaluator_discover" => self.mission_evaluator_discover(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
@@ -22225,6 +22227,82 @@ impl Server {
         Ok(output)
     }
 
+    /// Search the explicit evaluator candidate catalogue across every workspace domain.
+    ///
+    /// The returned rows are discovery evidence only. They help a caller choose an
+    /// `adapter_id` for a mission claim, but they do not execute an evaluator, inspect a step
+    /// result, grant permission, or establish the truth of the claim.
+    fn mission_evaluator_discover(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode mission evaluator discovery input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "mission evaluator discovery input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        let query: MissionEvaluatorQuery = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid mission evaluator discovery input: {error}"))?;
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let search = catalogue
+            .search(&query)
+            .map_err(|error| format!("mission evaluator discovery refused: {error}"))?;
+        let capability_catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("capability catalogue refused: {error}"))?;
+        let evaluator_groups = catalogue
+            .adapters()
+            .iter()
+            .map(|adapter| adapter.group_id.clone())
+            .collect::<BTreeSet<_>>();
+        let capability_groups = capability_catalogue
+            .groups()
+            .iter()
+            .map(|group| group.id.clone())
+            .collect::<BTreeSet<_>>();
+        let uncovered_groups = capability_groups
+            .difference(&evaluator_groups)
+            .cloned()
+            .collect::<Vec<_>>();
+        let unbound_groups = evaluator_groups
+            .difference(&capability_groups)
+            .cloned()
+            .collect::<Vec<_>>();
+        let coverage_complete = uncovered_groups.is_empty() && unbound_groups.is_empty();
+        let mut output = serde_json::to_value(search)
+            .map_err(|error| format!("cannot encode mission evaluator discovery result: {error}"))?;
+        output["ok"] = json!(true);
+        output["workflow"] = json!("mission_evaluator_discover");
+        output["mission_evaluator_schema_version"] = json!(MISSION_EVALUATOR_SCHEMA_VERSION);
+        output["selection_posture"] = json!("candidate_only");
+        output["coverage"] = json!({
+            "capability_group_count": capability_groups.len(),
+            "evaluator_group_count": evaluator_groups.len(),
+            "uncovered_groups": uncovered_groups,
+            "unbound_groups": unbound_groups,
+            "complete": coverage_complete,
+            "posture": "catalogue coverage evidence only; no evaluator was executed",
+        });
+        output["guarantees"] = json!([
+            "every returned adapter is an explicit catalogue row with a stable content digest",
+            "ranking is deterministic and uses labels only",
+            "candidate tools are suggestions and were not executed",
+            "a caller must bind an adapter explicitly to a mission claim and step output pointer",
+        ]);
+        output["limitations"] = json!([
+            "the catalogue does not execute adapters or validate domain semantics",
+            "candidate_tools do not prove that a concrete result contains the suggested fields",
+            "adapter discovery does not make a claim reviewed, calibrated, causal, clinical, or release-ready",
+        ]);
+        let output_bytes = serde_json::to_vec(&output).map_err(|error| {
+            format!("cannot measure mission evaluator discovery result: {error}")
+        })?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "mission evaluator discovery result exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        Ok(output)
+    }
+
     /// Verify that the explicit cross-domain catalogue and authoritative MCP tool definitions
     /// describe the same callable surface.
     ///
@@ -27198,7 +27276,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29572,6 +29650,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_tools": { "type": "boolean", "default": false, "description": "Attach authoritative schemas for the bounded recommended tool union." }
                 },
                 "required": ["goal", "needs"]
+            }
+        }),
+        json!({
+            "name": "mission_evaluator_discover",
+            "description": "Search the explicit non-executing evaluator catalogue covering every workspace capability group. Returns deterministic digest-bound candidates with domain, mission-level, purpose, candidate-tool, and output-pointer guidance; candidates are routing evidence only and must be explicitly reviewed and bound to a mission claim step.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Optional intent text such as `oncology fidelity`, `oracle disagreement`, or `release reproduction`." },
+                    "group_id": { "type": "string", "description": "Optional exact or prefix capability group id." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive evaluator domain filter." },
+                    "level": { "type": "string", "enum": ["observation", "evaluation", "operational", "release"], "description": "Optional mission claim level supported by the candidate." },
+                    "adapter_id": { "type": "string", "description": "Optional exact, prefix, or substring evaluator adapter id." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 32 }
+                },
+                "required": []
             }
         }),
         json!({

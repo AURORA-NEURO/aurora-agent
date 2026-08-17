@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 175);
+    assert_eq!(tools.len(), 176);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1225,6 +1225,41 @@ fn workspace_capabilities_are_explicit_about_every_major_domain_surface() {
             "missing domain {domain}"
         );
     }
+}
+
+#[test]
+fn mission_evaluator_discovery_covers_domains_without_executing_tools() {
+    let mut server = server();
+    let all = call(&mut server, "mission_evaluator_discover", json!({}));
+    assert_eq!(all["ok"], json!(true));
+    assert_eq!(all["workflow"], json!("mission_evaluator_discover"));
+    assert_eq!(all["selection_posture"], json!("candidate_only"));
+    assert_eq!(all["total_adapters"], json!(29));
+    assert_eq!(all["result_count"], json!(29));
+    assert_eq!(all["coverage"]["capability_group_count"], json!(29));
+    assert_eq!(all["coverage"]["evaluator_group_count"], json!(29));
+    assert_eq!(all["coverage"]["complete"], json!(true));
+    assert_eq!(all["matches"][0]["adapter"]["status"], json!("candidate_only"));
+    assert!(all["guarantees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "candidate tools are suggestions and were not executed"));
+
+    let oncology = call(
+        &mut server,
+        "mission_evaluator_discover",
+        json!({"query": "oncology fidelity", "level": "evaluation", "max_items": 4}),
+    );
+    assert_eq!(oncology["result_count"], json!(1));
+    assert_eq!(
+        oncology["matches"][0]["adapter"]["id"],
+        json!("oncoworlds.assay_fidelity")
+    );
+    assert_eq!(
+        oncology["matches"][0]["adapter"]["group_id"],
+        json!("oncoworlds_models_and_assays")
+    );
 }
 
 #[test]
@@ -5087,12 +5122,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(175));
-    assert_eq!(result["advertised_tool_count"], json!(175));
+    assert_eq!(result["unique_catalog_tools"], json!(176));
+    assert_eq!(result["advertised_tool_count"], json!(176));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(175));
-    assert_eq!(result["schema_quality"]["valid"], json!(175));
+    assert_eq!(result["schema_quality"]["checked"], json!(176));
+    assert_eq!(result["schema_quality"]["valid"], json!(176));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5648,7 +5683,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 21000
+                "budget": 30000
             },
             "policy": "normative",
             "include_markdown": true,

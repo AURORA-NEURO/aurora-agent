@@ -27,10 +27,13 @@ from .capability import (
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
+    MissionEvaluatorQuery,
+    MissionEvaluatorSearchReport,
     capability_audit_report,
     capability_route_report,
     capability_discover_report,
     capability_route_review_report,
+    mission_evaluator_discover_report,
 )
 from .capability_dashboard import CapabilityDashboardQueryArgs, CapabilityDashboardReport, capability_dashboard_report
 from .ci_evidence import CiExecutionEvidenceReport, CiExecutionEvidenceRequest, ci_execution_evidence_report
@@ -1419,6 +1422,23 @@ class ApiClient:
             include_tools=include_tools,
         )
         return self.call_tool("capability_discover", arguments)
+
+    def mission_evaluator_discover(
+        self,
+        request: MissionEvaluatorQuery | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Discover explicit non-executing evaluator candidates through HTTP."""
+
+        normalized = request if isinstance(request, MissionEvaluatorQuery) else MissionEvaluatorQuery(**dict(request or {}))
+        return self.call_tool("mission_evaluator_discover", normalized.to_mcp_arguments())
+
+    def mission_evaluator_discover_report(
+        self,
+        request: MissionEvaluatorQuery | Mapping[str, Any] | None = None,
+    ) -> MissionEvaluatorSearchReport:
+        """Return typed, digest-bound evaluator candidate evidence through HTTP."""
+
+        return mission_evaluator_discover_report(self.mission_evaluator_discover(request))
 
     def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         if not isinstance(include_groups, bool):
@@ -4633,6 +4653,23 @@ class AsyncApiClient:
             include_tools=include_tools,
         )
         return await self.call_tool("capability_discover", arguments)
+
+    async def mission_evaluator_discover(
+        self,
+        request: MissionEvaluatorQuery | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async discovery of explicit non-executing evaluator candidates through HTTP."""
+
+        normalized = request if isinstance(request, MissionEvaluatorQuery) else MissionEvaluatorQuery(**dict(request or {}))
+        return await self.call_tool("mission_evaluator_discover", normalized.to_mcp_arguments())
+
+    async def mission_evaluator_discover_report(
+        self,
+        request: MissionEvaluatorQuery | Mapping[str, Any] | None = None,
+    ) -> MissionEvaluatorSearchReport:
+        """Return typed async evaluator candidate evidence through HTTP."""
+
+        return mission_evaluator_discover_report(await self.mission_evaluator_discover(request))
 
     async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         if not isinstance(include_groups, bool):

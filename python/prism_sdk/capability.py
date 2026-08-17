@@ -831,6 +831,184 @@ class CapabilityRouteRequest:
         }
 
 
+@dataclass(frozen=True)
+class MissionEvaluatorQuery:
+    """Bounded discovery filters for explicit, non-executing mission evaluators."""
+
+    query: str | None = None
+    group_id: str | None = None
+    domain: str | None = None
+    level: str | None = None
+    adapter_id: str | None = None
+    max_items: int = 32
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("query", self.query),
+            ("group_id", self.group_id),
+            ("domain", self.domain),
+            ("level", self.level),
+            ("adapter_id", self.adapter_id),
+        ):
+            _optional_text(name, value)
+        if self.level is not None and self.level not in {"observation", "evaluation", "operational", "release"}:
+            raise ArgumentError("level must be observation, evaluation, operational, or release")
+        if not isinstance(self.max_items, int) or isinstance(self.max_items, bool) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("max_items must be between 1 and 256")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "query": self.query,
+                "group_id": self.group_id,
+                "domain": self.domain,
+                "level": self.level,
+                "adapter_id": self.adapter_id,
+                "max_items": self.max_items,
+            }.items()
+            if value is not None
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorAdapterReport:
+    """One typed candidate row from mission evaluator discovery."""
+
+    id: str
+    group_id: str
+    domains: tuple[str, ...]
+    levels: tuple[str, ...]
+    purpose: str
+    candidate_tools: tuple[str, ...]
+    output_pointer_examples: tuple[str, ...]
+    status: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorAdapterReport":
+        raw = _route_mapping("mission evaluator adapter", value)
+        return cls(
+            id=_route_text("evaluator adapter id", raw.get("id")),
+            group_id=_route_text("evaluator group id", raw.get("group_id")),
+            domains=_route_strings("evaluator domains", raw.get("domains", [])),
+            levels=_route_strings("evaluator levels", raw.get("levels", [])),
+            purpose=_route_text("evaluator purpose", raw.get("purpose")),
+            candidate_tools=_route_strings("evaluator candidate tools", raw.get("candidate_tools", [])),
+            output_pointer_examples=_route_strings(
+                "evaluator output pointer examples", raw.get("output_pointer_examples", [])
+            ),
+            status=_route_text("evaluator status", raw.get("status")),
+        )
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorMatchReport:
+    adapter: MissionEvaluatorAdapterReport
+    score: int
+    matched_fields: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorMatchReport":
+        raw = _route_mapping("mission evaluator match", value)
+        score = _route_count("evaluator score", raw.get("score"))
+        return cls(
+            adapter=MissionEvaluatorAdapterReport.from_wire(raw.get("adapter", {})),
+            score=score,
+            matched_fields=_route_strings("evaluator matched fields", raw.get("matched_fields", [])),
+        )
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorCoverageReport:
+    """Coverage reconciliation between capability groups and evaluator candidates."""
+
+    capability_group_count: int
+    evaluator_group_count: int
+    uncovered_groups: tuple[str, ...]
+    unbound_groups: tuple[str, ...]
+    complete: bool
+    posture: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorCoverageReport":
+        raw = _route_mapping("mission evaluator coverage", value)
+        capability_group_count = _route_count(
+            "evaluator coverage capability_group_count", raw.get("capability_group_count")
+        )
+        evaluator_group_count = _route_count(
+            "evaluator coverage evaluator_group_count", raw.get("evaluator_group_count")
+        )
+        uncovered_groups = _route_strings("evaluator coverage uncovered_groups", raw.get("uncovered_groups", []))
+        unbound_groups = _route_strings("evaluator coverage unbound_groups", raw.get("unbound_groups", []))
+        complete = raw.get("complete")
+        if not isinstance(complete, bool):
+            raise ArgumentError("evaluator coverage complete must be a boolean")
+        if complete != (not uncovered_groups and not unbound_groups):
+            raise ArgumentError("evaluator coverage complete does not reconcile with group gaps")
+        return cls(
+            capability_group_count=capability_group_count,
+            evaluator_group_count=evaluator_group_count,
+            uncovered_groups=uncovered_groups,
+            unbound_groups=unbound_groups,
+            complete=complete,
+            posture=_route_text("evaluator coverage posture", raw.get("posture")),
+        )
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorSearchReport:
+    """Validated typed view over cross-domain evaluator candidate discovery."""
+
+    raw: dict[str, Any]
+    catalog_digest: str
+    total_adapters: int
+    query: dict[str, Any]
+    matches: tuple[MissionEvaluatorMatchReport, ...]
+    coverage: MissionEvaluatorCoverageReport
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorSearchReport":
+        raw = _route_mapping("mission evaluator search", value)
+        if raw.get("ok") is False:
+            raise ArgumentError("mission evaluator search is not successful")
+        if raw.get("workflow") != "mission_evaluator_discover":
+            raise ArgumentError("mission evaluator workflow must be mission_evaluator_discover")
+        if raw.get("selection_posture") != "candidate_only":
+            raise ArgumentError("mission evaluator selection posture must be candidate_only")
+        matches_value = raw.get("matches", [])
+        if not isinstance(matches_value, Sequence) or isinstance(matches_value, (str, bytes)):
+            raise ArgumentError("mission evaluator matches must be an array")
+        return cls(
+            raw=raw,
+            catalog_digest=_route_text("mission evaluator catalog digest", raw.get("catalog_digest")),
+            total_adapters=_route_count("mission evaluator total adapters", raw.get("total_adapters")),
+            query=_route_mapping("mission evaluator query", raw.get("query", {})),
+            matches=tuple(MissionEvaluatorMatchReport.from_wire(item) for item in matches_value),
+            coverage=MissionEvaluatorCoverageReport.from_wire(raw.get("coverage", {})),
+            guarantees=_route_strings("mission evaluator guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("mission evaluator limitations", raw.get("limitations", [])),
+        )
+
+    @property
+    def adapters(self) -> tuple[MissionEvaluatorAdapterReport, ...]:
+        return tuple(match.adapter for match in self.matches)
+
+    @property
+    def all_candidates_only(self) -> bool:
+        return bool(self.matches) and all(adapter.status == "candidate_only" for adapter in self.adapters)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evaluator_discover_report(value: Mapping[str, Any]) -> MissionEvaluatorSearchReport:
+    """Parse a mission evaluator discovery response into a typed report."""
+
+    return MissionEvaluatorSearchReport.from_wire(_tool_payload(value, "mission_evaluator_discover"))
+
+
 __all__ = [
     "CapabilityQuery",
     "CapabilityGroupReport",
@@ -846,8 +1024,14 @@ __all__ = [
     "CapabilityRouteReport",
     "CapabilityRouteReviewRequest",
     "CapabilityRouteReviewReport",
+    "MissionEvaluatorQuery",
+    "MissionEvaluatorAdapterReport",
+    "MissionEvaluatorMatchReport",
+    "MissionEvaluatorCoverageReport",
+    "MissionEvaluatorSearchReport",
     "capability_route_report",
     "capability_route_review_report",
     "capability_discover_report",
     "capability_audit_report",
+    "mission_evaluator_discover_report",
 ]

@@ -215,6 +215,7 @@ pub mod error;
 pub mod exploit;
 pub mod engineering;
 pub mod engineering_plan;
+pub mod evaluator;
 pub mod execution_provenance;
 pub mod mission;
 pub mod operational_readiness;
@@ -281,6 +282,10 @@ pub use engineering_plan::{
     EngineeringPlanRequest, EngineeringPlanWave, EngineeringTicketPlan,
     ENGINEERING_PLAN_AUDIT_SCHEMA, ENGINEERING_PLAN_REQUEST_SCHEMA, MAX_PLAN_PARALLELISM,
     MAX_PLAN_TICKETS,
+};
+pub use evaluator::{
+    EvaluatorError, MissionEvaluatorAdapter, MissionEvaluatorCatalogue, MissionEvaluatorMatch,
+    MissionEvaluatorQuery, MissionEvaluatorSearch, MISSION_EVALUATOR_SCHEMA_VERSION,
 };
 pub use execution_provenance::{
     audit_execution_provenance, DelegatedCheckEvidence, ExecutionProvenanceAudit,

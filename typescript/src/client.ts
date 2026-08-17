@@ -260,6 +260,8 @@ import type {
   MetricsProfileAuditArgs,
   MissionAssembly,
   MissionClaimLineageResponse,
+  MissionEvaluatorDiscoverArgs,
+  MissionEvaluatorDiscoverResult,
   MissionExecutionProvenanceResponse,
   MissionJob,
   MissionJobStatus,
@@ -851,6 +853,10 @@ export class ApiClient {
 
   async capabilityDiscover(args: CapabilityDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityDiscoverResult>> {
     return this.callTool<CapabilityDiscoverResult>("capability_discover", args, options);
+  }
+
+  async missionEvaluatorDiscover(args: MissionEvaluatorDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvaluatorDiscoverResult>> {
+    return this.callTool<MissionEvaluatorDiscoverResult>("mission_evaluator_discover", args, options);
   }
 
   async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityAuditResult>> {
