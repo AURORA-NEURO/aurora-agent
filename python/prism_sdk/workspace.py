@@ -30,6 +30,10 @@ from .domain_reports import (
     DomainReportProjectReport,
     DomainReportProjectRequest,
 )
+from .domain_report_bridges import (
+    AdapterDomainReportResult,
+    adapter_domain_report_arguments,
+)
 from .domain_evidence import (
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
@@ -2084,6 +2088,20 @@ class Workspace:
         request: DomainReportProjectRequest | Mapping[str, Any],
     ) -> DomainReportProjectReport:
         return DomainReportProjectReport.from_wire(self.domain_report_project(request))
+
+    def domain_report_from_adapter_execution(
+        self,
+        evidence: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+        conformance: Mapping[str, Any] | None = None,
+    ) -> AdapterDomainReportResult:
+        """Validate/index adapter evidence and compose its canonical report through MCP."""
+
+        return AdapterDomainReportResult.from_wire(
+            self.tool(
+                "domain_report_project",
+                adapter_domain_report_arguments(evidence, conformance),
+            )
+        )
 
     def domain_report_coverage(
         self,
@@ -5746,6 +5764,18 @@ class AsyncWorkspace:
         request: DomainReportProjectRequest | Mapping[str, Any],
     ) -> DomainReportProjectReport:
         return DomainReportProjectReport.from_wire(await self.domain_report_project(request))
+
+    async def domain_report_from_adapter_execution(
+        self,
+        evidence: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+        conformance: Mapping[str, Any] | None = None,
+    ) -> AdapterDomainReportResult:
+        return AdapterDomainReportResult.from_wire(
+            await self.tool(
+                "domain_report_project",
+                adapter_domain_report_arguments(evidence, conformance),
+            )
+        )
 
     async def domain_report_coverage(
         self,

@@ -1127,11 +1127,17 @@ digest can be attached as a parent when constructing adapter execution evidence.
 `domain_report_from_adapter_execution(...)`,
 `domain_report_from_provider_normalization(...)`, and
 `domain_report_from_external_provider_normalization(...)` then compose those same observations
-into a `DomainReportProjectRequest` for the canonical report/intake surface. Each bridge retains
-typed evidence and caller parents, maps refused/failed outcomes to a refused claim posture, and
+into a `DomainReportProjectRequest` for the canonical report/intake surface. Each bridge uses a
+declared cross-domain MCP tool as `source_tool` while retaining adapter/provider identity inside
+the typed payload; it retains typed evidence and caller parents, maps refused/failed outcomes to a refused claim posture, and
 keeps explicit non-claims adjacent to the payload. External materialization retains receipt and
 payload lineage without opening the caller-owned locator; none of these bridges executes an
 adapter, contacts a provider, or claims readiness.
+`ApiClient.domain_report_from_adapter_execution()` and its async counterpart, plus the matching
+`Workspace` methods, submit the typed adapter bridge through `domain_report_project` and parse the
+combined evidence/report response as `AdapterDomainReportResult`. The transport facade preserves
+the server's indexed evidence parent, claim posture, and readiness boundary rather than treating
+successful composition as adapter execution.
 - `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
   installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full

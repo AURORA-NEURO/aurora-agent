@@ -155,11 +155,12 @@ use bioprism_devplat::{
     MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
-    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
-    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
+    WorkbenchRequest, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION, ADAPTER_DOMAIN_REPORT_WORKFLOW,
+    CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION, DOMAIN_ACQUISITION_WORKFLOW,
+    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
@@ -2811,10 +2812,121 @@ impl Server {
         match operation {
             "project" => self.project_domain_report(arguments),
             "coverage" => self.domain_report_coverage(arguments),
+            "from_adapter_execution" => self.project_adapter_execution_domain_report(arguments),
             other => Err(format!(
-                "unknown domain report operation {other:?}; choose project or coverage"
+                "unknown domain report operation {other:?}; choose project, coverage, or from_adapter_execution"
             )),
         }
+    }
+
+    /// Compose one validated adapter-evidence observation into the canonical domain-report
+    /// envelope. The adapter remains caller-owned: this operation indexes the evidence handoff
+    /// and the report projection, but never imports, executes, or certifies the adapter.
+    fn project_adapter_execution_domain_report(&self, arguments: &Value) -> Result<Value, String> {
+        let evidence = arguments
+            .get("evidence")
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or("from_adapter_execution requires an evidence object")?;
+        let evidence_result = self.adapter_execution_evidence(&evidence)?;
+        let evidence_artifact = evidence_result
+            .get("evidence")
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or("adapter evidence response omitted evidence")?;
+        let group_id = evidence_artifact
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("adapter evidence omitted group_id")?;
+        let domains = evidence_artifact
+            .get("domains")
+            .filter(|value| value.is_array())
+            .cloned()
+            .ok_or("adapter evidence omitted domains")?;
+        let subject_id = evidence_artifact
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("adapter evidence omitted subject_id")?;
+        let execution_status = evidence_artifact
+            .get("execution_status")
+            .and_then(Value::as_str)
+            .ok_or("adapter evidence omitted execution_status")?;
+        let claim_status = match execution_status {
+            "succeeded" | "partial" => "observed",
+            "refused" | "failed" => "refused",
+            _ => "review_required",
+        };
+        let mut parent_digests = evidence_artifact
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if let Some(content_digest) = evidence_result
+            .get("artifact_registry")
+            .and_then(|registry| registry.get("content_digest"))
+            .and_then(Value::as_str)
+        {
+            if !parent_digests.iter().any(|parent| parent == content_digest) {
+                parent_digests.push(content_digest.to_string());
+            }
+        }
+        let mut report = json!({
+            "kind": "adapter_execution",
+            "evidence": evidence_artifact,
+            "adapter": evidence_result.get("adapter"),
+        });
+        if let Some(conformance) = arguments.get("conformance") {
+            if !conformance.is_object() {
+                return Err("conformance must be an object when supplied".into());
+            }
+            report["conformance"] = conformance.clone();
+        }
+        let report_request = json!({
+            "group_id": group_id,
+            "domains": domains,
+            "subject_id": subject_id,
+            "source_tool": "adapter_execution_evidence",
+            "report": report,
+            "claim_posture": {
+                "status": claim_status,
+                "does_not_claim": [
+                    "adapter correctness beyond the caller-supplied observation",
+                    "scientific, clinical, causal, provenance, regulatory, or release validity",
+                    "MCP-core adapter execution or readiness"
+                ],
+                "limitations": [
+                    "adapter execution remains caller-owned",
+                    "the evidence is structural and caller-attested"
+                ]
+            },
+            "parent_digests": parent_digests
+        });
+        let domain_report = self.project_domain_report(&report_request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
+            "workflow": ADAPTER_DOMAIN_REPORT_WORKFLOW,
+            "evidence": evidence_result,
+            "domain_report": domain_report,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "adapter evidence is validated and indexed before the canonical domain report is projected",
+                "adapter identity remains inside the evidence payload while the declared MCP tool anchors catalogue scope",
+                "the evidence artifact digest is retained as a parent of the domain report"
+            ],
+            "does_not_claim": [
+                "the MCP core executed or imported the adapter",
+                "caller-attested conformance proves scientific, clinical, provenance, regulatory, or release validity",
+                "report indexing proves readiness or external effects"
+            ]
+        }))
     }
 
     fn project_domain_report(&self, arguments: &Value) -> Result<Value, String> {
@@ -30861,11 +30973,11 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_report_project",
-            "description": "Project a caller-supplied report from any declared workspace capability group into the bounded domain-report envelope, or audit which of the 29 catalogue groups have retained structured projections. The tool validates group, source-tool, and domain membership, preserves claim posture and limitations, indexes exact report JSON digests, and keeps coverage separate from scientific, clinical, release, provenance, and readiness claims.",
+            "description": "Project a caller-supplied report from any declared workspace capability group into the bounded domain-report envelope, compose validated adapter evidence into that envelope, or audit which of the 29 catalogue groups have retained structured projections. The tool validates group, source-tool, and domain membership, preserves claim posture and limitations, indexes exact report JSON digests, and keeps coverage separate from scientific, clinical, release, provenance, and readiness claims.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "operation": { "type": "string", "enum": ["project", "coverage"], "description": "project creates one explicit report projection; coverage summarizes retained structured projections. Defaults to project." },
+                    "operation": { "type": "string", "enum": ["project", "coverage", "from_adapter_execution"], "description": "project creates one explicit report projection; from_adapter_execution validates/indexes nested adapter evidence and composes a canonical report; coverage summarizes retained structured projections. Defaults to project." },
                     "group_id": { "type": "string", "description": "For project: exact workspace capability-group id; for coverage: optional exact group filter." },
                     "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "For project: domain labels declared by the selected capability group." },
                     "domain": { "type": "string", "description": "For coverage: optional case-insensitive domain-label filter." },
@@ -30873,6 +30985,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "source_tool": { "type": "string", "description": "For project: callable MCP tool declared under group_id." },
                     "report": { "type": "object", "description": "For project: bounded caller-supplied report payload; it is retained but not executed or scientifically interpreted." },
                     "claim_posture": { "type": "object", "description": "For project: {status, does_not_claim, limitations?}; status is observed, derived, review_required, refused, or not_applicable and does_not_claim must be non-empty." },
+                    "evidence": { "type": "object", "description": "For from_adapter_execution: serialized AdapterExecutionEvidenceRequest. The adapter is caller-executed; this operation validates and indexes the observation but never runs it." },
+                    "conformance": { "type": "object", "description": "For from_adapter_execution: optional caller-supplied bounded conformance report retained inside the canonical report payload." },
                     "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "For project: optional lowercase SHA-256 parent artifact digests." },
                     "max_groups": { "type": "integer", "minimum": 1, "maximum": 128, "description": "For coverage: maximum catalogue groups to include; defaults to 64." },
                     "include_report_digests": { "type": "boolean", "description": "For coverage: include exact indexed report digests per group; defaults false." }

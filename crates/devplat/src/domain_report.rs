@@ -18,6 +18,8 @@ pub const DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-report-coverage/0.1";
 pub const DOMAIN_REPORT_PROJECT_WORKFLOW: &str = "domain_report_project";
 pub const DOMAIN_REPORT_COVERAGE_WORKFLOW: &str = "domain_report_coverage";
+pub const ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION: &str = "bioprism-devplat-adapter-domain-report/0.1";
+pub const ADAPTER_DOMAIN_REPORT_WORKFLOW: &str = "adapter_domain_report";
 pub const MAX_DOMAIN_REPORT_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_DOMAIN_REPORT_PARENTS: usize = 128;
 pub const MAX_DOMAIN_REPORT_DOMAINS: usize = 64;

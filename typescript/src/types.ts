@@ -4864,7 +4864,7 @@ export interface DomainReportClaimPosture extends JsonObject {
 }
 
 export interface DomainReportProjectArgs extends JsonObject {
-  operation?: "project";
+  operation?: "project" | "from_adapter_execution";
   group_id: string;
   domains: string[];
   subject_id: string;
@@ -4873,6 +4873,26 @@ export interface DomainReportProjectArgs extends JsonObject {
   claim_posture: DomainReportClaimPosture;
   source_plan_digest?: string | null;
   parent_digests?: string[];
+  evidence?: AdapterExecutionEvidenceArgs;
+  conformance?: JsonObject;
+}
+
+export interface AdapterDomainReportArgs extends JsonObject {
+  operation: "from_adapter_execution";
+  evidence: AdapterExecutionEvidenceArgs;
+  conformance?: JsonObject;
+}
+
+export interface AdapterDomainReportResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-devplat-adapter-domain-report/0.1";
+  workflow: "adapter_domain_report";
+  evidence: AdapterExecutionEvidenceResult;
+  domain_report: DomainReportProjectResult;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
 }
 
 export interface DomainReportArtifactRegistryProjection extends JsonObject {

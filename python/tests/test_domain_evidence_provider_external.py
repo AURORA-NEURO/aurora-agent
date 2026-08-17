@@ -455,7 +455,7 @@ def test_external_normalization_bridges_receipt_materialization_and_provider_lin
         parent_digests=("3" * 64,),
     )
     arguments = domain_report.to_arguments()
-    assert arguments["source_tool"] == "literature:pubmed:external_payload"
+    assert arguments["source_tool"] == "domain_evidence_provider_external_payload_normalize"
     assert arguments["report"]["external_payload"] is True
     assert report.receipt_digest in arguments["report"]["evidence"]["parent_digests"]
     assert arguments["claim_posture"]["status"] == "observed"

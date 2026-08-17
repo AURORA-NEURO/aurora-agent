@@ -192,6 +192,10 @@ from .domain_reports import (
     DomainReportProjectRequest,
 )
 from .domain_report_bridges import (
+    ADAPTER_DOMAIN_REPORT_SCHEMA,
+    ADAPTER_DOMAIN_REPORT_WORKFLOW,
+    AdapterDomainReportResult,
+    adapter_domain_report_arguments,
     domain_report_from_adapter_execution,
     domain_report_from_provider_normalization,
     domain_report_from_external_provider_normalization,
@@ -2936,6 +2940,10 @@ __all__ = [
     "DomainReportCoverageRequest",
     "DomainReportCoverageReport",
     "domain_report_from_adapter_execution",
+    "ADAPTER_DOMAIN_REPORT_SCHEMA",
+    "ADAPTER_DOMAIN_REPORT_WORKFLOW",
+    "AdapterDomainReportResult",
+    "adapter_domain_report_arguments",
     "domain_report_from_provider_normalization",
     "domain_report_from_external_provider_normalization",
     "DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA",

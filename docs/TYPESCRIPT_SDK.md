@@ -526,6 +526,13 @@ explicit source/workflow parent-join posture, including missing and unclassified
 not infer provenance or convert a complete join into readiness.
 Its `page_summary` keeps execution, conformance, semantic-loss, join, output, and missing-parent
 counts separate and explicitly page-scoped.
+`domainReportFromAdapterExecution` composes the same typed evidence request through the canonical
+`domain_report_project` tool with `operation: "from_adapter_execution"`. The returned
+`AdapterDomainReportResult` retains both the indexed evidence and indexed domain report, links the
+evidence digest into report lineage, preserves refusal/partial posture, and keeps
+`readiness_claimed: false` with `execution: "not_started"`. The facade validates the nested
+evidence and optional conformance object before transport; it never runs the adapter or upgrades
+structural evidence into scientific, clinical, provenance, or release validity.
 `conformanceRun` returns typed `ConformanceRunResult` suite and release evidence, including fixture
 drift, test-pyramid counts, bounded case outcomes, and all unmet noncompensatory gates. A null
 `results` field means case details were not requested; it is not an empty-suite claim.

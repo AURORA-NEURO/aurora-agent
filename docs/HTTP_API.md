@@ -183,6 +183,13 @@ catalogue-declared `source_tool`, an object `report`, and a `claim_posture` with
 `observed`, `derived`, `review_required`, `refused`, or `not_applicable` plus a non-empty
 `does_not_claim` list. The report is structurally validated, indexed under its exact JSON digest,
 and returned with the artifact lookup and catalogue digest. It does not execute the source tool.
+The MCP tool `domain_report_project` also accepts `operation: "from_adapter_execution"` with a
+nested `adapter_execution_evidence` request. That operation validates and indexes the adapter
+evidence first, composes a catalogue-checked `adapter_execution` domain report, and returns both
+artifacts with the evidence digest linked as a report parent. It preserves observed, partial,
+refused, and review-required execution posture and always returns `readiness_claimed: false` and
+`execution: "not_started"`; it is a composition boundary, not adapter execution or a scientific,
+clinical, provenance, regulatory, or release-readiness claim.
 `GET /v1/domain-reports/coverage` reports which groups have retained structured projections,
 subject/source/status summaries, missing group ids, and an exact coverage digest. Coverage means
 local indexed projection presence only; it is not execution coverage, scientific validity,

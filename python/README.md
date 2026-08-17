@@ -173,9 +173,14 @@ its stable report digest can be carried as an explicit evidence parent.
 `domain_report_from_adapter_execution(...)`,
 `domain_report_from_provider_normalization(...)`, and
 `domain_report_from_external_provider_normalization(...)` compose those observations into the
-canonical `DomainReportProjectRequest`. They retain typed evidence, refusal/observed posture,
+canonical `DomainReportProjectRequest`. They use declared cross-domain MCP tool names at the
+report boundary while retaining typed adapter/provider identity inside the payload, and retain typed evidence, refusal/observed posture,
 caller lineage, and non-claims about execution, authenticity, scientific validity, and readiness;
 external-payload bridges preserve receipt/materialization lineage and never reopen a locator.
+`ApiClient`, `AsyncApiClient`, `Workspace`, and `AsyncWorkspace` additionally expose
+`domain_report_from_adapter_execution(...)`, which sends the typed request through the canonical
+`domain_report_project` operation and returns the combined `AdapterDomainReportResult` with
+evidence-to-report lineage and the server's explicit non-readiness boundary.
 Provider normalization reports now expose a parallel evidence handoff: payload, request, shape,
 row-index, intake, catalogue, and normalization digests become explicit parents/output identity,
 while connector outcome and structural status remain distinct. External receipt-verified

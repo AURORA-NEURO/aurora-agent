@@ -44,6 +44,10 @@ from .domain_reports import (
     DomainReportProjectReport,
     DomainReportProjectRequest,
 )
+from .domain_report_bridges import (
+    AdapterDomainReportResult,
+    adapter_domain_report_arguments,
+)
 from .domain_evidence import (
     DomainEvidenceHarmonizationReport,
     DomainEvidenceHarmonizeRequest,
@@ -868,6 +872,20 @@ class ApiClient:
         )
         return DomainReportProjectReport.from_wire(
             self.call_tool("domain_report_project", normalized.to_arguments())
+        )
+
+    def domain_report_from_adapter_execution(
+        self,
+        evidence: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+        conformance: Mapping[str, Any] | None = None,
+    ) -> AdapterDomainReportResult:
+        """Validate/index adapter evidence and compose its canonical domain report over MCP."""
+
+        return AdapterDomainReportResult.from_wire(
+            self.call_tool(
+                "domain_report_project",
+                adapter_domain_report_arguments(evidence, conformance),
+            )
         )
 
     def domain_report_coverage_tool(
@@ -5163,6 +5181,17 @@ class AsyncApiClient:
         request: DomainReportProjectRequest | Mapping[str, Any],
     ) -> DomainReportProjectReport:
         return await asyncio.to_thread(self.client.domain_report_project_tool, request)
+
+    async def domain_report_from_adapter_execution(
+        self,
+        evidence: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+        conformance: Mapping[str, Any] | None = None,
+    ) -> AdapterDomainReportResult:
+        return await asyncio.to_thread(
+            self.client.domain_report_from_adapter_execution,
+            evidence,
+            conformance,
+        )
 
     async def domain_report_coverage_tool(
         self,

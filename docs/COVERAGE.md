@@ -331,6 +331,11 @@ The same observations can now be projected through typed Python bridges into the
 receipt-verified external normalization. Claim posture and non-claims remain adjacent to the
 payload, refused outcomes stay refused, caller parents remain explicit, and external locators are
 never reopened; this is report composition rather than an execution or readiness upgrade.
+The canonical `domain_report_project(operation="from_adapter_execution")` path now performs that
+composition inside the Rust/MCP boundary as well: it validates and indexes the adapter evidence,
+indexes the catalogue-checked domain report, and joins the evidence artifact digest into report
+lineage. Python sync/async HTTP and workspace facades and the TypeScript client expose the same
+typed response, while preserving `execution: "not_started"` and `readiness_claimed: false`.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

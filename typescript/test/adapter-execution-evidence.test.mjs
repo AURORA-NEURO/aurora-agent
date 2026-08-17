@@ -85,3 +85,20 @@ test("provider normalization fixture preserves the shared request contract", asy
   await client.adapterExecutionEvidence(fixture);
   assert.deepEqual(sent, fixture);
 });
+
+test("client composes adapter evidence through the canonical domain report operation", async () => {
+  let sent;
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/domain_report_project");
+      sent = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true, tool: "domain_report_project", mcp: { result: { structuredContent: { workflow: "adapter_domain_report" } } } }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  await client.domainReportFromAdapterExecution(args, { report_digest: "e".repeat(64), status: "verified" });
+  assert.equal(sent.operation, "from_adapter_execution");
+  assert.deepEqual(sent.evidence, { ...args, losses: [] });
+  assert.equal(sent.conformance.status, "verified");
+  await assert.rejects(client.domainReportFromAdapterExecution({ ...args, input_digest: undefined }), ArgumentError);
+});

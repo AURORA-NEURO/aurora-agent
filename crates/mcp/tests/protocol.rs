@@ -836,6 +836,62 @@ fn domain_report_projection_refuses_unknown_source_and_domain_claims() {
 }
 
 #[test]
+fn adapter_domain_report_operation_validates_and_joins_adapter_evidence() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "operation": "from_adapter_execution",
+            "evidence": {
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "subject_id": "adapter-domain-report-subject",
+                "adapter_id": "bioprism.python.vcf_text",
+                "adapter_version": "0.1.0",
+                "source_id": "adapter-domain-report-source",
+                "input_digest": "a".repeat(64),
+                "output_digest": "b".repeat(64),
+                "execution_status": "succeeded",
+                "conformance_status": "verified",
+                "semantic_loss_status": "unknown",
+                "losses": [],
+                "parent_digests": ["c".repeat(64)]
+            },
+            "conformance": {"status": "verified", "report_digest": "d".repeat(64)}
+        }),
+    );
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-devplat-adapter-domain-report/0.1")
+    );
+    assert_eq!(result["workflow"], json!("adapter_domain_report"));
+    assert_eq!(
+        result["evidence"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+    assert_eq!(
+        result["domain_report"]["workflow"],
+        json!("domain_report_project")
+    );
+    assert_eq!(
+        result["domain_report"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+    assert_eq!(
+        result["domain_report"]["report"]["claim_posture"]["status"],
+        json!("observed")
+    );
+    assert!(result["domain_report"]["report"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|parent| parent == &result["evidence"]["artifact_registry"]["content_digest"]));
+    assert_eq!(result["readiness_claimed"], json!(false));
+}
+
+#[test]
 fn domain_evidence_harmonization_indexes_traceability_idempotently() {
     let mut server = server();
     let first = call(
