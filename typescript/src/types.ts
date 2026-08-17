@@ -7233,6 +7233,48 @@ export interface OperationsDomainCoverage extends JsonObject {
   non_claims: string[];
 }
 
+export interface OperationsHandoffArgs extends JsonObject {
+  goal?: string;
+  domains?: string[];
+  group_ids?: string[];
+  include_complete?: boolean;
+  max_groups?: number;
+}
+
+export interface OperationsHandoffGroup extends OperationsDomainGroup {
+  route_need_id: string;
+  next_action: string;
+}
+
+export interface OperationsHandoffCoverage extends JsonObject {
+  matching_group_count: number;
+  included_group_count: number;
+  complete_groups_omitted: number;
+  selected_groups_with_gaps: number;
+  truncated: boolean;
+  unresolved_group_ids: string[];
+  unresolved_domains: string[];
+}
+
+export interface OperationsHandoff extends JsonObject {
+  ok: boolean;
+  workflow: "operations_domain_handoff";
+  schema: "bioprism-operations-handoff/0.1";
+  handoff_id: string;
+  domain_coverage_digest: string;
+  goal: string;
+  selection: JsonObject;
+  coverage: OperationsHandoffCoverage;
+  groups: OperationsHandoffGroup[];
+  route_request: CapabilityRouteArgs;
+  handoff_status: "unresolved_domain" | "no_actionable_gaps" | "requires_catalogue_review" | "ready_for_capability_route";
+  execution: "not_started";
+  next_steps: string[];
+  guarantees: string[];
+  non_claims: string[];
+  links: Record<string, string>;
+}
+
 export interface OperationsSnapshot extends JsonObject {
   ok: boolean;
   schema: "bioprism-operations-snapshot/0.1";

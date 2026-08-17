@@ -21,6 +21,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/capabilities` | Tool/resource counts, transport support, limits, and workspace catalogue |
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
+| `POST /v1/operations/handoff` | Build a content-addressed, non-executing domain-to-`capability_route` handoff |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
@@ -140,6 +141,15 @@ The snapshot is clock-free and read-only. It does not dispatch a tool, resume a 
 webhook, establish receiver acceptance, or validate a scientific/clinical claim. Consumers should
 store `recent_events.next_after` as their next cursor and treat `recent_events.gap: true` as an
 explicit retention boundary rather than silently treating the page as complete history.
+
+`POST /v1/operations/handoff` accepts an optional `goal`, `domains`, `group_ids`,
+`include_complete`, and `max_groups` body. Selectors are normalized and intersected when both
+domains and group IDs are provided. The response returns selected groups, exact catalogue gaps,
+unresolved selectors, a ready-to-submit `route_request`, a content-addressed `handoff_id`, and a
+status of `ready_for_capability_route`, `requires_catalogue_review`, `no_actionable_gaps`, or
+`unresolved_domain`. The endpoint is deliberately non-executing: callers must submit the route to
+`capability_route`, review explicit selections with `capability_route_review`, and run
+`/v1/missions/preflight` before any mission dispatch.
 
 ## Asynchronous missions
 

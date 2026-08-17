@@ -2414,6 +2414,26 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
           links: {},
         });
       }
+      if (path === "/v1/operations/handoff") {
+        return jsonResponse({
+          ok: true,
+          workflow: "operations_domain_handoff",
+          schema: "bioprism-operations-handoff/0.1",
+          handoff_id: "a".repeat(64),
+          domain_coverage_digest: "b".repeat(64),
+          goal: "prepare an oncology route",
+          selection: { domains: ["oncology"], group_ids: [], include_complete: true, max_groups: 1, selector_mode: "intersection" },
+          coverage: { matching_group_count: 1, included_group_count: 1, complete_groups_omitted: 0, selected_groups_with_gaps: 0, truncated: false, unresolved_group_ids: [], unresolved_domains: [] },
+          groups: [{ id: "biological_domains", status: "available", domains: ["oncology"], declared_tool_count: 1, advertised_tool_count: 1, missing_tool_count: 0, missing_tools: [], fully_advertised: true, route_need_id: "domain-group:biological_domains", next_action: "submit the route_need to capability_route, then review explicit selections" }],
+          route_request: { goal: "prepare an oncology route", needs: [{ id: "domain-group:biological_domains", group_id: "biological_domains", query: "prepare an oncology route", max_items: 10 }], max_candidates_per_need: 10, max_tools: 128, include_tools: false },
+          handoff_status: "ready_for_capability_route",
+          execution: "not_started",
+          next_steps: ["route", "review", "preflight"],
+          guarantees: ["non-executing"],
+          non_claims: ["scientific validity"],
+          links: { capability_route: "/v1/tools/capability_route" },
+        });
+      }
       if (path === "/v1/recovery") {
         return jsonResponse({
           ok: true,
@@ -2473,6 +2493,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   assert.equal(operations.recent_events.events[0].id, 1);
   assert.equal(operations.domain_coverage.groups[0].id, "operations");
   assert.equal(operations.consistency.cross_store_atomic, false);
+  const handoff = await client.operationsHandoff({ goal: "prepare an oncology route", domains: ["oncology"], max_groups: 1 });
+  assert.equal(handoff.handoff_status, "ready_for_capability_route");
+  assert.equal(handoff.groups[0].route_need_id, "domain-group:biological_domains");
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
 });
 

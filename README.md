@@ -343,6 +343,10 @@ bootstrap and handoff surface: it never returns unbounded mission reports, execu
 does not turn local observations into scientific validity, receiver acceptance, or automatic
 recovery claims. The event cursor remains authoritative, so consumers should persist
 `recent_events.next_after` and inspect `gap` before declaring continuity.
+`POST /v1/operations/handoff` turns caller-selected domains or capability groups into a
+content-addressed, non-executing `capability_route` request. It preserves unresolved selectors,
+catalogue gaps, complete-group omissions, and explicit next steps through capability review and
+mission preflight; it never dispatches the generated route or authorizes execution.
 `GET /v1/webhooks/subscriptions/{id}/attempts` route and matching SDK helpers expose the
 provenance cursor with explicit retention gaps and dropped-row accounting. Receipt-bearing rows
 are also available through `/v1/delivery-receipts/{receipt_id}/attempts`, which joins the same

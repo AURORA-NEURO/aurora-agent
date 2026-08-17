@@ -662,6 +662,10 @@ status, the recovery matrix, typed domain-group/tool coverage, compact capabilit
 non-claims, including the explicit non-atomic cross-store consistency declaration. It is a
 read-only dashboard/bootstrap call; it does not execute tools, resume jobs,
 send webhooks, or promote local observations into scientific or receiver-acceptance claims.
+`operationsHandoff(args)` returns the typed `OperationsHandoff` proposal for selected domains or
+groups, preserving exact catalogue gaps, unresolved selectors, a content-addressed handoff ID,
+and a `CapabilityRouteArgs` proposal. The proposal remains `execution: "not_started"` until the
+caller performs route review and mission preflight.
 
 ```typescript
 const page = await api.events(0, 100);

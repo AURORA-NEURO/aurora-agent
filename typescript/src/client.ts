@@ -28,6 +28,8 @@ import type {
   ReleaseAuditResult,
   OperationsCatalogArgs,
   OperationsCatalogResult,
+  OperationsHandoff,
+  OperationsHandoffArgs,
   SafetyReleaseGateArgs,
   SafetyReleaseGateResult,
   MedicalBoundaryArgs,
@@ -431,6 +433,33 @@ export class ApiClient {
       undefined,
       options,
     );
+  }
+
+  /** Build a content-addressed, non-executing route handoff from domain coverage evidence. */
+  async operationsHandoff(
+    args: OperationsHandoffArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<OperationsHandoff> {
+    if (!isObject(args)) throw new ArgumentError("operations handoff arguments must be an object");
+    if (args.goal !== undefined && (typeof args.goal !== "string" || args.goal.trim().length === 0 || args.goal.length > 1024)) {
+      throw new ArgumentError("goal must be a non-empty visible string of at most 1024 characters");
+    }
+    for (const name of ["domains", "group_ids"] as const) {
+      const values = args[name];
+      if (values !== undefined && (!Array.isArray(values) || values.length > 64 || values.some((value) => typeof value !== "string" || value.trim().length === 0 || value.length > 128))) {
+        throw new ArgumentError(`${name} must contain at most 64 visible strings of at most 128 characters`);
+      }
+    }
+    if (args.include_complete !== undefined && typeof args.include_complete !== "boolean") {
+      throw new ArgumentError("include_complete must be a boolean");
+    }
+    if (args.max_groups !== undefined && (!Number.isSafeInteger(args.max_groups) || args.max_groups < 1 || args.max_groups > 64)) {
+      throw new ArgumentError("max_groups must be 1..=64");
+    }
+    const normalized: OperationsHandoffArgs = { ...args };
+    if (normalized.domains !== undefined) normalized.domains = [...new Set(normalized.domains)].sort();
+    if (normalized.group_ids !== undefined) normalized.group_ids = [...new Set(normalized.group_ids)].sort();
+    return this.request<OperationsHandoff>("POST", "/v1/operations/handoff", normalized, options);
   }
 
   async tools(options?: ClientRequestOptions): Promise<ToolsResponse["tools"]> {

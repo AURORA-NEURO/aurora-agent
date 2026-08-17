@@ -72,6 +72,7 @@ from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
 from .events import (
     MAX_EVENT_PAGE,
     MAX_OPERATIONS_SNAPSHOT_LIMIT,
+    MAX_OPERATIONS_DOMAIN_GROUPS,
     DeliveryAttemptPage,
     DeliveryPage,
     DeliveryReceiptAttempts,
@@ -79,6 +80,7 @@ from .events import (
     EventPage,
     EventPersistenceStatus,
     OperationsSnapshot,
+    OperationsHandoff,
     RecoveryMatrix,
     RouteReviewEvidence,
     SseSnapshot,
@@ -3401,6 +3403,60 @@ class ApiClient:
             self.request("GET", f"/v1/operations/snapshot?after={after}&limit={limit}")
         )
 
+    def operations_handoff(
+        self,
+        *,
+        goal: str | None = None,
+        domains: Sequence[str] | None = None,
+        group_ids: Sequence[str] | None = None,
+        include_complete: bool = True,
+        max_groups: int = MAX_OPERATIONS_DOMAIN_GROUPS,
+    ) -> OperationsHandoff:
+        """Build a typed, non-executing routing handoff from domain coverage evidence."""
+
+        if goal is not None and (
+            not isinstance(goal, str)
+            or not goal.strip()
+            or len(goal.encode("utf-8")) > 1024
+            or any(ord(character) < 0x20 for character in goal)
+        ):
+            raise ArgumentError("goal must be a non-empty visible string of at most 1024 bytes")
+        if not isinstance(include_complete, bool):
+            raise ArgumentError("include_complete must be a boolean")
+        if (
+            isinstance(max_groups, bool)
+            or not isinstance(max_groups, int)
+            or not 1 <= max_groups <= MAX_OPERATIONS_DOMAIN_GROUPS
+        ):
+            raise ArgumentError(
+                f"max_groups must be between 1 and {MAX_OPERATIONS_DOMAIN_GROUPS}"
+            )
+
+        payload: dict[str, Any] = {"include_complete": include_complete, "max_groups": max_groups}
+        for name, values in (("domains", domains), ("group_ids", group_ids)):
+            if values is None:
+                continue
+            if isinstance(values, (str, bytes)) or len(values) > MAX_OPERATIONS_DOMAIN_GROUPS:
+                raise ArgumentError(
+                    f"{name} must contain at most {MAX_OPERATIONS_DOMAIN_GROUPS} visible strings"
+                )
+            normalized: list[str] = []
+            for value in values:
+                if (
+                    not isinstance(value, str)
+                    or not value.strip()
+                    or len(value.encode("utf-8")) > 128
+                    or any(ord(character) < 0x20 for character in value)
+                ):
+                    raise ArgumentError(
+                        f"{name} entries must be non-empty visible strings of at most 128 bytes"
+                    )
+                normalized.append(value)
+            payload[name] = sorted(set(normalized))
+        if goal is not None:
+            payload["goal"] = goal
+        return OperationsHandoff.from_wire(self.request("POST", "/v1/operations/handoff", payload))
+
     def flush_event_persistence(self) -> EventPersistenceStatus:
         """Force an event cursor checkpoint and return typed bounded status."""
 
@@ -3705,6 +3761,26 @@ class AsyncApiClient:
 
         return await asyncio.to_thread(
             self.client.operations_snapshot, after=after, limit=limit
+        )
+
+    async def operations_handoff(
+        self,
+        *,
+        goal: str | None = None,
+        domains: Sequence[str] | None = None,
+        group_ids: Sequence[str] | None = None,
+        include_complete: bool = True,
+        max_groups: int = MAX_OPERATIONS_DOMAIN_GROUPS,
+    ) -> OperationsHandoff:
+        """Async typed domain routing handoff without dispatch."""
+
+        return await asyncio.to_thread(
+            self.client.operations_handoff,
+            goal=goal,
+            domains=domains,
+            group_ids=group_ids,
+            include_complete=include_complete,
+            max_groups=max_groups,
         )
 
     async def flush_event_persistence(self) -> EventPersistenceStatus:

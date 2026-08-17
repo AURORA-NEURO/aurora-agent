@@ -563,6 +563,10 @@ invent defaults:
   while secrets remain non-durable. They expose the current checkpoint's optional `state_digest`
   for operator correlation and `integrity_verified` for the observed current file; schema-1/2
   migration files legitimately report no digest before rewrite.
+  `operations_handoff(...)` and its async counterpart return a typed, content-addressed
+  `OperationsHandoff` with selected domain groups, exact catalogue gaps, unresolved selectors,
+  and a ready-to-submit `route_request`. It never dispatches the route; callers continue through
+  `capability_route_report(...)`, `capability_route_review_report(...)`, and mission preflight.
   `rebind_subscription(...)` supplies a secret in memory,
   re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

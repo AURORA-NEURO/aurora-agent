@@ -491,6 +491,7 @@ impl ApiRouter {
             ("GET", "/v1/capabilities") => self.capabilities(),
             ("GET", "/v1/recovery") => self.recovery_matrix(),
             ("GET", "/v1/operations/snapshot") => self.operations_snapshot(&request, &request_id),
+            ("POST", "/v1/operations/handoff") => self.operations_handoff(&request, &request_id),
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
@@ -957,6 +958,7 @@ impl ApiRouter {
                     "mission_inventory": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
+                    "operations_handoff": true,
                     "delivery_attempt_provenance": true,
                     "external_delivery_worker": false
                 },
@@ -984,6 +986,17 @@ impl ApiRouter {
                 }
             }),
         )
+    }
+
+    fn operations_handoff(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        match operations_handoff_value(&arguments) {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_operations_handoff", &error, request_id),
+        }
     }
 
     fn operations_mission_summary(&self) -> Result<Value, &'static str> {
@@ -1104,6 +1117,7 @@ impl ApiRouter {
                     "capabilities": "/v1/capabilities",
                     "recovery": "/v1/recovery",
                     "operations_snapshot": "/v1/operations/snapshot",
+                    "operations_handoff": "/v1/operations/handoff",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
                     "mission_persistence": "/v1/missions/persistence",
@@ -1144,6 +1158,7 @@ impl ApiRouter {
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
+                    "operations_handoff": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
@@ -2648,6 +2663,7 @@ impl ApiRouter {
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
                     "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
                     "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
+                    "/v1/operations/handoff": { "post": { "responses": { "200": { "description": "content-addressed, non-executing domain routing handoff" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
@@ -2821,6 +2837,264 @@ fn operations_domain_coverage() -> Value {
             "performance, calibration, or external-system availability"
         ]
     })
+}
+
+fn operations_handoff_value(arguments: &serde_json::Map<String, Value>) -> Result<Value, String> {
+    for key in arguments.keys() {
+        if !matches!(
+            key.as_str(),
+            "goal" | "domains" | "group_ids" | "include_complete" | "max_groups"
+        ) {
+            return Err(format!(
+                "operations handoff does not accept the {key:?} field"
+            ));
+        }
+    }
+    let goal = match arguments.get("goal") {
+        None => "route a bounded cross-domain operator handoff".to_string(),
+        Some(Value::String(value))
+            if !value.trim().is_empty()
+                && value.len() <= 1024
+                && value.bytes().all(|byte| byte >= 0x20) =>
+        {
+            value.clone()
+        }
+        Some(_) => {
+            return Err("goal must be a non-empty visible string of at most 1024 bytes".into())
+        }
+    };
+    let selector = |name: &str| -> Result<Vec<String>, String> {
+        let Some(value) = arguments.get(name) else {
+            return Ok(Vec::new());
+        };
+        let values = value
+            .as_array()
+            .ok_or_else(|| format!("{name} must be an array of visible strings"))?;
+        if values.len() > MAX_OPERATIONS_DOMAIN_GROUPS {
+            return Err(format!(
+                "{name} must contain at most {MAX_OPERATIONS_DOMAIN_GROUPS} entries"
+            ));
+        }
+        let mut selected = Vec::with_capacity(values.len());
+        for value in values {
+            let Some(value) = value.as_str() else {
+                return Err(format!("{name} must contain only strings"));
+            };
+            if value.trim().is_empty()
+                || value.len() > 128
+                || !value.bytes().all(|byte| byte >= 0x20)
+            {
+                return Err(format!(
+                    "{name} entries must be non-empty visible strings of at most 128 bytes"
+                ));
+            }
+            selected.push(value.to_string());
+        }
+        selected.sort();
+        selected.dedup();
+        Ok(selected)
+    };
+    let domains = selector("domains")?;
+    let group_ids = selector("group_ids")?;
+    let include_complete = arguments
+        .get("include_complete")
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or("include_complete must be a boolean".to_string())
+        })
+        .transpose()?
+        .unwrap_or(true);
+    let max_groups = match arguments.get("max_groups") {
+        None => MAX_OPERATIONS_DOMAIN_GROUPS,
+        Some(value) => {
+            let Some(value) = value_usize(value) else {
+                return Err(format!(
+                    "max_groups must be between 1 and {MAX_OPERATIONS_DOMAIN_GROUPS}"
+                ));
+            };
+            if !(1..=MAX_OPERATIONS_DOMAIN_GROUPS).contains(&value) {
+                return Err(format!(
+                    "max_groups must be between 1 and {MAX_OPERATIONS_DOMAIN_GROUPS}"
+                ));
+            }
+            value
+        }
+    };
+
+    let coverage = operations_domain_coverage();
+    let groups = coverage
+        .get("groups")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let selector_is_empty = domains.is_empty() && group_ids.is_empty();
+    let mut matching_group_count = 0usize;
+    let mut complete_groups_omitted = 0usize;
+    let mut selected_with_gaps = 0usize;
+    let mut selected_groups = Vec::new();
+    let mut route_needs = Vec::new();
+    for group in &groups {
+        let id = group.get("id").and_then(Value::as_str).unwrap_or("unknown");
+        let id_matches = group_ids.is_empty() || group_ids.iter().any(|value| value == id);
+        let domain_matches = domains.is_empty()
+            || group
+                .get("domains")
+                .and_then(Value::as_array)
+                .is_some_and(|values| {
+                    values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .any(|domain| domains.iter().any(|requested| requested == domain))
+                });
+        if !(id_matches && domain_matches) {
+            continue;
+        }
+        matching_group_count += 1;
+        let fully_advertised = group
+            .get("fully_advertised")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !include_complete && fully_advertised {
+            complete_groups_omitted += 1;
+            continue;
+        }
+        if group
+            .get("missing_tool_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            > 0
+        {
+            selected_with_gaps += 1;
+        }
+        let need_id = format!("domain-group:{id}");
+        let mut selected = group.clone();
+        selected["route_need_id"] = json!(need_id);
+        selected["next_action"] = json!(if fully_advertised {
+            "submit the route_need to capability_route, then review explicit selections"
+        } else {
+            "inspect capability_audit and repair catalogue gaps before routing"
+        });
+        if selected_groups.len() < max_groups {
+            selected_groups.push(selected);
+            route_needs.push(json!({
+                "id": need_id,
+                "group_id": id,
+                "query": goal,
+                "max_items": 10
+            }));
+        }
+    }
+    let unresolved_group_ids = group_ids
+        .iter()
+        .filter(|requested| {
+            !groups
+                .iter()
+                .any(|group| group.get("id").and_then(Value::as_str) == Some(requested.as_str()))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let unresolved_domains = domains
+        .iter()
+        .filter(|requested| {
+            !groups.iter().any(|group| {
+                group
+                    .get("domains")
+                    .and_then(Value::as_array)
+                    .is_some_and(|values| {
+                        values.iter().any(|value| value.as_str() == Some(requested))
+                    })
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let included_group_count = selected_groups.len();
+    let truncated =
+        matching_group_count.saturating_sub(complete_groups_omitted) > included_group_count;
+    let handoff_status = if !unresolved_group_ids.is_empty()
+        || !unresolved_domains.is_empty()
+        || (!selector_is_empty && matching_group_count == 0)
+    {
+        "unresolved_domain"
+    } else if included_group_count == 0 && complete_groups_omitted > 0 {
+        "no_actionable_gaps"
+    } else if selected_with_gaps > 0 {
+        "requires_catalogue_review"
+    } else {
+        "ready_for_capability_route"
+    };
+    let canonical = json!({
+        "goal": goal,
+        "domains": domains,
+        "group_ids": group_ids,
+        "include_complete": include_complete,
+        "max_groups": max_groups,
+        "coverage": coverage
+    });
+    let canonical_bytes = serde_json::to_vec(&canonical)
+        .map_err(|error| format!("operations handoff could not be digested: {error}"))?;
+    let handoff_id = hex_digest(&Sha256::digest(&canonical_bytes));
+    let coverage_bytes = serde_json::to_vec(&coverage)
+        .map_err(|error| format!("domain coverage could not be digested: {error}"))?;
+    let domain_coverage_digest = hex_digest(&Sha256::digest(&coverage_bytes));
+
+    Ok(json!({
+        "ok": true,
+        "workflow": "operations_domain_handoff",
+        "schema": "bioprism-operations-handoff/0.1",
+        "handoff_id": handoff_id,
+        "domain_coverage_digest": domain_coverage_digest,
+        "goal": goal,
+        "selection": {
+            "domains": domains,
+            "group_ids": group_ids,
+            "include_complete": include_complete,
+            "max_groups": max_groups,
+            "selector_mode": if selector_is_empty { "all_groups" } else { "intersection" }
+        },
+        "coverage": {
+            "matching_group_count": matching_group_count,
+            "included_group_count": included_group_count,
+            "complete_groups_omitted": complete_groups_omitted,
+            "selected_groups_with_gaps": selected_with_gaps,
+            "truncated": truncated,
+            "unresolved_group_ids": unresolved_group_ids,
+            "unresolved_domains": unresolved_domains
+        },
+        "groups": selected_groups,
+        "route_request": {
+            "goal": goal,
+            "needs": route_needs,
+            "max_candidates_per_need": 10,
+            "max_tools": 128,
+            "include_tools": false
+        },
+        "handoff_status": handoff_status,
+        "execution": "not_started",
+        "next_steps": [
+            "inspect exact missing tool names and run capability_audit when handoff_status requires_catalogue_review",
+            "submit route_request to capability_route for ranked candidates",
+            "review caller-selected tools with capability_route_review before mission_preflight",
+            "execute only after the returned mission plan and domain-specific evidence are accepted"
+        ],
+        "guarantees": [
+            "the handoff is content-addressed by the normalized request and current domain coverage",
+            "route_request is an explicit proposal and is never dispatched by this endpoint",
+            "unresolved selectors, catalogue gaps, and pagination are retained as separate evidence"
+        ],
+        "non_claims": [
+            "tool semantic readiness or scientific validity",
+            "authorization to execute a mission",
+            "runtime health, calibration, or external-system availability"
+        ],
+        "links": {
+            "capabilities": "/v1/capabilities",
+            "operations_snapshot": "/v1/operations/snapshot",
+            "capability_route": "/v1/tools/capability_route",
+            "capability_route_review": "/v1/tools/capability_route_review",
+            "mission_preflight": "/v1/missions/preflight"
+        }
+    }))
 }
 
 fn mission_checkpoint_digest(document: &Value) -> Result<String, String> {
@@ -3741,6 +4015,55 @@ mod tests {
             json!({}),
         ));
         assert_eq!(unknown.status, 400);
+    }
+
+    #[test]
+    fn operations_handoff_is_content_addressed_and_non_executing() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let response = router.handle(request(
+            "POST",
+            "/v1/operations/handoff",
+            json!({
+                "goal": "prepare an oncology evidence route",
+                "group_ids": ["biological_domains"],
+                "max_groups": 1
+            }),
+        ));
+        assert_eq!(response.status, 200);
+        let handoff: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(handoff["workflow"], "operations_domain_handoff");
+        assert_eq!(handoff["schema"], "bioprism-operations-handoff/0.1");
+        assert_eq!(handoff["execution"], "not_started");
+        assert_eq!(handoff["selection"]["selector_mode"], "intersection");
+        assert_eq!(handoff["coverage"]["included_group_count"], 1);
+        assert_eq!(handoff["groups"][0]["id"], "biological_domains");
+        assert_eq!(
+            handoff["route_request"]["needs"][0]["group_id"],
+            "biological_domains"
+        );
+        assert_eq!(handoff["handoff_id"].as_str().unwrap().len(), 64);
+        assert!(handoff["next_steps"].as_array().unwrap().len() >= 3);
+
+        let unresolved = router.handle(request(
+            "POST",
+            "/v1/operations/handoff",
+            json!({ "domains": ["not-a-real-domain"] }),
+        ));
+        assert_eq!(unresolved.status, 200);
+        let unresolved: Value = serde_json::from_slice(&unresolved.body).unwrap();
+        assert_eq!(unresolved["handoff_status"], "unresolved_domain");
+        assert_eq!(
+            unresolved["coverage"]["unresolved_domains"][0],
+            "not-a-real-domain"
+        );
+
+        let invalid = router.handle(request(
+            "POST",
+            "/v1/operations/handoff",
+            json!({ "unexpected": true }),
+        ));
+        assert_eq!(invalid.status, 422);
     }
 
     #[test]

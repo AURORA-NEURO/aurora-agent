@@ -563,6 +563,110 @@ class OperationsDomainCoverage:
 
 
 @dataclass(frozen=True)
+class OperationsHandoffGroup:
+    """One selected domain group plus its non-executing routing action."""
+
+    raw: dict[str, Any]
+    coverage: OperationsDomainGroup
+    route_need_id: str
+    next_action: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsHandoffGroup":
+        raw = _mapping("operations handoff group", value)
+        return cls(
+            raw=raw,
+            coverage=OperationsDomainGroup.from_wire(raw),
+            route_need_id=_text("operations handoff route_need_id", raw.get("route_need_id")),
+            next_action=_text("operations handoff next_action", raw.get("next_action")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class OperationsHandoff:
+    """Typed, content-addressed, non-executing domain routing handoff."""
+
+    raw: dict[str, Any]
+    workflow: str
+    schema: str
+    handoff_id: str
+    domain_coverage_digest: str
+    goal: str
+    selection: dict[str, Any]
+    coverage: dict[str, Any]
+    groups: tuple[OperationsHandoffGroup, ...]
+    route_request: dict[str, Any]
+    handoff_status: str
+    execution: str
+    next_steps: tuple[str, ...]
+    guarantees: tuple[str, ...]
+    non_claims: tuple[str, ...]
+    links: dict[str, str]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsHandoff":
+        raw = _mapping("operations handoff", value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("operations handoff must be successful")
+        if raw.get("workflow") != "operations_domain_handoff":
+            raise ArgumentError("operations handoff workflow is invalid")
+        if raw.get("schema") != "bioprism-operations-handoff/0.1":
+            raise ArgumentError("operations handoff schema is invalid")
+        groups_value = raw.get("groups")
+        if not isinstance(groups_value, Sequence) or isinstance(groups_value, (str, bytes)):
+            raise ArgumentError("operations handoff groups must be an array")
+        groups = tuple(OperationsHandoffGroup.from_wire(item) for item in groups_value)
+        selection = _mapping("operations handoff selection", raw.get("selection"))
+        coverage = _mapping("operations handoff coverage", raw.get("coverage"))
+        route_request = _mapping("operations handoff route_request", raw.get("route_request"))
+        links_raw = _mapping("operations handoff links", raw.get("links"))
+        links = {
+            _text("operations handoff link name", name): _text(
+                f"operations handoff link {name}", target
+            )
+            for name, target in links_raw.items()
+        }
+        handoff_status = _text("operations handoff status", raw.get("handoff_status"))
+        if handoff_status not in {
+            "unresolved_domain",
+            "no_actionable_gaps",
+            "requires_catalogue_review",
+            "ready_for_capability_route",
+        }:
+            raise ArgumentError("operations handoff status is invalid")
+        execution = _text("operations handoff execution", raw.get("execution"))
+        if execution != "not_started":
+            raise ArgumentError("operations handoff execution must remain not_started")
+        return cls(
+            raw=raw,
+            workflow="operations_domain_handoff",
+            schema="bioprism-operations-handoff/0.1",
+            handoff_id=_review_id("operations handoff handoff_id", raw.get("handoff_id")),
+            domain_coverage_digest=_review_id(
+                "operations handoff domain_coverage_digest",
+                raw.get("domain_coverage_digest"),
+            ),
+            goal=_text("operations handoff goal", raw.get("goal")),
+            selection=selection,
+            coverage=coverage,
+            groups=groups,
+            route_request=route_request,
+            handoff_status=handoff_status,
+            execution=execution,
+            next_steps=_texts("operations handoff next_steps", raw.get("next_steps")),
+            guarantees=_texts("operations handoff guarantees", raw.get("guarantees")),
+            non_claims=_texts("operations handoff non_claims", raw.get("non_claims")),
+            links=links,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class OperationsSnapshot:
     """Typed bounded control-plane evidence assembled by the HTTP gateway."""
 
@@ -1021,6 +1125,8 @@ __all__ = [
             "RecoveryMatrix",
     "OperationsDomainGroup",
     "OperationsDomainCoverage",
+    "OperationsHandoffGroup",
+    "OperationsHandoff",
     "MAX_OPERATIONS_SNAPSHOT_LIMIT",
     "MAX_OPERATIONS_DOMAIN_GROUPS",
     "MAX_OPERATIONS_DOMAIN_TOOLS",
