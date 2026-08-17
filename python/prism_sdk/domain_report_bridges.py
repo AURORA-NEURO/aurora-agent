@@ -20,14 +20,18 @@ from .adapter_execution_evidence import (
 )
 from .adapter_runtime import AdapterExecutionResult
 from .domain_evidence_provider import DomainEvidenceProviderNormalizationReport
+from .domain_evidence_provider import DomainEvidenceProviderNormalizationRequest
 from .domain_evidence_provider_external import (
     DomainEvidenceProviderExternalPayloadNormalizationReport,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
 )
 from .domain_reports import DomainReportProjectReport, DomainReportProjectRequest
 from .errors import ArgumentError
 
 ADAPTER_DOMAIN_REPORT_SCHEMA = "bioprism-devplat-adapter-domain-report/0.1"
 ADAPTER_DOMAIN_REPORT_WORKFLOW = "adapter_domain_report"
+PROVIDER_DOMAIN_REPORT_SCHEMA = "bioprism-devplat-provider-domain-report/0.1"
+PROVIDER_DOMAIN_REPORT_WORKFLOW = "provider_domain_report"
 
 
 def adapter_domain_report_arguments(
@@ -77,6 +81,116 @@ class AdapterDomainReportResult:
         evidence = adapter_execution_evidence_report(raw.get("evidence"))
         domain_report = DomainReportProjectReport.from_wire(raw.get("domain_report"))
         return cls(raw, evidence, domain_report)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def provider_domain_report_arguments(
+    normalization: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build arguments for inline provider normalization report composition."""
+
+    if isinstance(normalization, DomainEvidenceProviderNormalizationRequest):
+        normalized = normalization
+    else:
+        if not isinstance(normalization, Mapping):
+            raise ArgumentError("provider normalization must be an object")
+        raw = dict(normalization)
+        required = {
+            name: raw[name]
+            for name in (
+                "group_id",
+                "domains",
+                "subject_id",
+                "source_tool",
+                "connector_kind",
+                "provider",
+                "payload",
+            )
+        }
+        required["domains"] = tuple(required["domains"])
+        for name in (
+            "request",
+            "outcome",
+            "claim_posture",
+            "parent_digests",
+            "source_plan_digest",
+        ):
+            if name in raw:
+                required[name] = raw[name]
+        if "parent_digests" in required:
+            required["parent_digests"] = tuple(required["parent_digests"])
+        normalized = DomainEvidenceProviderNormalizationRequest(**required)
+    return {
+        "operation": "from_provider_normalization",
+        "normalization": normalized.to_mcp_arguments(),
+    }
+
+
+def external_provider_domain_report_arguments(
+    normalization: DomainEvidenceProviderExternalPayloadNormalizationRequest
+    | Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build arguments for receipt-verified external provider report composition."""
+
+    if isinstance(normalization, DomainEvidenceProviderExternalPayloadNormalizationRequest):
+        normalized = normalization
+    else:
+        if not isinstance(normalization, Mapping):
+            raise ArgumentError("external provider normalization must be an object")
+        normalized = DomainEvidenceProviderExternalPayloadNormalizationRequest.from_wire(
+            normalization
+        )
+    return {
+        "operation": "from_external_provider_normalization",
+        "normalization": normalized.to_mcp_arguments(),
+    }
+
+
+@dataclass(frozen=True)
+class ProviderDomainReportResult:
+    """Typed result containing provider normalization and its canonical domain report."""
+
+    raw: dict[str, Any]
+    mode: str
+    normalization: (
+        DomainEvidenceProviderNormalizationReport
+        | DomainEvidenceProviderExternalPayloadNormalizationReport
+    )
+    domain_report: DomainReportProjectReport
+    readiness_claimed: bool = False
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "ProviderDomainReportResult":
+        if not isinstance(value, Mapping):
+            raise ArgumentError("provider domain report response must be an object")
+        raw = dict(value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("provider domain report response is not successful")
+        if raw.get("schema") != PROVIDER_DOMAIN_REPORT_SCHEMA:
+            raise ArgumentError("provider domain report schema is invalid")
+        if raw.get("workflow") != PROVIDER_DOMAIN_REPORT_WORKFLOW:
+            raise ArgumentError("provider domain report workflow is invalid")
+        mode = raw.get("mode")
+        if mode == "inline":
+            normalization = DomainEvidenceProviderNormalizationReport.from_wire(
+                raw.get("normalization")
+            )
+        elif mode == "external_payload":
+            normalization = DomainEvidenceProviderExternalPayloadNormalizationReport.from_wire(
+                raw.get("normalization")
+            )
+        else:
+            raise ArgumentError("provider domain report mode is invalid")
+        if raw.get("readiness_claimed") is not False or raw.get("execution") != "not_started":
+            raise ArgumentError("provider domain report posture is invalid")
+        return cls(
+            raw=raw,
+            mode=mode,
+            normalization=normalization,
+            domain_report=DomainReportProjectReport.from_wire(raw.get("domain_report")),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -273,6 +387,11 @@ __all__ = [
     "ADAPTER_DOMAIN_REPORT_WORKFLOW",
     "AdapterDomainReportResult",
     "adapter_domain_report_arguments",
+    "PROVIDER_DOMAIN_REPORT_SCHEMA",
+    "PROVIDER_DOMAIN_REPORT_WORKFLOW",
+    "ProviderDomainReportResult",
+    "provider_domain_report_arguments",
+    "external_provider_domain_report_arguments",
     "domain_report_from_adapter_execution",
     "domain_report_from_provider_normalization",
     "domain_report_from_external_provider_normalization",

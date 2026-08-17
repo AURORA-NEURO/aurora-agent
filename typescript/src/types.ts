@@ -4864,7 +4864,7 @@ export interface DomainReportClaimPosture extends JsonObject {
 }
 
 export interface DomainReportProjectArgs extends JsonObject {
-  operation?: "project" | "from_adapter_execution";
+  operation?: "project" | "from_adapter_execution" | "from_provider_normalization" | "from_external_provider_normalization";
   group_id: string;
   domains: string[];
   subject_id: string;
@@ -4875,6 +4875,7 @@ export interface DomainReportProjectArgs extends JsonObject {
   parent_digests?: string[];
   evidence?: AdapterExecutionEvidenceArgs;
   conformance?: JsonObject;
+  normalization?: DomainEvidenceProviderNormalizationArgs | DomainEvidenceProviderExternalPayloadNormalizationArgs;
 }
 
 export interface AdapterDomainReportArgs extends JsonObject {
@@ -4888,6 +4889,25 @@ export interface AdapterDomainReportResult extends JsonObject {
   schema: "bioprism-devplat-adapter-domain-report/0.1";
   workflow: "adapter_domain_report";
   evidence: AdapterExecutionEvidenceResult;
+  domain_report: DomainReportProjectResult;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ProviderDomainReportArgs extends JsonObject {
+  operation: "from_provider_normalization" | "from_external_provider_normalization";
+  normalization: DomainEvidenceProviderNormalizationArgs | DomainEvidenceProviderExternalPayloadNormalizationArgs;
+  parent_digests?: string[];
+}
+
+export interface ProviderDomainReportResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-devplat-provider-domain-report/0.1";
+  workflow: "provider_domain_report";
+  mode: "inline" | "external_payload";
+  normalization: DomainEvidenceProviderNormalizationResult | DomainEvidenceProviderExternalPayloadNormalizationResult;
   domain_report: DomainReportProjectResult;
   readiness_claimed: false;
   execution: "not_started";

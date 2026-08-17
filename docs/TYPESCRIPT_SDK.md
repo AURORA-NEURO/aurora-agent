@@ -533,6 +533,12 @@ evidence digest into report lineage, preserves refusal/partial posture, and keep
 `readiness_claimed: false` with `execution: "not_started"`. The facade validates the nested
 evidence and optional conformance object before transport; it never runs the adapter or upgrades
 structural evidence into scientific, clinical, provenance, or release validity.
+domainReportFromProviderNormalization and
+domainReportFromExternalProviderNormalization expose the provider-domain bridge operations.
+Their ProviderDomainReportResult keeps the full normalization response typed, composes compact
+domain-report evidence, preserves normalization/receipt artifact parents, and keeps inline versus
+external-materialization mode explicit. The external facade retains the caller-owned locator
+metadata but never opens the locator or treats a digest match as provider authenticity.
 `conformanceRun` returns typed `ConformanceRunResult` suite and release evidence, including fixture
 drift, test-pyramid counts, bounded case outcomes, and all unmet noncompensatory gates. A null
 `results` field means case details were not requested; it is not an empty-suite claim.

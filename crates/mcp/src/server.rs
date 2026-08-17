@@ -179,6 +179,7 @@ use bioprism_devplat::{
     DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
     ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
     MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    PROVIDER_DOMAIN_REPORT_SCHEMA_VERSION, PROVIDER_DOMAIN_REPORT_WORKFLOW,
     RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
     SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
 };
@@ -2813,8 +2814,14 @@ impl Server {
             "project" => self.project_domain_report(arguments),
             "coverage" => self.domain_report_coverage(arguments),
             "from_adapter_execution" => self.project_adapter_execution_domain_report(arguments),
+            "from_provider_normalization" => {
+                self.project_provider_normalization_domain_report(arguments)
+            }
+            "from_external_provider_normalization" => {
+                self.project_external_provider_normalization_domain_report(arguments)
+            }
             other => Err(format!(
-                "unknown domain report operation {other:?}; choose project, coverage, or from_adapter_execution"
+                "unknown domain report operation {other:?}; choose project, coverage, from_adapter_execution, from_provider_normalization, or from_external_provider_normalization"
             )),
         }
     }
@@ -2925,6 +2932,204 @@ impl Server {
                 "the MCP core executed or imported the adapter",
                 "caller-attested conformance proves scientific, clinical, provenance, regulatory, or release validity",
                 "report indexing proves readiness or external effects"
+            ]
+        }))
+    }
+
+    fn provider_domain_report_parents(
+        arguments: &Value,
+        normalization: &Value,
+        external: bool,
+    ) -> Result<Vec<String>, String> {
+        let mut parents = Vec::new();
+        let mut append = |value: Option<&Value>, field: &str| -> Result<(), String> {
+            let Some(value) = value else {
+                return Ok(());
+            };
+            let values = value
+                .as_array()
+                .ok_or_else(|| format!("{field} must be an array"))?;
+            for parent in values {
+                let parent = parent
+                    .as_str()
+                    .ok_or_else(|| format!("{field} must contain strings"))?;
+                if !parents.iter().any(|existing| existing == parent) {
+                    parents.push(parent.to_string());
+                }
+            }
+            Ok(())
+        };
+        append(arguments.get("parent_digests"), "parent_digests")?;
+        append(
+            normalization
+                .get("intake")
+                .and_then(|intake| intake.get("parent_digests")),
+            "normalization.intake.parent_digests",
+        )?;
+        for digest in [normalization
+            .get("artifact_registry")
+            .and_then(|registry| registry.get("content_digest"))]
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        {
+            if !parents.iter().any(|existing| existing == digest) {
+                parents.push(digest.to_string());
+            }
+        }
+        if external {
+            if let Some(digest) = normalization
+                .get("receipt_artifact_registry")
+                .and_then(|registry| registry.get("content_digest"))
+                .and_then(Value::as_str)
+            {
+                if !parents.iter().any(|existing| existing == digest) {
+                    parents.push(digest.to_string());
+                }
+            }
+        }
+        Ok(parents)
+    }
+
+    fn project_provider_normalization_domain_report(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let normalization_arguments = arguments
+            .get("normalization")
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or("from_provider_normalization requires a normalization object")?;
+        let normalization = self.domain_evidence_provider_normalize(&normalization_arguments)?;
+        self.compose_provider_domain_report(arguments, normalization, "inline")
+    }
+
+    fn project_external_provider_normalization_domain_report(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let normalization_arguments = arguments
+            .get("normalization")
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or("from_external_provider_normalization requires a normalization object")?;
+        let normalization =
+            self.domain_evidence_provider_external_payload_normalize(&normalization_arguments)?;
+        self.compose_provider_domain_report(arguments, normalization, "external_payload")
+    }
+
+    fn compose_provider_domain_report(
+        &self,
+        arguments: &Value,
+        normalization: Value,
+        mode: &str,
+    ) -> Result<Value, String> {
+        let external = mode == "external_payload";
+        let group_id = normalization
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("provider normalization omitted group_id")?;
+        let domains = normalization
+            .get("domains")
+            .filter(|value| value.is_array())
+            .cloned()
+            .ok_or("provider normalization omitted domains")?;
+        let subject_id = normalization
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("provider normalization omitted subject_id")?;
+        let outcome = normalization
+            .get("outcome")
+            .and_then(Value::as_str)
+            .ok_or("provider normalization omitted outcome")?;
+        let claim_status = match outcome {
+            "observed" | "partial" => "observed",
+            "refused" | "error" => "refused",
+            _ => "review_required",
+        };
+        let parent_digests =
+            Self::provider_domain_report_parents(arguments, &normalization, external)?;
+        let mut evidence = json!({
+            "kind": "provider_normalization",
+            "mode": mode,
+            "schema": normalization.get("schema"),
+            "workflow": normalization.get("workflow"),
+            "group_id": group_id,
+            "domains": domains,
+            "subject_id": subject_id,
+            "source_tool": normalization.get("source_tool"),
+            "connector_kind": normalization.get("connector_kind"),
+            "provider": normalization.get("provider"),
+            "outcome": outcome,
+            "payload_digest": normalization.get("payload_digest"),
+            "request_digest": normalization.get("request_digest"),
+            "shape_audit": normalization.get("shape_audit"),
+            "record_index": normalization.get("record_index"),
+            "intake_digest": normalization.get("intake").and_then(|intake| intake.get("intake_digest")),
+            "artifact_content_digest": normalization.get("artifact_registry").and_then(|registry| registry.get("content_digest")),
+        });
+        if external {
+            evidence["receipt"] = normalization.get("receipt").cloned().unwrap_or(Value::Null);
+            evidence["materialization"] = normalization
+                .get("materialization")
+                .cloned()
+                .unwrap_or(Value::Null);
+            evidence["receipt_artifact_content_digest"] = normalization
+                .get("receipt_artifact_registry")
+                .and_then(|registry| registry.get("content_digest"))
+                .cloned()
+                .unwrap_or(Value::Null);
+        }
+        let report_request = json!({
+            "group_id": group_id,
+            "domains": domains,
+            "subject_id": subject_id,
+            "source_tool": if external {
+                "domain_evidence_provider_external_payload_normalize"
+            } else {
+                "domain_evidence_provider_normalize"
+            },
+            "report": evidence,
+            "claim_posture": {
+                "status": claim_status,
+                "does_not_claim": [
+                    "provider authenticity, signature validity, or remote execution",
+                    "scientific, clinical, causal, provenance, regulatory, or release validity",
+                    "retrieval completeness, terminology resolution, or external-effect completion"
+                ],
+                "limitations": if external {
+                    [
+                        "external payload materialization remains caller-supplied and the locator remains unopened",
+                        "receipt and normalization lineage do not establish payload or provider authenticity"
+                    ]
+                } else {
+                    [
+                        "provider normalization remains caller-supplied and does not authenticate the provider",
+                        "payload shape and record indexing remain structural observations"
+                    ]
+                }
+            },
+            "parent_digests": parent_digests
+        });
+        let domain_report = self.project_domain_report(&report_request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": PROVIDER_DOMAIN_REPORT_SCHEMA_VERSION,
+            "workflow": PROVIDER_DOMAIN_REPORT_WORKFLOW,
+            "mode": mode,
+            "normalization": normalization,
+            "domain_report": domain_report,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "provider normalization is validated and indexed before the canonical domain report is projected",
+                "provider payload bytes remain outside the domain-report copy when the report is composed",
+                "normalization and receipt artifact digests remain explicit report lineage parents"
+            ],
+            "does_not_claim": [
+                "provider authenticity, scientific, clinical, provenance, regulatory, or release validity",
+                "that normalization or receipt indexing executed a provider, connector, or adapter",
+                "that report composition proves readiness or external effects"
             ]
         }))
     }
@@ -30973,11 +31178,11 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_report_project",
-            "description": "Project a caller-supplied report from any declared workspace capability group into the bounded domain-report envelope, compose validated adapter evidence into that envelope, or audit which of the 29 catalogue groups have retained structured projections. The tool validates group, source-tool, and domain membership, preserves claim posture and limitations, indexes exact report JSON digests, and keeps coverage separate from scientific, clinical, release, provenance, and readiness claims.",
+            "description": "Project a caller-supplied report from any declared workspace capability group into the bounded domain-report envelope, compose validated adapter or provider evidence into that envelope, or audit which of the 29 catalogue groups have retained structured projections. The tool validates group, source-tool, and domain membership, preserves claim posture and limitations, indexes exact report JSON digests, and keeps coverage separate from scientific, clinical, release, provenance, and readiness claims.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "operation": { "type": "string", "enum": ["project", "coverage", "from_adapter_execution"], "description": "project creates one explicit report projection; from_adapter_execution validates/indexes nested adapter evidence and composes a canonical report; coverage summarizes retained structured projections. Defaults to project." },
+                    "operation": { "type": "string", "enum": ["project", "coverage", "from_adapter_execution", "from_provider_normalization", "from_external_provider_normalization"], "description": "project creates one explicit report projection; from_adapter_execution validates/indexes nested adapter evidence; from_provider_normalization and from_external_provider_normalization validate/index provider evidence and compose a canonical report; coverage summarizes retained structured projections. Defaults to project." },
                     "group_id": { "type": "string", "description": "For project: exact workspace capability-group id; for coverage: optional exact group filter." },
                     "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "For project: domain labels declared by the selected capability group." },
                     "domain": { "type": "string", "description": "For coverage: optional case-insensitive domain-label filter." },
@@ -30987,7 +31192,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "claim_posture": { "type": "object", "description": "For project: {status, does_not_claim, limitations?}; status is observed, derived, review_required, refused, or not_applicable and does_not_claim must be non-empty." },
                     "evidence": { "type": "object", "description": "For from_adapter_execution: serialized AdapterExecutionEvidenceRequest. The adapter is caller-executed; this operation validates and indexes the observation but never runs it." },
                     "conformance": { "type": "object", "description": "For from_adapter_execution: optional caller-supplied bounded conformance report retained inside the canonical report payload." },
-                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "For project: optional lowercase SHA-256 parent artifact digests." },
+                    "normalization": { "type": "object", "description": "For from_provider_normalization: serialized DomainEvidenceProviderNormalizationRequest; for from_external_provider_normalization: serialized DomainEvidenceProviderExternalPayloadNormalizationRequest. The provider/connector remains caller-managed." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "For projection operations: optional lowercase SHA-256 parent artifact digests." },
                     "max_groups": { "type": "integer", "minimum": 1, "maximum": 128, "description": "For coverage: maximum catalogue groups to include; defaults to 64." },
                     "include_report_digests": { "type": "boolean", "description": "For coverage: include exact indexed report digests per group; defaults false." }
                 },

@@ -190,6 +190,13 @@ artifacts with the evidence digest linked as a report parent. It preserves obser
 refused, and review-required execution posture and always returns `readiness_claimed: false` and
 `execution: "not_started"`; it is a composition boundary, not adapter execution or a scientific,
 clinical, provenance, regulatory, or release-readiness claim.
+The same tool accepts operation "from_provider_normalization" and
+operation "from_external_provider_normalization" with a nested provider-normalization
+request. The inline route retains structural provider shape/index observations; the external
+route additionally retains receipt and digest-verified materialization metadata while never
+opening the locator. Both routes return one provider-domain bridge envelope containing the
+normalization result and canonical domain report, with compact report evidence rather than a
+second payload copy, explicit artifact parents, and readiness_claimed: false.
 `GET /v1/domain-reports/coverage` reports which groups have retained structured projections,
 subject/source/status summaries, missing group ids, and an exact coverage digest. Coverage means
 local indexed projection presence only; it is not execution coverage, scientific validity,

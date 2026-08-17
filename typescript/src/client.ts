@@ -34,6 +34,8 @@ import type {
   DomainReportProjectResult,
   AdapterDomainReportArgs,
   AdapterDomainReportResult,
+  ProviderDomainReportArgs,
+  ProviderDomainReportResult,
   DomainReportCoverageOptions,
   DomainReportCoverageResult,
   DomainEvidenceHarmonizeArgs,
@@ -1805,6 +1807,46 @@ export class ApiClient {
     };
     if (conformance !== undefined) args.conformance = conformance;
     return this.callTool<AdapterDomainReportResult>("domain_report_project", args, options);
+  }
+
+  /** Validate and compose inline provider normalization into a canonical domain report. */
+  async domainReportFromProviderNormalization(
+    normalization: DomainEvidenceProviderNormalizationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ProviderDomainReportResult>> {
+    if (!isObject(normalization)) throw new ArgumentError("provider normalization arguments must be an object");
+    if (typeof normalization.group_id !== "string" || normalization.group_id.trim().length === 0) throw new ArgumentError("group_id must be a non-empty string");
+    if (!Array.isArray(normalization.domains) || normalization.domains.length < 1 || normalization.domains.length > 64 || normalization.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!isObject(normalization.payload) && !Array.isArray(normalization.payload)) throw new ArgumentError("payload must be an object or array");
+    if (normalization.parent_digests !== undefined && (!Array.isArray(normalization.parent_digests) || normalization.parent_digests.length > 128 || normalization.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    const args: ProviderDomainReportArgs = {
+      operation: "from_provider_normalization",
+      normalization: { ...normalization, outcome: normalization.outcome ?? "unknown" },
+    };
+    if (normalization.parent_digests !== undefined) args.parent_digests = normalization.parent_digests;
+    return this.callTool<ProviderDomainReportResult>("domain_report_project", args, options);
+  }
+
+  /** Validate and compose receipt-verified external provider normalization into a report. */
+  async domainReportFromExternalProviderNormalization(
+    normalization: DomainEvidenceProviderExternalPayloadNormalizationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ProviderDomainReportResult>> {
+    if (!isObject(normalization)) throw new ArgumentError("external provider normalization arguments must be an object");
+    if (!isObject(normalization.payload) && !Array.isArray(normalization.payload)) throw new ArgumentError("payload must be an object or array");
+    if (normalization.parent_digests !== undefined && (!Array.isArray(normalization.parent_digests) || normalization.parent_digests.length > 128 || normalization.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if ("credential_material" in normalization || "credentials" in normalization) throw new ArgumentError("credential material is not accepted by the external normalization boundary");
+    const args: ProviderDomainReportArgs = {
+      operation: "from_external_provider_normalization",
+      normalization: {
+        ...normalization,
+        availability: normalization.availability ?? "unknown",
+        retention: normalization.retention ?? "unknown",
+        outcome: normalization.outcome ?? "unknown",
+      },
+    };
+    if (normalization.parent_digests !== undefined) args.parent_digests = normalization.parent_digests;
+    return this.callTool<ProviderDomainReportResult>("domain_report_project", args, options);
   }
 
   async adapterExecutionEvidenceQuery(args: AdapterExecutionEvidenceQueryArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceQueryResult>> {

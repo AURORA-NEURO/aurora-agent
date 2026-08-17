@@ -1138,6 +1138,12 @@ adapter, contacts a provider, or claims readiness.
 combined evidence/report response as `AdapterDomainReportResult`. The transport facade preserves
 the server's indexed evidence parent, claim posture, and readiness boundary rather than treating
 successful composition as adapter execution.
+ApiClient.domain_report_from_provider_normalization() and
+domain_report_from_external_provider_normalization(), with matching Workspace and async
+facades, expose the shared provider-domain composition operations. Their
+ProviderDomainReportResult retains inline shape/index evidence or external receipt/materialization
+evidence while the canonical report stores compact digest-bound evidence and never duplicates the
+caller payload as a second report copy.
 - `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
   installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full

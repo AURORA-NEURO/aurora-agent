@@ -181,6 +181,11 @@ external-payload bridges preserve receipt/materialization lineage and never reop
 `domain_report_from_adapter_execution(...)`, which sends the typed request through the canonical
 `domain_report_project` operation and returns the combined `AdapterDomainReportResult` with
 evidence-to-report lineage and the server's explicit non-readiness boundary.
+The same transport facades expose
+domain_report_from_provider_normalization(...) and
+domain_report_from_external_provider_normalization(...) for inline and receipt-verified
+provider evidence; both return ProviderDomainReportResult with explicit mode, digest lineage,
+compact report evidence, and no locator reopening or readiness claim.
 Provider normalization reports now expose a parallel evidence handoff: payload, request, shape,
 row-index, intake, catalogue, and normalization digests become explicit parents/output identity,
 while connector outcome and structural status remain distinct. External receipt-verified

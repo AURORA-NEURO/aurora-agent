@@ -892,6 +892,101 @@ fn adapter_domain_report_operation_validates_and_joins_adapter_evidence() {
 }
 
 #[test]
+fn provider_domain_report_operations_compose_inline_and_external_normalization() {
+    let mut server = server();
+    let payload = json!({"records": [{"id": "pmid:1", "title": "opaque"}]});
+    let inline = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "operation": "from_provider_normalization",
+            "normalization": {
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "subject_id": "provider-domain-report",
+                "source_tool": "literature_bind_check",
+                "connector_kind": "literature",
+                "provider": "pubmed",
+                "payload": payload,
+                "outcome": "observed",
+                "parent_digests": ["a".repeat(64)]
+            }
+        }),
+    );
+    assert_eq!(inline["ok"], json!(true));
+    assert_eq!(inline["mode"], json!("inline"));
+    assert_eq!(inline["workflow"], json!("provider_domain_report"));
+    assert_eq!(
+        inline["domain_report"]["report"]["source_tool"],
+        json!("domain_evidence_provider_normalize")
+    );
+    assert_eq!(
+        inline["domain_report"]["report"]["claim_posture"]["status"],
+        json!("observed")
+    );
+    assert_eq!(
+        inline["domain_report"]["report"]["report"]["kind"],
+        json!("provider_normalization")
+    );
+    assert_eq!(
+        inline["domain_report"]["report"]["report"]["payload_digest"],
+        inline["normalization"]["payload_digest"]
+    );
+    assert!(inline["domain_report"]["report"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|parent| parent == &inline["normalization"]["artifact_registry"]["content_digest"]));
+    assert_eq!(inline["readiness_claimed"], json!(false));
+
+    let payload_digest = ContentHash::of_value(&payload).unwrap().to_string();
+    let byte_length = serde_json::to_vec(&payload).unwrap().len() as u64;
+    let external = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "operation": "from_external_provider_normalization",
+            "normalization": {
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "subject_id": "external-provider-domain-report",
+                "source_tool": "literature_bind_check",
+                "provider": "pubmed",
+                "connector_kind": "literature",
+                "handoff_digest": "b".repeat(64),
+                "transfer_id": "provider-domain-report-transfer",
+                "payload_digest": payload_digest,
+                "byte_length": byte_length,
+                "storage_backend": "object_store",
+                "locator_kind": "opaque",
+                "locator": "store://caller/pubmed/provider-domain-report",
+                "availability": "available",
+                "retention": "durable",
+                "payload": payload,
+                "outcome": "observed"
+            }
+        }),
+    );
+    assert_eq!(external["ok"], json!(true));
+    assert_eq!(external["mode"], json!("external_payload"));
+    assert_eq!(
+        external["domain_report"]["report"]["source_tool"],
+        json!("domain_evidence_provider_external_payload_normalize")
+    );
+    assert_eq!(
+        external["domain_report"]["report"]["report"]["materialization"]["locator_opened"],
+        json!(false)
+    );
+    assert!(external["domain_report"]["report"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|parent| parent
+            == &external["normalization"]["receipt_artifact_registry"]["content_digest"]));
+    assert_eq!(external["readiness_claimed"], json!(false));
+}
+
+#[test]
 fn domain_evidence_harmonization_indexes_traceability_idempotently() {
     let mut server = server();
     let first = call(

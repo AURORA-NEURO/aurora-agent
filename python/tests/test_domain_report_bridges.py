@@ -10,9 +10,12 @@ from prism_sdk import (
     Workspace,
     adapter_domain_report_arguments,
     AdapterDomainReportResult,
+    ProviderDomainReportResult,
     domain_evidence_provider_normalization_report,
     domain_report_from_adapter_execution,
     domain_report_from_provider_normalization,
+    external_provider_domain_report_arguments,
+    provider_domain_report_arguments,
     evaluate_adapter_conformance,
 )
 from unittest.mock import patch
@@ -150,6 +153,71 @@ def adapter_domain_report_payload() -> dict:
     }
 
 
+def provider_domain_report_payload(mode: str = "inline") -> dict:
+    normalization = provider_payload()
+    normalization["artifact_registry"] = {"indexed": True, "content_digest": "1" * 64}
+    normalization["intake"]["parent_digests"] = ["2" * 64]
+    if mode == "external_payload":
+        normalization.update(
+            {
+                "schema": "bioprism-devplat-domain-evidence-provider-external-payload-normalization/0.1",
+                "workflow": "domain_evidence_provider_external_payload_normalize",
+                "receipt": {"receipt_digest": "3" * 64, "payload_digest": "b" * 64},
+                "receipt_digest": "3" * 64,
+                "materialized_payload_digest": "b" * 64,
+                "materialization": {
+                    "matched": True,
+                    "locator_opened": False,
+                    "materialized_payload_digest": "b" * 64,
+                },
+                "receipt_artifact_registry": {"ok": True, "created": True},
+                "readiness_claimed": False,
+            }
+        )
+    canonical_report = {
+        "schema": "bioprism-devplat-domain-report/0.1",
+        "workflow": "domain_report_project",
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "provider-subject",
+        "source_tool": (
+            "domain_evidence_provider_external_payload_normalize"
+            if mode == "external_payload"
+            else "domain_evidence_provider_normalize"
+        ),
+        "report": {"kind": "provider_normalization", "mode": mode},
+        "claim_posture": {
+            "status": "observed",
+            "does_not_claim": ["provider authenticity"],
+            "limitations": [],
+        },
+        "parent_digests": ["1" * 64],
+        "readiness_claimed": False,
+        "execution": "not_started",
+        "guarantees": ["structural"],
+        "does_not_claim": ["readiness"],
+    }
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-provider-domain-report/0.1",
+        "workflow": "provider_domain_report",
+        "mode": mode,
+        "normalization": normalization,
+        "domain_report": {
+            "ok": True,
+            "schema": "bioprism-devplat-domain-report-project/0.1",
+            "workflow": "domain_report_project",
+            "report": canonical_report,
+            "artifact_registry": {"indexed": True, "content_digest": "4" * 64},
+            "coverage": {"group_id": "biological_domains"},
+            "readiness_claimed": False,
+            "execution": "not_started",
+        },
+        "readiness_claimed": False,
+        "execution": "not_started",
+    }
+
+
 def test_adapter_bridge_emits_canonical_review_bound_report_request() -> None:
     result = AdapterRuntime().execute(
         ProjectionRequest("bioprism.python.vcf_text", "bridge-vcf", {"text": VCF})
@@ -219,3 +287,42 @@ def test_python_transport_facades_submit_the_cross_language_adapter_bridge() -> 
     import asyncio
 
     asyncio.run(run())
+
+
+def test_python_transport_facades_submit_inline_and_external_provider_bridges() -> None:
+    normalization = {
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "provider-subject",
+        "source_tool": "literature_bind_check",
+        "connector_kind": "literature",
+        "provider": "pubmed",
+        "payload": {"records": [{"id": "pmid:1"}]},
+        "outcome": "observed",
+    }
+    with patch.object(ApiClient, "call_tool", return_value=provider_domain_report_payload()) as tool:
+        result = ApiClient("http://127.0.0.1:8787").domain_report_from_provider_normalization(
+            normalization
+        )
+    assert isinstance(result, ProviderDomainReportResult)
+    assert result.mode == "inline"
+    assert tool.call_args.args[1] == provider_domain_report_arguments(normalization)
+
+    external = {
+        **normalization,
+        "handoff_digest": "a" * 64,
+        "transfer_id": "external-1",
+        "payload_digest": "b" * 64,
+        "byte_length": 1,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/pubmed/external-1",
+        "availability": "available",
+        "retention": "durable",
+    }
+    with patch.object(ApiClient, "call_tool", return_value=provider_domain_report_payload("external_payload")) as tool:
+        result = ApiClient("http://127.0.0.1:8787").domain_report_from_external_provider_normalization(
+            external
+        )
+    assert result.mode == "external_payload"
+    assert tool.call_args.args[1] == external_provider_domain_report_arguments(external)

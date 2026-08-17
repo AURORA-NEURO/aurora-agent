@@ -75,3 +75,69 @@ test("domain report REST and tool clients preserve bounded projection semantics"
     ArgumentError,
   );
 });
+
+test("domain report client composes inline and external provider normalization", async () => {
+  const seen = [];
+  const providerResult = {
+    ok: true,
+    tool: "domain_report_project",
+    request_id: "provider-report-1",
+    mcp: {
+      result: {
+        structuredContent: {
+          ok: true,
+          schema: "bioprism-devplat-provider-domain-report/0.1",
+          workflow: "provider_domain_report",
+          mode: "inline",
+          readiness_claimed: false,
+          execution: "not_started",
+        },
+      },
+    },
+  };
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init = {}) => {
+      const url = new URL(String(input));
+      seen.push({ url, init });
+      return jsonResponse(providerResult);
+    },
+  });
+  const inline = {
+    group_id: "biological_domains",
+    domains: ["oncology"],
+    subject_id: "provider-ts",
+    source_tool: "literature_bind_check",
+    connector_kind: "literature",
+    provider: "pubmed",
+    payload: { records: [{ id: "pmid:1" }] },
+    outcome: "observed",
+  };
+  await client.domainReportFromProviderNormalization(inline);
+  const external = {
+    ...inline,
+    handoff_digest: "a".repeat(64),
+    transfer_id: "provider-ts-transfer",
+    payload_digest: "b".repeat(64),
+    byte_length: 4096,
+    storage_backend: "object_store",
+    locator_kind: "opaque",
+    locator: "store://caller/pubmed/provider-ts",
+    availability: "available",
+    retention: "durable",
+  };
+  await client.domainReportFromExternalProviderNormalization(external);
+  assert.equal(seen.length, 2);
+  const inlineBody = JSON.parse(seen[0].init.body);
+  assert.equal(seen[0].url.pathname, "/v1/tools/domain_report_project");
+  assert.equal(inlineBody.operation, "from_provider_normalization");
+  assert.equal(inlineBody.normalization.outcome, "observed");
+  const externalBody = JSON.parse(seen[1].init.body);
+  assert.equal(externalBody.operation, "from_external_provider_normalization");
+  assert.equal(externalBody.normalization.locator_opened, undefined);
+  assert.equal(externalBody.normalization.availability, "available");
+  await assert.rejects(
+    client.domainReportFromExternalProviderNormalization({ ...external, credentials: "nope" }),
+    ArgumentError,
+  );
+});

@@ -336,6 +336,11 @@ composition inside the Rust/MCP boundary as well: it validates and indexes the a
 indexes the catalogue-checked domain report, and joins the evidence artifact digest into report
 lineage. Python sync/async HTTP and workspace facades and the TypeScript client expose the same
 typed response, while preserving `execution: "not_started"` and `readiness_claimed: false`.
+Provider normalization now has the same canonical Rust/MCP composition boundary for both
+caller-supplied inline payloads and receipt-verified external materialization. The domain report
+retains shape/index summaries plus payload, intake, normalization, and receipt artifact lineage
+without copying the provider payload a second time; inline and external modes remain distinct and
+external locators remain unopened. Python and TypeScript transport facades cover both operations.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

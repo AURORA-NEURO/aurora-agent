@@ -33,6 +33,9 @@ from .domain_reports import (
 from .domain_report_bridges import (
     AdapterDomainReportResult,
     adapter_domain_report_arguments,
+    ProviderDomainReportResult,
+    provider_domain_report_arguments,
+    external_provider_domain_report_arguments,
 )
 from .domain_evidence import (
     DomainEvidenceHarmonizationReport,
@@ -2100,6 +2103,33 @@ class Workspace:
             self.tool(
                 "domain_report_project",
                 adapter_domain_report_arguments(evidence, conformance),
+            )
+        )
+
+    def domain_report_from_provider_normalization(
+        self,
+        normalization: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> ProviderDomainReportResult:
+        """Normalize provider evidence and compose its canonical report through MCP."""
+
+        return ProviderDomainReportResult.from_wire(
+            self.tool(
+                "domain_report_project",
+                provider_domain_report_arguments(normalization),
+            )
+        )
+
+    def domain_report_from_external_provider_normalization(
+        self,
+        normalization: DomainEvidenceProviderExternalPayloadNormalizationRequest
+        | Mapping[str, Any],
+    ) -> ProviderDomainReportResult:
+        """Compose a report from receipt-verified external provider normalization."""
+
+        return ProviderDomainReportResult.from_wire(
+            self.tool(
+                "domain_report_project",
+                external_provider_domain_report_arguments(normalization),
             )
         )
 
@@ -5774,6 +5804,29 @@ class AsyncWorkspace:
             await self.tool(
                 "domain_report_project",
                 adapter_domain_report_arguments(evidence, conformance),
+            )
+        )
+
+    async def domain_report_from_provider_normalization(
+        self,
+        normalization: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> ProviderDomainReportResult:
+        return ProviderDomainReportResult.from_wire(
+            await self.tool(
+                "domain_report_project",
+                provider_domain_report_arguments(normalization),
+            )
+        )
+
+    async def domain_report_from_external_provider_normalization(
+        self,
+        normalization: DomainEvidenceProviderExternalPayloadNormalizationRequest
+        | Mapping[str, Any],
+    ) -> ProviderDomainReportResult:
+        return ProviderDomainReportResult.from_wire(
+            await self.tool(
+                "domain_report_project",
+                external_provider_domain_report_arguments(normalization),
             )
         )
 
