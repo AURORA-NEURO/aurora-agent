@@ -16,6 +16,8 @@ use thiserror::Error;
 
 /// Wire version for mission evaluator discovery.
 pub const MISSION_EVALUATOR_SCHEMA_VERSION: &str = "bioprism-devplat-mission-evaluator/0.1";
+pub const MISSION_EVALUATOR_CATALOGUE_SNAPSHOT_SCHEMA_VERSION: &str =
+    "bioprism-devplat-mission-evaluator-catalogue-snapshot/0.1";
 pub const MISSION_EVALUATOR_REPLAY_COMPARE_SCHEMA_VERSION: &str =
     "bioprism-devplat-mission-evaluator-replay-compare/0.1";
 const MAX_ITEMS: usize = 256;
@@ -25,6 +27,7 @@ const MAX_REVIEW_SELECTIONS: usize = 64;
 const MAX_BINDINGS_PER_CLAIM: usize = 16;
 const MAX_REPLAY_ITEMS: usize = 512;
 const DEFAULT_REPLAY_ITEMS: usize = 128;
+const MAX_CATALOGUE_SNAPSHOT_BYTES: usize = 512 * 1024;
 
 fn default_max_items() -> usize {
     DEFAULT_MAX_ITEMS
@@ -336,6 +339,31 @@ impl MissionEvaluatorCatalogue {
 
     pub fn digest(&self) -> &ContentHash {
         &self.digest
+    }
+
+    /// Return the bounded, content-addressed catalogue rows used by a review.
+    ///
+    /// The snapshot is descriptive and non-executable. Retaining it lets a later replay compare
+    /// exact adapter rows instead of inferring a row-level explanation from a digest alone.
+    pub fn snapshot(&self) -> Value {
+        let rows = to_value(&self.adapters).expect("evaluator adapters are serializable");
+        let snapshot_digest = ContentHash::of_value(&rows)
+            .expect("evaluator catalogue rows must be hashable")
+            .to_string();
+        json!({
+            "schema": MISSION_EVALUATOR_CATALOGUE_SNAPSHOT_SCHEMA_VERSION,
+            "catalog_digest": self.digest.to_string(),
+            "snapshot_digest": snapshot_digest,
+            "row_count": self.adapters.len(),
+            "group_count": self.adapters.iter().map(|adapter| adapter.group_id.as_str()).collect::<BTreeSet<_>>().len(),
+            "rows": rows,
+            "retention": {
+                "rows_retained": true,
+                "bounded": true,
+                "maximum_bytes": MAX_CATALOGUE_SNAPSHOT_BYTES
+            },
+            "execution": "not_started"
+        })
     }
 
     /// Rank explicit candidates. Scores are routing evidence only.
@@ -651,6 +679,7 @@ impl MissionEvaluatorCatalogue {
             "review_id": review_id,
             "catalog_digest": catalog_digest,
             "discovery_digest": discovery_digest,
+            "catalogue_snapshot": self.snapshot(),
             "selection_count": request.selections.len(),
             "claim_count": claim_counts.len(),
             "claim_binding_limits": {
@@ -1052,6 +1081,7 @@ impl MissionEvaluatorCatalogue {
             .and_then(|lineage| lineage.get("evaluator_review"))
             .and_then(Value::as_object)
             .or_else(|| mission.get("evaluator_review").and_then(Value::as_object));
+        let historical_snapshot = review.and_then(|value| value.get("catalogue_snapshot"));
         let adapter_ids = mission_referenced_adapter_ids(&request.mission);
         let catalog_drift = self.catalog_drift(
             review
@@ -1064,6 +1094,7 @@ impl MissionEvaluatorCatalogue {
                 .and_then(|value| value.get("discovery_digest"))
                 .and_then(Value::as_str),
             &adapter_ids,
+            historical_snapshot,
             "mission_review_provenance",
         );
         Ok(json!({
@@ -1114,9 +1145,17 @@ impl MissionEvaluatorCatalogue {
                     .collect::<BTreeSet<_>>()
             })
             .unwrap_or_default();
+        let historical_snapshot = object
+            .get("historical_catalogue_snapshot")
+            .or_else(|| object.get("catalogue_snapshot"));
         let historical_catalog_digest = object
             .get("historical_catalog_digest")
-            .and_then(Value::as_str);
+            .and_then(Value::as_str)
+            .or_else(|| {
+                historical_snapshot
+                    .and_then(|snapshot| snapshot.get("catalog_digest"))
+                    .and_then(Value::as_str)
+            });
         let catalog_drift = self.catalog_drift(
             historical_catalog_digest,
             object.get("historical_review_id").and_then(Value::as_str),
@@ -1124,6 +1163,7 @@ impl MissionEvaluatorCatalogue {
                 .get("historical_discovery_digest")
                 .and_then(Value::as_str),
             &adapter_ids,
+            historical_snapshot,
             "durable_replay_summary",
         );
         Ok(json!({
@@ -1152,6 +1192,7 @@ impl MissionEvaluatorCatalogue {
         historical_review_id: Option<&str>,
         historical_discovery_digest: Option<&str>,
         referenced_adapter_ids: &BTreeSet<String>,
+        historical_snapshot: Option<&Value>,
         source: &str,
     ) -> Value {
         let current_catalog_digest = self.digest.to_string();
@@ -1185,7 +1226,7 @@ impl MissionEvaluatorCatalogue {
         } else {
             "drifted"
         };
-        json!({
+        let mut result = json!({
             "status": status,
             "historical_catalog_digest": historical_catalog_digest.map(str::to_string),
             "current_catalog_digest": current_catalog_digest,
@@ -1206,6 +1247,163 @@ impl MissionEvaluatorCatalogue {
             "comparison_scope": "historical_digest_and_current_binding_compatibility",
             "historical_catalogue_rows_retained": false,
             "source": source,
+        });
+        if let (Some(target), Some(snapshot_diff)) =
+            (result.as_object_mut(), self.catalogue_snapshot_diff(historical_snapshot).as_object())
+        {
+            for (key, value) in snapshot_diff {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+        result
+    }
+
+    fn catalogue_snapshot_diff(&self, snapshot: Option<&Value>) -> Value {
+        let Some(snapshot) = snapshot else {
+            return json!({
+                "historical_snapshot_present": false,
+                "historical_snapshot_valid": false,
+                "historical_catalogue_rows_retained": false,
+                "exact_row_diff_available": false,
+                "row_diff_status": "not_recorded",
+                "comparison_scope": "historical_digest_and_current_binding_compatibility",
+                "added_adapter_ids": [],
+                "removed_adapter_ids": [],
+                "changed_adapter_ids": [],
+                "unchanged_adapter_ids": [],
+                "changed_adapter_fields": {}
+            });
+        };
+        let Some(object) = snapshot.as_object() else {
+            return json!({
+                "historical_snapshot_present": true,
+                "historical_snapshot_valid": false,
+                "historical_catalogue_rows_retained": false,
+                "exact_row_diff_available": false,
+                "row_diff_status": "invalid",
+                "historical_snapshot_invalid_reason": "snapshot must be an object",
+                "comparison_scope": "historical_digest_and_current_binding_compatibility"
+            });
+        };
+        let Some(rows) = object.get("rows").and_then(Value::as_array) else {
+            return json!({
+                "historical_snapshot_present": true,
+                "historical_snapshot_valid": false,
+                "historical_catalogue_rows_retained": false,
+                "exact_row_diff_available": false,
+                "row_diff_status": "invalid",
+                "historical_snapshot_invalid_reason": "snapshot.rows must be an array",
+                "comparison_scope": "historical_digest_and_current_binding_compatibility"
+            });
+        };
+        let encoded_size = serde_json::to_vec(snapshot).map(|bytes| bytes.len()).unwrap_or(usize::MAX);
+        if rows.len() > MAX_REPLAY_ITEMS || encoded_size > MAX_CATALOGUE_SNAPSHOT_BYTES {
+            return json!({
+                "historical_snapshot_present": true,
+                "historical_snapshot_valid": false,
+                "historical_catalogue_rows_retained": false,
+                "exact_row_diff_available": false,
+                "row_diff_status": "invalid",
+                "historical_snapshot_invalid_reason": "snapshot exceeds the bounded row or byte limit",
+                "comparison_scope": "historical_digest_and_current_binding_compatibility"
+            });
+        }
+        let rows_value = Value::Array(rows.clone());
+        let recomputed_snapshot_digest = ContentHash::of_value(&rows_value)
+            .map(|digest| digest.to_string())
+            .unwrap_or_default();
+        let supplied_snapshot_digest = object
+            .get("snapshot_digest")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let supplied_catalog_digest = object
+            .get("catalog_digest")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let mut historical_rows = BTreeMap::<String, Value>::new();
+        let mut invalid_reason = None;
+        for row in rows {
+            let Ok(adapter) = serde_json::from_value::<MissionEvaluatorAdapter>(row.clone()) else {
+                invalid_reason = Some("snapshot.rows contains an invalid adapter row".to_string());
+                break;
+            };
+            if historical_rows.insert(adapter.id.clone(), row.clone()).is_some() {
+                invalid_reason = Some("snapshot.rows contains duplicate adapter IDs".to_string());
+                break;
+            }
+        }
+        let snapshot_digest_match = valid_digest(supplied_snapshot_digest)
+            && supplied_snapshot_digest == recomputed_snapshot_digest;
+        let catalog_digest_match = valid_digest(supplied_catalog_digest)
+            && supplied_catalog_digest == recomputed_snapshot_digest;
+        if invalid_reason.is_none() && (!snapshot_digest_match || !catalog_digest_match) {
+            invalid_reason = Some("snapshot digest does not match its retained rows".to_string());
+        }
+        if let Some(reason) = invalid_reason {
+            return json!({
+                "historical_snapshot_present": true,
+                "historical_snapshot_valid": false,
+                "historical_catalogue_rows_retained": false,
+                "exact_row_diff_available": false,
+                "row_diff_status": "invalid",
+                "historical_snapshot_digest": supplied_snapshot_digest,
+                "recomputed_historical_snapshot_digest": recomputed_snapshot_digest,
+                "historical_snapshot_digest_match": snapshot_digest_match,
+                "historical_snapshot_invalid_reason": reason,
+                "comparison_scope": "historical_digest_and_current_binding_compatibility"
+            });
+        }
+        let current_rows = self
+            .adapters
+            .iter()
+            .map(|adapter| (adapter.id.clone(), to_value(adapter).expect("adapter is serializable")))
+            .collect::<BTreeMap<_, _>>();
+        let historical_ids = historical_rows.keys().cloned().collect::<BTreeSet<_>>();
+        let current_ids = current_rows.keys().cloned().collect::<BTreeSet<_>>();
+        let added_adapter_ids = current_ids.difference(&historical_ids).cloned().collect::<Vec<_>>();
+        let removed_adapter_ids = historical_ids.difference(&current_ids).cloned().collect::<Vec<_>>();
+        let mut changed_adapter_ids = Vec::new();
+        let mut unchanged_adapter_ids = Vec::new();
+        let mut changed_adapter_fields = BTreeMap::<String, Vec<String>>::new();
+        for id in historical_ids.intersection(&current_ids) {
+            let historical = historical_rows.get(id).expect("intersection row exists");
+            let current = current_rows.get(id).expect("intersection row exists");
+            if historical == current {
+                unchanged_adapter_ids.push(id.clone());
+                continue;
+            }
+            changed_adapter_ids.push(id.clone());
+            let mut fields = BTreeSet::new();
+            if let (Some(historical), Some(current)) = (historical.as_object(), current.as_object()) {
+                let keys = historical
+                    .keys()
+                    .chain(current.keys())
+                    .cloned()
+                    .collect::<BTreeSet<_>>();
+                for key in keys {
+                    if historical.get(&key) != current.get(&key) {
+                        fields.insert(key);
+                    }
+                }
+            }
+            changed_adapter_fields.insert(id.clone(), fields.into_iter().collect());
+        }
+        json!({
+            "historical_snapshot_present": true,
+            "historical_snapshot_valid": true,
+            "historical_catalogue_rows_retained": true,
+            "exact_row_diff_available": true,
+            "row_diff_status": "exact",
+            "historical_snapshot_digest": supplied_snapshot_digest,
+            "recomputed_historical_snapshot_digest": recomputed_snapshot_digest,
+            "historical_snapshot_digest_match": true,
+            "historical_snapshot_row_count": historical_rows.len(),
+            "added_adapter_ids": added_adapter_ids,
+            "removed_adapter_ids": removed_adapter_ids,
+            "changed_adapter_ids": changed_adapter_ids,
+            "unchanged_adapter_ids": unchanged_adapter_ids,
+            "changed_adapter_fields": changed_adapter_fields,
+            "comparison_scope": "exact_adapter_row_comparison"
         })
     }
 }
@@ -1549,6 +1747,73 @@ mod tests {
                 item.as_str()
                     .is_some_and(|value| value.contains("historical catalogue rows"))
             }));
+    }
+
+    #[test]
+    fn retained_catalogue_snapshot_produces_exact_adapter_row_diff() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let snapshot = catalogue.snapshot();
+        assert_eq!(snapshot["schema"], MISSION_EVALUATOR_CATALOGUE_SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(snapshot["row_count"], json!(29));
+        assert_eq!(snapshot["snapshot_digest"], catalogue.digest().to_string());
+        let mission = json!({
+            "workflow": "agent_mission",
+            "plan": {"mission_id": "mission-snapshot"},
+            "claim_lineage": {
+                "evaluator_review": {
+                    "catalog_digest": catalogue.digest().to_string(),
+                    "review_id": "a".repeat(64),
+                    "discovery_digest": "b".repeat(64),
+                    "catalogue_snapshot": snapshot
+                },
+                "claims": []
+            }
+        });
+        let unchanged = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission,
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(unchanged["catalog_drift"]["row_diff_status"], "exact");
+        assert_eq!(unchanged["catalog_drift"]["exact_row_diff_available"], true);
+        assert_eq!(unchanged["catalog_drift"]["changed_adapter_ids"], json!([]));
+        assert_eq!(unchanged["catalog_drift"]["removed_adapter_ids"], json!([]));
+
+        let mut changed_snapshot = catalogue.snapshot();
+        changed_snapshot["rows"][0]["purpose"] = json!("historical purpose before a catalogue revision");
+        let row_digest = ContentHash::of_value(&changed_snapshot["rows"]).unwrap().to_string();
+        changed_snapshot["snapshot_digest"] = json!(row_digest.clone());
+        changed_snapshot["catalog_digest"] = json!(row_digest);
+        let changed_mission = json!({
+            "workflow": "agent_mission",
+            "plan": {"mission_id": "mission-snapshot-changed"},
+            "claim_lineage": {
+                "evaluator_review": {
+                    "catalog_digest": changed_snapshot["catalog_digest"],
+                    "review_id": "a".repeat(64),
+                    "discovery_digest": "b".repeat(64),
+                    "catalogue_snapshot": changed_snapshot
+                },
+                "claims": []
+            }
+        });
+        let changed = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission: changed_mission,
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(changed["catalog_drift"]["row_diff_status"], "exact");
+        assert_eq!(changed["catalog_drift"]["status"], "drifted");
+        assert_eq!(changed["catalog_drift"]["changed_adapter_ids"].as_array().unwrap().len(), 1);
+        assert!(changed["catalog_drift"]["changed_adapter_fields"]
+            .as_object()
+            .unwrap()
+            .values()
+            .any(|fields| fields.as_array().unwrap().iter().any(|field| field == "purpose")));
     }
 
     #[test]

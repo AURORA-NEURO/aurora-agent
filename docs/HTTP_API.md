@@ -35,6 +35,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/missions/{mission_id}/evaluator-replay` | Retrieve durable full or summary-only evaluator replay evidence |
 | `GET /v1/missions/{mission_id}/evaluator-replay/compare` | Compare retained evaluator provenance with the current catalogue |
 | `GET /v1/missions/{mission_id}/evidence-bundle` | Export a bounded, content-addressed mission evidence bundle |
+| `POST /v1/evidence-bundles/verify` | Verify a portable evidence bundle without executing a mission or evaluator |
 | `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
@@ -259,7 +260,7 @@ explicit refusal code rather than returning an empty successful replay. `executi
 evaluator tools. The Python `ApiClient`/`AsyncApiClient` and TypeScript `ApiClient` expose the same
 bounded query, while typed reports preserve retention mode, links, guarantees, and limitations.
 
-### Evaluator catalogue comparison and evidence bundle export
+### Evaluator catalogue snapshots, comparison, and evidence bundles
 
 `GET /v1/missions/{mission_id}/evaluator-replay/compare` accepts the same bounded
 `include_fixtures` and `max_items` query parameters as replay. Its `catalog_drift` object includes
@@ -270,6 +271,15 @@ digest does not prove evaluator semantics; a changed digest does not identify th
 row unless a caller retained that catalogue snapshot. Summary-only checkpoints use their separate
 `historical_catalog_digest` rather than treating a newly recomputed current digest as historical.
 
+Mission review provenance now retains a bounded `catalogue_snapshot` containing all 29 adapter rows,
+the catalogue digest, a snapshot digest, row/group counts, and bounded-retention metadata. When that snapshot is
+available, `catalog_drift` reports `comparison_scope: "exact_adapter_row_comparison"` plus deterministic
+`added_adapter_ids`, `removed_adapter_ids`, `changed_adapter_ids`, `unchanged_adapter_ids`, and
+`changed_adapter_fields`. Each snapshot is content-addressed twice: its row digest must match both
+`snapshot_digest` and `catalog_digest`; malformed, duplicate, oversized, or tampered snapshots are
+reported as invalid rather than treated as historical truth. Older summary-only checkpoints retain the
+digest-level limitation and explicitly report `row_diff_status: "not_recorded"`.
+
 `GET /v1/missions/{mission_id}/evidence-bundle` accepts `include_result` (default `false`),
 `include_trace` (default `true`), `include_fixtures` (default `false`), and `max_items` (`1..512`,
 default `128`). The export is capped at 2 MiB, includes a deterministic `bundle_digest`, and
@@ -278,6 +288,13 @@ preserves `result_digest`/`result_omitted` metadata even when the result body is
 result remains explicitly omitted. The bundle's `execution` posture is always `not_started` for
 the replay/comparison sub-workflows, and the trace is observational evidence rather than a second
 execution result.
+
+Trace omission is represented as `trace: []` and `export.trace_included: false`, so consumers never
+have to interpret `null` as an ambiguous omission. `POST /v1/evidence-bundles/verify` accepts
+`{ "bundle": <exported bundle> }` and recomputes the canonical bundle digest, retained-result digest,
+schema, retention, trace, and export-contract checks. It returns a verification report with
+`valid: false` for digest tampering and a 422/413 response for malformed or oversized input. Neither
+route executes a domain tool or evaluator, and neither silently truncates an oversized artifact.
 
 ## Asynchronous missions
 

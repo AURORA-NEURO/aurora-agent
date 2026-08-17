@@ -273,6 +273,8 @@ import type {
   MissionExecutionProvenanceResponse,
   MissionEvidenceBundleOptions,
   MissionEvidenceBundleResult,
+  MissionEvidenceBundleVerifyArgs,
+  MissionEvidenceBundleVerifyResult,
   MissionJob,
   MissionJobStatus,
   MissionInventoryResponse,
@@ -881,6 +883,10 @@ export class ApiClient {
     return this.callTool<MissionEvaluatorReplayCompareResult>("mission_evaluator_replay_compare", args, options);
   }
 
+  async missionEvidenceBundleVerify(args: MissionEvidenceBundleVerifyArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleVerifyResult>> {
+    return this.callTool<MissionEvidenceBundleVerifyResult>("mission_evidence_bundle_verify", args, options);
+  }
+
   async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityAuditResult>> {
     return this.callTool<CapabilityAuditResult>("capability_audit", args, options);
   }
@@ -1330,6 +1336,20 @@ export class ApiClient {
       "GET",
       `/v1/missions/${encodeURIComponent(id)}/evidence-bundle?${query.toString()}`,
       undefined,
+      options,
+    );
+  }
+
+  /** Verify a portable mission evidence bundle's canonical and retained-result digests. */
+  async missionEvidenceBundleVerifyQuery(
+    bundle: JsonObject,
+    options?: ClientRequestOptions,
+  ): Promise<MissionEvidenceBundleVerifyResult> {
+    if (!isObject(bundle)) throw new ArgumentError("bundle must be a JSON object");
+    return this.request<MissionEvidenceBundleVerifyResult>(
+      "POST",
+      "/v1/evidence-bundles/verify",
+      { bundle },
       options,
     );
   }

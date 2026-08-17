@@ -979,6 +979,7 @@ class MissionEvaluatorReviewReport:
     review_id: str
     catalog_digest: str
     discovery_digest: str
+    catalogue_snapshot: Mapping[str, Any]
     selection_count: int
     claim_count: int
     bindings: tuple[MissionEvaluatorBindingReport, ...]
@@ -1006,6 +1007,9 @@ class MissionEvaluatorReviewReport:
             review_id=_route_text("mission evaluator review id", raw.get("review_id")),
             catalog_digest=_route_text("mission evaluator review catalog digest", raw.get("catalog_digest")),
             discovery_digest=_route_text("mission evaluator discovery digest", raw.get("discovery_digest")),
+            catalogue_snapshot=_route_mapping(
+                "mission evaluator catalogue snapshot", raw.get("catalogue_snapshot", {})
+            ),
             selection_count=_route_count("mission evaluator selection count", raw.get("selection_count")),
             claim_count=_route_count("mission evaluator claim count", raw.get("claim_count")),
             bindings=tuple(MissionEvaluatorBindingReport.from_wire(item) for item in bindings_value),
@@ -1028,6 +1032,11 @@ class MissionEvaluatorReviewReport:
             for binding in self.bindings
             if binding.proposed_binding is not None
         )
+
+    @property
+    def snapshot_retained(self) -> bool:
+        retention = self.catalogue_snapshot.get("retention")
+        return isinstance(retention, Mapping) and retention.get("rows_retained") is True
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -1312,6 +1321,90 @@ class MissionEvidenceBundleRequest:
 
 
 @dataclass(frozen=True)
+class MissionEvidenceBundleVerifyRequest:
+    """Request verification of one exported, content-addressed mission bundle."""
+
+    bundle: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bundle", dict(_route_mapping("mission evidence bundle", self.bundle)))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"bundle": dict(self.bundle)}
+
+    def to_http_body(self) -> dict[str, Any]:
+        return {"bundle": dict(self.bundle)}
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleVerificationReport:
+    """Typed digest, retention, and result-integrity verification evidence."""
+
+    raw: dict[str, Any]
+    valid: bool
+    verification_status: str
+    bundle_digest: str
+    recomputed_bundle_digest: str
+    result_digest: str | None
+    recomputed_result_digest: str | None
+    checks: Mapping[str, Any]
+    failures: tuple[str, ...]
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleVerificationReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_verify")
+        if raw.get("workflow") != "mission_evidence_bundle_verify":
+            raise ArgumentError("mission evidence bundle verification workflow is invalid")
+        valid = raw.get("valid")
+        if not isinstance(valid, bool):
+            raise ArgumentError("mission evidence bundle verification valid must be a boolean")
+        status = _route_text("mission evidence bundle verification status", raw.get("verification_status"))
+        if status not in {"verified", "failed"}:
+            raise ArgumentError(f"unknown mission evidence bundle verification status: {status}")
+        failures = raw.get("failures", [])
+        if not isinstance(failures, Sequence) or isinstance(failures, (str, bytes)):
+            raise ArgumentError("mission evidence bundle verification failures must be an array")
+        result_digest = raw.get("result_digest")
+        recomputed_result_digest = raw.get("recomputed_result_digest")
+        if result_digest is not None:
+            result_digest = _route_text("mission evidence bundle result digest", result_digest)
+        if recomputed_result_digest is not None:
+            recomputed_result_digest = _route_text(
+                "mission evidence bundle recomputed result digest", recomputed_result_digest
+            )
+        return cls(
+            raw=raw,
+            valid=valid,
+            verification_status=status,
+            bundle_digest=_route_text("mission evidence bundle digest", raw.get("bundle_digest")),
+            recomputed_bundle_digest=_route_text(
+                "mission evidence bundle recomputed digest", raw.get("recomputed_bundle_digest")
+            ),
+            result_digest=result_digest,
+            recomputed_result_digest=recomputed_result_digest,
+            checks=_route_mapping("mission evidence bundle verification checks", raw.get("checks")),
+            failures=tuple(_route_text("mission evidence bundle verification failure", item) for item in failures),
+            execution=_route_text("mission evidence bundle verification execution", raw.get("execution")),
+        )
+
+    @property
+    def digest_matches(self) -> bool:
+        return self.checks.get("bundle_digest") is True
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evidence_bundle_verification_report(
+    value: Mapping[str, Any],
+) -> MissionEvidenceBundleVerificationReport:
+    """Parse a direct MCP result or HTTP envelope from bundle verification."""
+
+    return MissionEvidenceBundleVerificationReport.from_wire(value)
+
+
+@dataclass(frozen=True)
 class MissionEvidenceBundleReport:
     """Typed content-addressed mission evidence export."""
 
@@ -1545,7 +1638,9 @@ __all__ = [
     "MissionEvaluatorReplayQueryRequest",
     "MissionEvaluatorReplayQueryReport",
     "MissionEvidenceBundleRequest",
+    "MissionEvidenceBundleVerifyRequest",
     "MissionEvidenceBundleReport",
+    "MissionEvidenceBundleVerificationReport",
     "MissionEvaluatorAdapterReport",
     "MissionEvaluatorMatchReport",
     "MissionEvaluatorCoverageReport",
@@ -1560,4 +1655,5 @@ __all__ = [
     "mission_evaluator_replay_comparison_report",
     "mission_evaluator_replay_query_report",
     "mission_evidence_bundle_report",
+    "mission_evidence_bundle_verification_report",
 ]

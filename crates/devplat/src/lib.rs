@@ -216,6 +216,7 @@ pub mod exploit;
 pub mod engineering;
 pub mod engineering_plan;
 pub mod evaluator;
+pub mod evidence_bundle;
 pub mod execution_provenance;
 pub mod mission;
 pub mod operational_readiness;
@@ -287,7 +288,12 @@ pub use evaluator::{
     EvaluatorError, MissionEvaluatorAdapter, MissionEvaluatorCatalogue, MissionEvaluatorMatch,
     MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
     MissionEvaluatorReviewRequest, MissionEvaluatorSearch, MissionEvaluatorSelection,
+    MISSION_EVALUATOR_CATALOGUE_SNAPSHOT_SCHEMA_VERSION,
     MISSION_EVALUATOR_REPLAY_COMPARE_SCHEMA_VERSION, MISSION_EVALUATOR_SCHEMA_VERSION,
+};
+pub use evidence_bundle::{
+    verify_mission_evidence_bundle, EvidenceBundleError, MAX_EVIDENCE_BUNDLE_VERIFY_BYTES,
+    MISSION_EVIDENCE_BUNDLE_SCHEMA_VERSION, MISSION_EVIDENCE_BUNDLE_VERIFY_SCHEMA_VERSION,
 };
 pub use execution_provenance::{
     audit_execution_provenance, DelegatedCheckEvidence, ExecutionProvenanceAudit,

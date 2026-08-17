@@ -4325,6 +4325,17 @@ export interface MissionEvaluatorReviewFinding extends JsonObject {
   message: string;
 }
 
+export interface MissionEvaluatorCatalogueSnapshot extends JsonObject {
+  schema: "bioprism-devplat-mission-evaluator-catalogue-snapshot/0.1" | string;
+  catalog_digest: string;
+  snapshot_digest: string;
+  row_count: number;
+  group_count: number;
+  rows: JsonObject[];
+  retention: JsonObject;
+  execution: "not_started";
+}
+
 export interface MissionEvaluatorReviewResult extends JsonObject {
   ok: boolean;
   schema: string;
@@ -4332,6 +4343,7 @@ export interface MissionEvaluatorReviewResult extends JsonObject {
   review_id: string;
   catalog_digest: string;
   discovery_digest: string;
+  catalogue_snapshot?: MissionEvaluatorCatalogueSnapshot;
   selection_count: number;
   claim_count: number;
   bindings: MissionEvaluatorBindingReviewResult[];
@@ -7423,6 +7435,25 @@ export interface MissionEvidenceBundleResult extends JsonObject {
   guarantees: string[];
   limitations: string[];
   links: JsonObject;
+}
+
+export interface MissionEvidenceBundleVerifyArgs extends JsonObject {
+  bundle: JsonObject;
+}
+
+export interface MissionEvidenceBundleVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-mission-evidence-bundle-verify/0.1" | string;
+  workflow: "mission_evidence_bundle_verify";
+  valid: boolean;
+  verification_status: "verified" | "failed" | string;
+  bundle_digest: string;
+  recomputed_bundle_digest: string;
+  result_digest: string | null;
+  recomputed_result_digest: string | null;
+  checks: JsonObject;
+  failures: string[];
+  execution: "not_started";
 }
 
 export interface MissionJob extends JsonObject {

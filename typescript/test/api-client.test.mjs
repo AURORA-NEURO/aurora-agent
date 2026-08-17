@@ -4082,3 +4082,50 @@ test("client exposes evaluator replay comparison and content-addressed evidence 
   assert.equal(bundle.retention.mode, "summary_only");
   assert.equal(bundle.bundle_digest.length, 64);
 });
+
+test("client exposes portable mission evidence bundle verification over MCP and REST", async () => {
+  const bundle = { schema: "bioprism-api/mission-evidence-bundle/0.1", bundle_digest: "b".repeat(64) };
+  const verification = {
+    ok: true,
+    schema: "bioprism-devplat-mission-evidence-bundle-verify/0.1",
+    workflow: "mission_evidence_bundle_verify",
+    valid: true,
+    verification_status: "verified",
+    bundle_digest: "b".repeat(64),
+    recomputed_bundle_digest: "b".repeat(64),
+    result_digest: null,
+    recomputed_result_digest: null,
+    checks: { bundle_digest: true, retention: true, trace: true, export: true },
+    failures: [],
+    execution: "not_started",
+  };
+
+  const mcpClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/tools/mission_evidence_bundle_verify");
+      assert.deepEqual(JSON.parse(init.body), { bundle });
+      return jsonResponse({
+        ok: true,
+        tool: "mission_evidence_bundle_verify",
+        mcp: { result: { structuredContent: verification } },
+      });
+    },
+  });
+  const mcpResult = await mcpClient.missionEvidenceBundleVerify({ bundle });
+  assert.equal(mcpResult.mcp.result.structuredContent.valid, true);
+
+  const restClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/evidence-bundles/verify");
+      assert.deepEqual(JSON.parse(init.body), { bundle });
+      return jsonResponse(verification);
+    },
+  });
+  const restResult = await restClient.missionEvidenceBundleVerifyQuery(bundle);
+  assert.equal(restResult.workflow, "mission_evidence_bundle_verify");
+  assert.equal(restResult.verification_status, "verified");
+});

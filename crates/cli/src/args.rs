@@ -82,6 +82,10 @@ COMMANDS
                     Apply the standard metamorphic suite, validate every postcondition against
                     the oracle, deduplicate by content, and report effective diversity.
 
+  evidence verify   --bundle <path>
+                    Verify a portable mission evidence bundle's schema, retention claims and
+                    content digests. Exit 1 when the bundle is well-formed but unverifiable.
+
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
   -h, --help        Show this help.
@@ -125,6 +129,7 @@ pub enum Command {
     PrismFork { world: PathBuf, query: PathBuf, bundle_out: Option<PathBuf>, minimize: bool },
     PrismMinimize { world: PathBuf },
     MutateFamily { world: PathBuf, out_dir: Option<PathBuf> },
+    EvidenceBundleVerify { bundle: PathBuf },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -252,6 +257,9 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             query: options.take_path("--query")?,
             markdown: options.take_switch("--markdown"),
         },
+        ("evidence", "verify") => Command::EvidenceBundleVerify {
+            bundle: options.take_path("--bundle")?,
+        },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
 
@@ -326,5 +334,35 @@ impl Options {
             None => Ok(()),
             Some((name, _)) => Err(usage(format!("unrecognised option {name:?}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse, Command, Parsed};
+    use std::path::PathBuf;
+
+    #[test]
+    fn evidence_bundle_verify_is_a_json_capable_command() {
+        let parsed = parse(
+            ["--json", "evidence", "verify", "--bundle", "bundle.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse evidence verifier");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::EvidenceBundleVerify {
+                    bundle: PathBuf::from("bundle.json"),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_evidence_bundle_verification() {
+        assert!(super::help().contains("evidence verify   --bundle <path>"));
     }
 }

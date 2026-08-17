@@ -105,6 +105,8 @@ from .capability import (
     MissionEvaluatorReplayQueryRequest,
     MissionEvidenceBundleReport,
     MissionEvidenceBundleRequest,
+    MissionEvidenceBundleVerificationReport,
+    MissionEvidenceBundleVerifyRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -118,6 +120,7 @@ from .capability import (
     mission_evaluator_replay_comparison_report,
     mission_evaluator_replay_query_report,
     mission_evidence_bundle_report,
+    mission_evidence_bundle_verification_report,
 )
 from .capability_dashboard import (
     CAPABILITY_DASHBOARD_SCHEMA,
@@ -2314,6 +2317,8 @@ __all__ = [
     "MissionEvaluatorReplayQueryRequest",
     "MissionEvidenceBundleReport",
     "MissionEvidenceBundleRequest",
+    "MissionEvidenceBundleVerificationReport",
+    "MissionEvidenceBundleVerifyRequest",
     "CapabilityRouteNeed",
     "CapabilityRouteNeedReport",
     "CapabilityRouteCoverage",
@@ -2340,6 +2345,7 @@ __all__ = [
     "mission_evaluator_replay_comparison_report",
     "mission_evaluator_replay_query_report",
     "mission_evidence_bundle_report",
+    "mission_evidence_bundle_verification_report",
     "CAPABILITY_DASHBOARD_SCHEMA",
     "DEFAULT_DASHBOARD_GROUPS",
     "MAX_DASHBOARD_GROUPS",

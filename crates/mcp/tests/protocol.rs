@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 179);
+    assert_eq!(tools.len(), 180);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1352,6 +1352,34 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
         json!({"mission": drifted_mission, "include_fixtures": false, "max_items": 64}),
     );
     assert_eq!(drifted_comparison["catalog_drift"]["status"], json!("drifted"));
+
+    let mut bundle = json!({
+        "schema": "bioprism-api/mission-evidence-bundle/0.1",
+        "workflow": "mission_evidence_bundle_export",
+        "mission_id": "mission-protocol",
+        "retention": {"mode": "summary_only", "result_retained": false, "result_included": false, "summary_retained": true},
+        "result": Value::Null,
+        "result_digest": "d".repeat(64),
+        "evaluator_replay": {"workflow": "mission_evaluator_replay_summary"},
+        "catalog_drift": {"status": "not_recorded"},
+        "trace": [{"sequence": 1, "event": "mission_succeeded"}],
+        "export": {"format": "json", "include_result": false, "include_trace": true, "trace_included": true, "digest_algorithm": "sha256", "execution": "not_started"}
+    });
+    bundle["bundle_digest"] = json!(ContentHash::of_value(&bundle).unwrap().to_string());
+    let verified = call(
+        &mut server,
+        "mission_evidence_bundle_verify",
+        json!({"bundle": bundle.clone()}),
+    );
+    assert_eq!(verified["workflow"], json!("mission_evidence_bundle_verify"));
+    assert_eq!(verified["valid"], json!(true));
+    bundle["catalog_drift"]["status"] = json!("drifted");
+    let tampered = call(
+        &mut server,
+        "mission_evidence_bundle_verify",
+        json!({"bundle": bundle}),
+    );
+    assert_eq!(tampered["valid"], json!(false));
 
     let replayed_inconsistent = call(
         &mut server,
@@ -5285,12 +5313,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(179));
-    assert_eq!(result["advertised_tool_count"], json!(179));
+    assert_eq!(result["unique_catalog_tools"], json!(180));
+    assert_eq!(result["advertised_tool_count"], json!(180));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(179));
-    assert_eq!(result["schema_quality"]["valid"], json!(179));
+    assert_eq!(result["schema_quality"]["checked"], json!(180));
+    assert_eq!(result["schema_quality"]["valid"], json!(180));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

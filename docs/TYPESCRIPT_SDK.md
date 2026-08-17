@@ -727,6 +727,12 @@ include_trace, include_fixtures, max_items })` exports one bounded content-addre
 bundle with retention/omission metadata, replay and drift projections, optional trace/result,
 execution provenance, and a 64-character `bundle_digest`; it never dispatches a domain tool or
 evaluator and never silently truncates an oversized export.
+When review provenance retains the evaluator catalogue snapshot, the comparison result also exposes
+exact added, removed, changed, and unchanged adapter IDs plus changed row fields. Callers can verify
+the exported artifact with `missionEvidenceBundleVerify({ bundle })` through MCP or
+`missionEvidenceBundleVerifyQuery(bundle)` through REST. Both return the typed
+`MissionEvidenceBundleVerifyResult`, including canonical digest recomputation, retained-result checks,
+retention/trace/export checks, and explicit failure codes; verification is non-executing.
 
 ```typescript
 const page = await api.events(0, 100);

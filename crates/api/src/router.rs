@@ -11,7 +11,8 @@ use crate::events::{
 };
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
-    MissionEvaluatorCatalogue, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    verify_mission_evidence_bundle, EvidenceBundleError, MissionEvaluatorCatalogue,
+    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
 };
 use bioprism_ids::ContentHash;
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
@@ -510,6 +511,9 @@ impl ApiRouter {
                 self.create_operations_gate_review(&request, &request_id)
             }
             ("POST", "/v1/operations/handoff") => self.operations_handoff(&request, &request_id),
+            ("POST", "/v1/evidence-bundles/verify") => {
+                self.verify_evidence_bundle(&request, &request_id)
+            }
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
@@ -1002,6 +1006,7 @@ impl ApiRouter {
                     "mission_evaluator_replay_query": true,
                     "mission_evaluator_replay_compare": true,
                     "mission_evidence_bundle_export": true,
+                    "mission_evidence_bundle_verify": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -1035,6 +1040,7 @@ impl ApiRouter {
                     "mission_evaluator_replay": "/v1/missions/{mission_id}/evaluator-replay",
                     "mission_evaluator_replay_compare": "/v1/missions/{mission_id}/evaluator-replay/compare",
                     "mission_evidence_bundle": "/v1/missions/{mission_id}/evidence-bundle",
+                    "mission_evidence_bundle_verify": "/v1/evidence-bundles/verify",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -2147,6 +2153,7 @@ impl ApiRouter {
                      "mission_evaluator_replay": "/v1/missions/{mission_id}/evaluator-replay",
                      "mission_evaluator_replay_compare": "/v1/missions/{mission_id}/evaluator-replay/compare",
                      "mission_evidence_bundle": "/v1/missions/{mission_id}/evidence-bundle",
+                     "mission_evidence_bundle_verify": "/v1/evidence-bundles/verify",
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
@@ -3254,6 +3261,31 @@ impl ApiRouter {
         )
     }
 
+    fn verify_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let Some(bundle) = arguments.get("bundle") else {
+            return self.error(
+                422,
+                "invalid_evidence_bundle",
+                "request body must contain a bundle object",
+                request_id,
+            );
+        };
+        match verify_mission_evidence_bundle(bundle) {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(EvidenceBundleError::TooLarge { actual, maximum }) => self.error(
+                413,
+                "evidence_bundle_too_large",
+                &format!("bundle is {actual} bytes; maximum is {maximum} bytes"),
+                request_id,
+            ),
+            Err(error) => self.error(422, "invalid_evidence_bundle", &error.to_string(), request_id),
+        }
+    }
+
     fn mission_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let Some(mission_id) = mission_id(&request.path_segments(), Some("evidence-bundle")) else {
             return self.error(
@@ -3423,12 +3455,13 @@ impl ApiRouter {
             "trace": if include_trace {
                 json!(state.trace)
             } else {
-                Value::Null
+                json!([])
             },
             "export": {
                 "format": "json",
                 "include_result": include_result,
                 "include_trace": include_trace,
+                "trace_included": include_trace,
                 "include_fixtures": include_fixtures,
                 "max_items": max_items,
                 "execution": "not_started",
@@ -4554,6 +4587,7 @@ impl ApiRouter {
                     "/v1/operations/gates": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain evidence gate projection without readiness claims" } } } },
                     "/v1/operations/gate-reviews": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }], "responses": { "200": { "description": "durable cursor page of replayable operations gate reviews" } } }, "post": { "responses": { "201": { "description": "content-addressed operations gate review record" } } } },
                     "/v1/operations/handoff": { "post": { "responses": { "200": { "description": "content-addressed, non-executing domain routing handoff" } } } },
+                    "/v1/evidence-bundles/verify": { "post": { "responses": { "200": { "description": "content-addressed mission evidence bundle verification report" }, "413": { "description": "bundle exceeds verification bound" }, "422": { "description": "bundle is malformed" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
@@ -5888,6 +5922,7 @@ fn evaluator_replay_summary(report: &Value, mission_id: &str) -> Option<Value> {
         "historical_catalog_digest": review_provenance.get("catalog_digest").cloned().unwrap_or(Value::Null),
         "historical_review_id": review_provenance.get("review_id").cloned().unwrap_or(Value::Null),
         "historical_discovery_digest": review_provenance.get("discovery_digest").cloned().unwrap_or(Value::Null),
+        "historical_catalogue_snapshot": review_provenance.get("catalogue_snapshot").cloned().unwrap_or(Value::Null),
         "referenced_adapter_ids": referenced_adapter_ids,
         "binding_count": replay.get("binding_count")?,
         "omitted_bindings": replay.get("omitted_bindings")?,
@@ -7588,8 +7623,27 @@ mod tests {
         assert_eq!(bundle["workflow"], "mission_evidence_bundle_export");
         assert_eq!(bundle["retention"]["mode"], "full");
         assert_eq!(bundle["result"], Value::Null);
-        assert_eq!(bundle["trace"], Value::Null);
+        assert_eq!(bundle["trace"], json!([]));
         assert_eq!(bundle["bundle_digest"].as_str().unwrap().len(), 64);
+        let verification = router.handle(request(
+            "POST",
+            "/v1/evidence-bundles/verify",
+            json!({"bundle": bundle.clone()}),
+        ));
+        assert_eq!(verification.status, 200);
+        let verification: Value = serde_json::from_slice(&verification.body).unwrap();
+        assert_eq!(verification["workflow"], "mission_evidence_bundle_verify");
+        assert_eq!(verification["valid"], true);
+        let mut tampered = bundle;
+        tampered["catalog_drift"]["status"] = json!("drifted");
+        let tampered_response = router.handle(request(
+            "POST",
+            "/v1/evidence-bundles/verify",
+            json!({"bundle": tampered}),
+        ));
+        assert_eq!(tampered_response.status, 200);
+        let tampered: Value = serde_json::from_slice(&tampered_response.body).unwrap();
+        assert_eq!(tampered["valid"], false);
         let invalid_bundle = router.handle(request(
             "GET",
             "/v1/missions/api-async-1/evidence-bundle?include_result=maybe",

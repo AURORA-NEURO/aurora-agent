@@ -14,6 +14,7 @@ mod exit;
 mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
+use bioprism_devplat::verify_mission_evidence_bundle;
 use bioprism_fiber::compile;
 use bioprism_scope::DimensionRegistry;
 use bioprism_section::{CertificateProfile, ContextCertificate, OracleStatus};
@@ -119,7 +120,44 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
         Command::ContextCompare { world, query, markdown } => {
             context_compare(world, query, *markdown)
         }
+        Command::EvidenceBundleVerify { bundle } => evidence_bundle_verify(bundle),
     }
+}
+
+fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {
+    let bundle = io::read_json(bundle_path)?;
+    let report = verify_mission_evidence_bundle(&bundle).map_err(|error| {
+        CliError::invalid(error.to_string()).about(bundle_path.display().to_string())
+    })?;
+    let valid = report.get("valid").and_then(Value::as_bool).unwrap_or(false);
+    let digest = report
+        .get("bundle_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let recomputed = report
+        .get("recomputed_bundle_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let failures = report
+        .get("failures")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let human = format!(
+        "mission evidence bundle: {}\n  declared digest: {}\n  recomputed digest: {}\n  failures: {}\n\nNext: bioprism evidence verify --bundle {}\n",
+        if valid { "verified" } else { "FAILED" },
+        digest,
+        recomputed,
+        if failures.is_empty() { "none" } else { &failures },
+        bundle_path.display()
+    );
+    Ok(Outcome::ok(report, human).failing_if(!valid))
 }
 
 fn world_validate(world_path: &Path) -> CliResult<Outcome> {

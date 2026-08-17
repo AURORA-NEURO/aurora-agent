@@ -1005,6 +1005,7 @@ fn evaluator_review_provenance(review: Option<&Value>) -> Value {
         "review_id": object.get("review_id").cloned().unwrap_or(Value::Null),
         "catalog_digest": object.get("catalog_digest").cloned().unwrap_or(Value::Null),
         "discovery_digest": object.get("discovery_digest").cloned().unwrap_or(Value::Null),
+        "catalogue_snapshot": object.get("catalogue_snapshot").cloned().unwrap_or(Value::Null),
         "review_status": object.get("review_status").cloned().unwrap_or(Value::Null),
         "binding_posture": object.get("binding_posture").cloned().unwrap_or(Value::Null),
         "execution": object.get("execution").cloned().unwrap_or(Value::Null),

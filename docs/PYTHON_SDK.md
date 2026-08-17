@@ -510,6 +510,17 @@ invent defaults:
   full retention, optional result and trace, replay/catalogue-drift projections, omission metadata,
   execution provenance, links, and the 64-character content `bundle_digest`. The export is bounded
   and non-executing; oversized bundles are refused rather than truncated.
+- `MissionEvaluatorReviewReport.catalogue_snapshot` preserves the bounded, content-addressed adapter
+  rows retained at review time; `snapshot_retained` is a convenient retention check. Replay comparison
+  reports exact adapter row additions, removals, changes, unchanged IDs, and changed top-level fields
+  when the snapshot is valid, while legacy digest-only checkpoints retain their explicit limitation.
+- `MissionEvidenceBundleVerifyRequest` and `MissionEvidenceBundleVerificationReport` verify an exported
+  bundle's canonical digest, retained-result digest, schema, retention, trace, and export contract
+  without executing anything. `Workspace`/`AsyncWorkspace` expose the typed MCP path, while
+  `ApiClient`/`AsyncApiClient` expose both the durable REST route and the explicitly named MCP bridge
+  (`mission_evidence_bundle_verify_tool`). REST uses `POST /v1/evidence-bundles/verify`. A tampered
+  but well-formed bundle returns `valid=False` with failure codes instead of being mistaken for a
+  transport error.
 - `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
   `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
   ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool

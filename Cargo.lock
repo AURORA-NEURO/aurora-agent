@@ -226,6 +226,7 @@ name = "bioprism-cli"
 version = "0.1.0"
 dependencies = [
  "bioprism-baseline",
+ "bioprism-devplat",
  "bioprism-fiber",
  "bioprism-ids",
  "bioprism-mutation",

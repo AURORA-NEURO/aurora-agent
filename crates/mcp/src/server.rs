@@ -142,6 +142,7 @@ use bioprism_devplat::{
     MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayRequest,
     MissionEvaluatorReviewRequest,
+    verify_mission_evidence_bundle,
     MISSION_EVALUATOR_SCHEMA_VERSION,
     WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
@@ -1513,6 +1514,7 @@ impl Server {
             "mission_evaluator_review" => self.mission_evaluator_review(&arguments),
             "mission_evaluator_replay" => self.mission_evaluator_replay(&arguments),
             "mission_evaluator_replay_compare" => self.mission_evaluator_replay_compare(&arguments),
+            "mission_evidence_bundle_verify" => self.mission_evidence_bundle_verify(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
@@ -22387,6 +22389,34 @@ impl Server {
         Ok(output)
     }
 
+    /// Verify a portable mission evidence bundle without executing any contained workflow.
+    fn mission_evidence_bundle_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode mission evidence bundle verification input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "mission evidence bundle verification input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let bundle = arguments
+            .get("bundle")
+            .ok_or("bundle is required")?;
+        let output = verify_mission_evidence_bundle(bundle)
+            .map_err(|error| format!("mission evidence bundle verification refused: {error}"))?;
+        let output_bytes = serde_json::to_vec(&output).map_err(|error| {
+            format!("cannot measure mission evidence bundle verification result: {error}")
+        })?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "mission evidence bundle verification result exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        Ok(output)
+    }
+
     /// Verify that the explicit cross-domain catalogue and authoritative MCP tool definitions
     /// describe the same callable surface.
     ///
@@ -27361,7 +27391,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29807,6 +29837,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128, "description": "Maximum retained claims, bindings, and fixture rows returned by the nested replay projection." }
                 },
                 "required": ["mission"]
+            }
+        }),
+        json!({
+            "name": "mission_evidence_bundle_verify",
+            "description": "Verify a portable mission_evidence_bundle_export without executing a mission, evaluator, domain tool, or external effect. Recomputes the canonical bundle digest, checks the retention contract, and verifies the optional retained-result digest while keeping invalid verification evidence explicit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle": { "type": "object", "description": "The complete JSON object returned by the mission evidence bundle export route, including bundle_digest." }
+                },
+                "required": ["bundle"]
             }
         }),
         json!({

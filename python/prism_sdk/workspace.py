@@ -32,6 +32,8 @@ from .capability import (
     MissionEvaluatorReplayRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
+    MissionEvidenceBundleVerificationReport,
+    MissionEvidenceBundleVerifyRequest,
     MissionEvaluatorSearchReport,
     capability_audit_report,
     capability_discover_report,
@@ -41,6 +43,7 @@ from .capability import (
     mission_evaluator_review_report,
     mission_evaluator_replay_report,
     mission_evaluator_replay_comparison_report,
+    mission_evidence_bundle_verification_report,
 )
 from .capability_dashboard import (
     CapabilityDashboardQueryArgs,
@@ -1561,6 +1564,27 @@ class Workspace:
         """Return typed digest-drift and binding-compatibility evidence through MCP."""
 
         return mission_evaluator_replay_comparison_report(self.mission_evaluator_replay_compare(request))
+
+    def mission_evidence_bundle_verify(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a portable mission evidence bundle through workspace MCP."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleVerifyRequest)
+            else MissionEvidenceBundleVerifyRequest(**dict(request))
+        )
+        return self.tool("mission_evidence_bundle_verify", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_verification_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed workspace MCP mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(self.mission_evidence_bundle_verify(request))
 
     def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         """Verify catalogue membership against the authoritative MCP schema set."""
@@ -4550,6 +4574,29 @@ class AsyncWorkspace:
 
         return mission_evaluator_replay_comparison_report(
             await self.mission_evaluator_replay_compare(request)
+        )
+
+    async def mission_evidence_bundle_verify(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async workspace MCP mission evidence bundle verification."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleVerifyRequest)
+            else MissionEvidenceBundleVerifyRequest(**dict(request))
+        )
+        return await self.tool("mission_evidence_bundle_verify", normalized.to_mcp_arguments())
+
+    async def mission_evidence_bundle_verification_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed async workspace MCP mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(
+            await self.mission_evidence_bundle_verify(request)
         )
 
     async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:

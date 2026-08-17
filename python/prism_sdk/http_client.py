@@ -36,6 +36,8 @@ from .capability import (
     MissionEvaluatorReplayQueryRequest,
     MissionEvidenceBundleReport,
     MissionEvidenceBundleRequest,
+    MissionEvidenceBundleVerificationReport,
+    MissionEvidenceBundleVerifyRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -49,6 +51,7 @@ from .capability import (
     mission_evaluator_replay_comparison_report,
     mission_evaluator_replay_query_report,
     mission_evidence_bundle_report,
+    mission_evidence_bundle_verification_report,
 )
 from .capability_dashboard import CapabilityDashboardQueryArgs, CapabilityDashboardReport, capability_dashboard_report
 from .ci_evidence import CiExecutionEvidenceReport, CiExecutionEvidenceRequest, ci_execution_evidence_report
@@ -736,6 +739,27 @@ class ApiClient:
         """Return the typed durable mission evidence bundle."""
 
         return mission_evidence_bundle_report(self.mission_evidence_bundle(request))
+
+    def mission_evidence_bundle_verify(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify one portable mission evidence bundle through the REST gateway."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleVerifyRequest)
+            else MissionEvidenceBundleVerifyRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/evidence-bundles/verify", normalized.to_http_body())
+
+    def mission_evidence_bundle_verification_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed portable mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(self.mission_evidence_bundle_verify(request))
 
     def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Read a bounded cursor page from the authoritative clock-free mission trace."""
@@ -1594,6 +1618,27 @@ class ApiClient:
         """Return typed MCP catalog-drift comparison evidence."""
 
         return mission_evaluator_replay_comparison_report(self.mission_evaluator_replay_compare(request))
+
+    def mission_evidence_bundle_verify_tool(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify one portable mission evidence bundle through MCP."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleVerifyRequest)
+            else MissionEvidenceBundleVerifyRequest(**dict(request))
+        )
+        return self.call_tool("mission_evidence_bundle_verify", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_verification_tool_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed MCP portable mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(self.mission_evidence_bundle_verify_tool(request))
 
     def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         if not isinstance(include_groups, bool):
@@ -3926,6 +3971,22 @@ class AsyncApiClient:
 
         return mission_evidence_bundle_report(await self.mission_evidence_bundle(request))
 
+    async def mission_evidence_bundle_verify(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async durable REST mission evidence bundle verification."""
+
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_verify, request)
+
+    async def mission_evidence_bundle_verification_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed async durable mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(await self.mission_evidence_bundle_verify(request))
+
     async def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Async bounded cursor page over the authoritative mission trace."""
 
@@ -4926,6 +4987,29 @@ class AsyncApiClient:
 
         return mission_evaluator_replay_comparison_report(
             await self.mission_evaluator_replay_compare(request)
+        )
+
+    async def mission_evidence_bundle_verify_tool(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async MCP mission evidence bundle verification."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleVerifyRequest)
+            else MissionEvidenceBundleVerifyRequest(**dict(request))
+        )
+        return await self.call_tool("mission_evidence_bundle_verify", normalized.to_mcp_arguments())
+
+    async def mission_evidence_bundle_verification_tool_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed async MCP mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(
+            await self.mission_evidence_bundle_verify_tool(request)
         )
 
     async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:

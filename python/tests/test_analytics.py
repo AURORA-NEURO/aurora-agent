@@ -39,6 +39,8 @@ from prism_sdk import (
     MissionEvaluatorReplayQueryRequest,
     MissionEvidenceBundleReport,
     MissionEvidenceBundleRequest,
+    MissionEvidenceBundleVerificationReport,
+    MissionEvidenceBundleVerifyRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -87,6 +89,7 @@ from prism_sdk import (
     mission_evaluator_replay_comparison_report,
     mission_evaluator_replay_query_report,
     mission_evidence_bundle_report,
+    mission_evidence_bundle_verification_report,
     adapter_plan_report,
     Client,
     MetricObservation,
@@ -312,6 +315,16 @@ def mission_evaluator_review_payload() -> dict:
         "review_id": "r" * 64,
         "catalog_digest": "e" * 64,
         "discovery_digest": "d" * 64,
+        "catalogue_snapshot": {
+            "schema": "bioprism-devplat-mission-evaluator-catalogue-snapshot/0.1",
+            "catalog_digest": "e" * 64,
+            "snapshot_digest": "s" * 64,
+            "row_count": 29,
+            "group_count": 29,
+            "rows": [],
+            "retention": {"mode": "full", "rows_retained": True, "bytes": 1024},
+            "execution": "not_started",
+        },
         "selection_count": 1,
         "claim_count": 1,
         "bindings": [{
@@ -520,6 +533,30 @@ def mission_evidence_bundle_payload(*, summary_only: bool = True) -> dict:
             "claims": "/v1/missions/mission-python/claims",
             "replay": "/v1/missions/mission-python/evaluator-replay",
         },
+    }
+
+
+def mission_evidence_bundle_verification_payload(*, valid: bool = True) -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-mission-evidence-bundle-verify/0.1",
+        "workflow": "mission_evidence_bundle_verify",
+        "valid": valid,
+        "verification_status": "verified" if valid else "failed",
+        "bundle_digest": "b" * 64,
+        "recomputed_bundle_digest": "b" * 64 if valid else "c" * 64,
+        "result_digest": None,
+        "recomputed_result_digest": None,
+        "checks": {
+            "schema": True,
+            "bundle_digest": valid,
+            "retention": True,
+            "result_digest": None,
+            "trace": True,
+            "export": True,
+        },
+        "failures": [] if valid else ["bundle_digest_mismatch"],
+        "execution": "not_started",
     }
 
 
@@ -1575,6 +1612,7 @@ class AnalyticsModelTests(unittest.TestCase):
         report = MissionEvaluatorReviewReport.from_wire(mission_evaluator_review_payload())
         self.assertIsInstance(report.bindings[0], MissionEvaluatorBindingReport)
         self.assertTrue(report.ready)
+        self.assertTrue(report.snapshot_retained)
         self.assertEqual(report.proposed_bindings[0]["step_id"], "assay")
         self.assertEqual(report.binding_posture, "ready_for_mission_claim_bindings")
 
@@ -1671,6 +1709,30 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             MissionEvidenceBundleRequest("mission-python", include_result=1)  # type: ignore[arg-type]
 
+    def test_mission_evidence_bundle_verification_request_and_report_are_fail_closed(self) -> None:
+        request = MissionEvidenceBundleVerifyRequest({"workflow": "mission_evidence_bundle_export", "bundle_digest": "b" * 64})
+        self.assertEqual(request.to_mcp_arguments(), {"bundle": dict(request.bundle)})
+        self.assertEqual(request.to_http_body(), {"bundle": dict(request.bundle)})
+        report = MissionEvidenceBundleVerificationReport.from_wire(
+            mission_evidence_bundle_verification_payload()
+        )
+        self.assertTrue(report.valid)
+        self.assertTrue(report.digest_matches)
+        self.assertEqual(report.failures, ())
+        self.assertTrue(
+            mission_evidence_bundle_verification_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evidence_bundle_verification_payload()}}}
+            ).valid
+        )
+        failed = MissionEvidenceBundleVerificationReport.from_wire(
+            mission_evidence_bundle_verification_payload(valid=False)
+        )
+        self.assertFalse(failed.valid)
+        self.assertFalse(failed.digest_matches)
+        self.assertEqual(failed.failures, ("bundle_digest_mismatch",))
+        with self.assertRaises(ArgumentError):
+            MissionEvidenceBundleVerifyRequest([])  # type: ignore[arg-type]
+
     def test_sync_http_mission_evaluator_replay_query_uses_bounded_route(self) -> None:
         payload = mission_evaluator_replay_query_payload(summary_only=True)
         with patch.object(ApiClient, "request", return_value=payload) as request:
@@ -1733,6 +1795,31 @@ class AnalyticsModelTests(unittest.TestCase):
 
         report = asyncio.run(exercise())
         self.assertTrue(report.summary_only)
+
+    def test_sync_http_mission_evidence_bundle_verification_uses_portable_route(self) -> None:
+        payload = mission_evidence_bundle_verification_payload()
+        request_body = MissionEvidenceBundleVerifyRequest({"bundle_digest": "b" * 64})
+        with patch.object(ApiClient, "request", return_value=payload) as request:
+            report = ApiClient("http://127.0.0.1:8787").mission_evidence_bundle_verification_report(request_body)
+        self.assertTrue(report.valid)
+        request.assert_called_once_with("POST", "/v1/evidence-bundles/verify", request_body.to_http_body())
+
+    def test_sync_http_mcp_bridge_exposes_distinct_evidence_verifier_method(self) -> None:
+        request_body = MissionEvidenceBundleVerifyRequest({"bundle_digest": "b" * 64})
+        with patch.object(ApiClient, "call_tool", return_value=mission_evidence_bundle_verification_payload()) as tool:
+            report = ApiClient("http://127.0.0.1:8787").mission_evidence_bundle_verification_tool_report(request_body)
+        self.assertTrue(report.valid)
+        tool.assert_called_once_with("mission_evidence_bundle_verify", request_body.to_mcp_arguments())
+
+    def test_async_http_mission_evidence_bundle_verification_delegates_to_sync_transport(self) -> None:
+        async def exercise() -> MissionEvidenceBundleVerificationReport:
+            request_body = MissionEvidenceBundleVerifyRequest({"bundle_digest": "b" * 64})
+            with patch.object(ApiClient, "request", return_value=mission_evidence_bundle_verification_payload()) as request:
+                report = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).mission_evidence_bundle_verification_report(request_body)
+                request.assert_called_once_with("POST", "/v1/evidence-bundles/verify", request_body.to_http_body())
+                return report
+
+        self.assertTrue(asyncio.run(exercise()).valid)
 
     def test_mission_evaluator_review_request_rejects_duplicate_ids(self) -> None:
         with self.assertRaises(ArgumentError):
@@ -2352,6 +2439,18 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(report.status, "unchanged")
         compare.assert_called_once()
 
+    def test_sync_workspace_typed_mission_evidence_bundle_verification(self) -> None:
+        with patch.object(
+            Workspace,
+            "mission_evidence_bundle_verify",
+            return_value=mission_evidence_bundle_verification_payload(),
+        ) as verify:
+            report = Workspace(None).mission_evidence_bundle_verification_report(  # type: ignore[arg-type]
+                MissionEvidenceBundleVerifyRequest({"bundle_digest": "b" * 64})
+            )
+        self.assertTrue(report.valid)
+        verify.assert_called_once()
+
     def test_sync_workspace_exposes_capability_audit(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).capability_audit(include_groups=False)
@@ -2653,6 +2752,19 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(report.status, "unchanged")
         compare.assert_awaited_once()
+
+    async def test_async_workspace_typed_mission_evidence_bundle_verification(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "mission_evidence_bundle_verify",
+            new_callable=AsyncMock,
+            return_value=mission_evidence_bundle_verification_payload(),
+        ) as verify:
+            report = await AsyncWorkspace(None).mission_evidence_bundle_verification_report(  # type: ignore[arg-type]
+                {"bundle": {"bundle_digest": "b" * 64}}
+            )
+        self.assertTrue(report.valid)
+        verify.assert_awaited_once()
 
     async def test_async_workspace_exposes_capability_audit(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:
