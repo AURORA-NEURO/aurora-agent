@@ -1236,10 +1236,16 @@ fn domain_workflow_catalogue_covers_every_capability_group() {
     assert_eq!(report["coverage"]["group_count"], json!(29));
     assert_eq!(report["coverage"]["all_groups_have_workflow"], json!(true));
     assert_eq!(report["coverage"]["all_declared_tools_advertised"], json!(true));
+    assert_eq!(
+        report["coverage"]["all_workflows_have_domain_contract"],
+        json!(true)
+    );
     assert_eq!(report["execution"], json!("not_started"));
     assert!(report["workflows"].as_array().unwrap().iter().all(|workflow| {
         workflow["workflow_id"].is_string()
             && workflow["workflow_digest"].is_string()
+            && workflow["domain_contract"].is_object()
+            && workflow["tool_contracts"].is_array()
             && workflow["recommended_stages"].is_array()
     }));
 }
@@ -1260,6 +1266,9 @@ fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
     assert_eq!(report["workflow"], json!("domain_workflow_instantiate"));
     assert_eq!(report["mission"]["steps"][0]["tool"], json!("workspace_capabilities"));
     assert_eq!(report["selection"]["all_selected_tools_declared"], json!(true));
+    assert_eq!(report["selection"]["all_selected_tools_available"], json!(true));
+    assert_eq!(report["evidence_plan"]["steps"][0]["step_id"], json!("catalog"));
+    assert_eq!(report["domain_contract"]["posture"], json!("advisory_review_gated"));
     assert_eq!(report["execution"], json!("not_started"));
     assert_eq!(report["preflight_report"]["workflow"], json!("agent_mission"));
 

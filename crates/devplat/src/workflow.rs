@@ -24,6 +24,8 @@ pub const DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-catalogue/0.1";
 pub const DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-instantiate/0.1";
+pub const DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION: &str =
+    "bioprism-devplat-domain-workflow-contract/0.1";
 pub const MAX_DOMAIN_WORKFLOW_GROUPS: usize = 128;
 pub const MAX_DOMAIN_WORKFLOW_TOOLS: usize = 256;
 pub const MAX_DOMAIN_WORKFLOW_STEPS: usize = 128;
@@ -59,6 +61,14 @@ pub enum DomainWorkflowError {
         tool: String,
         workflow_id: String,
     },
+    #[error("step {step} selects unavailable tool {tool:?} from workflow {workflow_id:?}")]
+    ToolUnavailable {
+        step: usize,
+        tool: String,
+        workflow_id: String,
+    },
+    #[error("policy allow-list selects tool {tool:?} outside workflow {workflow_id:?}")]
+    PolicyToolOutsideWorkflow { tool: String, workflow_id: String },
     #[error("cannot canonicalise workflow document: {0}")]
     Canonicalisation(String),
     #[error("workflow document is {actual} bytes; maximum is {maximum}")]
@@ -205,7 +215,7 @@ fn title_for(id: &str) -> String {
         .join(" ")
 }
 
-fn tool_definition_names(value: &Value) -> Result<BTreeSet<String>, DomainWorkflowError> {
+fn tool_definition_records(value: &Value) -> Result<BTreeMap<String, Value>, DomainWorkflowError> {
     let definitions = value
         .as_array()
         .ok_or(DomainWorkflowError::ToolDefinitionsNotArray)?;
@@ -215,7 +225,7 @@ fn tool_definition_names(value: &Value) -> Result<BTreeSet<String>, DomainWorkfl
             definitions.len()
         )));
     }
-    let mut names = BTreeSet::new();
+    let mut records = BTreeMap::new();
     for definition in definitions {
         let object = definition.as_object().ok_or_else(|| {
             DomainWorkflowError::InvalidToolDefinition("each definition must be an object".into())
@@ -229,38 +239,98 @@ fn tool_definition_names(value: &Value) -> Result<BTreeSet<String>, DomainWorkfl
                     "each definition must have a non-empty name".into(),
                 )
             })?;
-        if !names.insert(name.to_string()) {
+        if records
+            .insert(name.to_string(), definition.clone())
+            .is_some()
+        {
             return Err(DomainWorkflowError::InvalidToolDefinition(format!(
                 "duplicate tool name {name:?}"
             )));
         }
     }
-    Ok(names)
+    Ok(records)
+}
+
+fn tool_contracts(
+    advertised_tools: &[String],
+    available: &BTreeSet<String>,
+    definitions: &BTreeMap<String, Value>,
+) -> Result<Vec<Value>, DomainWorkflowError> {
+    advertised_tools
+        .iter()
+        .map(|tool| {
+            let definition = definitions.get(tool);
+            let is_available = available.contains(tool);
+            let schema = definition.and_then(|definition| definition.get("inputSchema"));
+            let schema_state = if !is_available {
+                "unavailable"
+            } else if schema.is_some_and(Value::is_object) {
+                "present"
+            } else {
+                "missing"
+            };
+            let schema_digest = schema
+                .filter(|schema| schema.is_object())
+                .map(digest)
+                .transpose()?;
+            Ok(json!({
+                "name": tool,
+                "role": tool_role(tool),
+                "declared": true,
+                "available": is_available,
+                "schema_state": schema_state,
+                "schema_digest": schema_digest,
+                "argument_validation": "authoritative_mcp_preflight_required",
+                "evidence": {
+                    "capture": ["arguments_digest", "result_status", "result_digest"],
+                    "retain_refusal_or_omission": true,
+                    "claim_binding": "caller_owned_claims_must_bind_to_explicit_step_evidence",
+                },
+            }))
+        })
+        .collect()
 }
 
 fn group_workflow(
+    group_index: usize,
     group: &Map<String, Value>,
     advertised_tools: &[String],
     available: &BTreeSet<String>,
+    definitions: &BTreeMap<String, Value>,
     catalog_digest: &str,
 ) -> Result<Value, DomainWorkflowError> {
-    let id = visible_text(group, "id")
-        .map_err(|reason| DomainWorkflowError::InvalidGroup { group: 0, reason })?;
-    let domains = string_array(group, "domains", true, MAX_DOMAIN_WORKFLOW_GROUPS)
-        .map_err(|reason| DomainWorkflowError::InvalidGroup { group: 0, reason })?;
-    let crates = string_array(group, "crates", true, MAX_DOMAIN_WORKFLOW_GROUPS)
-        .map_err(|reason| DomainWorkflowError::InvalidGroup { group: 0, reason })?;
+    let id = visible_text(group, "id").map_err(|reason| DomainWorkflowError::InvalidGroup {
+        group: group_index,
+        reason,
+    })?;
+    let domains =
+        string_array(group, "domains", true, MAX_DOMAIN_WORKFLOW_GROUPS).map_err(|reason| {
+            DomainWorkflowError::InvalidGroup {
+                group: group_index,
+                reason,
+            }
+        })?;
+    let crates =
+        string_array(group, "crates", true, MAX_DOMAIN_WORKFLOW_GROUPS).map_err(|reason| {
+            DomainWorkflowError::InvalidGroup {
+                group: group_index,
+                reason,
+            }
+        })?;
     let cli_entrypoints = string_array(group, "cli_entrypoints", true, MAX_DOMAIN_WORKFLOW_GROUPS)
-        .map_err(|reason| DomainWorkflowError::InvalidGroup { group: 0, reason })?;
+        .map_err(|reason| DomainWorkflowError::InvalidGroup {
+            group: group_index,
+            reason,
+        })?;
     if advertised_tools.is_empty() {
         return Err(DomainWorkflowError::InvalidGroup {
-            group: 0,
+            group: group_index,
             reason: "mcp_tools must contain at least one tool".into(),
         });
     }
     if advertised_tools.len() > MAX_DOMAIN_WORKFLOW_TOOLS {
         return Err(DomainWorkflowError::InvalidGroup {
-            group: 0,
+            group: group_index,
             reason: format!("mcp_tools contains more than {MAX_DOMAIN_WORKFLOW_TOOLS} tools"),
         });
     }
@@ -294,6 +364,49 @@ fn group_workflow(
             })
         })
         .collect::<Vec<_>>();
+    let tool_contracts = tool_contracts(advertised_tools, available, definitions)?;
+    let all_tools_available = tool_contracts
+        .iter()
+        .all(|contract| contract["available"].as_bool().unwrap_or(false));
+    let all_schemas_present = tool_contracts
+        .iter()
+        .all(|contract| contract["schema_state"] == "present");
+    let domain_contract = json!({
+        "schema": DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION,
+        "posture": "advisory_review_gated",
+        "scope": {
+            "capability_group": id,
+            "domains": domains,
+            "crates": crates,
+            "cli_entrypoints": cli_entrypoints,
+            "declared_tools": advertised_tools,
+        },
+        "readiness": {
+            "template": "available",
+            "tool_inventory": if all_tools_available { "complete" } else { "incomplete" },
+            "argument_schemas": if all_schemas_present { "present" } else { "requires_preflight" },
+            "dispatch": "blocked_until_explicit_policy_and_authoritative_preflight",
+        },
+        "pre_dispatch_gates": [
+            {"id": "scope_review", "required": true, "rule": "every selected step remains inside this capability group"},
+            {"id": "tool_availability", "required": true, "rule": "every selected tool is present in authoritative tools/list"},
+            {"id": "argument_schema_preflight", "required": true, "rule": "each caller-owned argument object passes the authoritative input schema"},
+            {"id": "execution_policy", "required": true, "rule": "execution is explicit and every executable tool is allow-listed"},
+        ],
+        "evidence_contract": {
+            "per_step": ["step_id", "tool", "arguments_digest", "result_status", "result_digest"],
+            "retain_refusal_or_omission": true,
+            "claim_binding": "claims must point to explicit completed-step evidence; refusal and omission remain non-support",
+            "unresolved_work": "must remain visible until caller review resolves or accepts it",
+        },
+        "completion_contract": {
+            "required_steps": "succeeded",
+            "optional_steps": "succeeded_or_explicit_refusal_or_omission",
+            "review": "required_before_domain_or_release_claims",
+            "truth_posture": "no scientific, clinical, operational, or release conclusion is inferred",
+        },
+    });
+    let domain_contract_digest = digest(&domain_contract)?;
     let mut workflow = json!({
         "schema": DOMAIN_WORKFLOW_SCHEMA_VERSION,
         "workflow_id": id,
@@ -309,6 +422,9 @@ fn group_workflow(
             "available": available_tools,
             "missing": missing_tools,
         },
+        "tool_contracts": tool_contracts,
+        "domain_contract": domain_contract,
+        "domain_contract_digest": domain_contract_digest,
         "recommended_stages": recommended_stages,
         "instantiation": {
             "requires": ["mission_id", "goal", "steps"],
@@ -347,7 +463,8 @@ pub fn build_domain_workflow_catalogue(
             maximum: MAX_DOMAIN_WORKFLOW_GROUPS,
         });
     }
-    let available = tool_definition_names(tool_definitions)?;
+    let definitions = tool_definition_records(tool_definitions)?;
+    let available = definitions.keys().cloned().collect::<BTreeSet<_>>();
     let catalog_digest = digest(catalogue)?;
     let mut workflows = Vec::with_capacity(groups.len());
     let mut declared_tools = BTreeSet::new();
@@ -371,7 +488,14 @@ pub fn build_domain_workflow_catalogue(
             })?;
         declared_tools.extend(advertised.iter().cloned());
         domains.extend(group_domains);
-        let mut workflow = group_workflow(group, &advertised, &available, &catalog_digest)?;
+        let mut workflow = group_workflow(
+            index,
+            group,
+            &advertised,
+            &available,
+            &definitions,
+            &catalog_digest,
+        )?;
         workflow["group_index"] = json!(index);
         workflows.push(workflow);
     }
@@ -408,6 +532,7 @@ pub fn build_domain_workflow_catalogue(
             "groups_with_missing_tools": groups_with_missing_tools,
             "all_groups_have_workflow": true,
             "all_declared_tools_advertised": declared_tools.iter().all(|tool| available.contains(tool)),
+            "all_workflows_have_domain_contract": workflows.iter().all(|workflow| workflow["domain_contract"].is_object()),
         },
         "execution": "not_started",
         "guarantees": [
@@ -438,7 +563,8 @@ fn normalized_step(
     index: usize,
     workflow_id: &str,
     group_domains: &[String],
-    group_tools: &BTreeSet<String>,
+    declared_tools: &BTreeSet<String>,
+    available_tools: &BTreeSet<String>,
 ) -> Result<Value, DomainWorkflowError> {
     let object = value
         .as_object()
@@ -454,8 +580,15 @@ fn normalized_step(
         step: index,
         reason,
     })?;
-    if !group_tools.contains(tool) {
+    if !declared_tools.contains(tool) {
         return Err(DomainWorkflowError::ToolOutsideWorkflow {
+            step: index,
+            tool: tool.to_string(),
+            workflow_id: workflow_id.to_string(),
+        });
+    }
+    if !available_tools.contains(tool) {
+        return Err(DomainWorkflowError::ToolUnavailable {
             step: index,
             tool: tool.to_string(),
             workflow_id: workflow_id.to_string(),
@@ -558,10 +691,19 @@ pub fn instantiate_domain_workflow(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let group_tools = workflow["tools"]["declared"]
+    let declared_tools = workflow["tools"]["declared"]
         .as_array()
         .ok_or_else(|| {
             DomainWorkflowError::InvalidRequest("workflow has no declared tools".into())
+        })?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    let available_tools = workflow["tools"]["available"]
+        .as_array()
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest("workflow has no available tools".into())
         })?
         .iter()
         .filter_map(Value::as_str)
@@ -580,7 +722,14 @@ pub fn instantiate_domain_workflow(
     let mut step_ids = BTreeSet::new();
     let mut selected_tools = BTreeSet::new();
     for (index, raw_step) in raw_steps.iter().enumerate() {
-        let step = normalized_step(raw_step, index, &workflow_id, &group_domains, &group_tools)?;
+        let step = normalized_step(
+            raw_step,
+            index,
+            &workflow_id,
+            &group_domains,
+            &declared_tools,
+            &available_tools,
+        )?;
         let id = step["id"].as_str().unwrap_or_default().to_string();
         if !step_ids.insert(id.clone()) {
             return Err(DomainWorkflowError::InvalidStep {
@@ -606,6 +755,22 @@ pub fn instantiate_domain_workflow(
         ));
     }
     let execute = policy["execute"].as_bool().unwrap_or(false);
+    if let Some(allowed_tools) = policy["allowed_tools"].as_array() {
+        for allowed_tool in allowed_tools.iter().filter_map(Value::as_str) {
+            if !declared_tools.contains(allowed_tool) {
+                return Err(DomainWorkflowError::PolicyToolOutsideWorkflow {
+                    tool: allowed_tool.to_string(),
+                    workflow_id: workflow_id.clone(),
+                });
+            }
+            if !available_tools.contains(allowed_tool) {
+                return Err(DomainWorkflowError::PolicyToolOutsideWorkflow {
+                    tool: allowed_tool.to_string(),
+                    workflow_id: workflow_id.clone(),
+                });
+            }
+        }
+    }
     let mut allow_list_derived = false;
     if execute && policy["allowed_tools"].as_array().is_none_or(Vec::is_empty) {
         policy["allowed_tools"] = json!(selected_tools.iter().cloned().collect::<Vec<_>>());
@@ -626,6 +791,28 @@ pub fn instantiate_domain_workflow(
         DomainWorkflowError::InvalidRequest(format!("mission validation failed: {error}"))
     })?;
     let selected_tools = selected_tools.into_iter().collect::<Vec<_>>();
+    let evidence_plan = steps
+        .iter()
+        .map(|step| {
+            let tool = step["tool"].as_str().unwrap_or_default();
+            let tool_contract = workflow["tool_contracts"]
+                .as_array()
+                .and_then(|contracts| contracts.iter().find(|contract| contract["name"] == tool))
+                .cloned()
+                .unwrap_or_else(|| json!({"name": tool, "schema_state": "unknown"}));
+            json!({
+                "step_id": step["id"],
+                "tool": tool,
+                "required": step["required"],
+                "tool_contract": tool_contract,
+                "preconditions": ["scope_review", "tool_availability", "argument_schema_preflight", "execution_policy"],
+                "capture": ["arguments_digest", "result_status", "result_digest"],
+                "on_refusal": "retain structured refusal and mark unresolved",
+                "on_omission": "retain explicit omission reason and mark unresolved",
+                "claim_binding": "caller-owned claims must reference explicit step evidence",
+            })
+        })
+        .collect::<Vec<_>>();
     let output = json!({
         "ok": true,
         "schema": DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION,
@@ -638,7 +825,15 @@ pub fn instantiate_domain_workflow(
             "step_count": raw_steps.len(),
             "selected_tools": selected_tools,
             "all_selected_tools_declared": true,
+            "all_selected_tools_available": true,
             "allow_list_derived_from_selected_steps": allow_list_derived,
+        },
+        "domain_contract": workflow["domain_contract"],
+        "domain_contract_digest": workflow["domain_contract_digest"],
+        "evidence_plan": {
+            "schema": DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION,
+            "steps": evidence_plan,
+            "completion": workflow["domain_contract"]["completion_contract"],
         },
         "preflight": {
             "required": true,
@@ -648,6 +843,8 @@ pub fn instantiate_domain_workflow(
         "execution": "not_started",
         "guarantees": [
             "selected tools are scoped to the chosen capability group",
+            "selected tools are present in the authoritative tool inventory before instantiation",
+            "each selected step receives an explicit evidence and review contract",
             "mission invariants are validated before a caller can dispatch",
             "workflow instantiation never executes a tool",
         ],
@@ -700,6 +897,19 @@ mod tests {
             .unwrap()
             .iter()
             .all(|workflow| workflow["workflow_digest"].is_string()));
+        assert!(report["workflows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|workflow| workflow["domain_contract"].is_object()));
+        assert_eq!(
+            report["workflows"][0]["tool_contracts"][1]["schema_state"],
+            "unavailable"
+        );
+        assert_eq!(
+            report["coverage"]["all_workflows_have_domain_contract"],
+            true
+        );
     }
 
     #[test]
@@ -723,6 +933,12 @@ mod tests {
             "onco_boundary_check"
         );
         assert_eq!(report["selection"]["all_selected_tools_declared"], true);
+        assert_eq!(report["selection"]["all_selected_tools_available"], true);
+        assert_eq!(report["evidence_plan"]["steps"][0]["step_id"], "boundary");
+        assert_eq!(
+            report["evidence_plan"]["steps"][0]["tool_contract"]["schema_state"],
+            "missing"
+        );
     }
 
     #[test]
@@ -737,6 +953,37 @@ mod tests {
         assert!(matches!(
             instantiate_domain_workflow(&catalogue, &tools, &request),
             Err(DomainWorkflowError::ToolOutsideWorkflow { .. })
+        ));
+    }
+
+    #[test]
+    fn instantiation_refuses_a_declared_but_unavailable_tool() {
+        let (catalogue, tools) = inputs();
+        let request = json!({
+            "workflow_id":"genomics_workflows",
+            "mission_id":"m-2",
+            "goal":"compile the genomic query",
+            "steps":[{"id":"compile","tool":"missing_tool"}]
+        });
+        assert!(matches!(
+            instantiate_domain_workflow(&catalogue, &tools, &request),
+            Err(DomainWorkflowError::ToolUnavailable { .. })
+        ));
+    }
+
+    #[test]
+    fn instantiation_refuses_policy_tools_outside_the_selected_scope() {
+        let (catalogue, tools) = inputs();
+        let request = json!({
+            "workflow_id":"oncology_workflows",
+            "mission_id":"m-3",
+            "goal":"review",
+            "steps":[{"id":"boundary","tool":"onco_boundary_check"}],
+            "policy":{"execute":true,"allowed_tools":["bioql_compile"]}
+        });
+        assert!(matches!(
+            instantiate_domain_workflow(&catalogue, &tools, &request),
+            Err(DomainWorkflowError::PolicyToolOutsideWorkflow { .. })
         ));
     }
 }

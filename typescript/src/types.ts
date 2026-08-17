@@ -4634,6 +4634,43 @@ export interface DomainWorkflowInstantiateArgs extends JsonObject {
   evaluator_review?: JsonObject;
 }
 
+export interface DomainWorkflowToolContract extends JsonObject {
+  name: string;
+  role: string;
+  declared: boolean;
+  available: boolean;
+  schema_state: "present" | "missing" | "unavailable";
+  schema_digest?: string | null;
+  argument_validation: "authoritative_mcp_preflight_required";
+  evidence: JsonObject;
+}
+
+export interface DomainWorkflowContract extends JsonObject {
+  schema: string;
+  posture: "advisory_review_gated";
+  scope: JsonObject;
+  readiness: JsonObject;
+  pre_dispatch_gates: JsonValue[];
+  evidence_contract: JsonObject;
+  completion_contract: JsonObject;
+}
+
+export interface DomainWorkflowTemplate extends JsonObject {
+  workflow_id: string;
+  workflow_digest: string;
+  domain_contract: DomainWorkflowContract;
+  domain_contract_digest: string;
+  tool_contracts: DomainWorkflowToolContract[];
+  tools: JsonObject;
+  recommended_stages: JsonValue[];
+}
+
+export interface DomainWorkflowEvidencePlan extends JsonObject {
+  schema: string;
+  steps: JsonValue[];
+  completion: JsonObject;
+}
+
 export interface DomainWorkflowCatalogueResult extends JsonObject {
   ok: boolean;
   schema: string;
@@ -4641,7 +4678,7 @@ export interface DomainWorkflowCatalogueResult extends JsonObject {
   catalog_digest: string;
   workflow_catalog_digest: string;
   workflow_count: number;
-  workflows: JsonObject[];
+  workflows: DomainWorkflowTemplate[];
   coverage: JsonObject;
   execution: "not_started";
   guarantees: string[];
@@ -4657,6 +4694,9 @@ export interface DomainWorkflowInstantiateResult extends JsonObject {
   catalog_digest: string;
   mission: JsonObject;
   selection: JsonObject;
+  domain_contract: DomainWorkflowContract;
+  domain_contract_digest: string;
+  evidence_plan: DomainWorkflowEvidencePlan;
   preflight: JsonObject;
   preflight_report?: JsonObject;
   execution: "not_started";

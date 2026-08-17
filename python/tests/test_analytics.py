@@ -1653,11 +1653,16 @@ class AnalyticsModelTests(unittest.TestCase):
             "catalog_digest": "c" * 64,
             "mission": {"mission_id": "workflow-python"},
             "selection": {"selected_tools": ["workspace_capabilities"]},
+            "domain_contract": {"posture": "advisory_review_gated"},
+            "domain_contract_digest": "k" * 64,
+            "evidence_plan": {"steps": [{"step_id": "catalog"}]},
             "preflight": {"required": True},
             "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
             "execution": "not_started",
         })
         self.assertEqual(instantiation.selected_tools, ("workspace_capabilities",))
+        self.assertEqual(instantiation.domain_contract["posture"], "advisory_review_gated")
+        self.assertEqual(instantiation.evidence_plan["steps"][0]["step_id"], "catalog")
         self.assertEqual(instantiation.preflight_report["dispatch"], "not_started")
 
     def test_capability_discover_report_preserves_cross_domain_context(self) -> None:

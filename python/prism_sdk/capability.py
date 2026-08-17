@@ -474,7 +474,7 @@ class DomainWorkflowCatalogueReport:
 
 @dataclass(frozen=True)
 class DomainWorkflowInstantiationReport:
-    """Typed group-scoped mission plus authoritative preflight projection."""
+    """Typed group-scoped mission, domain contract, evidence plan, and preflight projection."""
 
     raw: dict[str, Any]
     workflow_id: str
@@ -482,6 +482,9 @@ class DomainWorkflowInstantiationReport:
     catalog_digest: str
     mission: Mapping[str, Any]
     selection: Mapping[str, Any]
+    domain_contract: Mapping[str, Any]
+    domain_contract_digest: str
+    evidence_plan: Mapping[str, Any]
     preflight: Mapping[str, Any]
     preflight_report: Mapping[str, Any] | None
     execution: str
@@ -499,6 +502,12 @@ class DomainWorkflowInstantiationReport:
             catalog_digest=_route_text("domain workflow catalog digest", raw.get("catalog_digest")),
             mission=_route_mapping("domain workflow mission", raw.get("mission")),
             selection=_route_mapping("domain workflow selection", raw.get("selection")),
+            domain_contract=_route_mapping("domain workflow domain contract", raw.get("domain_contract", {})),
+            domain_contract_digest=_route_text(
+                "domain workflow domain contract digest",
+                raw.get("domain_contract_digest", raw.get("workflow_digest")),
+            ),
+            evidence_plan=_route_mapping("domain workflow evidence plan", raw.get("evidence_plan", {})),
             preflight=_route_mapping("domain workflow preflight", raw.get("preflight")),
             preflight_report=preflight_report,
             execution=_route_text("domain workflow execution", raw.get("execution")),

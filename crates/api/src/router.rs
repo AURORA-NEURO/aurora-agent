@@ -8314,6 +8314,12 @@ mod tests {
         assert_eq!(catalogue["workflow"], "domain_workflow_catalogue");
         assert_eq!(catalogue["workflow_count"], 29);
         assert_eq!(catalogue["coverage"]["all_groups_have_workflow"], true);
+        assert_eq!(catalogue["coverage"]["all_workflows_have_domain_contract"], true);
+        assert!(catalogue["workflows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|workflow| workflow["domain_contract"].is_object()));
 
         let instantiated = router.handle(request(
             "POST",
@@ -8330,6 +8336,8 @@ mod tests {
         assert_eq!(instantiated["workflow"], "domain_workflow_instantiate");
         assert_eq!(instantiated["preflight_report"]["workflow"], "agent_mission");
         assert_eq!(instantiated["execution"], "not_started");
+        assert_eq!(instantiated["selection"]["all_selected_tools_available"], true);
+        assert_eq!(instantiated["evidence_plan"]["steps"][0]["step_id"], "catalog");
 
         let refused = router.handle(request(
             "POST",

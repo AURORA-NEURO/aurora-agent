@@ -83,19 +83,23 @@ event, subscription, and delivery state remains independently bounded and synchr
 `GET /v1/domain-workflows` is the transport-neutral bridge between capability discovery and
 `agent_mission`. It returns exactly one workflow template per explicit capability group, currently
 29 groups. Each row carries the group domains, owning crates, CLI entrypoints, declared MCP tools,
-the intersection with authoritative `tools/list`, missing definitions, advisory lexical stages,
-and a `workflow_digest`; the catalogue also carries input and workflow-catalogue digests. Missing
-tool definitions remain visible and never become executable by implication.
+the intersection with authoritative `tools/list`, missing definitions, per-tool schema/evidence
+contracts, advisory lexical stages, and a `workflow_digest`; the catalogue also carries input and
+workflow-catalogue digests. Each row's `domain_contract` makes scope review, tool availability,
+argument-schema preflight, execution policy, per-step evidence retention, refusal/omission handling,
+and completion review explicit. Missing tool definitions remain visible and never become executable
+by implication.
 
 `POST /v1/domain-workflows/instantiate` accepts `workflow_id`, `mission_id`, `goal`, and an explicit
 `steps` array, with optional mission policy, claim requests, and evaluator review. Every selected
-tool must be declared by the selected group. The kernel normalizes defaults, validates the mission
-DAG, and when `policy.execute` is true derives `allowed_tools` from the selected steps only if the
-caller did not provide one. The response includes the instantiated mission, selection ledger,
-workflow and catalogue digests, a kernel preflight contract, and the authoritative MCP
-`preflight_report`. `execution` and `dispatch` remain `not_started`; this route never invokes a
-domain tool. Domain-specific arguments still require the authoritative schema report, and a valid
-plan is not a readiness, truth, clinical, or release claim.
+tool must be declared by the selected group and present in authoritative `tools/list`; policy
+allow-list entries cannot escape the selected group. The kernel normalizes defaults, validates the
+mission DAG, and when `policy.execute` is true derives `allowed_tools` from the selected steps only
+if the caller did not provide one. The response includes the instantiated mission, selection
+ledger, workflow and catalogue digests, the selected `domain_contract`, an `evidence_plan` for
+every step, and the authoritative MCP `preflight_report`. `execution` and `dispatch` remain
+`not_started`; this route never invokes a domain tool. Domain-specific arguments still require the
+authoritative schema report, and a valid plan is not a readiness, truth, clinical, or release claim.
 
 ## Restart-aware mission snapshots
 

@@ -160,11 +160,14 @@ fn workflow_catalogue() -> CliResult<Outcome> {
     )
     .map_err(|error| CliError::internal(error.to_string()))?;
     let human = format!(
-        "domain workflow catalogue\n  workflows: {}\n  groups with missing tools: {}\n  execution: not started\n\nNext: bioprism workflow instantiate --workflow <id> --mission-id <id> --goal <text> --steps steps.json\n",
+        "domain workflow catalogue\n  workflows: {}\n  groups with missing tools: {}\n  domain contracts: {}\n  execution: not started\n\nNext: bioprism workflow instantiate --workflow <id> --mission-id <id> --goal <text> --steps steps.json\n",
         report["workflow_count"].as_u64().unwrap_or_default(),
         report["coverage"]["groups_with_missing_tools"]
             .as_u64()
             .unwrap_or_default(),
+        report["coverage"]["all_workflows_have_domain_contract"]
+            .as_bool()
+            .unwrap_or(false),
     );
     Ok(Outcome::ok(report, human))
 }
@@ -216,7 +219,7 @@ fn workflow_instantiate(
     report["preflight_report"] = preflight;
     report["dry_run"] = json!(dry_run);
     let human = format!(
-        "domain workflow {}\n  mission: {}\n  steps: {}\n  preflight: authoritative no-dispatch\n  execution: not started\n\nNext: POST /v1/missions/preflight or `bioprism workflow instantiate --workflow {} --mission-id <id> --goal <text> --steps <path>`\n",
+        "domain workflow {}\n  mission: {}\n  steps: {}\n  evidence plan: per-step\n  preflight: authoritative no-dispatch\n  execution: not started\n\nNext: POST /v1/missions/preflight or `bioprism workflow instantiate --workflow {} --mission-id <id> --goal <text> --steps <path>`\n",
         workflow,
         mission_id,
         report["selection"]["step_count"].as_u64().unwrap_or_default(),

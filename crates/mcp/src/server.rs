@@ -22175,12 +22175,12 @@ impl Server {
         Ok(result)
     }
 
-    /// Search the complete workspace capability catalogue and optionally attach authoritative MCP
-    /// schemas for the matched tools.
+    /// Build the complete deterministic workflow catalogue, including a per-group domain contract
+    /// for scope, evidence retention, review gates, and completion posture.
     ///
-    /// This is intentionally a discovery operation, not a semantic router or permission grant.
-    /// Scores only reflect explicit label matches; callers still need to inspect the returned
-    /// domain, evidence, policy, and tool contracts before constructing a mission.
+    /// This is intentionally a planning operation, not a semantic router or permission grant.
+    /// Domain contracts are structural handoff evidence; they do not infer domain truth or
+    /// readiness and do not dispatch any tool.
     fn domain_workflow_catalogue(&self, arguments: &Value) -> Result<Value, String> {
         if !arguments
             .as_object()
@@ -22195,10 +22195,12 @@ impl Server {
         .map_err(|error| format!("domain workflow catalogue refused: {error}"))
     }
 
-    /// Instantiate one explicitly selected, group-scoped workflow into a validated mission.
+    /// Instantiate one explicitly selected, group-scoped workflow into a validated mission and
+    /// a step-by-step evidence plan.
     ///
     /// The kernel validates mission invariants here; the server then adds the authoritative MCP
-    /// schema preflight report. Neither operation dispatches a selected tool.
+    /// schema preflight report. Neither operation dispatches a selected tool, and unavailable
+    /// tools or out-of-scope policy entries fail before preflight.
     fn domain_workflow_instantiate(&self, arguments: &Value) -> Result<Value, String> {
         let mut output = instantiate_domain_workflow(
             &workspace_capabilities(),
@@ -22217,6 +22219,12 @@ impl Server {
         Ok(output)
     }
 
+    /// Search the complete workspace capability catalogue and optionally attach authoritative MCP
+    /// schemas for the matched tools.
+    ///
+    /// This is intentionally a discovery operation, not a semantic router or permission grant.
+    /// Scores only reflect explicit label matches; callers still need to inspect the returned
+    /// domain, evidence, policy, and tool contracts before constructing a mission.
     fn capability_discover(&self, arguments: &Value) -> Result<Value, String> {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode capability discovery input: {error}"))?;
@@ -30045,7 +30053,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_workflow_catalogue",
-            "description": "Build the deterministic workflow-template catalogue for every explicit capability group. Each template binds declared domains, crates, CLI entrypoints, available and missing MCP tools, advisory stage hints, and a content digest. This is discovery and planning evidence only: it does not select domain arguments, grant permission, execute tools, or claim scientific, clinical, operational, or release readiness.",
+            "description": "Build the deterministic workflow-template catalogue for every explicit capability group. Each template binds declared domains, crates, CLI entrypoints, available and missing MCP tools, advisory stage hints, a digest-bound domain contract for pre-dispatch review, per-step evidence retention, refusal/omission handling, and completion posture. This is planning evidence only: it does not select domain arguments, grant permission, execute tools, or claim scientific, clinical, operational, or release readiness.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -30054,7 +30062,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_workflow_instantiate",
-            "description": "Instantiate a caller-selected domain workflow template into a bounded, group-scoped mission and immediately run authoritative no-dispatch mission preflight. Every selected tool must be declared by the chosen workflow; executable policies are allow-listed from selected steps when needed. This never dispatches a tool, infers domain semantics, or turns a valid plan into a readiness or truth claim.",
+            "description": "Instantiate a caller-selected domain workflow template into a bounded, group-scoped mission, explicit per-step evidence plan, and authoritative no-dispatch mission preflight. Every selected tool must be both declared and available in tools/list; policy allow-lists cannot escape the selected group. This never dispatches a tool, infers domain semantics, or turns a valid plan into a readiness or truth claim.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
