@@ -26,6 +26,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/operations/gates?after=N&limit=M` | Per-domain catalogue, activity, transport, pooled evaluation, domain-evaluator, safety, and release evidence gates without readiness claims |
 | `POST /v1/operations/handoff` | Build a content-addressed, non-executing domain-to-`capability_route` handoff |
 | `GET /v1/domain-workflows` | Build one deterministic, digest-bound workflow template for every capability group |
+| `POST /v1/domain-workflows/scaffold` | Select available stage tools, build an execution-disabled workflow, and run bounded preflight |
 | `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
 | `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
@@ -96,6 +97,19 @@ workflow-catalogue digests. Each row's `domain_contract` makes scope review, too
 argument-schema preflight, execution policy, per-step evidence retention, refusal/omission handling,
 and completion review explicit. Missing tool definitions remain visible and never become executable
 by implication.
+
+`POST /v1/domain-workflows/scaffold` is the low-friction planning entrypoint for callers that have
+not yet authored a complete step list. It accepts `workflow_id`, `mission_id`, and `goal`, plus
+optional `tools` and an `arguments` object keyed by tool name. With no explicit tools, the kernel
+selects at most one authoritative available tool for each advisory stage; explicit selection remains
+bounded to the selected workflow and recursive `agent_mission` cannot be selected as a scaffold step.
+The response preserves the generated `instantiation`, selected and omitted tools, bounded
+`argument_contract` facts from the live tool catalogue, and the authoritative MCP preflight report.
+Missing required arguments produce `preflight_status: "blocked"` with structured diagnostics rather
+than a false-ready response. Scaffolding is deterministic and execution-disabled: `execution` and
+`dispatch` remain `not_started`, `readiness_claimed` is always `false`, and the route never calls a
+domain tool or grants permission. Callers must review sufficiency, complete arguments against the
+authoritative schema, and use explicit mission preflight before any separate execution path.
 
 `POST /v1/domain-workflows/instantiate` accepts `workflow_id`, `mission_id`, `goal`, and an explicit
 `steps` array, with optional mission policy, claim requests, and evaluator review. Every selected

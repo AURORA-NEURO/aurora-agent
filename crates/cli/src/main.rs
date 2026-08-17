@@ -19,6 +19,7 @@ use bioprism_devplat::{
 };
 use bioprism_devplat::{
     build_domain_workflow_catalogue, instantiate_domain_workflow, reconcile_domain_workflow,
+    scaffold_domain_workflow,
 };
 use bioprism_fiber::compile;
 use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
@@ -31,6 +32,16 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 fn main() {
+    std::thread::Builder::new()
+        .name("bioprism-cli".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(main_inner)
+        .expect("bioprism CLI worker thread should start")
+        .join()
+        .expect("bioprism CLI worker thread should finish");
+}
+
+fn main_inner() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
 
     let parsed = match args::parse(raw) {
@@ -146,6 +157,19 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *include_bundles,
         ),
         Command::WorkflowCatalogue => workflow_catalogue(),
+        Command::WorkflowScaffold {
+            workflow,
+            mission_id,
+            goal,
+            tools,
+            arguments,
+        } => workflow_scaffold(
+            workflow,
+            mission_id,
+            goal,
+            tools.as_deref(),
+            arguments.as_deref(),
+        ),
         Command::WorkflowInstantiate {
             workflow,
             mission_id,
@@ -201,6 +225,69 @@ fn workflow_catalogue() -> CliResult<Outcome> {
         report["coverage"]["all_workflows_have_domain_contract"]
             .as_bool()
             .unwrap_or(false),
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn workflow_scaffold(
+    workflow: &str,
+    mission_id: &str,
+    goal: &str,
+    tools_path: Option<&Path>,
+    arguments_path: Option<&Path>,
+) -> CliResult<Outcome> {
+    let mut request = json!({
+        "workflow_id": workflow,
+        "mission_id": mission_id,
+        "goal": goal,
+    });
+    if let Some(path) = tools_path {
+        let raw = io::read_json(path)?;
+        request["tools"] = raw
+            .get("tools")
+            .cloned()
+            .filter(Value::is_array)
+            .unwrap_or(raw);
+    }
+    if let Some(path) = arguments_path {
+        request["arguments"] = io::read_json(path)?;
+    }
+    let mut report = scaffold_domain_workflow(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+        &request,
+    )
+    .map_err(|error| CliError::invalid(error.to_string()))?;
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    match server.preflight_agent_mission(&report["mission"]) {
+        Ok(preflight) => {
+            report["preflight_status"] = json!("ready");
+            report["preflight_report"] = preflight;
+        }
+        Err(error) => {
+            report["preflight_status"] = json!("blocked");
+            report["preflight_report"] = json!({
+                "ok": false,
+                "workflow": "agent_mission",
+                "preflight": true,
+                "dispatch": "not_started",
+                "schema_valid": false,
+                "error": error,
+                "readiness_claimed": false,
+            });
+        }
+    }
+    report["cli"] = json!({"execution": "not_started", "writes": false});
+    let selected = report["selection"]["selected_tools"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or_default();
+    let status = report["preflight_status"].as_str().unwrap_or("blocked");
+    let human = format!(
+        "domain workflow scaffold {}\n  mission: {}\n  selected tools: {}\n  preflight: {}\n  readiness claimed: false\n  execution: not started\n\nNext: review the scaffold, complete authoritative arguments, then run mission preflight before any explicit execution path.\n",
+        workflow, mission_id, selected, status,
     );
     Ok(Outcome::ok(report, human))
 }

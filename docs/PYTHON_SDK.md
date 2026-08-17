@@ -574,6 +574,13 @@ invent defaults:
   reports preserve catalogue/workflow digests, missing-tool coverage, selected-tool scope,
   the selected domain contract, a step-level evidence plan, authoritative `preflight_report`, and
   `execution: "not_started"`. No client method dispatches a domain tool through this workflow layer.
+- `DomainWorkflowScaffoldRequest` and `DomainWorkflowScaffoldReport` provide the deterministic
+  planning shortcut for all capability groups. `ApiClient`/`AsyncApiClient` expose REST and
+  `*_tool` variants, while `Workspace`/`AsyncWorkspace` expose the MCP bridge. The typed request
+  preserves explicit tool and per-tool argument selection; the report preserves selected/omitted
+  tools, bounded live `argument_contract` facts, structured ready/blocked preflight, and the
+  invariant `readiness_claimed is False`. A scaffold never dispatches, grants permission, or makes
+  a domain conclusion.
 - `DomainWorkflowReconcileRequest` and `DomainWorkflowReconciliationReport` join that instantiation
   to a retained `agent_mission` report or evidence bundle. `ApiClient`, `AsyncApiClient`, and
   `Workspace` expose sync/async REST and MCP helpers; the typed report separates integrity validity,

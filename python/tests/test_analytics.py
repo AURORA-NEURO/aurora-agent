@@ -59,6 +59,8 @@ from prism_sdk import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowScaffoldRequest,
+    DomainWorkflowScaffoldReport,
     DomainWorkflowReconcileRequest,
     DomainWorkflowReconciliationReport,
     DomainWorkflowReconciliationImportReport,
@@ -1733,6 +1735,35 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(instantiation.domain_contract["posture"], "advisory_review_gated")
         self.assertEqual(instantiation.evidence_plan["steps"][0]["step_id"], "catalog")
         self.assertEqual(instantiation.preflight_report["dispatch"], "not_started")
+
+        scaffold_request = DomainWorkflowScaffoldRequest(
+            "documentation_and_knowledge",
+            "scaffold-python",
+            "discover the repository capabilities",
+            tools=("workspace_capabilities",),
+            arguments={"workspace_capabilities": {}},
+        )
+        self.assertEqual(
+            scaffold_request.to_arguments()["arguments"],
+            {"workspace_capabilities": {}},
+        )
+        scaffold = DomainWorkflowScaffoldReport.from_wire({
+            "ok": True,
+            "workflow": "domain_workflow_scaffold",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "d" * 64,
+            "catalog_digest": "c" * 64,
+            "selection": {"selected_tools": ["workspace_capabilities"]},
+            "mission": {"mission_id": "scaffold-python"},
+            "preflight": {"required": True, "dispatch": "not_started"},
+            "preflight_status": "ready",
+            "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
+            "execution": "not_started",
+            "readiness_claimed": False,
+        })
+        self.assertEqual(scaffold.selected_tools, ("workspace_capabilities",))
+        self.assertFalse(scaffold.readiness_claimed)
+        self.assertEqual(scaffold.preflight_status, "ready")
 
         reconcile_request = DomainWorkflowReconcileRequest(
             {"workflow": "domain_workflow_instantiate", "workflow_id": "documentation_and_knowledge"},

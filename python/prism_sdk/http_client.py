@@ -30,6 +30,8 @@ from .capability import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowScaffoldRequest,
+    DomainWorkflowScaffoldReport,
     DomainWorkflowReconcileRequest,
     DomainWorkflowReconciliationReport,
     DomainWorkflowReconciliationImportRequest,
@@ -64,6 +66,7 @@ from .capability import (
     capability_route_review_report,
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
+    domain_workflow_scaffold_report,
     domain_workflow_reconciliation_report,
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
@@ -651,6 +654,25 @@ class ApiClient:
     def domain_workflow_catalogue_report(self) -> DomainWorkflowCatalogueReport:
         return domain_workflow_catalogue_report(self.domain_workflow_catalogue())
 
+    def domain_workflow_scaffold(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Build and preflight an execution-disabled scaffold for one capability group."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowScaffoldRequest)
+            else DomainWorkflowScaffoldRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/domain-workflows/scaffold", normalized.to_arguments())
+
+    def domain_workflow_scaffold_report(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> DomainWorkflowScaffoldReport:
+        return domain_workflow_scaffold_report(self.domain_workflow_scaffold(request))
+
     def domain_workflow_instantiate(
         self,
         request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
@@ -696,6 +718,23 @@ class ApiClient:
 
     def domain_workflow_catalogue_tool_report(self) -> DomainWorkflowCatalogueReport:
         return domain_workflow_catalogue_report(self.domain_workflow_catalogue_tool())
+
+    def domain_workflow_scaffold_tool(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowScaffoldRequest)
+            else DomainWorkflowScaffoldRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_scaffold", normalized.to_arguments())
+
+    def domain_workflow_scaffold_tool_report(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> DomainWorkflowScaffoldReport:
+        return domain_workflow_scaffold_report(self.domain_workflow_scaffold_tool(request))
 
     def domain_workflow_instantiate_tool(
         self,
@@ -4267,6 +4306,18 @@ class AsyncApiClient:
     async def domain_workflow_catalogue_report(self) -> DomainWorkflowCatalogueReport:
         return domain_workflow_catalogue_report(await self.domain_workflow_catalogue())
 
+    async def domain_workflow_scaffold(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_scaffold, request)
+
+    async def domain_workflow_scaffold_report(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> DomainWorkflowScaffoldReport:
+        return domain_workflow_scaffold_report(await self.domain_workflow_scaffold(request))
+
     async def domain_workflow_instantiate(
         self,
         request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
@@ -4296,6 +4347,18 @@ class AsyncApiClient:
 
     async def domain_workflow_catalogue_tool_report(self) -> DomainWorkflowCatalogueReport:
         return domain_workflow_catalogue_report(await self.domain_workflow_catalogue_tool())
+
+    async def domain_workflow_scaffold_tool(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_scaffold_tool, request)
+
+    async def domain_workflow_scaffold_tool_report(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> DomainWorkflowScaffoldReport:
+        return domain_workflow_scaffold_report(await self.domain_workflow_scaffold_tool(request))
 
     async def domain_workflow_instantiate_tool(
         self,

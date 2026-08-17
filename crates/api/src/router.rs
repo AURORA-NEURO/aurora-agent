@@ -770,6 +770,9 @@ impl ApiRouter {
             ("POST", "/v1/domain-workflows/instantiate") => {
                 self.domain_workflow_instantiate(&request, &request_id)
             }
+            ("POST", "/v1/domain-workflows/scaffold") => {
+                self.domain_workflow_scaffold(&request, &request_id)
+            }
             ("POST", "/v1/evidence-bundles/verify") => {
                 self.verify_evidence_bundle(&request, &request_id)
             }
@@ -2547,6 +2550,7 @@ impl ApiRouter {
                     "operations_gate_reviews": "/v1/operations/gate-reviews",
                     "operations_handoff": "/v1/operations/handoff",
                     "domain_workflows": "/v1/domain-workflows",
+                    "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
                     "domain_workflow_reconciliations": "/v1/domain-workflows/reconciliations",
@@ -2612,6 +2616,7 @@ impl ApiRouter {
                     "operations_gate_reviews": true,
                     "operations_handoff": true,
                     "domain_workflow_catalogue": true,
+                    "domain_workflow_scaffold": true,
                     "domain_workflow_instantiate": true,
                     "domain_workflow_reconcile": true,
                     "domain_workflow_reconciliation_registry": true,
@@ -3035,6 +3040,22 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_workflow_instantiate",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_workflow_scaffold(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_scaffold",
             Value::Object(arguments),
         )
     }
@@ -5542,6 +5563,7 @@ impl ApiRouter {
                     "/v1/operations/handoff": { "post": { "responses": { "200": { "description": "content-addressed, non-executing domain routing handoff" } } } },
                     "/v1/evidence-bundles/verify": { "post": { "responses": { "200": { "description": "content-addressed mission evidence bundle verification report" }, "413": { "description": "bundle exceeds verification bound" }, "422": { "description": "bundle is malformed" } } } },
                     "/v1/domain-workflows": { "get": { "responses": { "200": { "description": "deterministic workflow template for every capability group" } } } },
+                    "/v1/domain-workflows/scaffold": { "post": { "responses": { "200": { "description": "deterministic execution-disabled workflow scaffold with authoritative preflight" }, "422": { "description": "workflow selection or scaffold request was refused" } } } },
                     "/v1/domain-workflows/instantiate": { "post": { "responses": { "200": { "description": "group-scoped, authoritative-preflighted, no-dispatch workflow mission" }, "422": { "description": "workflow selection or mission preflight was refused" } } } },
                     "/v1/domain-workflows/reconcile": { "post": { "responses": { "200": { "description": "digest-bound workflow execution and evidence reconciliation" }, "422": { "description": "workflow evidence source or contract was refused" } } } },
                     "/v1/domain-workflows/reconciliations": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "workflow_id", "in": "query" }, { "name": "mission_plan_digest", "in": "query" }, { "name": "completion_status", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_records", "in": "query" }], "responses": { "200": { "description": "bounded deterministic workflow reconciliation registry index" } } }, "post": { "responses": { "201": { "description": "digest-valid workflow reconciliation imported" }, "200": { "description": "idempotent re-import" }, "422": { "description": "reconciliation record failed digest validation" } } } },
@@ -9232,6 +9254,27 @@ mod tests {
             .unwrap()
             .iter()
             .all(|workflow| workflow["domain_contract"].is_object()));
+
+        let scaffolded = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/scaffold",
+            json!({
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "api-scaffold-1",
+                "goal": "prepare a repository discovery starting plan",
+                "tools": ["workspace_capabilities"],
+                "arguments": {"workspace_capabilities": {}}
+            }),
+        ));
+        assert_eq!(scaffolded.status, 200);
+        let scaffolded: Value = serde_json::from_slice(&scaffolded.body).unwrap();
+        assert_eq!(scaffolded["workflow"], "domain_workflow_scaffold");
+        assert_eq!(scaffolded["execution"], "not_started");
+        assert_eq!(scaffolded["readiness_claimed"], false);
+        assert_eq!(scaffolded["mission"]["policy"]["execute"], false);
+        assert_eq!(scaffolded["selection"]["strategy"], "explicit_tools");
+        assert_eq!(scaffolded["preflight_report"]["dispatch"], "not_started");
+        assert_eq!(scaffolded["preflight_status"], "ready");
 
         let instantiated = router.handle(request(
             "POST",

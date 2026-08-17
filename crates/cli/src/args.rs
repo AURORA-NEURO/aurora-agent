@@ -95,6 +95,10 @@ COMMANDS
   workflow catalogue
                     Build one deterministic, digest-bound workflow template for every capability
                     group. No tool is selected or executed.
+  workflow scaffold --workflow <id> --mission-id <id> --goal <text>
+                    [--tools <path>] [--arguments <path>]
+                    Select available tools by advisory stage (or use an explicit JSON string array)
+                    and run no-dispatch preflight. Missing arguments remain explicitly blocked.
   workflow instantiate --workflow <id> --mission-id <id> --goal <text> --steps <path>
                     [--policy <path>] [--dry-run]
                     Instantiate a group-scoped mission and attach authoritative no-dispatch
@@ -164,6 +168,13 @@ pub enum Command {
         include_bundles: bool,
     },
     WorkflowCatalogue,
+    WorkflowScaffold {
+        workflow: String,
+        mission_id: String,
+        goal: String,
+        tools: Option<PathBuf>,
+        arguments: Option<PathBuf>,
+    },
     WorkflowInstantiate {
         workflow: String,
         mission_id: String,
@@ -341,6 +352,19 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             include_bundles: options.take_switch("--include-bundles"),
         },
         ("workflow", "catalogue") => Command::WorkflowCatalogue,
+        ("workflow", "scaffold") => Command::WorkflowScaffold {
+            workflow: options
+                .take_optional("--workflow")
+                .ok_or_else(|| usage("--workflow is required"))?,
+            mission_id: options
+                .take_optional("--mission-id")
+                .ok_or_else(|| usage("--mission-id is required"))?,
+            goal: options
+                .take_optional("--goal")
+                .ok_or_else(|| usage("--goal is required"))?,
+            tools: options.take_optional_path("--tools"),
+            arguments: options.take_optional_path("--arguments"),
+        },
         ("workflow", "instantiate") => Command::WorkflowInstantiate {
             workflow: options
                 .take_optional("--workflow")
@@ -555,6 +579,42 @@ mod tests {
                     steps: PathBuf::from("steps.json"),
                     policy: Some(PathBuf::from("policy.json")),
                     dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn workflow_scaffold_parses_optional_tool_and_argument_files() {
+        let parsed = parse(
+            [
+                "workflow",
+                "scaffold",
+                "--workflow",
+                "documentation_and_knowledge",
+                "--mission-id",
+                "m-1",
+                "--goal",
+                "discover capabilities",
+                "--tools",
+                "tools.json",
+                "--arguments",
+                "arguments.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workflow scaffold");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkflowScaffold {
+                    workflow: "documentation_and_knowledge".into(),
+                    mission_id: "m-1".into(),
+                    goal: "discover capabilities".into(),
+                    tools: Some(PathBuf::from("tools.json")),
+                    arguments: Some(PathBuf::from("arguments.json")),
                 },
             })
         );

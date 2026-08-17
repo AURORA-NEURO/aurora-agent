@@ -24,6 +24,8 @@ pub const DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-catalogue/0.1";
 pub const DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-instantiate/0.1";
+pub const DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION: &str =
+    "bioprism-devplat-domain-workflow-scaffold/0.1";
 pub const DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-contract/0.1";
 pub const MAX_DOMAIN_WORKFLOW_GROUPS: usize = 128;
@@ -280,6 +282,7 @@ fn tool_contracts(
                 "available": is_available,
                 "schema_state": schema_state,
                 "schema_digest": schema_digest,
+                "argument_contract": argument_contract(schema),
                 "argument_validation": "authoritative_mcp_preflight_required",
                 "evidence": {
                     "capture": ["arguments_digest", "result_status", "result_digest"],
@@ -289,6 +292,95 @@ fn tool_contracts(
             }))
         })
         .collect()
+}
+
+/// Project only the argument facts an agent needs to author a call. The complete authoritative
+/// schema remains owned by `tools/list`; this bounded summary avoids copying arbitrary schema
+/// branches into every workflow row while keeping required/optional fields, common constraints,
+/// and composition keywords visible before mission preflight.
+fn argument_contract(schema: Option<&Value>) -> Value {
+    let Some(schema) = schema.filter(|value| value.is_object()) else {
+        return json!({
+            "state": "missing",
+            "required": [],
+            "optional": [],
+            "properties": {},
+            "composition_keywords": [],
+            "additional_properties": "unspecified",
+        });
+    };
+    let object = schema.as_object().expect("filtered schema is an object");
+    let required = object
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let required_set = required.iter().cloned().collect::<BTreeSet<_>>();
+    let mut properties = BTreeMap::new();
+    if let Some(raw_properties) = object.get("properties").and_then(Value::as_object) {
+        for (name, property) in raw_properties.iter().take(MAX_DOMAIN_WORKFLOW_TOOLS) {
+            let Some(property) = property.as_object() else {
+                properties.insert(
+                    name.clone(),
+                    json!({"state": "invalid", "required": required_set.contains(name)}),
+                );
+                continue;
+            };
+            let mut summary = serde_json::Map::new();
+            for field in [
+                "type",
+                "format",
+                "minimum",
+                "maximum",
+                "minItems",
+                "maxItems",
+                "minLength",
+                "maxLength",
+                "pattern",
+            ] {
+                if let Some(value) = property.get(field) {
+                    summary.insert(field.to_string(), value.clone());
+                }
+            }
+            if let Some(values) = property.get("enum").and_then(Value::as_array) {
+                summary.insert("enum_count".into(), json!(values.len()));
+            }
+            summary.insert("required".into(), json!(required_set.contains(name)));
+            summary.insert("description_present".into(), json!(property.contains_key("description")));
+            properties.insert(name.clone(), Value::Object(summary));
+        }
+    }
+    let property_names = properties.keys().cloned().collect::<BTreeSet<_>>();
+    let optional = property_names
+        .difference(&required_set)
+        .cloned()
+        .collect::<Vec<_>>();
+    let composition_keywords = ["oneOf", "anyOf", "allOf", "not", "$ref"]
+        .iter()
+        .filter(|key| object.contains_key(**key))
+        .map(|key| (*key).to_string())
+        .collect::<Vec<_>>();
+    let additional_properties = match object.get("additionalProperties") {
+        None => json!("unspecified"),
+        Some(Value::Bool(value)) => json!(value),
+        Some(Value::Object(_)) => json!("schema"),
+        Some(_) => json!("invalid"),
+    };
+    json!({
+        "state": "present",
+        "type": object.get("type").cloned().unwrap_or(Value::Null),
+        "required": required,
+        "optional": optional,
+        "properties": properties,
+        "composition_keywords": composition_keywords,
+        "additional_properties": additional_properties,
+    })
 }
 
 fn group_workflow(
@@ -878,6 +970,235 @@ pub fn instantiate_domain_workflow(
     Ok(output)
 }
 
+/// Build a deterministic, execution-disabled starting mission for one capability-group workflow.
+///
+/// The scaffold selects the first available tool from each lexical stage unless the caller gives
+/// an explicit `tools` list. It never claims those tools are semantically sufficient: each step's
+/// argument object remains caller-owned, and the authoritative MCP preflight must still be run by
+/// the transport adapter. The returned `instantiation` is intentionally preserved verbatim so it
+/// can be passed to `domain_workflow_reconcile` after a caller executes the planned mission.
+pub fn scaffold_domain_workflow(
+    catalogue: &Value,
+    tool_definitions: &Value,
+    request: &Value,
+) -> Result<Value, DomainWorkflowError> {
+    checked_bytes(request)?;
+    let object = request
+        .as_object()
+        .ok_or(DomainWorkflowError::RequestNotObject)?;
+    for key in object.keys() {
+        if !matches!(key.as_str(), "workflow_id" | "mission_id" | "goal" | "tools" | "arguments") {
+            return Err(DomainWorkflowError::InvalidRequest(format!(
+                "scaffold does not accept the {key:?} field"
+            )));
+        }
+    }
+    let workflow_id = visible_text(object, "workflow_id")
+        .map_err(DomainWorkflowError::InvalidRequest)?
+        .to_string();
+    let mission_id = visible_text(object, "mission_id")
+        .map_err(DomainWorkflowError::InvalidRequest)?
+        .to_string();
+    let goal = visible_text(object, "goal")
+        .map_err(DomainWorkflowError::InvalidRequest)?
+        .to_string();
+    let catalogue_report = build_domain_workflow_catalogue(catalogue, tool_definitions)?;
+    let workflow = catalogue_report["workflows"]
+        .as_array()
+        .and_then(|workflows| workflows.iter().find(|item| item["workflow_id"] == workflow_id))
+        .ok_or_else(|| DomainWorkflowError::UnknownWorkflow {
+            workflow_id: workflow_id.clone(),
+        })?;
+    let available = workflow["tools"]["available"]
+        .as_array()
+        .ok_or_else(|| DomainWorkflowError::InvalidRequest("workflow has no available tool list".into()))?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    if available.is_empty() {
+        return Err(DomainWorkflowError::InvalidRequest(format!(
+            "workflow {workflow_id:?} has no available tools to scaffold"
+        )));
+    }
+    let scaffoldable = available
+        .iter()
+        .filter(|tool| !matches!(tool.as_str(), "agent_mission" | "domain_workflow_scaffold"))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if scaffoldable.is_empty() {
+        return Err(DomainWorkflowError::InvalidRequest(format!(
+            "workflow {workflow_id:?} has no non-recursive tools to scaffold"
+        )));
+    }
+
+    let explicit_tools = match object.get("tools") {
+        None => None,
+        Some(_) => Some(
+            string_array(object, "tools", true, MAX_DOMAIN_WORKFLOW_STEPS)
+                .map_err(DomainWorkflowError::InvalidRequest)?,
+        ),
+    };
+    let (selection_strategy, selected_tools) = if let Some(tools) = explicit_tools {
+        if tools.is_empty() {
+            return Err(DomainWorkflowError::InvalidRequest(
+                "tools must contain at least one selected tool".into(),
+            ));
+        }
+        if let Some(tool) = tools
+            .iter()
+            .find(|tool| matches!(tool.as_str(), "agent_mission" | "domain_workflow_scaffold"))
+        {
+            return Err(DomainWorkflowError::InvalidRequest(format!(
+                "scaffold cannot select recursive tool `{tool}`"
+            )));
+        }
+        ("explicit_tools", tools)
+    } else {
+        let mut selected = Vec::new();
+        let mut seen = BTreeSet::new();
+        if let Some(stages) = workflow["recommended_stages"].as_array() {
+            for stage in stages {
+                let Some(tool) = stage["tools"]
+                    .as_array()
+                    .and_then(|tools| tools.iter().filter_map(Value::as_str).find(|tool| scaffoldable.contains(*tool)))
+                else {
+                    continue;
+                };
+                if seen.insert(tool.to_string()) {
+                    selected.push(tool.to_string());
+                }
+            }
+        }
+        if selected.is_empty() {
+            selected.push(scaffoldable.iter().next().cloned().ok_or_else(|| {
+                DomainWorkflowError::InvalidRequest("workflow has no scaffoldable tool".into())
+            })?);
+        }
+        ("one_available_tool_per_stage", selected)
+    };
+    for (index, tool) in selected_tools.iter().enumerate() {
+        if !available.contains(tool) {
+            return Err(DomainWorkflowError::ToolUnavailable {
+                step: index,
+                tool: tool.clone(),
+                workflow_id: workflow_id.clone(),
+            });
+        }
+    }
+
+    let arguments = match object.get("arguments") {
+        None => BTreeMap::new(),
+        Some(Value::Object(values)) => values
+            .iter()
+            .map(|(tool, value)| {
+                if !selected_tools.iter().any(|selected| selected == tool) {
+                    return Err(DomainWorkflowError::InvalidRequest(format!(
+                        "arguments contains unselected tool {tool:?}"
+                    )));
+                }
+                if !value.is_object() {
+                    return Err(DomainWorkflowError::InvalidRequest(format!(
+                        "arguments[{tool:?}] must be an object"
+                    )));
+                }
+                Ok((tool.clone(), value.clone()))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?,
+        Some(_) => {
+            return Err(DomainWorkflowError::InvalidRequest(
+                "arguments must be an object keyed by selected tool name".into(),
+            ))
+        }
+    };
+    let domain = workflow["domains"]
+        .as_array()
+        .and_then(|domains| domains.first())
+        .and_then(Value::as_str)
+        .unwrap_or(&workflow_id)
+        .to_string();
+    let steps = selected_tools
+        .iter()
+        .enumerate()
+        .map(|(index, tool)| {
+            let role = tool_role(tool);
+            json!({
+                "id": format!("scaffold-{}-{}", index + 1, role),
+                "domain": domain,
+                "capability": workflow_id,
+                "objective": format!("review the {role} stage using {tool}"),
+                "tool": tool,
+                "arguments": arguments.get(tool).cloned().unwrap_or_else(|| json!({})),
+                "required": true,
+            })
+        })
+        .collect::<Vec<_>>();
+    let instantiation_request = json!({
+        "workflow_id": workflow_id,
+        "mission_id": mission_id,
+        "goal": goal,
+        "steps": steps,
+        "policy": {
+            "execute": false,
+            "stop_on_error": true,
+            "allow_side_effects": false,
+            "allowed_tools": []
+        }
+    });
+    let instantiation = instantiate_domain_workflow(catalogue, tool_definitions, &instantiation_request)?;
+    let omitted_tools = available
+        .difference(&selected_tools.iter().cloned().collect::<BTreeSet<_>>())
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut output = json!({
+        "ok": true,
+        "schema": DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION,
+        "workflow": "domain_workflow_scaffold",
+        "workflow_id": instantiation["workflow_id"],
+        "workflow_digest": instantiation["workflow_digest"],
+        "catalog_digest": instantiation["catalog_digest"],
+        "selection": {
+            "strategy": selection_strategy,
+            "selected_tools": selected_tools,
+            "available_tool_count": available.len(),
+            "omitted_available_tools": omitted_tools,
+            "caller_arguments_supplied": arguments.len(),
+        },
+        "instantiation": instantiation,
+        "mission": instantiation["mission"],
+        "domain_contract": instantiation["domain_contract"],
+        "domain_contract_digest": instantiation["domain_contract_digest"],
+        "evidence_plan": instantiation["evidence_plan"],
+        "execution": "not_started",
+        "readiness_claimed": false,
+        "preflight": {
+            "required": true,
+            "dispatch": "not_started",
+            "argument_schema_validation": "deferred_to_authoritative_tools_list",
+        },
+        "guarantees": [
+            "the scaffold selects only available tools from one capability-group workflow",
+            "the generated mission is execution-disabled and carries an explicit evidence plan",
+            "caller-supplied arguments remain visible and unmodified",
+            "omitted available tools remain visible instead of being silently treated as unnecessary",
+        ],
+        "limitations": [
+            "lexical stage selection is a starting point, not semantic tool sufficiency",
+            "authoritative schema preflight remains required before dispatch",
+            "a scaffold is not permission, scientific evidence, readiness, or a domain conclusion",
+        ],
+        "next_actions": [
+            "fill every required argument field from the authoritative tool schema",
+            "review the selected and omitted tools for domain-specific sufficiency",
+            "run mission preflight and obtain any required operations gate acceptance",
+            "execute only through an explicit allow-list and reconcile the retained report",
+        ],
+    });
+    output["scaffold_digest"] = Value::String(digest(&output)?);
+    checked_bytes(&output)?;
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1010,5 +1331,124 @@ mod tests {
             instantiate_domain_workflow(&catalogue, &tools, &request),
             Err(DomainWorkflowError::PolicyToolOutsideWorkflow { .. })
         ));
+    }
+
+    #[test]
+    fn scaffold_selects_available_tools_by_stage_and_forces_plan_only_execution() {
+        let (catalogue, tools) = inputs();
+        let output = scaffold_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id": "oncology_workflows",
+                "mission_id": "scaffold-1",
+                "goal": "build an oncology review starting point"
+            }),
+        )
+        .unwrap();
+        assert_eq!(output["workflow"], "domain_workflow_scaffold");
+        assert_eq!(output["selection"]["strategy"], "one_available_tool_per_stage");
+        assert_eq!(output["selection"]["selected_tools"].as_array().unwrap().len(), 2);
+        assert_eq!(output["mission"]["policy"]["execute"], false);
+        assert_eq!(output["execution"], "not_started");
+        assert_eq!(output["readiness_claimed"], false);
+        assert_eq!(output["instantiation"]["workflow"], "domain_workflow_instantiate");
+        assert_eq!(output["mission"]["workflow_binding"]["workflow_id"], "oncology_workflows");
+        assert_eq!(output["scaffold_digest"].as_str().unwrap().len(), 64);
+        assert!(output["next_actions"].as_array().unwrap().len() >= 3);
+    }
+
+    #[test]
+    fn scaffold_honours_explicit_tools_and_rejects_unselected_arguments() {
+        let (catalogue, tools) = inputs();
+        let output = scaffold_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id": "oncology_workflows",
+                "mission_id": "scaffold-2",
+                "goal": "focus on outcome analysis",
+                "tools": ["onco_outcome_analyze"],
+                "arguments": {"onco_outcome_analyze": {"subject": "S1"}}
+            }),
+        )
+        .unwrap();
+        assert_eq!(output["selection"]["strategy"], "explicit_tools");
+        assert_eq!(output["selection"]["selected_tools"], json!(["onco_outcome_analyze"]));
+        assert_eq!(
+            output["mission"]["steps"][0]["arguments"],
+            json!({"subject": "S1"})
+        );
+
+        let refused = scaffold_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id": "oncology_workflows",
+                "mission_id": "scaffold-3",
+                "goal": "reject an argument for an unselected tool",
+                "tools": ["onco_outcome_analyze"],
+                "arguments": {"onco_boundary_check": {}}
+            }),
+        );
+        assert!(matches!(refused, Err(DomainWorkflowError::InvalidRequest(_))));
+
+        let recursive_catalogue = json!([{
+            "id": "recursive_workflow",
+            "domains": ["orchestration"],
+            "crates": ["orchestration"],
+            "mcp_tools": ["domain_workflow_scaffold"],
+            "cli_entrypoints": [],
+            "status": "available"
+        }]);
+        let recursive_tools = json!([{"name": "domain_workflow_scaffold"}]);
+        let recursive = scaffold_domain_workflow(
+            &recursive_catalogue,
+            &recursive_tools,
+            &json!({
+                "workflow_id": "recursive_workflow",
+                "mission_id": "scaffold-4",
+                "goal": "reject recursive planning",
+                "tools": ["domain_workflow_scaffold"]
+            }),
+        );
+        assert!(matches!(
+            recursive,
+            Err(DomainWorkflowError::InvalidRequest(_))
+        ));
+    }
+
+    #[test]
+    fn catalogue_exposes_bounded_required_argument_contracts() {
+        let catalogue = json!([{
+            "id": "schema_workflow",
+            "domains": ["schema"],
+            "crates": ["schema"],
+            "mcp_tools": ["schema_tool"],
+            "cli_entrypoints": [],
+            "status": "available"
+        }]);
+        let tools = json!([{
+            "name": "schema_tool",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "required_value": {"type": "string", "minLength": 2},
+                    "optional_count": {"type": "integer", "minimum": 1}
+                },
+                "required": ["required_value"],
+                "additionalProperties": false,
+                "oneOf": [{"required": ["required_value"]}]
+            }
+        }]);
+        let report = build_domain_workflow_catalogue(&catalogue, &tools).unwrap();
+        let contract = &report["workflows"][0]["tool_contracts"][0]["argument_contract"];
+        assert_eq!(contract["state"], "present");
+        assert_eq!(contract["required"], json!(["required_value"]));
+        assert_eq!(contract["optional"], json!(["optional_count"]));
+        assert_eq!(contract["properties"]["required_value"]["required"], true);
+        assert_eq!(contract["properties"]["optional_count"]["minimum"], 1);
+        assert_eq!(contract["additional_properties"], false);
+        assert_eq!(contract["composition_keywords"], json!(["oneOf"]));
     }
 }

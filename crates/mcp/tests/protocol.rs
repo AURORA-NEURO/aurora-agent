@@ -324,7 +324,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 189);
+    assert_eq!(tools.len(), 190);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1251,7 +1251,50 @@ fn domain_workflow_catalogue_covers_every_capability_group() {
             && workflow["domain_contract"].is_object()
             && workflow["tool_contracts"].is_array()
             && workflow["recommended_stages"].is_array()
+            && workflow["tool_contracts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|contract| contract["argument_contract"].is_object())
     }));
+}
+
+#[test]
+fn domain_workflow_scaffolds_are_actionable_and_execution_disabled_for_every_group() {
+    let mut server = server();
+    let catalogue = call(&mut server, "domain_workflow_catalogue", json!({}));
+    let workflows = catalogue["workflows"].as_array().unwrap();
+    assert_eq!(workflows.len(), 29);
+
+    for workflow in workflows {
+        let workflow_id = workflow["workflow_id"].as_str().unwrap();
+        let report = call(
+            &mut server,
+            "domain_workflow_scaffold",
+            json!({
+                "workflow_id": workflow_id,
+                "mission_id": format!("scaffold-{workflow_id}"),
+                "goal": format!("prepare a reviewed starting plan for {workflow_id}")
+            }),
+        );
+        assert_eq!(report["ok"], true, "scaffold failed for {workflow_id}: {report}");
+        assert_eq!(report["workflow"], "domain_workflow_scaffold");
+        assert_eq!(report["execution"], "not_started");
+        assert_eq!(report["mission"]["policy"]["execute"], false);
+        assert_eq!(report["mission"]["workflow_binding"]["workflow_id"], workflow_id);
+        assert!(!report["selection"]["selected_tools"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            report["preflight_status"].as_str(),
+            Some("ready") | Some("blocked")
+        ));
+        assert_eq!(report["preflight_report"]["dispatch"], "not_started");
+        assert_eq!(report["preflight_report"]["preflight"], true);
+        assert_eq!(report["readiness_claimed"], false);
+        assert!(report["next_actions"].as_array().unwrap().len() >= 2);
+    }
 }
 
 #[test]
@@ -5597,12 +5640,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(189));
-    assert_eq!(result["advertised_tool_count"], json!(189));
+    assert_eq!(result["unique_catalog_tools"], json!(190));
+    assert_eq!(result["advertised_tool_count"], json!(190));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(189));
-    assert_eq!(result["schema_quality"]["valid"], json!(189));
+    assert_eq!(result["schema_quality"]["checked"], json!(190));
+    assert_eq!(result["schema_quality"]["valid"], json!(190));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

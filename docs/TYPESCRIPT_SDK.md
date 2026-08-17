@@ -84,6 +84,11 @@ Convenience methods currently cover:
   authoritative no-dispatch preflight, and `execution: "not_started"`. These methods do not infer
   domain arguments or authorize tool execution. The returned mission carries a digest-bound
   `workflow_binding` so the exact workflow/contract/evidence scope survives dispatch;
+- `domainWorkflowScaffold` / `domainWorkflowScaffoldQuery`: deterministic planning helpers that
+  choose one available tool per advisory stage (or honor explicit tools), preserve bounded
+  per-tool argument contracts, and return structured ready/blocked preflight without dispatch.
+  `DomainWorkflowScaffoldResult.readiness_claimed` is the literal `false`; the scaffold is never
+  permission, evidence, clinical guidance, or a domain conclusion;
 - `domainWorkflowReconcileQuery` / `domainWorkflowReconcile`: correlate a retained mission report
   or evidence bundle with an instantiation and return typed integrity, per-step evidence, trace,
   completion, and omission posture. The result remains review-required and non-executing.

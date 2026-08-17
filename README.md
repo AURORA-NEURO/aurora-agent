@@ -783,6 +783,15 @@ validates the mission DAG, derives a least-scope allow-list for requested execut
 step-level evidence plan, and attaches authoritative no-dispatch MCP schema preflight. MCP, REST,
 CLI, Python, and TypeScript all expose the same kernel. A valid workflow remains a plan, not
 permission, scientific evidence, clinical guidance, deployment readiness, or execution.
+`domain_workflow_scaffold` is the bounded planning shortcut across the same 29 groups: it selects
+one live available tool per advisory stage by default, or accepts an explicit tool list and
+per-tool argument map, then materializes a deterministic `domain_workflow_instantiate` payload.
+Each catalogue tool contract carries bounded argument-schema facts, and the scaffold runs the
+authoritative MCP preflight before returning. Missing required arguments are an explicit blocked
+preflight result; they are never replaced with benign defaults. The response always preserves
+`execution: "not_started"`, `dispatch: "not_started"`, and `readiness_claimed: false`, so this
+convenience surface cannot silently become an executor or readiness credential. MCP, REST, Python,
+and TypeScript expose the same scaffold contract.
 The instantiated mission also carries a bounded `workflow_binding` containing the workflow,
 catalogue, domain-contract, and evidence-plan digests plus the contract snapshots needed to
 reconstruct that exact scope after dispatch. The binding is validated as structure and provenance;

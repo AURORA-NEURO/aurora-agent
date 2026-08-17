@@ -4634,6 +4634,14 @@ export interface DomainWorkflowInstantiateArgs extends JsonObject {
   evaluator_review?: JsonObject;
 }
 
+export interface DomainWorkflowScaffoldArgs extends JsonObject {
+  workflow_id: string;
+  mission_id: string;
+  goal: string;
+  tools?: string[];
+  arguments?: Record<string, JsonObject>;
+}
+
 export interface DomainWorkflowReconcileArgs extends JsonObject {
   instantiation: JsonObject;
   mission_report?: JsonObject;
@@ -4648,6 +4656,7 @@ export interface DomainWorkflowToolContract extends JsonObject {
   schema_state: "present" | "missing" | "unavailable";
   schema_digest?: string | null;
   argument_validation: "authoritative_mcp_preflight_required";
+  argument_contract?: JsonObject;
   evidence: JsonObject;
 }
 
@@ -4718,6 +4727,29 @@ export interface DomainWorkflowInstantiateResult extends JsonObject {
   execution: "not_started";
   guarantees: string[];
   limitations: string[];
+}
+
+export interface DomainWorkflowScaffoldResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_scaffold";
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  selection: JsonObject;
+  instantiation: DomainWorkflowInstantiateResult;
+  mission: JsonObject & { workflow_binding?: DomainWorkflowBinding };
+  domain_contract: DomainWorkflowContract;
+  domain_contract_digest: string;
+  evidence_plan: DomainWorkflowEvidencePlan;
+  execution: "not_started";
+  readiness_claimed: false;
+  preflight: JsonObject;
+  preflight_status: "ready" | "blocked";
+  preflight_report: JsonObject;
+  guarantees: string[];
+  limitations: string[];
+  next_actions: string[];
 }
 
 export interface DomainWorkflowReconcileResult extends JsonObject {

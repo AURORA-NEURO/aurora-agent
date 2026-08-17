@@ -438,6 +438,38 @@ class DomainWorkflowInstantiateRequest:
 
 
 @dataclass(frozen=True)
+class DomainWorkflowScaffoldRequest:
+    """Caller-owned request for a deterministic, execution-disabled workflow scaffold."""
+
+    workflow_id: str
+    mission_id: str
+    goal: str
+    tools: Sequence[str] = ()
+    arguments: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name, value in (("workflow_id", self.workflow_id), ("mission_id", self.mission_id), ("goal", self.goal)):
+            _route_text(f"workflow scaffold {name}", value)
+        if not isinstance(self.tools, Sequence) or isinstance(self.tools, (str, bytes)) or len(self.tools) > 128:
+            raise ArgumentError("workflow scaffold tools must contain at most 128 strings")
+        _route_strings("workflow scaffold tools", self.tools)
+        if not isinstance(self.arguments, Mapping):
+            raise ArgumentError("workflow scaffold arguments must be an object")
+        for tool, value in self.arguments.items():
+            _route_text("workflow scaffold argument tool", tool)
+            _route_mapping(f"workflow scaffold arguments[{tool}]", value)
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {
+            "workflow_id": self.workflow_id,
+            "mission_id": self.mission_id,
+            "goal": self.goal,
+            "tools": list(self.tools),
+            "arguments": {tool: dict(value) for tool, value in self.arguments.items()},
+        }
+
+
+@dataclass(frozen=True)
 class DomainWorkflowReconcileRequest:
     """Retained execution evidence to reconcile against one workflow instantiation."""
 
@@ -563,6 +595,56 @@ def domain_workflow_instantiation_report(value: Mapping[str, Any]) -> DomainWork
     """Parse a direct REST/MCP workflow instantiation result."""
 
     return DomainWorkflowInstantiationReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowScaffoldReport:
+    """Typed scaffold with explicit preflight status and no dispatch/readiness claim."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    workflow_digest: str
+    catalog_digest: str
+    mission: Mapping[str, Any]
+    selection: Mapping[str, Any]
+    preflight: Mapping[str, Any]
+    preflight_status: str
+    preflight_report: Mapping[str, Any]
+    execution: str
+    readiness_claimed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowScaffoldReport":
+        raw = _tool_payload(value, "domain_workflow_scaffold")
+        readiness_claimed = raw.get("readiness_claimed")
+        if not isinstance(readiness_claimed, bool):
+            raise ArgumentError("domain workflow scaffold readiness_claimed must be a boolean")
+        return cls(
+            raw=raw,
+            workflow_id=_route_text("domain workflow scaffold id", raw.get("workflow_id")),
+            workflow_digest=_route_text("domain workflow scaffold digest", raw.get("workflow_digest")),
+            catalog_digest=_route_text("domain workflow scaffold catalog digest", raw.get("catalog_digest")),
+            mission=_route_mapping("domain workflow scaffold mission", raw.get("mission")),
+            selection=_route_mapping("domain workflow scaffold selection", raw.get("selection")),
+            preflight=_route_mapping("domain workflow scaffold preflight", raw.get("preflight")),
+            preflight_status=_route_text("domain workflow scaffold preflight status", raw.get("preflight_status")),
+            preflight_report=_route_mapping("domain workflow scaffold preflight report", raw.get("preflight_report", {})),
+            execution=_route_text("domain workflow scaffold execution", raw.get("execution")),
+            readiness_claimed=readiness_claimed,
+        )
+
+    @property
+    def selected_tools(self) -> tuple[str, ...]:
+        return _route_strings("selected scaffold tools", self.selection.get("selected_tools", []))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def domain_workflow_scaffold_report(value: Mapping[str, Any]) -> DomainWorkflowScaffoldReport:
+    """Parse a direct REST/MCP workflow scaffold result."""
+
+    return DomainWorkflowScaffoldReport.from_wire(value)
 
 
 @dataclass(frozen=True)
@@ -2311,9 +2393,11 @@ def mission_evaluator_discover_report(value: Mapping[str, Any]) -> MissionEvalua
 
 __all__ = [
     "DomainWorkflowInstantiateRequest",
+    "DomainWorkflowScaffoldRequest",
     "DomainWorkflowReconcileRequest",
     "DomainWorkflowCatalogueReport",
     "DomainWorkflowInstantiationReport",
+    "DomainWorkflowScaffoldReport",
     "DomainWorkflowReconciliationReport",
     "DomainWorkflowReconciliationImportRequest",
     "DomainWorkflowReconciliationQueryRequest",
@@ -2364,6 +2448,7 @@ __all__ = [
     "capability_route_report",
     "domain_workflow_catalogue_report",
     "domain_workflow_instantiation_report",
+    "domain_workflow_scaffold_report",
     "domain_workflow_reconciliation_report",
     "capability_route_review_report",
     "capability_discover_report",

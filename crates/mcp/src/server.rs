@@ -131,7 +131,7 @@ use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
     audit_execution_provenance, build_dashboard,
     build_delivery_receipt, plan_mission, run_workbench, verify_delivery_receipt,
-    build_domain_workflow_catalogue, instantiate_domain_workflow,
+    build_domain_workflow_catalogue, instantiate_domain_workflow, scaffold_domain_workflow,
     reconcile_domain_workflow,
     DomainWorkflowReconciliationRegistry,
     normalize_ci_provider_payload,
@@ -1549,6 +1549,7 @@ impl Server {
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
             "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
+            "domain_workflow_scaffold" => self.domain_workflow_scaffold(&arguments),
             "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
             "domain_workflow_reconcile" => self.domain_workflow_reconcile(&arguments),
             "domain_workflow_reconciliation_import" => {
@@ -22228,6 +22229,58 @@ impl Server {
         .map_err(|error| format!("domain workflow catalogue refused: {error}"))
     }
 
+    /// Build an execution-disabled, schema-aware starting mission for one capability group.
+    ///
+    /// Kernel scaffolding chooses tools; this transport layer adds the authoritative live
+    /// `tools/list` preflight. Missing required arguments therefore remain a structured blocked
+    /// handoff rather than being turned into a transport-level success or an opaque failure.
+    fn domain_workflow_scaffold(&self, arguments: &Value) -> Result<Value, String> {
+        let mut output = scaffold_domain_workflow(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow scaffold refused: {error}"))?;
+        let mission = output
+            .get("mission")
+            .cloned()
+            .ok_or_else(|| "domain workflow scaffold omitted mission".to_string())?;
+        let preflight_report = match self.preflight_agent_mission(&mission) {
+            Ok(report) => report,
+            Err(error) => json!({
+                "ok": false,
+                "workflow": "agent_mission",
+                "preflight": true,
+                "dispatch": "not_started",
+                "schema_valid": false,
+                "error": error,
+                "guarantees": [
+                    "the scaffold remains execution-disabled",
+                    "authoritative schema refusal is retained for caller correction"
+                ],
+                "readiness_claimed": false
+            }),
+        };
+        let preflight_ok = preflight_report.get("ok") == Some(&Value::Bool(true));
+        output["preflight_status"] = json!(if preflight_ok { "ready" } else { "blocked" });
+        output["preflight_report"] = preflight_report.clone();
+        output["instantiation"]["preflight_report"] = preflight_report;
+        output["next_actions"] = if preflight_ok {
+            json!([
+                "review the selected and omitted tools for domain-specific sufficiency",
+                "obtain any required operations gate acceptance",
+                "execute only through an explicit allow-list and reconcile the retained report"
+            ])
+        } else {
+            json!([
+                "fill every reported required argument field from the authoritative tool schema",
+                "rerun the scaffold or mission preflight after correcting arguments",
+                "obtain any required operations gate acceptance before execution"
+            ])
+        };
+        Ok(output)
+    }
+
     /// Instantiate one explicitly selected, group-scoped workflow into a validated mission and
     /// a step-by-step evidence plan.
     ///
@@ -27868,7 +27921,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "domain_workflow_catalogue", "domain_workflow_instantiate", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -30310,6 +30363,21 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {},
                 "required": []
+            }
+        }),
+        json!({
+            "name": "domain_workflow_scaffold",
+            "description": "Generate a deterministic, execution-disabled starting mission for one capability-group workflow. By default it selects one available tool per lexical stage; explicit tools and per-tool argument objects may be supplied. The response includes bounded argument contracts, selected/omitted tools, a digest-bound workflow binding, and live authoritative schema preflight. Missing required arguments remain a blocked correction posture; this never grants permission, executes tools, infers semantic sufficiency, or claims domain readiness.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string", "description": "Capability-group workflow id returned by domain_workflow_catalogue." },
+                    "mission_id": { "type": "string", "description": "Stable caller-owned mission identity for the planned scaffold." },
+                    "goal": { "type": "string", "description": "Caller-owned objective for the planned mission." },
+                    "tools": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "type": "string" }, "description": "Optional explicit available tools. If omitted, the scaffold selects one available tool per lexical stage." },
+                    "arguments": { "type": "object", "description": "Optional map from selected tool name to an explicit JSON argument object. Unselected tool names are refused." }
+                },
+                "required": ["workflow_id", "mission_id", "goal"]
             }
         }),
         json!({

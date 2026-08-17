@@ -21,6 +21,8 @@ import type {
   DomainWorkflowCatalogueResult,
   DomainWorkflowInstantiateArgs,
   DomainWorkflowInstantiateResult,
+  DomainWorkflowScaffoldArgs,
+  DomainWorkflowScaffoldResult,
   DomainWorkflowReconcileArgs,
   DomainWorkflowReconcileResult,
   DomainWorkflowReconciliationImportArgs,
@@ -451,6 +453,22 @@ export class ApiClient {
   /** Read one deterministic, digest-bound workflow template for every capability group. */
   async domainWorkflowCatalogueQuery(options?: ClientRequestOptions): Promise<DomainWorkflowCatalogueResult> {
     return this.request<DomainWorkflowCatalogueResult>("GET", "/v1/domain-workflows", undefined, options);
+  }
+
+  /** Build and preflight an execution-disabled scaffold for one capability group. */
+  async domainWorkflowScaffoldQuery(
+    args: DomainWorkflowScaffoldArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowScaffoldResult> {
+    if (!isObject(args)) throw new ArgumentError("domain workflow scaffold arguments must be an object");
+    if (typeof args.workflow_id !== "string" || args.workflow_id.trim().length === 0) throw new ArgumentError("workflow_id must be a non-empty string");
+    if (typeof args.mission_id !== "string" || args.mission_id.trim().length === 0) throw new ArgumentError("mission_id must be a non-empty string");
+    if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
+    if (args.tools !== undefined && (!Array.isArray(args.tools) || args.tools.length > 128 || args.tools.some((tool) => typeof tool !== "string" || tool.trim().length === 0))) {
+      throw new ArgumentError("tools must contain at most 128 non-empty strings");
+    }
+    if (args.arguments !== undefined && !isObject(args.arguments)) throw new ArgumentError("arguments must be an object");
+    return this.request<DomainWorkflowScaffoldResult>("POST", "/v1/domain-workflows/scaffold", args, options);
   }
 
   /** Instantiate and authoritative-preflight a group-scoped mission without dispatch. */
@@ -953,6 +971,21 @@ export class ApiClient {
 
   async domainWorkflowCatalogue(options?: ClientRequestOptions): Promise<RestToolResponse<DomainWorkflowCatalogueResult>> {
     return this.callTool<DomainWorkflowCatalogueResult>("domain_workflow_catalogue", {}, options);
+  }
+
+  async domainWorkflowScaffold(
+    args: DomainWorkflowScaffoldArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowScaffoldResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain workflow scaffold arguments must be an object");
+    if (typeof args.workflow_id !== "string" || args.workflow_id.trim().length === 0) throw new ArgumentError("workflow_id must be a non-empty string");
+    if (typeof args.mission_id !== "string" || args.mission_id.trim().length === 0) throw new ArgumentError("mission_id must be a non-empty string");
+    if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
+    if (args.tools !== undefined && (!Array.isArray(args.tools) || args.tools.length > 128 || args.tools.some((tool) => typeof tool !== "string" || tool.trim().length === 0))) {
+      throw new ArgumentError("tools must contain at most 128 non-empty strings");
+    }
+    if (args.arguments !== undefined && !isObject(args.arguments)) throw new ArgumentError("arguments must be an object");
+    return this.callTool<DomainWorkflowScaffoldResult>("domain_workflow_scaffold", args, options);
   }
 
   async domainWorkflowInstantiate(
