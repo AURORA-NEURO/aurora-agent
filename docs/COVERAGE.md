@@ -314,6 +314,10 @@ is checked against retained raw-content digests, source-plan and response lineag
 parents, partial transport remains partial, and truncated/binary/omitted bodies become typed
 refused observations even when parsing never began. This keeps optional binary readers and
 clinical/provider retrieval boundaries observable without treating non-execution as success.
+The sync and async submission helpers now compose local runtime results with the existing HTTP/MCP
+facades. They validate and materialize the complete batch before submission, keep remote refusal
+reports distinct from transport exceptions, and can retain per-source transport errors when a
+caller explicitly opts into continuing a heterogeneous batch.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

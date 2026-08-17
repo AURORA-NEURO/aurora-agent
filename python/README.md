@@ -162,6 +162,10 @@ It verifies the explicit parser-input digest against the retained raw-content di
 source-plan and response parents, carries partial transport state into execution evidence, and
 retains truncated/binary/omitted-body refusals even when no parser ran. A declared adapter version
 is required for those pre-parser refusals; no source locator is reopened.
+`submit_adapter_execution_evidence(...)`, `submit_projection_batch_evidence(...)`, and their async
+counterparts then hand these requests to `ApiClient`/`Workspace`-compatible sinks. Batch conversion
+happens before network calls; `continue_on_error=True` preserves per-source transport failures,
+while a returned remote refusal remains a retained, typed report rather than a transport error.
 When installed, `read_nifti_header()` and `read_anndata_projection()` provide verified raw-file
 bindings for nibabel and anndata-backed H5AD/Zarr metadata. They feed the same auditors without
 loading image arrays or matrix values; missing optional packages remain typed refusals.
