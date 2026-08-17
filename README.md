@@ -357,6 +357,8 @@ stored report counts are split into completion statuses, structural-ready rows, 
 requirements, integrity-invalid rows, and evidence-invalid rows. These are derived audit counters
 only; they do not authorize execution or upgrade a domain, scientific, clinical, safety, or release
 claim.
+The summary also carries a per-workflow status matrix and distinct workflow count, so the
+cross-domain view cannot hide an unobserved or failed capability group inside one aggregate.
 The domain projection compares the authoritative workspace capability groups with the advertised
 tool catalogue, preserving missing names and omission counts without inferring semantic readiness.
 It is designed as a dashboard

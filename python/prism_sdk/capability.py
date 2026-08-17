@@ -771,6 +771,8 @@ class DomainWorkflowReconciliationSummaryReport:
     registry_generation: int
     registry_size: int
     completion_status_counts: Mapping[str, int]
+    workflow_count: int
+    workflow_status_counts: Mapping[str, Mapping[str, int]]
     ready_count: int
     review_required_count: int
     integrity_invalid_count: int
@@ -792,6 +794,22 @@ class DomainWorkflowReconciliationSummaryReport:
             )
             for status, count in counts_raw.items()
         }
+        workflow_counts_raw = _route_mapping(
+            "workflow reconciliation summary workflow_status_counts",
+            raw.get("workflow_status_counts"),
+        )
+        workflow_counts = {
+            _route_text("workflow reconciliation summary workflow id", workflow_id): {
+                _route_text("workflow reconciliation summary workflow status", status): _route_count(
+                    f"workflow reconciliation summary workflow status count {workflow_id}/{status}",
+                    count,
+                )
+                for status, count in _route_mapping(
+                    f"workflow reconciliation summary workflow statuses {workflow_id}", statuses
+                ).items()
+            }
+            for workflow_id, statuses in workflow_counts_raw.items()
+        }
         readiness_claimed = raw.get("readiness_claimed")
         if readiness_claimed is not False:
             raise ArgumentError("workflow reconciliation summary readiness_claimed must be false")
@@ -800,6 +818,8 @@ class DomainWorkflowReconciliationSummaryReport:
             registry_generation=_route_count("workflow reconciliation summary generation", raw.get("registry_generation")),
             registry_size=_route_count("workflow reconciliation summary size", raw.get("registry_size")),
             completion_status_counts=counts,
+            workflow_count=_route_count("workflow reconciliation summary workflow count", raw.get("workflow_count")),
+            workflow_status_counts=workflow_counts,
             ready_count=_route_count("workflow reconciliation summary ready count", raw.get("ready_count")),
             review_required_count=_route_count("workflow reconciliation summary review count", raw.get("review_required_count")),
             integrity_invalid_count=_route_count("workflow reconciliation summary integrity count", raw.get("integrity_invalid_count")),

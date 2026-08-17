@@ -676,7 +676,8 @@ optional content digests plus `integrity_verified`; a digest is an integrity cor
 claim of distributed consensus.
 `operationsSnapshot(after, limit)` returns the typed `OperationsSnapshot` control-plane view:
 one bounded event cursor page, event metrics, reconciled mission status counts, nested persistence
-status (including workflow-reconciliation checkpoint state), a typed reconciliation posture summary,
+status (including workflow-reconciliation checkpoint state), and a typed reconciliation posture
+summary including its per-workflow status matrix,
 the recovery matrix, typed domain-group/tool coverage, compact capability flags, and explicit operator actions and
 non-claims, including the explicit non-atomic cross-store consistency declaration. It is a
 read-only dashboard/bootstrap call; it does not execute tools, resume jobs,

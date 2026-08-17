@@ -121,6 +121,7 @@ impl DomainWorkflowReconciliationRegistry {
     /// No counter in this projection is an execution or domain-success claim.
     pub fn operator_summary(&self) -> Value {
         let mut completion_status_counts = BTreeMap::<String, usize>::new();
+        let mut workflow_status_counts = BTreeMap::<String, BTreeMap<String, usize>>::new();
         let mut ready_count = 0usize;
         let mut review_required_count = 0usize;
         let mut integrity_invalid_count = 0usize;
@@ -132,6 +133,22 @@ impl DomainWorkflowReconciliationRegistry {
                 .unwrap_or("unknown")
                 .to_string();
             *completion_status_counts.entry(status).or_default() += 1;
+            let workflow_id = record
+                .get("workflow_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            *workflow_status_counts
+                .entry(workflow_id)
+                .or_default()
+                .entry(
+                    record
+                        .pointer("/completion/status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .to_string(),
+                )
+                .or_default() += 1;
             if record.pointer("/completion/ready").and_then(Value::as_bool) == Some(true) {
                 ready_count += 1;
             }
@@ -160,6 +177,8 @@ impl DomainWorkflowReconciliationRegistry {
             "registry_generation": self.generation,
             "registry_size": self.records.len(),
             "completion_status_counts": completion_status_counts,
+            "workflow_count": workflow_status_counts.len(),
+            "workflow_status_counts": workflow_status_counts,
             "ready_count": ready_count,
             "review_required_count": review_required_count,
             "integrity_invalid_count": integrity_invalid_count,
@@ -593,6 +612,8 @@ mod tests {
         assert_eq!(summary["ready_count"], 1);
         assert_eq!(summary["review_required_count"], 1);
         assert_eq!(summary["completion_status_counts"]["complete"], 1);
+        assert_eq!(summary["workflow_count"], 1);
+        assert_eq!(summary["workflow_status_counts"]["oncology"]["complete"], 1);
     }
 
     #[test]
@@ -636,5 +657,12 @@ mod tests {
             .unwrap();
         assert_eq!(next["rows"].as_array().unwrap().len(), 1);
         assert_eq!(next["has_more"], false);
+        let summary = registry.operator_summary();
+        assert_eq!(summary["workflow_count"], 2);
+        assert_eq!(summary["workflow_status_counts"]["oncology"]["failed"], 1);
+        assert_eq!(
+            summary["workflow_status_counts"]["workspace"]["complete"],
+            1
+        );
     }
 }

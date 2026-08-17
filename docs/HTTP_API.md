@@ -132,7 +132,7 @@ approval.
 `GET /v1/operations/snapshot` composes this registry into the control-plane read model. Its
 `reconciliation_summary` reports digest-valid registry size and generation, completion-status
 counts, structural-ready count, explicit review-required count, integrity-invalid count, and
-evidence-invalid count; `persistence.workflow_reconciliations` reports checkpoint state. The
+evidence-invalid count, plus a per-workflow completion-status matrix; `persistence.workflow_reconciliations` reports checkpoint state. The
 summary is read-only and non-claiming, and the snapshot still declares that cross-store composition
 is not atomic.
 

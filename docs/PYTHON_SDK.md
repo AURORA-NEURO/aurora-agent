@@ -629,7 +629,7 @@ invent defaults:
   `operations_snapshot(after=..., limit=...)` and its async counterpart return a typed
   `OperationsSnapshot` that composes a bounded `EventPage`, event metrics, mission status-count
   evidence, typed mission/event/reconciliation persistence checks, the reconciliation summary,
-  the recovery matrix, typed domain-group/tool
+  including its per-workflow status matrix, the recovery matrix, typed domain-group/tool
   coverage, capability flags, consistency declaration, and operator action/non-claim text. The
   domain model preserves exact missing tool names and omission counts without calling them
   runtime or scientific readiness. The cursor remains explicit in

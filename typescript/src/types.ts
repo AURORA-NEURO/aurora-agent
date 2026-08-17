@@ -7809,6 +7809,8 @@ export interface DomainWorkflowReconciliationSummary extends JsonObject {
   registry_generation: number;
   registry_size: number;
   completion_status_counts: Record<string, number>;
+  workflow_count: number;
+  workflow_status_counts: Record<string, Record<string, number>>;
   ready_count: number;
   review_required_count: number;
   integrity_invalid_count: number;
