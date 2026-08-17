@@ -351,6 +351,10 @@ mission preflight; it never dispatches the generated route or authorizes executi
 capability group, allowing operators to distinguish catalogued-but-unobserved tools from tools
 that actually emitted events in the requested cursor page. This is activity evidence only, not
 runtime, scientific, safety, or release readiness.
+`GET /v1/operations/gates?after=N&limit=M` turns the same bounded page into separate catalogue,
+activity, transport-completion, evaluation, safety, and release evidence gates for every capability
+group. A completed local call is never promoted into a readiness verdict: groups remain
+`catalogue_blocked`, `insufficient_evidence`, or `review_required`, with `readiness_claimed: false`.
 `GET /v1/webhooks/subscriptions/{id}/attempts` route and matching SDK helpers expose the
 provenance cursor with explicit retention gaps and dropped-row accounting. Receipt-bearing rows
 are also available through `/v1/delivery-receipts/{receipt_id}/attempts`, which joins the same

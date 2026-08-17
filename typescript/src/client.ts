@@ -31,6 +31,7 @@ import type {
   OperationsHandoff,
   OperationsHandoffArgs,
   OperationsDomainActivity,
+  OperationsDomainGates,
   SafetyReleaseGateArgs,
   SafetyReleaseGateResult,
   MedicalBoundaryArgs,
@@ -476,6 +477,24 @@ export class ApiClient {
     return this.request<OperationsDomainActivity>(
       "GET",
       `/v1/operations/domains?after=${after}&limit=${limit}`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Read separate per-domain evidence gates without inferring readiness. */
+  async operationsDomainGates(
+    after = 0,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<OperationsDomainGates> {
+    cursor(after, "after");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) {
+      throw new ArgumentError("limit must be 1..=256");
+    }
+    return this.request<OperationsDomainGates>(
+      "GET",
+      `/v1/operations/gates?after=${after}&limit=${limit}`,
       undefined,
       options,
     );

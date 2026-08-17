@@ -669,6 +669,10 @@ caller performs route review and mission preflight.
 `operationsDomainActivity(after, limit)` returns the typed per-domain activity projection and
 keeps the event cursor, exact observed tools, catalogue gaps, and catalogued-but-unobserved tools
 separate; its `observation_policy` explicitly does not claim readiness.
+`operationsDomainGates(after, limit)` returns typed evidence gates for catalogue, activity,
+transport completion, evaluation, safety, and release channels. Its group state is explicitly
+`catalogue_blocked`, `insufficient_evidence`, or `review_required`; the type contract preserves
+`readiness_claimed: false` even when all locally observed channels are present.
 
 ```typescript
 const page = await api.events(0, 100);

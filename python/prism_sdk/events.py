@@ -819,6 +819,143 @@ class OperationsDomainActivity:
 
 
 @dataclass(frozen=True)
+class OperationsDomainGateGroup:
+    """One capability group with explicit evidence-channel gate states."""
+
+    raw: dict[str, Any]
+    coverage: OperationsDomainGroup
+    gate_state: str
+    readiness_claimed: bool
+    gates: dict[str, dict[str, Any]]
+    last_event_id: int | None
+    evidence_scope: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsDomainGateGroup":
+        raw = _mapping("operations domain gate group", value)
+        gate_state = _text("operations domain gate gate_state", raw.get("gate_state"))
+        if gate_state not in {
+            "catalogue_blocked",
+            "insufficient_evidence",
+            "review_required",
+        }:
+            raise ArgumentError("operations domain gate state is invalid")
+        if raw.get("readiness_claimed") is not False:
+            raise ArgumentError("operations domain gate group must not claim readiness")
+        gates_raw = _mapping("operations domain gate gates", raw.get("gates"))
+        required = {
+            "catalogue",
+            "observed_activity",
+            "transport_completion",
+            "evaluation_evidence",
+            "safety_evidence",
+            "release_evidence",
+        }
+        if not required.issubset(gates_raw):
+            raise ArgumentError("operations domain gate group is missing a required gate")
+        gates = {name: _mapping(f"operations domain gate {name}", gates_raw[name]) for name in gates_raw}
+        last_event_id = raw.get("last_event_id")
+        if last_event_id is not None:
+            last_event_id = _non_negative("operations domain gate last_event_id", last_event_id)
+        return cls(
+            raw=raw,
+            coverage=OperationsDomainGroup.from_wire(raw),
+            gate_state=gate_state,
+            readiness_claimed=False,
+            gates=gates,
+            last_event_id=last_event_id,
+            evidence_scope=_text("operations domain gate evidence_scope", raw.get("evidence_scope")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class OperationsDomainGates:
+    """Typed evidence gates that never convert local activity into readiness."""
+
+    raw: dict[str, Any]
+    workflow: str
+    schema: str
+    event_cursor: dict[str, Any]
+    groups: tuple[OperationsDomainGateGroup, ...]
+    summary: dict[str, Any]
+    gate_policy: dict[str, Any]
+    guarantees: tuple[str, ...]
+    non_claims: tuple[str, ...]
+    links: dict[str, str]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsDomainGates":
+        raw = _mapping("operations domain gates", value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("operations domain gates must be successful")
+        if raw.get("workflow") != "operations_domain_gates":
+            raise ArgumentError("operations domain gates workflow is invalid")
+        if raw.get("schema") != "bioprism-operations-domain-gates/0.1":
+            raise ArgumentError("operations domain gates schema is invalid")
+        event_cursor = _mapping("operations domain gates event_cursor", raw.get("event_cursor"))
+        for name in ("after", "next_after", "returned_events", "dropped_events"):
+            _non_negative(f"operations domain gates event_cursor {name}", event_cursor.get(name))
+        for name in ("oldest", "newest"):
+            if event_cursor.get(name) is not None:
+                _non_negative(f"operations domain gates event_cursor {name}", event_cursor.get(name))
+        if not isinstance(event_cursor.get("gap"), bool):
+            raise ArgumentError("operations domain gates event_cursor gap must be a boolean")
+        groups_value = raw.get("groups")
+        if not isinstance(groups_value, Sequence) or isinstance(groups_value, (str, bytes)):
+            raise ArgumentError("operations domain gates groups must be an array")
+        groups = tuple(OperationsDomainGateGroup.from_wire(item) for item in groups_value)
+        summary_raw = _mapping("operations domain gates summary", raw.get("summary"))
+        summary: dict[str, Any] = {}
+        for name in (
+            "group_count",
+            "returned_groups",
+            "tool_events_scanned",
+            "attributed_tool_events",
+            "unattributed_tool_events",
+            "completed_tool_events",
+            "refused_tool_events",
+            "evaluation_evidence_events",
+            "safety_evidence_events",
+            "release_evidence_events",
+            "groups_blocked_catalogue",
+            "groups_insufficient_evidence",
+            "groups_review_required",
+        ):
+            summary[name] = _non_negative(f"operations domain gates summary {name}", summary_raw.get(name))
+        if summary_raw.get("readiness_claimed") is not False:
+            raise ArgumentError("operations domain gates summary must not claim readiness")
+        summary["readiness_claimed"] = False
+        gate_policy = _mapping("operations domain gates gate_policy", raw.get("gate_policy"))
+        if gate_policy.get("readiness_claimed") is not False:
+            raise ArgumentError("operations domain gates policy must not claim readiness")
+        links_raw = _mapping("operations domain gates links", raw.get("links"))
+        links = {
+            _text("operations domain gates link name", name): _text(
+                f"operations domain gates link {name}", target
+            )
+            for name, target in links_raw.items()
+        }
+        return cls(
+            raw=raw,
+            workflow="operations_domain_gates",
+            schema="bioprism-operations-domain-gates/0.1",
+            event_cursor=event_cursor,
+            groups=groups,
+            summary=summary,
+            gate_policy=gate_policy,
+            guarantees=_texts("operations domain gates guarantees", raw.get("guarantees")),
+            non_claims=_texts("operations domain gates non_claims", raw.get("non_claims")),
+            links=links,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class OperationsSnapshot:
     """Typed bounded control-plane evidence assembled by the HTTP gateway."""
 
@@ -1281,6 +1418,8 @@ __all__ = [
     "OperationsHandoff",
     "OperationsDomainActivityGroup",
     "OperationsDomainActivity",
+    "OperationsDomainGateGroup",
+    "OperationsDomainGates",
     "MAX_OPERATIONS_SNAPSHOT_LIMIT",
     "MAX_OPERATIONS_DOMAIN_GROUPS",
     "MAX_OPERATIONS_DOMAIN_TOOLS",

@@ -22,6 +22,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
 | `GET /v1/operations/domains?after=N&limit=M` | Per-domain catalogue coverage plus exact local tool activity observed in the requested event page |
+| `GET /v1/operations/gates?after=N&limit=M` | Per-domain catalogue, activity, transport, evaluation, safety, and release evidence gates without readiness claims |
 | `POST /v1/operations/handoff` | Build a content-addressed, non-executing domain-to-`capability_route` handoff |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
@@ -158,6 +159,14 @@ event ID, and an `activity_state` of `catalogue_gap`, `observed_in_page`, or
 `catalogued_unobserved_in_page`. Matching is exact on the tool name carried by a retained event;
 the response declares that activity is limited to the requested page and never calls it runtime
 health or readiness.
+
+`GET /v1/operations/gates` applies the same cursor bounds to an evidence-gate projection. Each
+group keeps catalogue, observed-activity, transport-completion, evaluation, safety, and release
+gates separate, including the exact observed tools and refusal/completion counts. The overall
+state is `catalogue_blocked`, `insufficient_evidence`, or `review_required`; even a complete
+local evidence set requires domain-authority review and is returned with `readiness_claimed: false`.
+The channel classifier is an exact, documented tool-name projection; it does not execute tools or
+infer scientific validity, clinical safety, or deployment authorization.
 
 ## Asynchronous missions
 

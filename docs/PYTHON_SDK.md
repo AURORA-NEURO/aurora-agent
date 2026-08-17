@@ -570,6 +570,10 @@ invent defaults:
   `operations_domain_activity(after=..., limit=...)` returns typed per-domain activity rows with
   explicit event-cursor scope, exact observed tools, and catalogue-gap/unobserved distinctions;
   it is activity evidence rather than a readiness claim.
+  `operations_domain_gates(after=..., limit=...)` returns typed per-domain evidence gates for
+  catalogue, activity, transport completion, evaluation, safety, and release channels. Gate rows
+  retain refusal/completion evidence and remain `insufficient_evidence` or `review_required`
+  until a separate authority reviews them; the typed response enforces `readiness_claimed: false`.
   `rebind_subscription(...)` supplies a secret in memory,
   re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the

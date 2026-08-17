@@ -82,6 +82,7 @@ from .events import (
     OperationsSnapshot,
     OperationsHandoff,
     OperationsDomainActivity,
+    OperationsDomainGates,
     RecoveryMatrix,
     RouteReviewEvidence,
     SseSnapshot,
@@ -3477,6 +3478,25 @@ class ApiClient:
             self.request("GET", f"/v1/operations/domains?after={after}&limit={limit}")
         )
 
+    def operations_domain_gates(
+        self, *, after: int = 0, limit: int = 100
+    ) -> OperationsDomainGates:
+        """Return bounded per-domain evidence gates without claiming readiness."""
+
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= MAX_OPERATIONS_SNAPSHOT_LIMIT
+        ):
+            raise ArgumentError(
+                f"limit must be between 1 and {MAX_OPERATIONS_SNAPSHOT_LIMIT}"
+            )
+        return OperationsDomainGates.from_wire(
+            self.request("GET", f"/v1/operations/gates?after={after}&limit={limit}")
+        )
+
     def flush_event_persistence(self) -> EventPersistenceStatus:
         """Force an event cursor checkpoint and return typed bounded status."""
 
@@ -3810,6 +3830,15 @@ class AsyncApiClient:
 
         return await asyncio.to_thread(
             self.client.operations_domain_activity, after=after, limit=limit
+        )
+
+    async def operations_domain_gates(
+        self, *, after: int = 0, limit: int = 100
+    ) -> OperationsDomainGates:
+        """Async typed evidence gates with an explicit bounded event cursor."""
+
+        return await asyncio.to_thread(
+            self.client.operations_domain_gates, after=after, limit=limit
         )
 
     async def flush_event_persistence(self) -> EventPersistenceStatus:

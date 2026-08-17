@@ -7315,6 +7315,50 @@ export interface OperationsDomainActivity extends JsonObject {
   links: Record<string, string>;
 }
 
+export interface OperationsDomainGateGroup extends OperationsDomainGroup {
+  gate_state: "catalogue_blocked" | "insufficient_evidence" | "review_required";
+  readiness_claimed: false;
+  gates: Record<string, JsonObject>;
+  last_event_id: number | null;
+  evidence_scope: "requested_event_page_only";
+}
+
+export interface OperationsDomainGates extends JsonObject {
+  ok: boolean;
+  workflow: "operations_domain_gates";
+  schema: "bioprism-operations-domain-gates/0.1";
+  event_cursor: {
+    after: number;
+    next_after: number;
+    oldest: number | null;
+    newest: number | null;
+    gap: boolean;
+    dropped_events: number;
+    returned_events: number;
+  };
+  groups: OperationsDomainGateGroup[];
+  summary: {
+    group_count: number;
+    returned_groups: number;
+    tool_events_scanned: number;
+    attributed_tool_events: number;
+    unattributed_tool_events: number;
+    completed_tool_events: number;
+    refused_tool_events: number;
+    evaluation_evidence_events: number;
+    safety_evidence_events: number;
+    release_evidence_events: number;
+    groups_blocked_catalogue: number;
+    groups_insufficient_evidence: number;
+    groups_review_required: number;
+    readiness_claimed: false;
+  };
+  gate_policy: JsonObject;
+  guarantees: string[];
+  non_claims: string[];
+  links: Record<string, string>;
+}
+
 export interface OperationsSnapshot extends JsonObject {
   ok: boolean;
   schema: "bioprism-operations-snapshot/0.1";
