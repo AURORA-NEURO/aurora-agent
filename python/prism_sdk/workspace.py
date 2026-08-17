@@ -52,6 +52,11 @@ from .source_adapter import (
     SourceAdapterProjectionResult,
     project_source_execution,
 )
+from .domain_evidence_pipeline import (
+    DomainEvidencePipelineRequest,
+    DomainEvidencePipelineResult,
+    project_domain_source_execution,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -2157,6 +2162,28 @@ class Workspace:
             else SourceAdapterProjectionRequest(**dict(request))
         )
         return project_source_execution(normalized_execution, normalized_request, runtime=runtime)
+
+    def domain_evidence_source_project_for_domain(
+        self,
+        catalogue: DomainAcquisitionReport | Mapping[str, Any],
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: DomainEvidencePipelineRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> DomainEvidencePipelineResult:
+        """Project a source envelope only when its adapter is declared for the selected domain."""
+
+        normalized_request = (
+            request
+            if isinstance(request, DomainEvidencePipelineRequest)
+            else DomainEvidencePipelineRequest(**dict(request))
+        )
+        normalized_execution = (
+            execution.to_dict()
+            if isinstance(execution, DomainEvidenceSourceExecutionReport)
+            else dict(execution)
+        )
+        return project_domain_source_execution(catalogue, normalized_execution, normalized_request, runtime=runtime)
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         """Audit exact identity agreement across the bounded artifact stores."""
@@ -5587,6 +5614,34 @@ class AsyncWorkspace:
         )
         return await asyncio.to_thread(
             project_source_execution,
+            normalized_execution,
+            normalized_request,
+            runtime=runtime,
+        )
+
+    async def domain_evidence_source_project_for_domain(
+        self,
+        catalogue: DomainAcquisitionReport | Mapping[str, Any],
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: DomainEvidencePipelineRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> DomainEvidencePipelineResult:
+        """Project a source envelope through a catalogue-bound adapter route locally."""
+
+        normalized_request = (
+            request
+            if isinstance(request, DomainEvidencePipelineRequest)
+            else DomainEvidencePipelineRequest(**dict(request))
+        )
+        normalized_execution = (
+            execution.to_dict()
+            if isinstance(execution, DomainEvidenceSourceExecutionReport)
+            else dict(execution)
+        )
+        return await asyncio.to_thread(
+            project_domain_source_execution,
+            catalogue,
             normalized_execution,
             normalized_request,
             runtime=runtime,

@@ -56,6 +56,11 @@ from .source_adapter import (
     SourceAdapterProjectionResult,
     project_source_execution,
 )
+from .domain_evidence_pipeline import (
+    DomainEvidencePipelineRequest,
+    DomainEvidencePipelineResult,
+    project_domain_source_execution,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -1000,6 +1005,28 @@ class ApiClient:
             else SourceAdapterProjectionRequest(**dict(request))
         )
         return project_source_execution(normalized_execution, normalized_request, runtime=runtime)
+
+    def domain_evidence_source_project_for_domain(
+        self,
+        catalogue: DomainAcquisitionReport | Mapping[str, Any],
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: DomainEvidencePipelineRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> DomainEvidencePipelineResult:
+        """Project a source envelope only when the selected adapter is declared for its domain."""
+
+        normalized_request = (
+            request
+            if isinstance(request, DomainEvidencePipelineRequest)
+            else DomainEvidencePipelineRequest(**dict(request))
+        )
+        normalized_execution = (
+            execution.to_dict()
+            if isinstance(execution, DomainEvidenceSourceExecutionReport)
+            else dict(execution)
+        )
+        return project_domain_source_execution(catalogue, normalized_execution, normalized_request, runtime=runtime)
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
         """Read the deterministic workflow template for every capability group."""
@@ -4839,6 +4866,24 @@ class AsyncApiClient:
 
         return await asyncio.to_thread(
             self.client.domain_evidence_source_project,
+            execution,
+            request,
+            runtime=runtime,
+        )
+
+    async def domain_evidence_source_project_for_domain(
+        self,
+        catalogue: DomainAcquisitionReport | Mapping[str, Any],
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: DomainEvidencePipelineRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> DomainEvidencePipelineResult:
+        """Project a source envelope through a catalogue-bound adapter route locally."""
+
+        return await asyncio.to_thread(
+            self.client.domain_evidence_source_project_for_domain,
+            catalogue,
             execution,
             request,
             runtime=runtime,

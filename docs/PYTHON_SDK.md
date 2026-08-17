@@ -77,6 +77,13 @@ digest when supplied, and retains source-plan/response/raw digests in a separate
 context rather than mislabeling them as parser provenance. A partial transport outcome remains
 partial even when the nested format audit succeeds; invalid, lossy, blocked, and refused parser
 states remain distinct.
+`DomainEvidencePipelineRequest`, `DomainEvidencePipelineResult`, and
+`project_domain_source_execution()` add the catalogue-bound variant. It requires the exact
+catalogue digest, source-plan digest, group, domain, and adapter id; refuses incomplete or
+truncated catalogue slices and cross-domain execution envelopes; and preserves the selected route
+in the result. The four client facades expose `domain_evidence_source_project_for_domain()` as
+the same local operation. This is a routing/conformance gate, not an ontology resolver or a
+scientific authorization decision.
 
 ## Lifecycle
 

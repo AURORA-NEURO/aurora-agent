@@ -30,6 +30,15 @@ from .source_adapter import (
     SourceAdapterProjectionStatus,
     project_source_execution,
 )
+from .domain_evidence_pipeline import (
+    DOMAIN_EVIDENCE_PIPELINE_SCHEMA,
+    DOMAIN_EVIDENCE_PIPELINE_WORKFLOW,
+    MAX_PIPELINE_LABEL_BYTES,
+    DomainEvidencePipelineRequest,
+    DomainEvidencePipelineResult,
+    DomainEvidencePipelineStatus,
+    project_domain_source_execution,
+)
 from .analytics import (
     AnalyticsDirection,
     AnalyticsEvidence,
@@ -2020,6 +2029,12 @@ __all__ = [
     "SourceAdapterProjectionRequest",
     "SourceAdapterProjectionResult",
     "SourceAdapterProjectionStatus",
+    "DOMAIN_EVIDENCE_PIPELINE_SCHEMA",
+    "DOMAIN_EVIDENCE_PIPELINE_WORKFLOW",
+    "MAX_PIPELINE_LABEL_BYTES",
+    "DomainEvidencePipelineRequest",
+    "DomainEvidencePipelineResult",
+    "DomainEvidencePipelineStatus",
     "DOMAIN_ACQUISITION_SCHEMA",
     "DOMAIN_ACQUISITION_WORKFLOW",
     "MAX_DOMAIN_ACQUISITION_DOMAINS",
@@ -3672,6 +3687,7 @@ __all__ = [
     "audit_fhir",
     "execute_projection",
     "execute_projection_batch",
+    "project_domain_source_execution",
     "project_source_execution",
     "ProjectionBatchRequest",
     "ProjectionBatchResult",

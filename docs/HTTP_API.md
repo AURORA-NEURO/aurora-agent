@@ -237,6 +237,11 @@ handoff never fetches the locator again, verifies an optional raw-byte digest, r
 omitted/binary/preview/truncated bodies, and preserves source transport digests separately from
 parser provenance. A partial source outcome remains partial even when the nested parser accepts
 the available body.
+The Python SDK also offers a catalogue-bound local handoff that requires the exact acquisition
+catalogue digest, source-plan digest, group, domain, and declared adapter route before invoking
+the parser. This prevents a valid adapter from being reused for a different declared domain or
+from being selected from a truncated catalogue slice; it remains a routing/conformance check,
+not ontology resolution or scientific authorization.
 `POST /v1/tools/domain_acquisition_catalogue` exposes the cross-domain route registry. Its
 digest-bound report returns one row for every selected declared domain, with transport and
 interpretation kept separate: bounded file/plain-HTTP transport, caller-managed connector
