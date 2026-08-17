@@ -304,6 +304,11 @@ silently falling back or sniffing content.
 Its heterogeneous batch envelope now aggregates status, adapter, failure, validity, publishability,
 scope, and semantic-loss evidence while retaining member digests and explicit omitted-request state;
 stop-on-error batches are never marked accepted as complete.
+Every runtime result can now be projected into the shared `adapter_execution_evidence` request
+with explicit subject/source/input identity, output digest, conformance status, semantic-loss
+entries, refusal code, and parent lineage. Batch conversion requires a source-digest map for every
+member, keeping concrete format execution and durable cross-domain evidence as separate but
+composable planes.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

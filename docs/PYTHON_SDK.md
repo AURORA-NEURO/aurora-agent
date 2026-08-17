@@ -1087,6 +1087,14 @@ separate status, loss, join, output, and missing-parent counts without inventing
   totals, semantic-loss summaries, scope dimensions, document digests, and a batch digest; optional
   stop-on-error execution reports omitted requests and marks the aggregate unaccepted instead of
   making an incomplete batch look complete.
+`AdapterExecutionResult.to_adapter_execution_evidence_request(...)` converts each declared
+runtime result into the shared digest-bound caller-evidence request. It requires explicit
+subject and source/input identity (including the source digest), preserves the adapter
+descriptor/version, maps refusal and dependency outcomes, carries document output digests and
+semantic-loss entries, and never infers source-byte identity from an inline payload or locator.
+`ProjectionBatchResult.to_adapter_execution_evidence_requests(...)` requires one digest per source
+id and one explicit subject id so heterogeneous batches cannot silently omit evidence members or
+conflate source and subject identity.
 - `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
   installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full

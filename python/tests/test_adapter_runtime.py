@@ -131,6 +131,14 @@ class AdapterRuntimeTests(unittest.TestCase):
                 self.assertIn(result.status, {RuntimeStatus.SUCCEEDED, RuntimeStatus.LOSSY})
                 self.assertEqual(len(result.document_digest or ""), 64)
                 self.assertNotIn(VCF, str(result.to_wire()["request"]))
+                evidence = result.to_adapter_execution_evidence_request(
+                    "biological_domains",
+                    ("genomics",),
+                    subject_id=f"subject-{adapter_id.rsplit('.', 1)[-1]}",
+                    input_digest="f" * 64,
+                )
+                self.assertEqual(evidence.adapter_id, adapter_id)
+                self.assertEqual(evidence.source_id, f"source-{adapter_id.rsplit('.', 1)[-1]}")
 
     def test_heterogeneous_batch_is_deterministic_and_preserves_member_documents(self) -> None:
         requests = (
@@ -164,6 +172,67 @@ class AdapterRuntimeTests(unittest.TestCase):
         self.assertGreater(first.to_wire()["semantic_loss"]["declared_loss_count"], 0)
         self.assertNotIn(VCF, str(first.to_wire()["request"]))
         self.assertEqual(first.to_wire()["result_count"], 2)
+
+    def test_runtime_results_bridge_into_shared_adapter_execution_evidence(self) -> None:
+        result = AdapterRuntime().execute(
+            ProjectionRequest(
+                "bioprism.python.vcf_text",
+                "bridge-vcf",
+                {"text": VCF, "reference_build": "GRCh38"},
+            )
+        )
+        evidence = result.to_adapter_execution_evidence_request(
+            "biological_domains",
+            ("genomics",),
+            subject_id="subject-bridge-vcf",
+            input_digest="a" * 64,
+            parent_digests=("b" * 64,),
+            attempt_id="attempt-bridge-vcf",
+        )
+        self.assertEqual(evidence.adapter_id, "bioprism.python.vcf_text")
+        self.assertEqual(evidence.execution_status, "partial")
+        self.assertEqual(evidence.conformance_status, "verified")
+        self.assertEqual(evidence.semantic_loss_status, "lossy")
+        self.assertEqual(evidence.output_digest, result.document_digest)
+        self.assertGreaterEqual(len(evidence.losses), 1)
+        self.assertEqual(evidence.parent_digests, ("b" * 64,))
+
+        rejected = AdapterRuntime().execute(
+            ProjectionRequest("bioprism.python.vcf_text", "bridge-rejected", {"text": 17})
+        )
+        rejected_evidence = rejected.to_adapter_execution_evidence_request(
+            "biological_domains", ("genomics",), subject_id="subject-rejected", input_digest="c" * 64
+        )
+        self.assertEqual(rejected_evidence.execution_status, "refused")
+        self.assertEqual(rejected_evidence.conformance_status, "refused")
+        self.assertEqual(rejected_evidence.error_code, "argument_error")
+
+    def test_batch_results_require_explicit_per_source_digests_for_evidence(self) -> None:
+        batch = execute_projection_batch(
+            (
+                ProjectionRequest("bioprism.python.vcf_text", "batch-bridge-vcf", {"text": VCF}, max_items=10),
+                ProjectionRequest(
+                    "bioprism.python.fhir_manifest",
+                    "batch-bridge-fhir",
+                    {"document": {"resourceType": "Patient", "id": "patient-1"}},
+                    max_items=10,
+                ),
+            ),
+            max_total_items=20,
+        )
+        evidence = batch.to_adapter_execution_evidence_requests(
+            "biological_domains",
+            ("genomics",),
+            subject_id="subject-batch",
+            input_digests={"batch-bridge-vcf": "d" * 64, "batch-bridge-fhir": "e" * 64},
+        )
+        self.assertEqual(len(evidence), 2)
+        self.assertEqual(evidence[0].source_id, "batch-bridge-vcf")
+        self.assertEqual(evidence[1].source_id, "batch-bridge-fhir")
+        with self.assertRaises(ArgumentError):
+            batch.to_adapter_execution_evidence_requests(
+                "biological_domains", ("genomics",), subject_id="subject-batch", input_digests={"batch-bridge-vcf": "d" * 64}
+            )
 
     def test_batch_reports_partial_completion_and_preserves_refusal_evidence(self) -> None:
         good = ProjectionRequest(

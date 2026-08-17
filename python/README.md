@@ -151,6 +151,12 @@ each member's document, refusal state, digest, and semantic-loss classification.
 report adapter/failure counts, validity/publishability totals, scope dimensions, and visible versus
 omitted semantic-loss evidence. Batch limits and stop-on-error omissions are explicit, and an
 incomplete batch is not accepted as complete.
+Each `AdapterExecutionResult` can be converted with
+`to_adapter_execution_evidence_request(...)` into the shared MCP/HTTP evidence handoff. The
+bridge requires caller-supplied subject identity and source/input digests, retains output and
+semantic-loss evidence, and preserves rejected, blocked, and dependency-missing outcomes. Batch
+conversion requires a digest map for every source id, so evidence coverage cannot be inferred from
+successful members or from source/subject label overlap.
 When installed, `read_nifti_header()` and `read_anndata_projection()` provide verified raw-file
 bindings for nibabel and anndata-backed H5AD/Zarr metadata. They feed the same auditors without
 loading image arrays or matrix values; missing optional packages remain typed refusals.
