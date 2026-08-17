@@ -18,6 +18,7 @@ use crate::domain_evidence_intake::{
     validate_domain_evidence_intake, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
 };
 use crate::domain_evidence_provider::DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA;
+use crate::domain_evidence_provider_external::DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA;
 use crate::domain_evidence_provider_handoff::DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA;
 use crate::domain_evidence_source::{
     validate_domain_evidence_source_plan, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
@@ -54,6 +55,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_evidence_intake",
     "domain_evidence_provider_replay",
     "domain_evidence_provider_handoff",
+    "domain_evidence_provider_external_payload",
     "domain_evidence_source_plan",
     "external_reference",
 ];
@@ -736,6 +738,41 @@ fn verify_known_artifact(
                 }),
             ))
         }
+        "domain_evidence_provider_external_payload" => {
+            let object = artifact.as_object().ok_or_else(|| {
+                ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider external payload receipt must be an object".into(),
+                )
+            })?;
+            if object.get("schema").and_then(Value::as_str)
+                != Some(DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA)
+            {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider external payload receipt schema is unsupported"
+                        .into(),
+                ));
+            }
+            let declared = required_digest(object, "receipt_digest")?;
+            let mut unsigned = artifact.clone();
+            unsigned
+                .as_object_mut()
+                .expect("external payload receipt object was checked above")
+                .remove("receipt_digest");
+            let recomputed = content_digest(&unsigned)?;
+            if declared != recomputed {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "receipt_digest does not match the record contents".into(),
+                ));
+            }
+            Ok((
+                Some(declared.clone()),
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_evidence_provider_external_payload_digest",
+                    "receipt_digest": declared
+                }),
+            ))
+        }
         "domain_evidence_source_plan"
             if artifact.get("schema").and_then(Value::as_str)
                 == Some(DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION) =>
@@ -1056,6 +1093,51 @@ mod tests {
         };
         handoff["handoff_digest"] = json!(digest.clone());
         let mut request = artifact("domain_evidence_provider_handoff", "provider-1", handoff);
+        request["declared_digest"] = json!(digest);
+        let mut registry = ArtifactRegistry::new();
+        assert_eq!(registry.register(&request).unwrap()["created"], true);
+        let restored = ArtifactRegistry::from_snapshot(&registry.snapshot().unwrap()).unwrap();
+        assert_eq!(restored.len(), 1);
+    }
+
+    #[test]
+    fn external_payload_receipts_reverify_their_declared_digest_on_restore() {
+        let mut receipt = json!({
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
+            "workflow": "domain_evidence_provider_external_payload_receipt",
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-1",
+            "source_tool": "literature_bind_check",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "handoff_digest": "a".repeat(64),
+            "transfer_id": "transfer-1",
+            "payload_digest": "b".repeat(64),
+            "byte_length": 4096,
+            "storage_backend": "object_store",
+            "locator_kind": "opaque",
+            "locator": "store://object/1",
+            "content_type": null,
+            "content_encoding": null,
+            "request_digest": null,
+            "parent_digests": [],
+            "availability": "available",
+            "retention": "durable",
+            "attempt_id": null,
+            "receipt_digest": ""
+        });
+        let digest = {
+            let mut unsigned = receipt.clone();
+            unsigned.as_object_mut().unwrap().remove("receipt_digest");
+            ContentHash::of_value(&unsigned).unwrap().to_string()
+        };
+        receipt["receipt_digest"] = json!(digest.clone());
+        let mut request = artifact(
+            "domain_evidence_provider_external_payload",
+            "provider-1",
+            receipt,
+        );
         request["declared_digest"] = json!(digest);
         let mut registry = ArtifactRegistry::new();
         assert_eq!(registry.register(&request).unwrap()["created"], true);

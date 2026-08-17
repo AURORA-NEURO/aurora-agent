@@ -74,6 +74,11 @@ from .domain_evidence_provider_handoff import (
     DomainEvidenceProviderHandoffRequest,
     domain_evidence_provider_handoff_report,
 )
+from .domain_evidence_provider_external import (
+    DomainEvidenceProviderExternalPayloadReceiptReport,
+    DomainEvidenceProviderExternalPayloadReceiptRequest,
+    domain_evidence_provider_external_payload_receipt_report,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -1134,6 +1139,40 @@ class ApiClient:
         return domain_evidence_provider_handoff_report(
             self.call_tool(
                 "domain_evidence_provider_connector_handoff", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_receipt(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReceiptRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
+        """Retain metadata for an out-of-line provider payload through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadReceiptRequest)
+            else DomainEvidenceProviderExternalPayloadReceiptRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_receipt_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_receipt",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_receipt_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReceiptRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadReceiptRequest)
+            else DomainEvidenceProviderExternalPayloadReceiptRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_receipt_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_receipt", normalized.to_mcp_arguments()
             )
         )
 
@@ -5036,6 +5075,22 @@ class AsyncApiClient:
     ) -> DomainEvidenceProviderHandoffReport:
         return await asyncio.to_thread(
             self.client.domain_evidence_provider_connector_handoff_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_receipt(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReceiptRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_receipt, request
+        )
+
+    async def domain_evidence_provider_external_payload_receipt_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReceiptRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_receipt_tool, request
         )
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:

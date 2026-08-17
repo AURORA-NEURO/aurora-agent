@@ -130,12 +130,13 @@ use bioprism_devplat::{
     execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload,
     normalize_domain_evidence_provider, plan_domain_evidence_source, plan_mission,
-    reconcile_domain_workflow, run_workbench, scaffold_domain_workflow, standard_walkthroughs,
-    verify_delivery_receipt, verify_domain_evidence_provider_replay,
-    verify_mission_evidence_bundle, ArtifactRegistry, CapabilityCatalogue,
-    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
-    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
-    DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
+    reconcile_domain_workflow, record_domain_evidence_provider_external_payload, run_workbench,
+    scaffold_domain_workflow, standard_walkthroughs, verify_delivery_receipt,
+    verify_domain_evidence_provider_replay, verify_mission_evidence_bundle, ArtifactRegistry,
+    CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
+    CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
+    DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
+    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadReceiptRequest,
     DomainEvidenceProviderHandoffRequest, DomainEvidenceProviderNormalizationRequest,
     DomainEvidenceProviderReplayRequest, DomainWorkflowReconciliationRegistry, EngineeringManifest,
     EngineeringPlanRequest, EvidenceBundleRegistry, ExecutionProvenanceRequest,
@@ -148,18 +149,19 @@ use bioprism_devplat::{
     DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
     DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
     DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
-    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW,
-    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
-    DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW,
-    DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
-    DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW,
-    DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION, DOMAIN_REPORT_COVERAGE_WORKFLOW,
-    DOMAIN_REPORT_PROJECT_SCHEMA_VERSION, DOMAIN_REPORT_PROJECT_WORKFLOW,
-    DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA,
-    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS, MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION,
-    OPERATIONAL_READINESS_AUDIT_SCHEMA, RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA,
-    SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
-    WORKBENCH_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
+    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
+    ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
+    SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1392,6 +1394,9 @@ impl Server {
             }
             "domain_evidence_provider_connector_handoff" => {
                 self.domain_evidence_provider_connector_handoff(&arguments)
+            }
+            "domain_evidence_provider_external_payload_receipt" => {
+                self.domain_evidence_provider_external_payload_receipt(&arguments)
             }
             "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
@@ -3572,6 +3577,64 @@ impl Server {
             "does_not_claim": [
                 "plugin launch, provider authentication, authorization, or network execution",
                 "provider authenticity, retrieval completeness, or payload correctness",
+                "scientific, clinical, causal, provenance, regulatory, or release validity"
+            ]
+        }))
+    }
+
+    /// Retain caller-owned metadata for a large provider payload stored outside the core. The
+    /// receipt is an integrity/lineage record only; it never opens the locator or copies payload
+    /// bytes into MCP.
+    fn domain_evidence_provider_external_payload_receipt(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode external payload receipt input: {error}"))?;
+        if encoded.len() > 2_000_000 {
+            return Err(
+                "external payload receipt input exceeds the 2000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadReceiptRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid external payload receipt input: {error}"))?;
+        let receipt = record_domain_evidence_provider_external_payload(&request)
+            .map_err(|error| format!("external payload receipt refused: {error}"))?;
+        let artifact = serde_json::to_value(&receipt)
+            .map_err(|error| format!("cannot encode external payload receipt artifact: {error}"))?;
+        let mut parents = receipt.parent_digests.clone();
+        parents.push(receipt.handoff_digest.clone());
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload",
+                "subject_id": receipt.subject_id,
+                "domains": receipt.domains,
+                "parent_digests": parents,
+                "declared_digest": receipt.receipt_digest,
+                "artifact": artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW,
+            "receipt": receipt,
+            "handoff_digest": receipt.handoff_digest,
+            "payload_digest": receipt.payload_digest,
+            "receipt_digest": receipt.receipt_digest,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "the external payload is represented by exact digest, byte length, and transfer metadata",
+                "the locator remains caller-owned and the receipt can parent later normalization",
+                "the durable registry retains the receipt without copying payload bytes"
+            ],
+            "does_not_claim": [
+                "store accessibility, retention, payload availability, or transfer completion beyond caller status",
+                "payload authenticity, provider authenticity, decryption, or independent byte inspection",
                 "scientific, clinical, causal, provenance, regulatory, or release validity"
             ]
         }))
@@ -30067,6 +30130,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_provider_normalize",
         "domain_evidence_provider_replay_verify",
         "domain_evidence_provider_connector_handoff",
+        "domain_evidence_provider_external_payload_receipt",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -30485,6 +30549,37 @@ pub fn tool_definitions() -> Vec<Value> {
                     "attempt_id": { "type": ["string", "null"] }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "manifest"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_receipt",
+            "description": "Retain a digest-bound receipt for a large caller-managed provider payload stored outside the MCP core. The receipt records exact payload digest, byte length, transfer identity, storage backend, locator class, media metadata, availability, retention, and connector-handoff parent without fetching or copying payload bytes.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning this external payload receipt." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string", "description": "Caller-declared provider label; it is not authenticated here." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string", "description": "Digest of the retained caller-managed connector handoff." },
+                    "transfer_id": { "type": "string", "description": "Caller-owned transfer or export attempt identity." },
+                    "payload_digest": { "type": "string", "description": "Lowercase SHA-256 digest of the out-of-line payload bytes or canonical payload representation." },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string", "description": "Caller-owned locator/reference; embedded credentials and control line breaks are refused." },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"], "default": "unknown" },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"], "default": "unknown" },
+                    "attempt_id": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator"]
             }
         }),
         json!({

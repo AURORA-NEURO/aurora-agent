@@ -10,6 +10,10 @@ typed manifest records connector scope, capabilities, caller-asserted authentica
 opaque secret references only. The client rejects credential material, validates lowercase digest
 parents, and preserves the server's `not_started`/readiness-false boundary; plugin launch,
 authentication, network access, and provider validity remain caller responsibilities.
+`domainEvidenceProviderExternalPayloadReceipt()` provides the corresponding large-payload path:
+only the payload digest, byte length, transfer identity, storage/locator metadata, and handoff
+parent cross the API boundary. Payload bytes, credentials, and fetch authority remain outside the
+core, while `available`, `durable`, and `not_started` stay explicitly typed.
 
 The repository ships `typescript/`, a small ESM package for clients that can use the standard
 Fetch API. It is intentionally an integration layer over `bioprism-api`, not a second domain

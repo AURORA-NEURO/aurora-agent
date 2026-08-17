@@ -21,6 +21,7 @@ ARTIFACT_KINDS = (
     "domain_evidence_harmonization",
     "domain_evidence_intake",
     "domain_evidence_provider_handoff",
+    "domain_evidence_provider_external_payload",
     "domain_evidence_source_plan",
     "external_reference",
 )

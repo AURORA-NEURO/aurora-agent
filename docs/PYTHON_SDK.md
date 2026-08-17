@@ -112,6 +112,12 @@ caller-managed plugin boundary. They retain connector scope, capabilities, opaqu
 status, and digest parents through `ApiClient`, `AsyncApiClient`, `Workspace`, and
 `AsyncWorkspace`; unsupported credential fields fail locally, and every returned handoff remains
 `not_started` with readiness false until a separate caller-owned executor performs work.
+`DomainEvidenceProviderExternalPayloadReceiptRequest` and
+`DomainEvidenceProviderExternalPayloadReceiptReport` handle the out-of-line variant for large
+provider results. They carry only a caller locator/reference, exact lowercase payload digest,
+byte length, transfer id, storage/retention/availability metadata, and handoff parent. REST,
+MCP-tool, sync, async, and workspace helpers reject embedded credentials and payload material;
+the receipt does not prove that the external object can be fetched or decrypted.
 
 ## Lifecycle
 

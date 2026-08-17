@@ -5146,6 +5146,79 @@ export interface DomainEvidenceProviderHandoffResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export type DomainEvidenceProviderExternalPayloadStorageBackend = "object_store" | "file" | "database" | "caller_managed";
+export type DomainEvidenceProviderExternalPayloadLocatorKind = "opaque" | "uri" | "path";
+export type DomainEvidenceProviderExternalPayloadAvailability = "available" | "partial" | "missing" | "unknown";
+export type DomainEvidenceProviderExternalPayloadRetention = "ephemeral" | "durable" | "unknown";
+
+export interface DomainEvidenceProviderExternalPayloadReceiptArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  handoff_digest: string;
+  transfer_id: string;
+  payload_digest: string;
+  byte_length: number;
+  storage_backend: DomainEvidenceProviderExternalPayloadStorageBackend;
+  locator_kind: DomainEvidenceProviderExternalPayloadLocatorKind;
+  locator: string;
+  content_type?: string | null;
+  content_encoding?: string | null;
+  request_digest?: string | null;
+  parent_digests?: string[];
+  availability?: DomainEvidenceProviderExternalPayloadAvailability;
+  retention?: DomainEvidenceProviderExternalPayloadRetention;
+  attempt_id?: string | null;
+}
+
+export interface DomainEvidenceProviderExternalPayloadReceipt extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-receipt/0.1";
+  workflow: "domain_evidence_provider_external_payload_receipt";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  handoff_digest: string;
+  transfer_id: string;
+  payload_digest: string;
+  byte_length: number;
+  storage_backend: DomainEvidenceProviderExternalPayloadStorageBackend;
+  locator_kind: DomainEvidenceProviderExternalPayloadLocatorKind;
+  locator: string;
+  content_type: string | null;
+  content_encoding: string | null;
+  request_digest: string | null;
+  parent_digests: string[];
+  availability: DomainEvidenceProviderExternalPayloadAvailability;
+  retention: DomainEvidenceProviderExternalPayloadRetention;
+  attempt_id: string | null;
+  receipt_digest: string;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadReceiptResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-receipt/0.1";
+  workflow: "domain_evidence_provider_external_payload_receipt";
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  handoff_digest: string;
+  payload_digest: string;
+  receipt_digest: string;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
   candidate_fields: string[];
   present_record_count: number;

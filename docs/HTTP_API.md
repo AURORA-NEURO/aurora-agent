@@ -248,7 +248,7 @@ interpretation kept separate: bounded file/plain-HTTP transport, caller-managed 
 families, native adapter matches, Python-delegated adapter matches, domain-tool-only rows, and
 unmapped rows are distinct. Adapter matches are based only on declared scope-label overlap and
 carry the adapter registry digest; they do not resolve ontologies, execute adapters, verify
-dependencies, or claim scientific/clinical validity. The seven evidence transport/intake/provider
+dependencies, or claim scientific/clinical validity. The eight evidence transport/intake/provider
 tools are explicitly cross-cutting memberships for all 29 groups, so existing source-plan,
 provider, and intake scope checks can be used for every declared domain rather than only
 infrastructure domains.
@@ -276,6 +276,12 @@ as `domain_evidence_provider_handoff`; it always reports `execution: not_started
 `readiness_claimed: false`. The core never launches a plugin, resolves credentials, authenticates
 or contacts a provider, and rejects credential material rather than serializing it into the
 artifact.
+`POST /v1/tools/domain_evidence_provider_external_payload_receipt` is the out-of-line transfer
+seam for payloads too large or sensitive to send through MCP. It stores only an exact payload
+digest, byte length, transfer identity, storage backend, locator class/reference, media metadata,
+availability, retention, and the connector-handoff parent. The receipt is durably indexed and
+snapshot-verified, but the core never opens the locator, fetches, decrypts, or inspects the bytes;
+`available` and `durable` remain caller assertions until an external executor proves otherwise.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

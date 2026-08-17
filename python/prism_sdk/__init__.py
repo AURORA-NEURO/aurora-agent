@@ -75,6 +75,19 @@ from .domain_evidence_provider_handoff import (
     DomainEvidenceProviderHandoffRequest,
     domain_evidence_provider_handoff_report,
 )
+from .domain_evidence_provider_external import (
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_AVAILABILITIES,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_CONNECTOR_KINDS,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LOCATOR_KINDS,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_RETENTIONS,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_STORAGE_BACKENDS,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_BYTES,
+    DomainEvidenceProviderExternalPayloadReceiptReport,
+    DomainEvidenceProviderExternalPayloadReceiptRequest,
+    domain_evidence_provider_external_payload_receipt_report,
+)
 from .analytics import (
     AnalyticsDirection,
     AnalyticsEvidence,
