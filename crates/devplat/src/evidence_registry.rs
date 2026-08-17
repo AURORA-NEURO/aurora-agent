@@ -61,6 +61,11 @@ impl EvidenceBundleRegistry {
         self.bundles.is_empty()
     }
 
+    /// Return deterministic digest identities without exposing bundle bodies.
+    pub fn digests_for_audit(&self) -> Vec<String> {
+        self.bundles.keys().cloned().collect()
+    }
+
     /// Import one bundle after independently verifying every integrity and retention check.
     pub fn import(&mut self, bundle: &Value) -> Result<Value, EvidenceRegistryError> {
         if !bundle.is_object() {

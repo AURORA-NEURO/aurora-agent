@@ -729,6 +729,29 @@ fn artifact_registry_audit_joins_cross_domain_records_without_inventing_provenan
         .unwrap()
         .iter()
         .any(|item| item == "parent presence proves causal provenance or scientific validity"));
+    let cross_store = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({"operation": "cross_store"}),
+    );
+    assert_eq!(
+        cross_store["workflow"],
+        json!("artifact_registry_cross_store_audit")
+    );
+    assert_eq!(cross_store["consistent"], json!(true));
+    assert_eq!(
+        cross_store["coverage"]["mission_evidence_bundle"]["complete"],
+        json!(true)
+    );
+    assert_eq!(
+        cross_store["stores"]["artifact_registry"]["record_count"],
+        json!(2)
+    );
+    assert!(cross_store["does_not_claim"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "the three stores were read in one atomic transaction"));
 }
 
 #[test]
@@ -6688,7 +6711,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
             },
             "policy": "normative",
             "include_markdown": true,
-            "max_markdown_chars": 100000
+            "max_markdown_chars": 120000
         }),
     );
     assert_eq!(payload["ok"], json!(true));

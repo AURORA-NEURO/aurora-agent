@@ -14,6 +14,7 @@ from .analytics import (
 )
 from .authoring import PackArtifact
 from .artifacts import (
+    ArtifactCrossStoreAuditReport,
     ArtifactGetReport,
     ArtifactGetRequest,
     ArtifactLineageReport,
@@ -1981,6 +1982,13 @@ class Workspace:
         """Register, query, fetch, or traverse bounded cross-domain artifacts through MCP."""
 
         return self.tool("artifact_registry_audit", arguments)
+
+    def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
+        """Audit exact identity agreement across the bounded artifact stores."""
+
+        return ArtifactCrossStoreAuditReport.from_wire(
+            self.artifact_registry_audit({"operation": "cross_store"})
+        )
 
     def artifact_register(
         self,
@@ -5240,6 +5248,11 @@ class AsyncWorkspace:
         arguments: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         return await self.tool("artifact_registry_audit", arguments)
+
+    async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
+        return ArtifactCrossStoreAuditReport.from_wire(
+            await self.artifact_registry_audit({"operation": "cross_store"})
+        )
 
     async def artifact_register(
         self,

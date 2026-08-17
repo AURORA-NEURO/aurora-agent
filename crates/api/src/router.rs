@@ -11,10 +11,11 @@ use crate::events::{
 };
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
-    verify_mission_evidence_bundle, ArtifactRegistry, ArtifactRegistryError,
-    DomainWorkflowReconciliationRegistry, EvidenceBundleError, EvidenceBundleRegistry,
-    EvidenceRegistryError, MissionEvaluatorCatalogue, MissionEvaluatorReplayCompareRequest,
-    MissionEvaluatorReplayRequest, MAX_ARTIFACT_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
+    build_cross_domain_audit, verify_mission_evidence_bundle, ArtifactRegistry,
+    ArtifactRegistryError, DomainWorkflowReconciliationRegistry, EvidenceBundleError,
+    EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
+    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MAX_ARTIFACT_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
 };
 use bioprism_factory::{
     AuthorityMutation, ExecutionOperation, Idempotency as FactoryIdempotency, Job as FactoryJob,
@@ -1292,6 +1293,7 @@ impl ApiRouter {
             ("GET", path) if path.starts_with("/v1/evidence-bundles/") => {
                 self.get_evidence_bundle(&request, &request_id)
             }
+            ("GET", "/v1/artifacts/cross-store") => self.cross_store_artifact_audit(&request_id),
             ("GET", "/v1/artifacts") => self.query_artifacts(&request, &request_id),
             ("POST", "/v1/artifacts") => self.register_artifact(&request, &request_id),
             ("GET", "/v1/artifacts/persistence") => self.artifact_persistence_status(),
@@ -5346,6 +5348,123 @@ impl ApiRouter {
         HttpResponse::json(if created { 201 } else { 200 }, &report)
     }
 
+    /// Compare the three bounded local registries by exact digest identity.
+    ///
+    /// The stores are sampled independently, so the response includes each generation and
+    /// checkpoint digest rather than implying a cross-store transaction.
+    fn cross_store_artifact_audit(&self, request_id: &str) -> HttpResponse {
+        let (artifact_records, artifact_generation, artifact_state_digest) = {
+            let registry = match self.artifact_registry.lock() {
+                Ok(registry) => registry,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "artifact_registry_unavailable",
+                        "artifact registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return self.error(
+                        500,
+                        "cross_domain_audit_unavailable",
+                        &format!("artifact registry snapshot failed: {error}"),
+                        request_id,
+                    )
+                }
+            };
+            (
+                registry.records_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (evidence_digests, evidence_generation, evidence_state_digest) = {
+            let registry = match self.evidence_registry.lock() {
+                Ok(registry) => registry,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "evidence_registry_unavailable",
+                        "evidence registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return self.error(
+                        500,
+                        "cross_domain_audit_unavailable",
+                        &format!("evidence registry snapshot failed: {error}"),
+                        request_id,
+                    )
+                }
+            };
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (reconciliation_digests, reconciliation_generation, reconciliation_state_digest) = {
+            let registry = match self.reconciliation_registry.lock() {
+                Ok(registry) => registry,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "reconciliation_registry_unavailable",
+                        "workflow reconciliation registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return self.error(
+                        500,
+                        "cross_domain_audit_unavailable",
+                        &format!("workflow reconciliation registry snapshot failed: {error}"),
+                        request_id,
+                    )
+                }
+            };
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        HttpResponse::json(
+            200,
+            &build_cross_domain_audit(
+                &artifact_records,
+                &evidence_digests,
+                &reconciliation_digests,
+                artifact_generation,
+                evidence_generation,
+                reconciliation_generation,
+                artifact_state_digest,
+                evidence_state_digest,
+                reconciliation_state_digest,
+            ),
+        )
+    }
+
     fn query_artifacts(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let query = match request.query() {
             Ok(query) => query,
@@ -6882,6 +7001,7 @@ impl ApiRouter {
                     "/v1/evidence-bundles/persistence": { "get": { "responses": { "200": { "description": "restart-aware evidence registry checkpoint status" } } } },
                     "/v1/evidence-bundles/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded evidence registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/artifacts": { "get": { "parameters": [{ "name": "kind", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "subject_id", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_artifacts", "in": "query" }], "responses": { "200": { "description": "bounded cross-domain artifact index query" } } }, "post": { "responses": { "201": { "description": "registered content-addressed artifact" }, "200": { "description": "idempotent artifact registration" } } } },
+                    "/v1/artifacts/cross-store": { "get": { "responses": { "200": { "description": "digest-only consistency audit across artifact, evidence, and workflow-reconciliation registries" } } } },
                     "/v1/artifacts/{content_digest}": { "get": { "parameters": [{ "name": "content_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one artifact record with verification posture" }, "404": { "description": "artifact digest is not present" } } } },
                     "/v1/artifacts/{content_digest}/lineage": { "get": { "parameters": [{ "name": "content_digest", "in": "path", "required": true }], "responses": { "200": { "description": "bounded parent lineage with explicit missing nodes and cycles" } } } },
                     "/v1/artifacts/persistence": { "get": { "responses": { "200": { "description": "restart-aware artifact registry checkpoint status" } } } },
@@ -11007,6 +11127,19 @@ mod tests {
         let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
         assert_eq!(restored_query["rows"].as_array().unwrap().len(), 2);
         assert_eq!(restored_query["registry_generation"], 2);
+        let cross_store = restored.handle(request("GET", "/v1/artifacts/cross-store", json!({})));
+        assert_eq!(cross_store.status, 200);
+        let cross_store: Value = serde_json::from_slice(&cross_store.body).unwrap();
+        assert_eq!(
+            cross_store["workflow"],
+            "artifact_registry_cross_store_audit"
+        );
+        assert_eq!(cross_store["consistent"], true);
+        assert_eq!(
+            cross_store["stores"]["artifact_registry"]["record_count"],
+            2
+        );
+        assert_eq!(cross_store["findings"], json!([]));
         let _ = std::fs::remove_file(path);
     }
 

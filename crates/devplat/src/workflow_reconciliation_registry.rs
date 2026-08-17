@@ -64,6 +64,11 @@ impl DomainWorkflowReconciliationRegistry {
         self.records.is_empty()
     }
 
+    /// Return deterministic reconciliation digest identities without exposing report bodies.
+    pub fn digests_for_audit(&self) -> Vec<String> {
+        self.records.keys().cloned().collect()
+    }
+
     /// Import one kernel-produced report. Re-importing the identical report is idempotent.
     pub fn import(
         &mut self,

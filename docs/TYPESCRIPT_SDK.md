@@ -75,11 +75,15 @@ list. `callTool` accepts any path-safe tool name and a JSON object, so a client 
 tools before the TypeScript package has a convenience method.
 
 The typed artifact registry facade covers `artifactRegister`, `artifactQuery`, `artifactGet`,
-`artifactLineage`, `artifactRegistryPersistence`, and `flushArtifactRegistryPersistence`, plus
+`artifactLineage`, `artifactCrossStoreAudit`, `artifactRegistryPersistence`, and `flushArtifactRegistryPersistence`, plus
 the generic `artifactRegistryAudit` MCP call. Artifact records are exact-content indexed and
 lineage responses preserve missing parent digests and cycles; the SDK does not promote index
 presence into causal provenance, scientific validity, clinical safety, publication authority, or
 external-effect completion.
+`artifactCrossStoreAudit` reports bounded exact-digest agreement across the artifact, evidence,
+and workflow-reconciliation stores, including missing projections, orphaned projections,
+wrong-kind findings, generations, and checkpoint identities. The stores are observed separately;
+the result is not a transaction or a completeness claim.
 
 Convenience methods currently cover:
 

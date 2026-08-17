@@ -62,6 +62,21 @@ test("artifact registry REST and MCP clients preserve lineage uncertainty", asyn
     guarantees: [],
     does_not_claim: ["parent presence proves causal provenance or scientific validity"],
   };
+  const crossStore = {
+    ok: true,
+    schema: "bioprism-devplat-cross-domain-artifact-audit/0.1",
+    workflow: "artifact_registry_cross_store_audit",
+    consistent: true,
+    bounded: true,
+    truncated: false,
+    stores: {},
+    coverage: {},
+    artifact_kind_counts: { domain_report: 1 },
+    findings: [],
+    execution: "not_started",
+    guarantees: [],
+    does_not_claim: ["the three stores were read in one atomic transaction"],
+  };
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",
     fetch: async (input, init = {}) => {
@@ -73,6 +88,7 @@ test("artifact registry REST and MCP clients preserve lineage uncertainty", asyn
       if (url.pathname === "/v1/artifacts") return jsonResponse(query);
       if (url.pathname === `/v1/artifacts/${digest}/lineage`) return jsonResponse(lineage);
       if (url.pathname === `/v1/artifacts/${digest}`) return jsonResponse(fetched);
+      if (url.pathname === "/v1/artifacts/cross-store") return jsonResponse(crossStore);
       if (url.pathname === "/v1/tools/artifact_registry_audit") return jsonResponse({ ok: true, tool: "artifact_registry_audit", mcp: { result: { structuredContent: lineage } } });
       throw new Error(`unexpected path ${url.pathname}`);
     },
@@ -81,5 +97,6 @@ test("artifact registry REST and MCP clients preserve lineage uncertainty", asyn
   assert.equal((await client.artifactQuery({ domain: "oncology" })).rows.length, 1);
   assert.equal((await client.artifactGet(digest)).record.content_digest, digest);
   assert.deepEqual((await client.artifactLineage(digest)).missing_parent_digests, ["b".repeat(64)]);
+  assert.equal((await client.artifactCrossStoreAudit()).consistent, true);
   assert.equal((await client.artifactRegistryAudit({ operation: "lineage", content_digest: digest })).mcp.result.structuredContent.workflow, "artifact_registry_lineage");
 });

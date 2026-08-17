@@ -13,11 +13,15 @@ domain invariants, release gates, and evidence semantics.
 
 The artifact registry is available through typed `ArtifactRegistrationRequest`,
 `ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,
-`ArtifactGetReport`, and `ArtifactLineageReport` models. `ApiClient` exposes REST registration,
+`ArtifactGetReport`, `ArtifactLineageReport`, and `ArtifactCrossStoreAuditReport` models. `ApiClient` exposes REST registration,
 query, lookup, lineage, persistence status, and flush methods; `Workspace` and
 `AsyncWorkspace` expose the MCP `artifact_registry_audit` flow. Parent presence remains an index
 observation, missing parents remain explicit, and no client model treats a digest as scientific,
 clinical, publication, causal, or external-effect authority.
+`ApiClient.artifact_cross_store_audit()` and `Workspace.artifact_cross_store_audit()` compare
+retained exact identities across the artifact, evidence, and reconciliation registries. They
+return missing projections, orphaned projections, wrong-kind findings, store generations, and
+checkpoint digests without implying an atomic cross-store transaction.
 The Rust boundary also appends an `artifact_registry` projection to trusted mission, replay,
 verified-bundle, and workflow-reconciliation responses. The projection is an audit lookup and may
 report an explicit indexing or checkpoint failure; generic tool results are not auto-registered.

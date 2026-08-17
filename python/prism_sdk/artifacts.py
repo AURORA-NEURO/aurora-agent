@@ -237,6 +237,41 @@ class ArtifactLineageReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class ArtifactCrossStoreAuditReport:
+    """Digest-only consistency diagnostics across the three bounded local registries."""
+
+    raw: dict[str, Any]
+    consistent: bool
+    truncated: bool
+    stores: Mapping[str, Any]
+    coverage: Mapping[str, Any]
+    findings: tuple[Mapping[str, Any], ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "ArtifactCrossStoreAuditReport":
+        raw = dict(value)
+        if raw.get("workflow") != "artifact_registry_cross_store_audit":
+            raise ArgumentError("artifact cross-store audit workflow is invalid")
+        consistent, truncated = raw.get("consistent"), raw.get("truncated")
+        if not isinstance(consistent, bool) or not isinstance(truncated, bool):
+            raise ArgumentError("artifact cross-store audit flags must be booleans")
+        findings = raw.get("findings", [])
+        if not isinstance(findings, Sequence) or isinstance(findings, (str, bytes)):
+            raise ArgumentError("artifact cross-store audit findings must be an array")
+        return cls(
+            raw=raw,
+            consistent=consistent,
+            truncated=truncated,
+            stores=_mapping("artifact cross-store audit stores", raw.get("stores")),
+            coverage=_mapping("artifact cross-store audit coverage", raw.get("coverage")),
+            findings=tuple(_mapping("artifact cross-store audit finding", item) for item in findings),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def _mapping(name: str, value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ArgumentError(f"{name} must be an object")

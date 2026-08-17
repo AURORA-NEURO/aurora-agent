@@ -2388,6 +2388,9 @@ impl Server {
             .get("operation")
             .and_then(Value::as_str)
             .unwrap_or("query");
+        if operation == "cross_store" {
+            return self.cross_store_artifact_audit();
+        }
         let mut registry = self
             .artifact_registry
             .lock()
@@ -2491,9 +2494,79 @@ impl Server {
                 }))
             }
             other => Err(format!(
-                "unknown artifact registry operation {other:?}; choose register, query, get, lineage, or verify_snapshot"
+                "unknown artifact registry operation {other:?}; choose register, query, get, lineage, cross_store, or verify_snapshot"
             )),
         }
+    }
+
+    /// Compare the three bounded local registries by exact digest identity.
+    ///
+    /// Each mutex is observed independently so a slow or poisoned source store cannot hold the
+    /// other stores hostage. The returned generations and checkpoint digests make that
+    /// non-transactional observation explicit to callers.
+    fn cross_store_artifact_audit(&self) -> Result<Value, String> {
+        let (artifact_records, artifact_generation, artifact_state_digest) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            let snapshot = registry
+                .snapshot()
+                .map_err(|error| format!("artifact registry snapshot failed: {error}"))?;
+            (
+                registry.records_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (evidence_digests, evidence_generation, evidence_state_digest) = {
+            let registry = self
+                .evidence_registry
+                .lock()
+                .map_err(|_| "evidence registry lock is poisoned".to_string())?;
+            let snapshot = registry
+                .snapshot()
+                .map_err(|error| format!("evidence registry snapshot failed: {error}"))?;
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (reconciliation_digests, reconciliation_generation, reconciliation_state_digest) = {
+            let registry = self
+                .workflow_reconciliation_registry
+                .lock()
+                .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?;
+            let snapshot = registry.snapshot().map_err(|error| {
+                format!("workflow reconciliation registry snapshot failed: {error}")
+            })?;
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        Ok(bioprism_devplat::build_cross_domain_audit(
+            &artifact_records,
+            &evidence_digests,
+            &reconciliation_digests,
+            artifact_generation,
+            evidence_generation,
+            reconciliation_generation,
+            artifact_state_digest,
+            evidence_state_digest,
+            reconciliation_state_digest,
+        ))
     }
 
     /// Attach an index projection only to outputs that crossed an explicit integrity boundary.
@@ -28773,7 +28846,7 @@ pub fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "verify_snapshot"], "description": "Operation to perform; defaults to query." },
+                    "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "cross_store", "verify_snapshot"], "description": "Operation to perform; defaults to query. cross_store compares exact identities across the artifact, evidence, and reconciliation registries." },
                     "registration": { "type": "object", "description": "For register: {kind, subject_id, domains, parent_digests, declared_digest?, artifact}." },
                     "kind": { "type": "string", "description": "For query: artifact kind such as mission_evidence_bundle, workflow_reconciliation, evaluator_replay, or domain_report." },
                     "domain": { "type": "string", "description": "For query: one explicit domain label." },

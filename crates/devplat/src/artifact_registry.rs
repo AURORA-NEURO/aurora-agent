@@ -98,6 +98,15 @@ impl ArtifactRegistry {
         self.records.is_empty()
     }
 
+    /// Return bounded metadata copies for cross-store diagnostics.
+    ///
+    /// Artifact bodies are intentionally omitted from this projection. Callers that need a body
+    /// must use `get` with its explicit digest, while consistency audits only need identity and
+    /// kind information.
+    pub fn records_for_audit(&self) -> Vec<ArtifactRecord> {
+        self.records.values().cloned().collect()
+    }
+
     /// Register one bounded artifact and preserve the verification method that admitted it.
     pub fn register(&mut self, request: &Value) -> Result<Value, ArtifactRegistryError> {
         let object = request

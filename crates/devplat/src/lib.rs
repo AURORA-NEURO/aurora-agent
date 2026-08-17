@@ -211,6 +211,7 @@ pub mod ci_provider_evidence;
 pub mod citations;
 pub mod claim;
 pub mod classify;
+pub mod cross_domain_audit;
 pub mod delivery_receipt;
 pub mod engineering;
 pub mod engineering_plan;
@@ -274,6 +275,10 @@ pub use citations::{audit as audit_citations, scan as scan_citations, CitationAu
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};
 pub use classify::{
     classification, implemented_module_ids, not_implemented, verdict_counts, ModuleVerdict, Verdict,
+};
+pub use cross_domain_audit::{
+    build_cross_domain_audit, CROSS_DOMAIN_AUDIT_SCHEMA_VERSION, CROSS_DOMAIN_AUDIT_WORKFLOW,
+    MAX_CROSS_DOMAIN_AUDIT_FINDINGS,
 };
 pub use delivery_receipt::{
     build_delivery_receipt, verify_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,

@@ -19,6 +19,7 @@ from urllib.parse import quote, urlencode, urlsplit
 
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
 from .artifacts import (
+    ArtifactCrossStoreAuditReport,
     ArtifactGetReport,
     ArtifactGetRequest,
     ArtifactLineageReport,
@@ -723,6 +724,13 @@ class ApiClient:
 
     def artifact_registry_persistence(self) -> dict[str, Any]:
         return self.request("GET", "/v1/artifacts/persistence")
+
+    def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
+        """Compare retained evidence/reconciliation identities with artifact projections."""
+
+        return ArtifactCrossStoreAuditReport.from_wire(
+            self.request("GET", "/v1/artifacts/cross-store")
+        )
 
     def flush_artifact_registry_persistence(self) -> dict[str, Any]:
         return self.request("POST", "/v1/artifacts/persistence/flush", {})
@@ -4446,6 +4454,9 @@ class AsyncApiClient:
 
     async def artifact_registry_persistence(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.artifact_registry_persistence)
+
+    async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
+        return await asyncio.to_thread(self.client.artifact_cross_store_audit)
 
     async def flush_artifact_registry_persistence(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.flush_artifact_registry_persistence)

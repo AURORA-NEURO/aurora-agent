@@ -30,6 +30,7 @@ from .analytics import (
 )
 from .artifacts import (
     ARTIFACT_KINDS,
+    ArtifactCrossStoreAuditReport,
     ArtifactGetReport,
     ArtifactGetRequest,
     ArtifactLineageReport,
@@ -2653,6 +2654,7 @@ __all__ = [
     "TRUST_ZONES",
     "CHANNELS",
     "ARTIFACT_KINDS",
+    "ArtifactCrossStoreAuditReport",
     "INCIDENT_CLASSES",
     "CONTAINMENT_ACTIONS",
     "AUDIT_EVENTS",

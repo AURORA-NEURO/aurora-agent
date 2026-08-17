@@ -7822,6 +7822,22 @@ export interface ArtifactLineageResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface ArtifactCrossStoreAuditResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_cross_store_audit";
+  consistent: boolean;
+  bounded: true;
+  truncated: boolean;
+  stores: JsonObject;
+  coverage: JsonObject;
+  artifact_kind_counts: JsonObject;
+  findings: JsonObject[];
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface ArtifactRegistryPersistenceStatus extends JsonObject {
   ok: boolean;
   enabled: boolean;

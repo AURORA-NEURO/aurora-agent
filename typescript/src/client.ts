@@ -294,6 +294,7 @@ import type {
   MissionEvidenceBundleVerifyResult,
   ArtifactRegistrationArgs,
   ArtifactRegistrationResult,
+  ArtifactCrossStoreAuditResult,
   ArtifactQueryOptions,
   ArtifactQueryResult,
   ArtifactGetResult,
@@ -1155,6 +1156,10 @@ export class ApiClient {
 
   async artifactRegistryPersistence(options?: ClientRequestOptions): Promise<ArtifactRegistryPersistenceStatus> {
     return this.request<ArtifactRegistryPersistenceStatus>("GET", "/v1/artifacts/persistence", undefined, options);
+  }
+
+  async artifactCrossStoreAudit(options?: ClientRequestOptions): Promise<ArtifactCrossStoreAuditResult> {
+    return this.request<ArtifactCrossStoreAuditResult>("GET", "/v1/artifacts/cross-store", undefined, options);
   }
 
   async flushArtifactRegistryPersistence(options?: ClientRequestOptions): Promise<ArtifactRegistryPersistenceStatus> {

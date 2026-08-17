@@ -59,6 +59,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/evidence-bundles/persistence/flush` | Force an atomic evidence registry checkpoint |
 | `POST /v1/artifacts` | Register one bounded exact-content cross-domain artifact |
 | `GET /v1/artifacts?kind=&domain=&subject_id=&after=&limit=&include_artifacts=` | Query digest-ordered artifact index rows |
+| `GET /v1/artifacts/cross-store` | Compare exact identities across artifact, evidence, and workflow-reconciliation registries |
 | `GET /v1/artifacts/{content_digest}` | Fetch one artifact record and its verification posture |
 | `GET /v1/artifacts/{content_digest}/lineage` | Traverse bounded parent lineage with explicit missing parents and cycles |
 | `GET /v1/artifacts/persistence` | Inspect restart-safe artifact registry checkpoint integrity and bounds |
@@ -163,6 +164,11 @@ verified evidence-bundle imports, evaluator replays, and workflow reconciliation
 contains the exact cross-domain content digest, verification posture, and checkpoint status where
 applicable. Direct domain-tool results are not automatically registered, and a projection never
 claims causal provenance, scientific validity, authorization, or release readiness.
+`GET /v1/artifacts/cross-store` is a bounded consistency diagnostic. It compares retained exact
+digests, reports missing source projections, orphaned projections, wrong-kind projections, store
+generations, and each store's digest-protected checkpoint identity. The three registries are
+sampled independently; `consistent=true` means agreement among those bounded observations, not a
+transaction or proof that an omitted record never existed.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup
