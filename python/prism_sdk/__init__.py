@@ -119,6 +119,13 @@ from .ci_provider import (
     CiProviderNormalizationRequest,
     ci_provider_normalization_report,
 )
+from .ci_provider_evidence import (
+    CI_PROVIDER_EVIDENCE_SCHEMA,
+    MAX_PROVIDER_EVIDENCE_ROWS,
+    CiProviderEvidenceReport,
+    CiProviderEvidenceRequest,
+    ci_provider_evidence_report,
+)
 from .execution_provenance import (
     EXECUTION_PROVENANCE_SCHEMA,
     MAX_DELEGATED_CHECKS,
@@ -2273,6 +2280,11 @@ __all__ = [
     "CiProviderNormalizationReport",
     "CiProviderNormalizationRequest",
     "ci_provider_normalization_report",
+    "CI_PROVIDER_EVIDENCE_SCHEMA",
+    "MAX_PROVIDER_EVIDENCE_ROWS",
+    "CiProviderEvidenceReport",
+    "CiProviderEvidenceRequest",
+    "ci_provider_evidence_report",
     "EXECUTION_PROVENANCE_SCHEMA",
     "MAX_DELEGATED_CHECKS",
     "DelegatedCheckEvidenceArgs",

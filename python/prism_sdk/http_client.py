@@ -39,6 +39,11 @@ from .ci_provider import (
     CiProviderNormalizationRequest,
     ci_provider_normalization_report,
 )
+from .ci_provider_evidence import (
+    CiProviderEvidenceReport,
+    CiProviderEvidenceRequest,
+    ci_provider_evidence_report,
+)
 from .execution_provenance import ExecutionProvenanceReport, ExecutionProvenanceRequest, execution_provenance_report
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
@@ -1430,6 +1435,23 @@ class ApiClient:
         """Return typed provider-normalization evidence through HTTP."""
 
         return ci_provider_normalization_report(self.ci_provider_normalize(request))
+
+    def ci_provider_evidence_audit(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Audit provider-bound artifact, log, and attestation rows through HTTP."""
+
+        normalized = request if isinstance(request, CiProviderEvidenceRequest) else CiProviderEvidenceRequest(**dict(request))
+        return self.call_tool("ci_provider_evidence_audit", normalized.to_mcp_arguments())
+
+    def ci_provider_evidence_report(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> CiProviderEvidenceReport:
+        """Return typed structural provider-evidence conformance evidence."""
+
+        return ci_provider_evidence_report(self.ci_provider_evidence_audit(request))
 
     def execution_provenance_audit(
         self,
@@ -4244,6 +4266,23 @@ class AsyncApiClient:
         """Return typed provider-normalization evidence through async HTTP."""
 
         return ci_provider_normalization_report(await self.ci_provider_normalize(request))
+
+    async def ci_provider_evidence_audit(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async provider-bound artifact, log, and attestation conformance audit."""
+
+        normalized = request if isinstance(request, CiProviderEvidenceRequest) else CiProviderEvidenceRequest(**dict(request))
+        return await self.call_tool("ci_provider_evidence_audit", normalized.to_mcp_arguments())
+
+    async def ci_provider_evidence_report(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> CiProviderEvidenceReport:
+        """Return typed async provider-evidence conformance evidence."""
+
+        return ci_provider_evidence_report(await self.ci_provider_evidence_audit(request))
 
     async def execution_provenance_audit(
         self,

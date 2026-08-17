@@ -709,6 +709,11 @@ projects it into the exact `CiRunEvidence` envelope consumed by that audit. Miss
 digests are derived from the supplied check object and labeled, while unknown and non-passing states
 remain visible; normalization never contacts a provider, verifies signatures, fetches logs, or turns
 caller-supplied data into authenticated execution truth.
+`ci_provider_evidence_audit` extends the same handoff with bounded artifact, log, and attestation rows:
+it validates unique ids, content-digest syntax, provider/run/check bindings, and attestation subjects,
+preserves the original rows, and emits separate deterministic record digests. Its `conformance_ready`
+signal is structural only; the route does not fetch remote bytes, execute checks, authenticate providers,
+or cryptographically verify attestation statements.
 `developer_delivery_audit` can compose that normalization directly through an explicit `ci_provider`
 argument; it returns both the normalized provider projection and the downstream `ci_evidence` audit,
 while rejecting simultaneous `ci_provider` and canonical `ci_evidence` inputs.

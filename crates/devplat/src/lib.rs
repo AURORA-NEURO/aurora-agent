@@ -207,6 +207,7 @@ pub mod capability_dashboard;
 pub mod citations;
 pub mod ci_evidence;
 pub mod ci_provider;
+pub mod ci_provider_evidence;
 pub mod claim;
 pub mod classify;
 pub mod delivery_receipt;
@@ -249,6 +250,11 @@ pub use ci_evidence::{
 pub use ci_provider::{
     normalize_ci_provider_payload, CiProviderNormalization, CiProviderNormalizationError,
     CiProviderNormalizationRequest, CI_PROVIDER_NORMALIZATION_SCHEMA,
+};
+pub use ci_provider_evidence::{
+    audit_ci_provider_evidence, CiProviderArtifact, CiProviderAttestation,
+    CiProviderEvidenceAudit, CiProviderEvidenceError, CiProviderEvidenceRequest, CiProviderLog,
+    CI_PROVIDER_EVIDENCE_SCHEMA,
 };
 pub use citations::{audit as audit_citations, scan as scan_citations, CitationAudit};
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};

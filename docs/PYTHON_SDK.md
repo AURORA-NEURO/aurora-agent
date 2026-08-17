@@ -404,6 +404,12 @@ invent defaults:
   audit. `CiProviderNormalizationReport` preserves provider/source, payload digest, derived-digest
   warnings, and normalized evidence across `Workspace`, `AsyncWorkspace`, `ApiClient`, and
   `AsyncApiClient`; it does not contact or authenticate a provider.
+- `CiProviderEvidenceRequest` and `ci_provider_evidence_audit(...)` add bounded artifact, log, and
+  attestation rows to that provider handoff. `CiProviderEvidenceReport` preserves row families,
+  record digests, binding findings, canonical nested evidence, and the structural-only
+  `conformance_ready` signal across the same four facades. The SDK validates mapping/array bounds
+  locally; Rust remains authoritative for digest syntax, identity binding, and attestation subject
+  semantics.
 - `execution_provenance_audit(...)` reconciles an `agent_mission` report with terminal results,
   contiguous trace identity, and optional delegated checks. `ExecutionProvenanceReport` preserves
   content digests, missingness, non-passing checks, and the structural-only `provenance_ready`

@@ -128,12 +128,14 @@ use bioprism_dataops::{
     DataClass, Plane, TenantPattern,
 };
 use bioprism_devplat::{
-    apply_binding, audit_ci_execution_evidence, audit_execution_provenance, build_dashboard,
+    apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
+    audit_execution_provenance, build_dashboard,
     build_delivery_receipt, plan_mission, run_workbench, verify_delivery_receipt,
     normalize_ci_provider_payload,
     standard_walkthroughs,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    CiExecutionEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
+    CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
+    DeliveryReceiptRequest,
     DeliveryReceiptVerificationRequest,
     DevPlatReport, ExecutionProvenanceRequest, MissionReport,
     MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
@@ -1490,6 +1492,7 @@ impl Server {
             "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
             "ci_provider_normalize" => self.ci_provider_normalize(&arguments),
+            "ci_provider_evidence_audit" => self.ci_provider_evidence_audit(&arguments),
             "ci_execution_evidence_audit" => self.ci_execution_evidence_audit(&arguments),
             "execution_provenance_audit" => self.execution_provenance_audit(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
@@ -24256,6 +24259,45 @@ impl Server {
         }))
     }
 
+    /// Audit normalized provider evidence together with optional artifact, log, and attestation rows.
+    fn ci_provider_evidence_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode CI provider evidence input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("CI provider evidence input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: CiProviderEvidenceRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid CI provider evidence input: {error}"))?;
+        let audit = audit_ci_provider_evidence(&request)
+            .map_err(|error| format!("CI provider evidence audit refused: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "workflow": "ci_provider_evidence_audit",
+            "schema": bioprism_devplat::CI_PROVIDER_EVIDENCE_SCHEMA,
+            "valid": audit.structurally_valid,
+            "conformance_ready": audit.conformance_ready,
+            "provider": audit.provider,
+            "source": audit.source,
+            "run_id": audit.run_id,
+            "payload_digest": audit.payload_digest,
+            "plan_digest": audit.plan_digest,
+            "evidence_digest": audit.evidence_digest,
+            "artifact_record_digest": audit.artifact_record_digest,
+            "log_record_digest": audit.log_record_digest,
+            "attestation_record_digest": audit.attestation_record_digest,
+            "audit": audit,
+            "guarantees": [
+                "provider artifacts, logs, and attestations are retained and bound to normalized identities before a handoff signal is emitted",
+                "record digests are deterministic and malformed, duplicate, unknown, or unbound rows remain visible as findings",
+                "conformance_ready is structural evidence readiness and never external execution or provider authority"
+            ],
+            "limitations": [
+                "the route does not fetch remote bytes, execute checks, authenticate providers, verify signatures, or approve deployment",
+                "caller-supplied record digests identify declarations and do not prove the content at a remote URI"
+            ]
+        }))
+    }
+
     fn engineering_manifest_audit(&self, arguments: &Value) -> Result<Value, String> {
         let raw_manifest = arguments
             .get("manifest")
@@ -27163,7 +27205,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_provider_normalize", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -29593,6 +29635,44 @@ pub fn tool_definitions() -> Vec<Value> {
                     "provider": { "type": "string", "enum": ["github_actions", "gitlab_ci", "generic"], "description": "Provider payload shape to normalize." },
                     "payload": { "type": "object", "description": "For github_actions: run plus jobs (or a flat run with jobs); for gitlab_ci: pipeline plus jobs; for generic: run_id, conclusion, and checks. Provider payloads are caller-supplied and never authenticated here." },
                     "source": { "type": "string", "enum": ["caller_attested", "provider_observed"], "description": "Optional provenance label. Defaults to provider_observed for github_actions/gitlab_ci and caller_attested for generic." }
+                },
+                "required": ["ci", "provider", "payload"]
+            }
+        }),
+        json!({
+            "name": "ci_provider_evidence_audit",
+            "description": "Audit a caller-supplied provider payload and optional artifact, log, and attestation records as a deterministic structural conformance handoff. Provider/run/check bindings, content-digest syntax, duplicate identities, subject references, and canonical CI evidence are checked fail-closed; records are preserved and separately digested. This route never fetches remote bytes, executes checks, authenticates providers, verifies signatures, or grants release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ci": { "type": "object", "description": "Canonical CiRequest used to regenerate and bind the exact workflow/check plan." },
+                    "provider": { "type": "string", "enum": ["github_actions", "gitlab_ci", "generic"], "description": "Provider payload shape to normalize." },
+                    "payload": { "type": "object", "description": "Caller-supplied provider payload. GitHub uses run/jobs, GitLab uses pipeline/jobs, and generic uses run_id/conclusion/checks." },
+                    "source": { "type": "string", "enum": ["caller_attested", "provider_observed"], "description": "Optional provenance label; defaults by provider." },
+                    "artifacts": {
+                        "type": "array", "maxItems": 128,
+                        "description": "Optional artifact records bound to the normalized provider, run, and optional canonical check.",
+                        "items": { "type": "object", "properties": {
+                            "id": { "type": "string" }, "kind": { "type": "string" }, "digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+                            "check": { "type": "string" }, "run_id": { "type": "string" }, "provider": { "type": "string" }, "uri": { "type": "string" }
+                        }, "required": ["id", "kind", "digest"] }
+                    },
+                    "logs": {
+                        "type": "array", "maxItems": 128,
+                        "description": "Optional log records bound to the normalized provider, run, and optional canonical check.",
+                        "items": { "type": "object", "properties": {
+                            "id": { "type": "string" }, "digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+                            "check": { "type": "string" }, "run_id": { "type": "string" }, "provider": { "type": "string" }, "uri": { "type": "string" }, "truncated": { "type": "boolean" }
+                        }, "required": ["id", "digest"] }
+                    },
+                    "attestations": {
+                        "type": "array", "maxItems": 128,
+                        "description": "Optional attestation declarations whose subjects must identify the normalized run, artifact, or log. The statement is preserved but not cryptographically verified.",
+                        "items": { "type": "object", "properties": {
+                            "id": { "type": "string" }, "subject": { "type": "string" }, "issuer": { "type": "string" },
+                            "statement_digest": { "type": "string", "minLength": 64, "maxLength": 64 }, "method": { "type": "string" }
+                        }, "required": ["id", "subject", "issuer", "statement_digest", "method"] }
+                    }
                 },
                 "required": ["ci", "provider", "payload"]
             }

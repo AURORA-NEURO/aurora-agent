@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 174 callable tools. That count is intentionally
+The MCP integration layer currently exposes 175 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -59,6 +59,11 @@ accepts bounded GitHub Actions, GitLab CI, or generic payloads, binds the regene
 provider statuses into canonical `CiRunEvidence`, derives absent result digests deterministically,
 and labels those derivations. Invalid supplied digests are refused; unknown and non-passing states
 remain downstream audit findings. The route still does not contact providers or authenticate them.
+`ci_provider_evidence_audit` extends that boundary to provider-bound artifact, log, and attestation
+rows. It validates unique identities, content-digest syntax, provider/run/check bindings, URI
+shape, and attestation subjects; preserves every row; emits separate record digests; and reports
+structural `conformance_ready` without fetching remote content, executing checks, authenticating a
+provider, or cryptographically verifying an attestation.
 `developer_delivery_audit` accepts this same request as `ci_provider`, composes normalization and
 the plan-bound evidence audit, and returns both layers. Canonical `ci_evidence` and `ci_provider`
 are mutually exclusive so provenance cannot be silently blended.

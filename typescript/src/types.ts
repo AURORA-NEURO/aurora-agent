@@ -3895,6 +3895,44 @@ export interface CiProviderNormalizationArgs extends JsonObject {
   source?: "caller_attested" | "provider_observed";
 }
 
+export interface CiProviderArtifactArgs extends JsonObject {
+  id: string;
+  kind: string;
+  digest: string;
+  check?: string;
+  run_id?: string;
+  provider?: string;
+  uri?: string;
+}
+
+export interface CiProviderLogArgs extends JsonObject {
+  id: string;
+  digest: string;
+  check?: string;
+  run_id?: string;
+  provider?: string;
+  uri?: string;
+  truncated?: boolean;
+}
+
+export interface CiProviderAttestationArgs extends JsonObject {
+  id: string;
+  subject: string;
+  issuer: string;
+  statement_digest: string;
+  method: string;
+}
+
+export interface CiProviderEvidenceArgs extends JsonObject {
+  ci: JsonObject;
+  provider: "github_actions" | "gitlab_ci" | "generic";
+  payload: JsonObject;
+  source?: "caller_attested" | "provider_observed";
+  artifacts?: CiProviderArtifactArgs[];
+  logs?: CiProviderLogArgs[];
+  attestations?: CiProviderAttestationArgs[];
+}
+
 export interface CiEvidenceFindingResult extends JsonObject {
   code: string;
   severity: string;
@@ -3968,6 +4006,57 @@ export interface CiProviderNormalizationResult extends JsonObject {
   warnings: string[];
   evidence: CiProviderNormalizationEvidenceResult;
   normalization: JsonObject;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiProviderEvidenceAuditResult extends JsonObject {
+  schema: "bioprism-devplat-ci-provider-evidence/0.1";
+  workflow: "ci_provider_evidence_audit";
+  provider: string;
+  source: string;
+  run_id: string;
+  payload_digest: string;
+  plan_digest: string;
+  evidence_digest: string;
+  artifact_record_digest: string;
+  log_record_digest: string;
+  attestation_record_digest: string;
+  artifact_count: number;
+  log_count: number;
+  attestation_count: number;
+  linked_artifact_count: number;
+  linked_log_count: number;
+  attestation_subject_count: number;
+  ci_evidence: JsonObject;
+  artifacts: CiProviderArtifactArgs[];
+  logs: CiProviderLogArgs[];
+  attestations: CiProviderAttestationArgs[];
+  structurally_valid: boolean;
+  conformance_ready: boolean;
+  execution: string;
+  verification: string;
+  findings: CiEvidenceFindingResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiProviderEvidenceResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_provider_evidence_audit";
+  schema: "bioprism-devplat-ci-provider-evidence/0.1";
+  valid: boolean;
+  conformance_ready: boolean;
+  provider: string;
+  source: string;
+  run_id: string;
+  payload_digest: string;
+  plan_digest: string;
+  evidence_digest: string;
+  artifact_record_digest: string;
+  log_record_digest: string;
+  attestation_record_digest: string;
+  audit: CiProviderEvidenceAuditResult;
   guarantees: string[];
   limitations: string[];
 }

@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 174);
+    assert_eq!(tools.len(), 175);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4231,6 +4231,84 @@ fn ci_provider_normalize_projects_github_payload_into_auditable_evidence() {
 }
 
 #[test]
+fn ci_provider_evidence_audit_binds_rows_and_preserves_structural_limits() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "provider-evidence",
+        "triggers": ["push"],
+        "rust_toolchain": "stable",
+        "offline": true,
+        "checks": [{"name": "tests", "run": "cargo test -p core", "required": true}]
+    });
+    let digest = |label: &str| ContentHash::of_bytes(label.as_bytes()).to_string();
+    let audited = call(
+        &mut server,
+        "ci_provider_evidence_audit",
+        json!({
+            "ci": ci.clone(),
+            "provider": "github_actions",
+            "payload": {
+                "run": {"id": 9020, "conclusion": "success"},
+                "jobs": [{"name": "tests", "conclusion": "success"}]
+            },
+            "artifacts": [{
+                "id": "artifact-tests", "kind": "junit", "digest": digest("artifact"),
+                "check": "tests", "run_id": "9020", "provider": "github_actions",
+                "uri": "https://example.test/artifact"
+            }],
+            "logs": [{
+                "id": "log-tests", "digest": digest("log"), "check": "tests",
+                "run_id": "9020", "provider": "github_actions", "truncated": false
+            }],
+            "attestations": [{
+                "id": "attestation-tests", "subject": "artifact-tests", "issuer": "caller",
+                "statement_digest": digest("statement"), "method": "declared_provider_statement"
+            }]
+        }),
+    );
+    assert_eq!(audited["workflow"], json!("ci_provider_evidence_audit"));
+    assert_eq!(audited["valid"], json!(true));
+    assert_eq!(audited["conformance_ready"], json!(true));
+    assert_eq!(audited["audit"]["artifact_count"], json!(1));
+    assert_eq!(audited["audit"]["linked_log_count"], json!(1));
+    assert_eq!(audited["audit"]["attestation_subject_count"], json!(1));
+    assert_eq!(audited["audit"]["verification"], json!("structural_only"));
+
+    let tampered = json!({
+        "ci": ci,
+        "provider": "github_actions",
+        "payload": {
+            "run": {"id": 9020, "conclusion": "success"},
+            "jobs": [{"name": "tests", "conclusion": "success"}]
+        },
+        "artifacts": [{
+            "id": "artifact-tests", "kind": "junit", "digest": "not-a-digest",
+            "check": "unknown", "run_id": "wrong", "provider": "wrong"
+        }],
+        "attestations": [{
+            "id": "attestation-tests", "subject": "missing", "issuer": "caller",
+            "statement_digest": digest("statement"), "method": "declared"
+        }]
+    });
+    let refused_rows = call(&mut server, "ci_provider_evidence_audit", tampered);
+    assert_eq!(refused_rows["valid"], json!(false));
+    assert_eq!(refused_rows["conformance_ready"], json!(false));
+    for code in [
+        "artifact_digest_invalid",
+        "unknown_check_binding",
+        "run_binding_mismatch",
+        "provider_binding_mismatch",
+        "attestation_subject_unknown",
+    ] {
+        assert!(refused_rows["audit"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == code));
+    }
+}
+
+#[test]
 fn developer_delivery_composes_provider_normalization_into_ci_release_evidence() {
     let mut server = server();
     let ci = json!({
@@ -4908,12 +4986,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(174));
-    assert_eq!(result["advertised_tool_count"], json!(174));
+    assert_eq!(result["unique_catalog_tools"], json!(175));
+    assert_eq!(result["advertised_tool_count"], json!(175));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(174));
-    assert_eq!(result["schema_quality"]["valid"], json!(174));
+    assert_eq!(result["schema_quality"]["checked"], json!(175));
+    assert_eq!(result["schema_quality"]["valid"], json!(175));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

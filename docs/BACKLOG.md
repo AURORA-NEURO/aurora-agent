@@ -249,6 +249,11 @@ GitHub Actions, GitLab CI, and generic payloads map into canonical `CiRunEvidenc
 derived and labeled, supplied malformed digests are refused, and unknown/non-passing statuses stay
 visible to the downstream audit. It remains caller-supplied structural normalization rather than
 provider contact, signature verification, log retrieval, or external CI execution.
+`ci_provider_evidence_audit` now adds the next conformance layer for artifact, log, and attestation
+rows: it preserves the supplied records, checks provider/run/check bindings and subject references,
+computes separate deterministic row-family digests, and fails closed on malformed or unbound rows.
+This is still a local structural handoff; it does not fetch bytes, authenticate a provider, verify
+signatures, execute CI, or establish release authority.
 The delivery audit now accepts that request directly as `ci_provider`, returning the normalized
 projection and downstream CI evidence audit together while refusing mixed canonical/provider
 evidence inputs. This closes the local composition gap without claiming that an external runner,

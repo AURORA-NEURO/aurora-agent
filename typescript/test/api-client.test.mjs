@@ -141,6 +141,54 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
+      if (path === "/v1/tools/ci_provider_evidence_audit") return jsonResponse({ ok: true, tool: "ci_provider_evidence_audit", request_id: "r30", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "ci_provider_evidence_audit",
+        schema: "bioprism-devplat-ci-provider-evidence/0.1",
+        valid: true,
+        conformance_ready: true,
+        provider: "github_actions",
+        source: "provider_observed",
+        run_id: "9001",
+        payload_digest: "q".repeat(64),
+        plan_digest: "p".repeat(64),
+        evidence_digest: "e".repeat(64),
+        artifact_record_digest: "a".repeat(64),
+        log_record_digest: "l".repeat(64),
+        attestation_record_digest: "t".repeat(64),
+        audit: {
+          schema: "bioprism-devplat-ci-provider-evidence/0.1",
+          workflow: "ci_provider_evidence_audit",
+          provider: "github_actions",
+          source: "provider_observed",
+          run_id: "9001",
+          payload_digest: "q".repeat(64),
+          plan_digest: "p".repeat(64),
+          evidence_digest: "e".repeat(64),
+          artifact_record_digest: "a".repeat(64),
+          log_record_digest: "l".repeat(64),
+          attestation_record_digest: "t".repeat(64),
+          artifact_count: 1,
+          log_count: 1,
+          attestation_count: 1,
+          linked_artifact_count: 1,
+          linked_log_count: 1,
+          attestation_subject_count: 1,
+          ci_evidence: {},
+          artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64) }],
+          logs: [{ id: "log-1", digest: "f".repeat(64) }],
+          attestations: [{ id: "attestation-1", subject: "artifact-1", issuer: "caller", statement_digest: "s".repeat(64), method: "declared" }],
+          structurally_valid: true,
+          conformance_ready: true,
+          execution: "evidence_supplied_not_executed_here",
+          verification: "structural_only",
+          findings: [],
+          guarantees: [],
+          limitations: [],
+        },
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/execution_provenance_audit") return jsonResponse({ ok: true, tool: "execution_provenance_audit", request_id: "r28", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "execution_provenance_audit",
@@ -1646,6 +1694,15 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(normalizedCi.mcp.result.structuredContent.workflow, "ci_provider_normalize");
   assert.equal(normalizedCi.mcp.result.structuredContent.derived_result_digest_count, 1);
   assert.equal(normalizedCi.mcp.result.structuredContent.evidence.checks[0].status, "passed");
+  const providerEvidence = await client.ciProviderEvidenceAudit({
+    ci: { workflow: "contracts" },
+    provider: "github_actions",
+    payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] },
+    artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64) }],
+  });
+  assert.equal(providerEvidence.mcp.result.structuredContent.workflow, "ci_provider_evidence_audit");
+  assert.equal(providerEvidence.mcp.result.structuredContent.conformance_ready, true);
+  assert.equal(providerEvidence.mcp.result.structuredContent.audit.artifact_count, 1);
   const provenance = await client.executionProvenanceAudit({
     mission: { plan: { mission_id: "mission-ts", digest: "p".repeat(64) }, execution: "executed" },
     delegated_checks: [{ name: "unit_tests", kind: "test", required: true, status: "passed", result_digest: "r".repeat(64), source: "caller_attested" }],

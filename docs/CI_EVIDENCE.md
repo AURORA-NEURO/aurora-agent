@@ -56,6 +56,26 @@ and audit in one explicit delivery call. The result keeps the normalized provide
 the downstream `ci_evidence` audit separately visible; `ci_provider` and canonical `ci_evidence`
 are mutually exclusive inputs.
 
+## Provider artifacts, logs, and attestations
+
+`ci_provider_evidence_audit` is the deeper conformance handoff for consumers that have more than a
+run summary. It accepts the same provider payload plus bounded `artifacts`, `logs`, and
+`attestations` arrays. Artifact and log rows must carry a unique id, a valid content digest, the
+normalized provider and run id, and—when present—a check name from the regenerated plan. URI text
+is retained as a locator but is never fetched. Attestation rows must point to the normalized run,
+an artifact, or a log; their issuer, method, and statement digest are retained as declarations.
+
+The audit returns separate deterministic record digests for each row family, linked-row counts,
+subject counts, canonical nested CI evidence, and sorted findings. Duplicate ids, invalid digest
+syntax, unknown checks, provider/run mismatches, missing bindings, malformed locators, and unknown
+attestation subjects are blocking findings. Rows are preserved even when invalid so an operator can
+inspect and repair the original handoff rather than receiving a rewritten green projection.
+
+`conformance_ready` means the canonical CI evidence and attached rows satisfy these structural
+predicates. It does not mean the remote artifact exists, a log was downloaded, a provider was
+authenticated, a signature was checked, or a check was executed. Attestation statements remain
+available for a later verifier; this route explicitly reports `verification: structural_only`.
+
 ## Result semantics
 
 `valid`/`structurally_valid` means the plan digest and exact check/evidence structure reconcile.
@@ -73,10 +93,15 @@ safe, clinically valid, scientifically valid, or deployed.
 
 - Python: `CiExecutionEvidenceRequest`, `CiExecutionEvidenceReport`, and sync/async Workspace and
   HTTP methods. `CiProviderNormalizationRequest` and `CiProviderNormalizationReport` expose the
-  corresponding provider normalizer.
+  corresponding provider normalizer; `CiProviderEvidenceRequest` and `CiProviderEvidenceReport`
+  expose the artifact/log/attestation conformance handoff across all four facades.
 - TypeScript: `CiExecutionEvidenceArgs`, `CiExecutionEvidenceResult`, and
   `ApiClient.ciExecutionEvidenceAudit(...)`, plus `CiProviderNormalizationArgs`,
-  `CiProviderNormalizationResult`, and `ApiClient.ciProviderNormalize(...)`.
-- MCP: the `ci_execution_evidence_audit` and `ci_provider_normalize` tools with the
+  `CiProviderNormalizationResult`, and `ApiClient.ciProviderNormalize(...)`, plus
+  `CiProviderEvidenceArgs`, `CiProviderEvidenceResult`, and
+  `ApiClient.ciProviderEvidenceAudit(...)`.
+- MCP: the `ci_execution_evidence_audit`, `ci_provider_normalize`, and
+  `ci_provider_evidence_audit` tools with the
   `bioprism-devplat-ci-execution-evidence/0.1` and
-  `bioprism-devplat-ci-provider-normalization/0.1` schemas.
+  `bioprism-devplat-ci-provider-normalization/0.1` and
+  `bioprism-devplat-ci-provider-evidence/0.1` schemas.

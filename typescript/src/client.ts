@@ -231,6 +231,8 @@ import type {
   DeveloperWorkbenchArgs,
   CiProviderNormalizationArgs,
   CiProviderNormalizationResult,
+  CiProviderEvidenceArgs,
+  CiProviderEvidenceResult,
   CiExecutionEvidenceArgs,
   CiExecutionEvidenceResult,
   ExecutionProvenanceArgs,
@@ -698,6 +700,10 @@ export class ApiClient {
 
   async ciProviderNormalize(args: CiProviderNormalizationArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiProviderNormalizationResult>> {
     return this.callTool<CiProviderNormalizationResult>("ci_provider_normalize", args, options);
+  }
+
+  async ciProviderEvidenceAudit(args: CiProviderEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiProviderEvidenceResult>> {
+    return this.callTool<CiProviderEvidenceResult>("ci_provider_evidence_audit", args, options);
   }
 
   async executionProvenanceAudit(args: ExecutionProvenanceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ExecutionProvenanceResult>> {

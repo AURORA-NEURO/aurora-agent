@@ -64,7 +64,7 @@ fn main() {
                      provider_capability_gate, sdk_registry_check, hub_submission_review, hub_disclosure_review,\n\
                      hub_card_render, hub_leaderboard_render, bioatlas_publication_audit, telemetry_project,\n\
                      governance_schema_check,\n\
-                     developer_platform_status, capability_audit, capability_dashboard, capability_discover, capability_route, agent_mission, developer_workbench, ci_provider_normalize, ci_execution_evidence_audit, execution_provenance_audit, developer_delivery_audit, engineering_execution_plan, safety_posture, security_redteam_simulate, security_privacy_audit, sandbox_admission_audit, sandbox_runtime_simulate, security_program_audit, weave_protocol_catalog, world_index,\n\
+                     developer_platform_status, capability_audit, capability_dashboard, capability_discover, capability_route, agent_mission, developer_workbench, ci_provider_normalize, ci_provider_evidence_audit, ci_execution_evidence_audit, execution_provenance_audit, developer_delivery_audit, engineering_execution_plan, safety_posture, security_redteam_simulate, security_privacy_audit, sandbox_admission_audit, sandbox_runtime_simulate, security_program_audit, weave_protocol_catalog, world_index,\n\
                      workspace_capabilities, repository_catalog, repository_bundle, repository_impact\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\
                      workspace capability catalog"
