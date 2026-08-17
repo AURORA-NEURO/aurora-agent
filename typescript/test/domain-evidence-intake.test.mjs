@@ -149,6 +149,40 @@ const sourceExecutionArgs = {
   parent_digests: ["e".repeat(64)],
 };
 
+const providerNormalization = {
+  ok: true,
+  schema: "bioprism-devplat-domain-evidence-provider-normalization/0.1",
+  workflow: "domain_evidence_provider_normalize",
+  group_id: "biological_domains",
+  domains: ["oncology"],
+  subject_id: "provider-ts",
+  source_tool: "literature_bind_check",
+  connector_kind: "literature",
+  provider: "pubmed",
+  outcome: "unknown",
+  payload_digest: "j".repeat(64),
+  request_digest: null,
+  response: { provider: "pubmed", authenticated: false, payload_digest: "j".repeat(64) },
+  normalization: { payload_digest: "j".repeat(64) },
+  intake: { workflow: "domain_evidence_intake", outcome: "unknown" },
+  artifact_registry: { indexed: true, kind: "domain_evidence_intake", content_digest: "k".repeat(64) },
+  catalogue_digest: "l".repeat(64),
+  readiness_claimed: false,
+  execution: "not_started",
+  guarantees: [],
+  does_not_claim: ["provider authenticity"],
+};
+
+const providerNormalizationArgs = {
+  group_id: "biological_domains",
+  domains: ["oncology"],
+  subject_id: "provider-ts",
+  source_tool: "literature_bind_check",
+  connector_kind: "literature",
+  provider: "pubmed",
+  payload: { records: [{ id: "pmid:1" }] },
+};
+
 test("domain evidence intake REST and tool clients preserve exact envelope metadata", async () => {
   const seen = [];
   const client = new ApiClient({
@@ -164,6 +198,7 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
       if (url.pathname === "/v1/tools/domain_evidence_source_plan") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_source_plan", mcp: { result: { structuredContent: sourcePlan } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/domain-evidence/sources/execute") return new Response(JSON.stringify(sourceExecution), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_source_execute") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_source_execute", mcp: { result: { structuredContent: sourceExecution } } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/tools/domain_evidence_provider_normalize") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_normalize", mcp: { result: { structuredContent: providerNormalization } } }), { status: 200, headers: { "content-type": "application/json" } });
       throw new Error(`unexpected path ${url.pathname}`);
     },
   });
@@ -175,6 +210,8 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   assert.equal((await client.domainEvidenceSourcePlanTool(sourceArgs)).mcp.result.structuredContent.plan_digest, "g".repeat(64));
   assert.equal((await client.domainEvidenceSourceExecute(sourceExecutionArgs)).outcome, "observed");
   assert.equal((await client.domainEvidenceSourceExecuteTool(sourceExecutionArgs)).mcp.result.structuredContent.raw_content_digest, "f".repeat(64));
+  assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.provider, "pubmed");
+  assert.equal((await client.domainEvidenceProviderNormalizeTool(providerNormalizationArgs)).mcp.result.structuredContent.outcome, "unknown");
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");
   assert.equal(seen[2].url.searchParams.get("include_intake_digests"), "true");
   assert.equal(seen[4].url.pathname, "/v1/domain-evidence/sources");
@@ -185,6 +222,10 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   );
   await assert.rejects(
     client.domainEvidenceSourceExecute({ source_plan_digest: "not-a-digest" }),
+    ArgumentError,
+  );
+  await assert.rejects(
+    client.domainEvidenceProviderNormalize({ ...providerNormalizationArgs, connector_kind: "file" }),
     ArgumentError,
   );
 });

@@ -61,6 +61,11 @@ from .domain_evidence_pipeline import (
     DomainEvidencePipelineResult,
     project_domain_source_execution,
 )
+from .domain_evidence_provider import (
+    DomainEvidenceProviderNormalizationReport,
+    DomainEvidenceProviderNormalizationRequest,
+    domain_evidence_provider_normalization_report,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -1027,6 +1032,34 @@ class ApiClient:
             else dict(execution)
         )
         return project_domain_source_execution(catalogue, normalized_execution, normalized_request, runtime=runtime)
+
+    def domain_evidence_provider_normalize(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        """Normalize and retain a caller-managed provider payload through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderNormalizationRequest)
+            else DomainEvidenceProviderNormalizationRequest(**dict(request))
+        )
+        return domain_evidence_provider_normalization_report(
+            self.request("POST", "/v1/tools/domain_evidence_provider_normalize", normalized.to_mcp_arguments())
+        )
+
+    def domain_evidence_provider_normalize_tool(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderNormalizationRequest)
+            else DomainEvidenceProviderNormalizationRequest(**dict(request))
+        )
+        return domain_evidence_provider_normalization_report(
+            self.call_tool("domain_evidence_provider_normalize", normalized.to_mcp_arguments())
+        )
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
         """Read the deterministic workflow template for every capability group."""
@@ -4888,6 +4921,18 @@ class AsyncApiClient:
             request,
             runtime=runtime,
         )
+
+    async def domain_evidence_provider_normalize(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_provider_normalize, request)
+
+    async def domain_evidence_provider_normalize_tool(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_provider_normalize_tool, request)
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

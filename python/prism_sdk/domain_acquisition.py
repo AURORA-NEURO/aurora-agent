@@ -103,6 +103,13 @@ class DomainAcquisitionRouteReport:
         return _route_text("domain acquisition transport status", self.transport.get("status"))
 
     @property
+    def caller_managed_tools(self) -> tuple[str, ...]:
+        return _route_strings(
+            "domain acquisition caller-managed tools",
+            self.transport.get("caller_managed_tools", []),
+        )
+
+    @property
     def interpretation_status(self) -> str:
         return _route_text("domain acquisition interpretation status", self.interpretation.get("status"))
 

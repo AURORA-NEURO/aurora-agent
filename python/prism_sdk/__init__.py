@@ -39,6 +39,15 @@ from .domain_evidence_pipeline import (
     DomainEvidencePipelineStatus,
     project_domain_source_execution,
 )
+from .domain_evidence_provider import (
+    DOMAIN_EVIDENCE_PROVIDER_CONNECTOR_KINDS,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_OUTCOMES,
+    DomainEvidenceProviderNormalizationReport,
+    DomainEvidenceProviderNormalizationRequest,
+    domain_evidence_provider_normalization_report,
+)
 from .analytics import (
     AnalyticsDirection,
     AnalyticsEvidence,
@@ -2035,6 +2044,12 @@ __all__ = [
     "DomainEvidencePipelineRequest",
     "DomainEvidencePipelineResult",
     "DomainEvidencePipelineStatus",
+    "DOMAIN_EVIDENCE_PROVIDER_CONNECTOR_KINDS",
+    "DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA",
+    "DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW",
+    "DOMAIN_EVIDENCE_PROVIDER_OUTCOMES",
+    "DomainEvidenceProviderNormalizationReport",
+    "DomainEvidenceProviderNormalizationRequest",
     "DOMAIN_ACQUISITION_SCHEMA",
     "DOMAIN_ACQUISITION_WORKFLOW",
     "MAX_DOMAIN_ACQUISITION_DOMAINS",
@@ -3688,6 +3703,7 @@ __all__ = [
     "execute_projection",
     "execute_projection_batch",
     "project_domain_source_execution",
+    "domain_evidence_provider_normalization_report",
     "project_source_execution",
     "ProjectionBatchRequest",
     "ProjectionBatchResult",

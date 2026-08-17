@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 199);
+    assert_eq!(tools.len(), 200);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1299,6 +1299,75 @@ fn domain_evidence_source_execute_reads_confined_file_and_retains_raw_and_json_d
         refused["intake"]["artifact_registry"]["indexed"],
         json!(true)
     );
+}
+
+#[test]
+fn domain_evidence_provider_normalize_retains_caller_managed_payload_with_explicit_digests() {
+    let mut server = server();
+    let planned = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-subject",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "literature",
+            "locator_kind": "opaque",
+            "locator": "caller://pubmed/query/oncology",
+            "retrieval_mode": "reference_only",
+            "does_not_claim": ["provider authenticity", "clinical truth"]
+        }),
+    );
+    let normalized = call(
+        &mut server,
+        "domain_evidence_provider_normalize",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-subject",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "literature",
+            "provider": "pubmed",
+            "payload": {"records": [{"id": "pmid:1", "title": "opaque"}]},
+            "request": {"query": "oncology"},
+            "outcome": "observed",
+            "source_plan_digest": planned["plan_digest"].clone()
+        }),
+    );
+    assert_eq!(
+        normalized["workflow"],
+        json!("domain_evidence_provider_normalize")
+    );
+    assert_eq!(normalized["connector_kind"], json!("literature"));
+    assert_eq!(normalized["provider"], json!("pubmed"));
+    assert_eq!(normalized["payload_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(normalized["intake"]["outcome"], json!("observed"));
+    assert_eq!(
+        normalized["intake"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+    assert!(normalized["intake"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|digest| digest == &planned["artifact_registry"]["content_digest"]));
+
+    let unknown = call(
+        &mut server,
+        "domain_evidence_provider_normalize",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-unknown",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "literature",
+            "provider": "caller",
+            "payload": {"records": []}
+        }),
+    );
+    assert_eq!(unknown["outcome"], json!("unknown"));
+    assert_eq!(unknown["intake"]["outcome"], json!("unknown"));
 }
 
 #[test]
@@ -6712,6 +6781,11 @@ fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
     );
     assert!(catalogue["routes"].as_array().unwrap().iter().all(|route| {
         route["transport"]["status"] == "bounded_file_http"
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_normalize")
             && route["interpretation"]["status"].is_string()
             && route["limitations"].as_array().is_some()
     }));
@@ -6747,12 +6821,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(199));
-    assert_eq!(result["advertised_tool_count"], json!(199));
+    assert_eq!(result["unique_catalog_tools"], json!(200));
+    assert_eq!(result["advertised_tool_count"], json!(200));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(199));
-    assert_eq!(result["schema_quality"]["valid"], json!(199));
+    assert_eq!(result["schema_quality"]["checked"], json!(200));
+    assert_eq!(result["schema_quality"]["valid"], json!(200));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

@@ -5069,6 +5069,47 @@ export type DomainEvidenceSourceConnectorKind = "literature" | "clinical_trial" 
 export type DomainEvidenceSourceLocatorKind = "uri" | "path" | "opaque";
 export type DomainEvidenceSourceRetrievalMode = "reference_only" | "metadata_only" | "content";
 
+export type DomainEvidenceProviderConnectorKind = "literature" | "clinical_trial" | "fhir" | "object_store" | "provider_api";
+
+export interface DomainEvidenceProviderNormalizationArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  provider: string;
+  payload: JsonObject | JsonValue[];
+  request?: JsonValue;
+  outcome?: DomainEvidenceIntakeOutcome;
+  claim_posture?: DomainReportClaimPosture;
+  parent_digests?: string[];
+  source_plan_digest?: string | null;
+}
+
+export interface DomainEvidenceProviderNormalizationResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-normalization/0.1";
+  workflow: "domain_evidence_provider_normalize";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  provider: string;
+  outcome: DomainEvidenceIntakeOutcome;
+  payload_digest: string;
+  request_digest: string | null;
+  response: JsonObject;
+  normalization: JsonObject;
+  intake: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceSourcePlanArgs extends JsonObject {
   group_id: string;
   domains: string[];
@@ -5208,6 +5249,7 @@ export interface DomainAcquisitionArgs extends JsonObject {
 export interface DomainAcquisitionTransportResult extends JsonObject {
   status: "bounded_file_http" | "caller_managed_plan" | "none";
   tools: string[];
+  caller_managed_tools: string[];
   bounded_connector_kinds: string[];
   caller_managed_connector_kinds: string[];
   limitations: string[];

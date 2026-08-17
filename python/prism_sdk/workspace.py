@@ -57,6 +57,11 @@ from .domain_evidence_pipeline import (
     DomainEvidencePipelineResult,
     project_domain_source_execution,
 )
+from .domain_evidence_provider import (
+    DomainEvidenceProviderNormalizationReport,
+    DomainEvidenceProviderNormalizationRequest,
+    domain_evidence_provider_normalization_report,
+)
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
     DomainAcquisitionQuery,
@@ -2184,6 +2189,23 @@ class Workspace:
             else dict(execution)
         )
         return project_domain_source_execution(catalogue, normalized_execution, normalized_request, runtime=runtime)
+
+    def domain_evidence_provider_normalize(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderNormalizationRequest)
+            else DomainEvidenceProviderNormalizationRequest(**dict(request))
+        )
+        return self.tool("domain_evidence_provider_normalize", normalized.to_mcp_arguments())
+
+    def domain_evidence_provider_normalization_report(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        return domain_evidence_provider_normalization_report(self.domain_evidence_provider_normalize(request))
 
     def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
         """Audit exact identity agreement across the bounded artifact stores."""
@@ -5645,6 +5667,25 @@ class AsyncWorkspace:
             normalized_execution,
             normalized_request,
             runtime=runtime,
+        )
+
+    async def domain_evidence_provider_normalize(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderNormalizationRequest)
+            else DomainEvidenceProviderNormalizationRequest(**dict(request))
+        )
+        return await self.tool("domain_evidence_provider_normalize", normalized.to_mcp_arguments())
+
+    async def domain_evidence_provider_normalization_report(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        return domain_evidence_provider_normalization_report(
+            await self.domain_evidence_provider_normalize(request)
         )
 
     async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:

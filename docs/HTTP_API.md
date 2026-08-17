@@ -248,9 +248,15 @@ interpretation kept separate: bounded file/plain-HTTP transport, caller-managed 
 families, native adapter matches, Python-delegated adapter matches, domain-tool-only rows, and
 unmapped rows are distinct. Adapter matches are based only on declared scope-label overlap and
 carry the adapter registry digest; they do not resolve ontologies, execute adapters, verify
-dependencies, or claim scientific/clinical validity. The four evidence transport/intake tools
-are explicitly cross-cutting memberships for all 29 groups, so existing source-plan and intake
-scope checks can be used for every declared domain rather than only infrastructure domains.
+dependencies, or claim scientific/clinical validity. The five evidence transport/intake/provider
+tools are explicitly cross-cutting memberships for all 29 groups, so existing source-plan,
+provider, and intake scope checks can be used for every declared domain rather than only
+infrastructure domains.
+`POST /v1/tools/domain_evidence_provider_normalize` is the caller-managed counterpart: it accepts
+an opaque provider-shaped payload for literature, clinical-trial, FHIR, object-store, or generic
+provider-API connectors, derives separate payload/request identities, and indexes the normalized
+envelope through `domain_evidence_intake`. It does not contact, authenticate, or interpret the
+provider response, and defaults an omitted outcome to `unknown`.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

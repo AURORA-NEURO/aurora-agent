@@ -216,6 +216,7 @@ pub mod delivery_receipt;
 pub mod domain_acquisition;
 pub mod domain_evidence;
 pub mod domain_evidence_intake;
+pub mod domain_evidence_provider;
 pub mod domain_evidence_source;
 pub mod domain_evidence_source_execution;
 pub mod domain_report;
@@ -310,6 +311,13 @@ pub use domain_evidence_intake::{
     DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
     MAX_DOMAIN_EVIDENCE_INTAKE_BYTES, MAX_DOMAIN_EVIDENCE_INTAKE_DOMAINS,
     MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS, MAX_DOMAIN_EVIDENCE_INTAKE_TEXT_BYTES,
+};
+pub use domain_evidence_provider::{
+    normalize_domain_evidence_provider, DomainEvidenceProviderNormalization,
+    DomainEvidenceProviderNormalizationError, DomainEvidenceProviderNormalizationRequest,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_BYTES, MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_PARENTS, MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES,
 };
 pub use domain_evidence_source::{
     plan_domain_evidence_source, validate_domain_evidence_source_plan,

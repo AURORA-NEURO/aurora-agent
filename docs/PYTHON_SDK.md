@@ -68,6 +68,9 @@ retained plan through the bounded file/plain-HTTP kernel, preserve observed/part
 outcomes and raw-byte versus canonical-response digests, and automatically retain the result as
 intake. The sync/async HTTP clients and `Workspace`/`AsyncWorkspace` expose both REST and MCP
 helpers; unsupported connectors and unsafe transport policy remain explicit refusals.
+Acquisition route transport rows also preserve `caller_managed_tools` separately from bounded
+file/HTTP tools, so provider normalization availability is not misreported as executable network
+transport.
 `SourceAdapterProjectionRequest`, `SourceAdapterProjectionResult`, and
 `project_source_execution()` form the local handoff from that returned envelope to a concrete
 Python adapter. `ApiClient`, `AsyncApiClient`, `Workspace`, and `AsyncWorkspace` expose the same
@@ -84,6 +87,13 @@ truncated catalogue slices and cross-domain execution envelopes; and preserves t
 in the result. The four client facades expose `domain_evidence_source_project_for_domain()` as
 the same local operation. This is a routing/conformance gate, not an ontology resolver or a
 scientific authorization decision.
+`DomainEvidenceProviderNormalizationRequest` and
+`DomainEvidenceProviderNormalizationReport` cover caller-managed literature, clinical-trial,
+FHIR, object-store, and provider-API payloads. `ApiClient`, `AsyncApiClient`, `Workspace`, and
+`AsyncWorkspace` expose `domain_evidence_provider_normalize()`; the server preserves provider,
+connector, payload, and optional request digests and feeds the result through the same indexed
+intake/coverage path as bounded source reads. Provider authentication, signatures, retrieval,
+terminology expansion, and scientific/clinical interpretation remain explicit non-claims.
 
 ## Lifecycle
 

@@ -111,6 +111,12 @@ response digest of a later bound intake before indexing.
 the bounded local-file/plain-HTTP connector kernel. The typed result preserves transport outcome,
 raw-content digest, canonical response digest, and the automatically indexed intake; traversal,
 HTTPS, redirects, unsupported connectors, and disallowed hosts remain explicit refusals.
+`domainEvidenceProviderNormalize` and `domainEvidenceProviderNormalizeTool` cover the caller-
+managed literature, clinical-trial, FHIR, object-store, and provider-API boundary. They require
+an explicit provider-shaped object/array payload, preserve provider/payload/request identities,
+default an omitted outcome to `unknown`, and feed the same catalogue-bound intake path. The SDK
+does not contact providers or infer authenticity, terminology, scientific, clinical, or release
+validity from normalized fields.
 
 Convenience methods currently cover:
 
@@ -255,7 +261,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 199-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 200-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,

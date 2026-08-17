@@ -31,6 +31,7 @@ const BOUNDED_TRANSPORT_TOOLS: &[&str] = &[
     "domain_evidence_source_execute",
     "domain_evidence_intake",
 ];
+const CALLER_MANAGED_EVIDENCE_TOOLS: &[&str] = &["domain_evidence_provider_normalize"];
 const CALLER_MANAGED_CONNECTORS: &[&str] = &[
     "literature",
     "clinical_trial",
@@ -103,6 +104,7 @@ pub struct DomainTransportRoute {
     /// `bounded_file_http`, `caller_managed_plan`, `caller_supplied_intake`, or `none`.
     pub status: String,
     pub tools: Vec<String>,
+    pub caller_managed_tools: Vec<String>,
     pub bounded_connector_kinds: Vec<String>,
     pub caller_managed_connector_kinds: Vec<String>,
     pub limitations: Vec<String>,
@@ -400,6 +402,11 @@ fn build_route(
     let transport = DomainTransportRoute {
         status: transport_status(&group.mcp_tools),
         tools,
+        caller_managed_tools: CALLER_MANAGED_EVIDENCE_TOOLS
+            .iter()
+            .filter(|tool| group.mcp_tools.iter().any(|candidate| candidate == **tool))
+            .map(|tool| (*tool).to_string())
+            .collect(),
         bounded_connector_kinds: vec!["file".into(), "generic_http".into()],
         caller_managed_connector_kinds: CALLER_MANAGED_CONNECTORS
             .iter()
