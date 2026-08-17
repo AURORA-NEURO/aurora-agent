@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 178);
+    assert_eq!(tools.len(), 179);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1335,6 +1335,23 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
     assert_eq!(replay["fixtures"].as_array().unwrap().len(), 29);
     assert_eq!(replay["fixtures"][0]["variants"].as_array().unwrap().len(), 4);
     assert_eq!(replay["coverage"]["complete"], json!(false));
+
+    let comparison = call(
+        &mut server,
+        "mission_evaluator_replay_compare",
+        json!({"mission": mission.clone(), "include_fixtures": false, "max_items": 64}),
+    );
+    assert_eq!(comparison["workflow"], json!("mission_evaluator_replay_compare"));
+    assert_eq!(comparison["catalog_drift"]["status"], json!("unchanged"));
+    assert_eq!(comparison["catalog_drift"]["digest_match"], json!(true));
+    let mut drifted_mission = mission.clone();
+    drifted_mission["claim_lineage"]["evaluator_review"]["catalog_digest"] = json!("a".repeat(64));
+    let drifted_comparison = call(
+        &mut server,
+        "mission_evaluator_replay_compare",
+        json!({"mission": drifted_mission, "include_fixtures": false, "max_items": 64}),
+    );
+    assert_eq!(drifted_comparison["catalog_drift"]["status"], json!("drifted"));
 
     let replayed_inconsistent = call(
         &mut server,
@@ -5268,12 +5285,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(178));
-    assert_eq!(result["advertised_tool_count"], json!(178));
+    assert_eq!(result["unique_catalog_tools"], json!(179));
+    assert_eq!(result["advertised_tool_count"], json!(179));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(178));
-    assert_eq!(result["schema_quality"]["valid"], json!(178));
+    assert_eq!(result["schema_quality"]["checked"], json!(179));
+    assert_eq!(result["schema_quality"]["valid"], json!(179));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

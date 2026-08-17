@@ -26,6 +26,8 @@ from .capability import (
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
     MissionEvaluatorQuery,
+    MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayComparisonReport,
     MissionEvaluatorReplayReport,
     MissionEvaluatorReplayRequest,
     MissionEvaluatorReviewReport,
@@ -38,6 +40,7 @@ from .capability import (
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
     mission_evaluator_replay_report,
+    mission_evaluator_replay_comparison_report,
 )
 from .capability_dashboard import (
     CapabilityDashboardQueryArgs,
@@ -1541,6 +1544,23 @@ class Workspace:
         """Return typed evaluator replay, fixture, and coverage evidence through MCP."""
 
         return mission_evaluator_replay_report(self.mission_evaluator_replay(request))
+
+    def mission_evaluator_replay_compare(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compare retained replay evidence with the current evaluator catalogue through MCP."""
+
+        normalized = request if isinstance(request, MissionEvaluatorReplayCompareRequest) else MissionEvaluatorReplayCompareRequest(**dict(request))
+        return self.tool("mission_evaluator_replay_compare", normalized.to_mcp_arguments())
+
+    def mission_evaluator_replay_compare_report(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed digest-drift and binding-compatibility evidence through MCP."""
+
+        return mission_evaluator_replay_comparison_report(self.mission_evaluator_replay_compare(request))
 
     def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         """Verify catalogue membership against the authoritative MCP schema set."""
@@ -4512,6 +4532,25 @@ class AsyncWorkspace:
         """Return typed async evaluator replay and fixture evidence through MCP."""
 
         return mission_evaluator_replay_report(await self.mission_evaluator_replay(request))
+
+    async def mission_evaluator_replay_compare(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async comparison of retained replay evidence with the current catalogue."""
+
+        normalized = request if isinstance(request, MissionEvaluatorReplayCompareRequest) else MissionEvaluatorReplayCompareRequest(**dict(request))
+        return await self.tool("mission_evaluator_replay_compare", normalized.to_mcp_arguments())
+
+    async def mission_evaluator_replay_compare_report(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed async digest-drift and binding-compatibility evidence."""
+
+        return mission_evaluator_replay_comparison_report(
+            await self.mission_evaluator_replay_compare(request)
+        )
 
     async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         """Async counterpart to :meth:`Workspace.capability_audit`."""

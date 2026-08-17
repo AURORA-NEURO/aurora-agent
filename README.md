@@ -778,6 +778,14 @@ querying: `retention.mode: "full"` exposes the retained replay, while `"summary_
 digest, count, coverage, finding, and omission evidence after a large report body is trimmed.
 Python and TypeScript clients preserve this distinction in typed query helpers; neither mode
 reconstructs raw output or dispatches an evaluator.
+The adjacent `/evaluator-replay/compare` route detects catalogue-digest drift and checks whether
+referenced adapters remain bound in the current catalogue. It deliberately reports the boundary
+between digest-level comparison and exact historical row diffs: unless a caller retained the
+original catalogue, a changed digest is not presented as a row-level explanation. The durable
+`/evidence-bundle` route then exports mission status, retention and omission proofs, optional raw
+result/trace, replay, catalogue drift, execution provenance, navigable links, and a deterministic
+bundle digest in one bounded artifact. Both routes remain structural and non-executing, and the
+Python/TypeScript SDKs expose the same comparison and export contracts.
 `capability_dashboard` provides the bounded operator view beneath those routes: it binds the live
 catalogue to authoritative MCP schemas, reports callable/partial/declared-only groups, keeps
 crate/CLI/Python/MCP surface counts separate, and labels missing transports without pretending a

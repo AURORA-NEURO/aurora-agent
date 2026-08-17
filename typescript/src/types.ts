@@ -4417,6 +4417,24 @@ export interface MissionEvaluatorReplayResult extends JsonObject {
   limitations: string[];
 }
 
+export interface MissionEvaluatorReplayCompareArgs extends JsonObject {
+  mission: JsonObject;
+  include_fixtures?: boolean;
+  max_items?: number;
+}
+
+export interface MissionEvaluatorReplayCompareResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-mission-evaluator-replay-compare/0.1" | string;
+  workflow: "mission_evaluator_replay_compare";
+  mission_id: string;
+  replay: JsonObject;
+  catalog_drift: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CapabilityAuditGroupResult extends JsonObject {
   id: string;
   domains: string[];
@@ -7377,6 +7395,31 @@ export interface MissionEvaluatorReplayQueryResult extends JsonObject {
   retention: MissionEvaluatorReplayRetention;
   replay: JsonObject;
   execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+  links: JsonObject;
+}
+
+export interface MissionEvidenceBundleOptions extends JsonObject {
+  include_result?: boolean;
+  include_trace?: boolean;
+  include_fixtures?: boolean;
+  max_items?: number;
+}
+
+export interface MissionEvidenceBundleResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-api/mission-evidence-bundle/0.1";
+  workflow: "mission_evidence_bundle_export";
+  mission_id: string;
+  retention: JsonObject;
+  result: JsonObject | null;
+  result_digest: string | null;
+  evaluator_replay: JsonObject;
+  catalog_drift: JsonObject;
+  trace: JsonValue;
+  export: JsonObject;
+  bundle_digest: string;
   guarantees: string[];
   limitations: string[];
   links: JsonObject;

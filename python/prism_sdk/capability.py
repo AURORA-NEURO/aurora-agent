@@ -1138,6 +1138,74 @@ def mission_evaluator_replay_report(value: Mapping[str, Any]) -> MissionEvaluato
 
 
 @dataclass(frozen=True)
+class MissionEvaluatorReplayCompareRequest:
+    """Request a non-executing current-catalogue comparison for one mission report."""
+
+    mission: Mapping[str, Any]
+    include_fixtures: bool = True
+    max_items: int = 128
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mission", dict(_route_mapping("mission evaluator replay comparison mission", self.mission)))
+        if not isinstance(self.include_fixtures, bool):
+            raise ArgumentError("mission evaluator replay comparison include_fixtures must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 512:
+            raise ArgumentError("mission evaluator replay comparison max_items must be between 1 and 512")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {
+            "mission": dict(self.mission),
+            "include_fixtures": self.include_fixtures,
+            "max_items": self.max_items,
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayComparisonReport:
+    """Typed digest-drift and current-binding compatibility evidence."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    replay: Mapping[str, Any]
+    catalog_drift: Mapping[str, Any]
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorReplayComparisonReport":
+        raw = _tool_payload(value, "mission_evaluator_replay_compare")
+        if raw.get("workflow") != "mission_evaluator_replay_compare":
+            raise ArgumentError("mission evaluator replay comparison workflow is invalid")
+        return cls(
+            raw=raw,
+            mission_id=_route_text("mission evaluator replay comparison mission id", raw.get("mission_id")),
+            replay=_route_mapping("mission evaluator replay comparison replay", raw.get("replay")),
+            catalog_drift=_route_mapping("mission evaluator replay catalog drift", raw.get("catalog_drift")),
+            execution=_route_text("mission evaluator replay comparison execution", raw.get("execution")),
+            guarantees=_route_strings("mission evaluator replay comparison guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("mission evaluator replay comparison limitations", raw.get("limitations", [])),
+        )
+
+    @property
+    def status(self) -> str:
+        return str(self.catalog_drift.get("status", "not_recorded"))
+
+    @property
+    def drifted(self) -> bool:
+        return self.status in {"drifted", "drifted_with_missing_bindings", "invalid_recorded_digest"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evaluator_replay_comparison_report(value: Mapping[str, Any]) -> MissionEvaluatorReplayComparisonReport:
+    """Parse a direct MCP result or HTTP envelope from replay comparison."""
+
+    return MissionEvaluatorReplayComparisonReport.from_wire(value)
+
+
+@dataclass(frozen=True)
 class MissionEvaluatorReplayQueryRequest:
     """Bounded REST query for durable full or summary-only evaluator replay evidence."""
 
@@ -1210,6 +1278,107 @@ def mission_evaluator_replay_query_report(value: Mapping[str, Any]) -> MissionEv
     """Parse the durable REST evaluator replay query response."""
 
     return MissionEvaluatorReplayQueryReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleRequest:
+    """Bounded REST export options for a durable mission evidence bundle."""
+
+    mission_id: str
+    include_result: bool = False
+    include_trace: bool = True
+    include_fixtures: bool = False
+    max_items: int = 128
+
+    def __post_init__(self) -> None:
+        _route_text("mission evidence bundle mission id", self.mission_id)
+        for name, value in (
+            ("include_result", self.include_result),
+            ("include_trace", self.include_trace),
+            ("include_fixtures", self.include_fixtures),
+        ):
+            if not isinstance(value, bool):
+                raise ArgumentError(f"mission evidence bundle {name} must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 512:
+            raise ArgumentError("mission evidence bundle max_items must be between 1 and 512")
+
+    def to_query_params(self) -> dict[str, str]:
+        return {
+            "include_result": "true" if self.include_result else "false",
+            "include_trace": "true" if self.include_trace else "false",
+            "include_fixtures": "true" if self.include_fixtures else "false",
+            "max_items": str(self.max_items),
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleReport:
+    """Typed content-addressed mission evidence export."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    retention: Mapping[str, Any]
+    result: Mapping[str, Any] | None
+    result_digest: str | None
+    evaluator_replay: Mapping[str, Any]
+    catalog_drift: Mapping[str, Any]
+    trace: tuple[Mapping[str, Any], ...]
+    bundle_digest: str
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+    links: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_export")
+        if raw.get("workflow") != "mission_evidence_bundle_export":
+            raise ArgumentError("mission evidence bundle workflow is invalid")
+        result = raw.get("result")
+        if result is not None and not isinstance(result, Mapping):
+            raise ArgumentError("mission evidence bundle result must be an object or null")
+        trace = raw.get("trace", [])
+        if not isinstance(trace, Sequence) or isinstance(trace, (str, bytes)):
+            raise ArgumentError("mission evidence bundle trace must be an array")
+        digest = _route_text("mission evidence bundle digest", raw.get("bundle_digest"))
+        if len(digest) != 64:
+            raise ArgumentError("mission evidence bundle digest must be a 64-character digest")
+        export = _route_mapping("mission evidence bundle export", raw.get("export"))
+        result_digest = raw.get("result_digest")
+        if result_digest is not None:
+            result_digest = _route_text("mission evidence bundle result digest", result_digest)
+        return cls(
+            raw=raw,
+            mission_id=_route_text("mission evidence bundle mission id", raw.get("mission_id")),
+            retention=_route_mapping("mission evidence bundle retention", raw.get("retention")),
+            result=dict(result) if isinstance(result, Mapping) else None,
+            result_digest=result_digest,
+            evaluator_replay=_route_mapping("mission evidence bundle replay", raw.get("evaluator_replay")),
+            catalog_drift=_route_mapping("mission evidence bundle catalog drift", raw.get("catalog_drift")),
+            trace=tuple(_route_mapping("mission evidence bundle trace row", row) for row in trace),
+            bundle_digest=digest,
+            execution=_route_text("mission evidence bundle execution", export.get("execution")),
+            guarantees=_route_strings("mission evidence bundle guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("mission evidence bundle limitations", raw.get("limitations", [])),
+            links=_route_mapping("mission evidence bundle links", raw.get("links", {})),
+        )
+
+    @property
+    def summary_only(self) -> bool:
+        return self.retention.get("mode") == "summary_only"
+
+    @property
+    def result_included(self) -> bool:
+        return self.retention.get("result_included") is True
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evidence_bundle_report(value: Mapping[str, Any]) -> MissionEvidenceBundleReport:
+    """Parse the durable REST mission evidence bundle response."""
+
+    return MissionEvidenceBundleReport.from_wire(value)
 
 
 @dataclass(frozen=True)
@@ -1371,8 +1540,12 @@ __all__ = [
     "MissionEvaluatorReviewReport",
     "MissionEvaluatorReplayRequest",
     "MissionEvaluatorReplayReport",
+    "MissionEvaluatorReplayCompareRequest",
+    "MissionEvaluatorReplayComparisonReport",
     "MissionEvaluatorReplayQueryRequest",
     "MissionEvaluatorReplayQueryReport",
+    "MissionEvidenceBundleRequest",
+    "MissionEvidenceBundleReport",
     "MissionEvaluatorAdapterReport",
     "MissionEvaluatorMatchReport",
     "MissionEvaluatorCoverageReport",
@@ -1384,5 +1557,7 @@ __all__ = [
     "mission_evaluator_discover_report",
     "mission_evaluator_review_report",
     "mission_evaluator_replay_report",
+    "mission_evaluator_replay_comparison_report",
     "mission_evaluator_replay_query_report",
+    "mission_evidence_bundle_report",
 ]

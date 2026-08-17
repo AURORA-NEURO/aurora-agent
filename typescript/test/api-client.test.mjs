@@ -3984,3 +3984,101 @@ test("client exposes durable evaluator replay query retention semantics", async 
   assert.equal(result.retention.result_retained, false);
   assert.equal(result.replay.workflow, "mission_evaluator_replay_summary");
 });
+
+test("client exposes evaluator replay comparison and content-addressed evidence bundles", async () => {
+  const mcpClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/tools/mission_evaluator_replay_compare");
+      const body = JSON.parse(init.body);
+      assert.equal(body.include_fixtures, false);
+      assert.equal(body.max_items, 64);
+      return jsonResponse({
+        ok: true,
+        tool: "mission_evaluator_replay_compare",
+        request_id: "r6compare",
+        mcp: { result: { structuredContent: {
+          ok: true,
+          schema: "bioprism-devplat-mission-evaluator-replay-compare/0.1",
+          workflow: "mission_evaluator_replay_compare",
+          mission_id: "mission-ts",
+          replay: { workflow: "mission_evaluator_replay", execution: "not_started" },
+          catalog_drift: {
+            status: "drifted_with_missing_bindings",
+            digest_match: false,
+            missing_referenced_adapter_ids: ["oncoworlds.assay_fidelity"],
+          },
+          execution: "not_started",
+          guarantees: ["comparison is non-executing"],
+          limitations: ["historical catalogue rows were not retained"],
+        } } },
+      });
+    },
+  });
+  const comparison = await mcpClient.missionEvaluatorReplayCompare({
+    mission: { workflow: "agent_mission" },
+    include_fixtures: false,
+    max_items: 64,
+  });
+  assert.equal(comparison.mcp.result.structuredContent.workflow, "mission_evaluator_replay_compare");
+  assert.equal(comparison.mcp.result.structuredContent.catalog_drift.status, "drifted_with_missing_bindings");
+
+  const restClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/missions/mission-ts/evaluator-replay/compare") {
+        assert.equal(url.searchParams.get("include_fixtures"), "false");
+        assert.equal(url.searchParams.get("max_items"), "64");
+        return jsonResponse({
+          ok: true,
+          schema: "bioprism-api/mission-evaluator-replay-compare/0.1",
+          workflow: "mission_evaluator_replay_compare",
+          mission_id: "mission-ts",
+          replay: { workflow: "mission_evaluator_replay" },
+          catalog_drift: { status: "unchanged", digest_match: true },
+          execution: "not_started",
+          guarantees: [],
+          limitations: [],
+        });
+      }
+      assert.equal(url.pathname, "/v1/missions/mission-ts/evidence-bundle");
+      assert.equal(url.searchParams.get("include_result"), "false");
+      assert.equal(url.searchParams.get("include_trace"), "true");
+      assert.equal(url.searchParams.get("include_fixtures"), "false");
+      assert.equal(url.searchParams.get("max_items"), "64");
+      return jsonResponse({
+        ok: true,
+        schema: "bioprism-api/mission-evidence-bundle/0.1",
+        workflow: "mission_evidence_bundle_export",
+        mission_id: "mission-ts",
+        retention: { mode: "summary_only", result_retained: false, result_included: false },
+        result: null,
+        result_digest: null,
+        evaluator_replay: { workflow: "mission_evaluator_replay_summary" },
+        catalog_drift: { status: "unchanged" },
+        trace: [{ sequence: 1, event: "mission_succeeded" }],
+        export: { include_result: false, include_trace: true, include_fixtures: false, max_items: 64, execution: "not_started" },
+        bundle_digest: "b".repeat(64),
+        guarantees: [],
+        limitations: [],
+        links: {},
+      });
+    },
+  });
+  const restComparison = await restClient.missionEvaluatorReplayCompareQuery("mission-ts", {
+    include_fixtures: false,
+    max_items: 64,
+  });
+  assert.equal(restComparison.catalog_drift.status, "unchanged");
+  const bundle = await restClient.missionEvidenceBundle("mission-ts", {
+    include_result: false,
+    include_trace: true,
+    include_fixtures: false,
+    max_items: 64,
+  });
+  assert.equal(bundle.workflow, "mission_evidence_bundle_export");
+  assert.equal(bundle.retention.mode, "summary_only");
+  assert.equal(bundle.bundle_digest.length, 64);
+});

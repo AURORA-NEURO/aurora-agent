@@ -497,6 +497,19 @@ invent defaults:
   replay from the compact digest/count/coverage summary preserved after large-result omission.
   Summary-only evidence never reconstructs raw output or executes an evaluator, and the typed
   report keeps retention metadata, links, guarantees, and limitations intact.
+- `MissionEvaluatorReplayCompareRequest` and `mission_evaluator_replay_comparison_report(...)`
+  expose the non-executing MCP comparison between retained evaluator provenance and the current
+  catalogue. `MissionEvaluatorReplayComparisonReport.status` distinguishes unchanged, drifted,
+  missing-binding, not-recorded, and invalid-digest states while preserving the explicit limitation
+  that a retained digest is not an historical row-by-row catalogue snapshot. The sync/async
+  `Workspace` methods and `ApiClient`/`AsyncApiClient.mission_evaluator_replay_compare(...)`
+  helpers use the same contract; REST callers use
+  `mission_evaluator_replay_compare_query(...)`.
+- `MissionEvidenceBundleRequest` bounds result/trace/fixture inclusion and `max_items` for the
+  durable `/evidence-bundle` export. `MissionEvidenceBundleReport` preserves summary-only versus
+  full retention, optional result and trace, replay/catalogue-drift projections, omission metadata,
+  execution provenance, links, and the 64-character content `bundle_digest`. The export is bounded
+  and non-executing; oversized bundles are refused rather than truncated.
 - `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
   `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
   ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool

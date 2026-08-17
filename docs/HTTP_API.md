@@ -33,6 +33,8 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/missions/{mission_id}/provenance` | Retrieve retained gate, review, domain-evaluator, and accepted-dispatch evidence |
 | `GET /v1/missions/{mission_id}/claims` | Retrieve the bounded claim-to-step evidence-lineage projection |
 | `GET /v1/missions/{mission_id}/evaluator-replay` | Retrieve durable full or summary-only evaluator replay evidence |
+| `GET /v1/missions/{mission_id}/evaluator-replay/compare` | Compare retained evaluator provenance with the current catalogue |
+| `GET /v1/missions/{mission_id}/evidence-bundle` | Export a bounded, content-addressed mission evidence bundle |
 | `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
@@ -96,6 +98,14 @@ it returns `409` when no state path was configured and `503` when the checkpoint
 When a terminal mission result is omitted, `GET /v1/missions/{mission_id}/evaluator-replay` can
 still return a bounded structural `mission_evaluator_replay_summary` through
 `retention.mode: "summary_only"`; it never reconstructs raw output or executes an evaluator.
+The sibling `/evaluator-replay/compare` route compares the retained historical catalogue digest
+and referenced adapter IDs with the current catalogue. It reports `unchanged`, `drifted`,
+`*_with_missing_bindings`, `not_recorded`, and invalid-digest states without claiming an exact
+historical row diff when only the digest was retained. `/evidence-bundle` packages the mission
+status, retention/omission metadata, optional result and trace, replay projection, catalogue-drift
+comparison, execution provenance, links, and a SHA-256 `bundle_digest` into one bounded export.
+Neither route executes a domain tool or evaluator; the evidence bundle rejects oversized serialized
+exports with `413` rather than silently truncating them.
 
 Pass `--event-state <file>` to checkpoint the retained event cursor plus bounded subscription and
 outbox metadata as a separate JSON document. It restores event IDs, retention-gap accounting,
@@ -248,6 +258,26 @@ explicit refusal code rather than returning an empty successful replay. `executi
 `"not_started"` for both modes: this route audits stored evidence and never dispatches domain or
 evaluator tools. The Python `ApiClient`/`AsyncApiClient` and TypeScript `ApiClient` expose the same
 bounded query, while typed reports preserve retention mode, links, guarantees, and limitations.
+
+### Evaluator catalogue comparison and evidence bundle export
+
+`GET /v1/missions/{mission_id}/evaluator-replay/compare` accepts the same bounded
+`include_fixtures` and `max_items` query parameters as replay. Its `catalog_drift` object includes
+the historical and current catalogue digests, digest validity/match, historical review and
+discovery IDs, compatible and missing referenced adapter IDs, current catalogue counts, and the
+explicit `comparison_scope: "historical_digest_and_current_binding_compatibility"`. A matching
+digest does not prove evaluator semantics; a changed digest does not identify the exact changed
+row unless a caller retained that catalogue snapshot. Summary-only checkpoints use their separate
+`historical_catalog_digest` rather than treating a newly recomputed current digest as historical.
+
+`GET /v1/missions/{mission_id}/evidence-bundle` accepts `include_result` (default `false`),
+`include_trace` (default `true`), `include_fixtures` (default `false`), and `max_items` (`1..512`,
+default `128`). The export is capped at 2 MiB, includes a deterministic `bundle_digest`, and
+preserves `result_digest`/`result_omitted` metadata even when the result body is not included.
+`include_result=true` is accepted only when the authoritative result was retained; an omitted
+result remains explicitly omitted. The bundle's `execution` posture is always `not_started` for
+the replay/comparison sub-workflows, and the trace is observational evidence rather than a second
+execution result.
 
 ## Asynchronous missions
 

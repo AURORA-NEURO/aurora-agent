@@ -16,6 +16,8 @@ use thiserror::Error;
 
 /// Wire version for mission evaluator discovery.
 pub const MISSION_EVALUATOR_SCHEMA_VERSION: &str = "bioprism-devplat-mission-evaluator/0.1";
+pub const MISSION_EVALUATOR_REPLAY_COMPARE_SCHEMA_VERSION: &str =
+    "bioprism-devplat-mission-evaluator-replay-compare/0.1";
 const MAX_ITEMS: usize = 256;
 const DEFAULT_MAX_ITEMS: usize = 32;
 const MAX_FILTER_BYTES: usize = 512;
@@ -224,6 +226,17 @@ pub struct MissionEvaluatorReplayRequest {
     pub max_items: usize,
 }
 
+/// Input to the bounded, non-executing comparison between retained mission evaluator evidence
+/// and the evaluator catalogue available in the current process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissionEvaluatorReplayCompareRequest {
+    pub mission: Value,
+    #[serde(default = "default_include_fixtures")]
+    pub include_fixtures: bool,
+    #[serde(default = "default_replay_items")]
+    pub max_items: usize,
+}
+
 /// Validated evaluator catalogue with a content digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissionEvaluatorCatalogue {
@@ -231,7 +244,11 @@ pub struct MissionEvaluatorCatalogue {
     digest: ContentHash,
 }
 
-fn fixture_output_for_pointer(adapter: &MissionEvaluatorAdapter, pointer: &str, signal: &str) -> Value {
+fn fixture_output_for_pointer(
+    adapter: &MissionEvaluatorAdapter,
+    pointer: &str,
+    signal: &str,
+) -> Value {
     let leaf = json!({
         "fixture_signal": signal,
         "adapter_id": adapter.id,
@@ -275,15 +292,13 @@ fn evaluator_fixture(adapter: &MissionEvaluatorAdapter) -> Value {
     let retained_digest = ContentHash::of_value(&retained_value)
         .map(|digest| digest.to_string())
         .unwrap_or_default();
-    let disagreement_digest = ContentHash::of_value(
-        if output_pointer.is_empty() {
-            &disagreement_output
-        } else {
-            disagreement_output
-                .pointer(&output_pointer)
-                .unwrap_or(&disagreement_output)
-        },
-    )
+    let disagreement_digest = ContentHash::of_value(if output_pointer.is_empty() {
+        &disagreement_output
+    } else {
+        disagreement_output
+            .pointer(&output_pointer)
+            .unwrap_or(&disagreement_output)
+    })
     .map(|digest| digest.to_string())
     .unwrap_or_default();
     json!({
@@ -309,8 +324,9 @@ impl MissionEvaluatorCatalogue {
     /// Build the in-tree catalogue covering each workspace capability group.
     pub fn standard() -> Self {
         let adapters = standard_adapters();
-        let digest = ContentHash::of_value(&to_value(&adapters).expect("adapters are serializable"))
-            .expect("standard evaluator catalogue must be hashable");
+        let digest =
+            ContentHash::of_value(&to_value(&adapters).expect("adapters are serializable"))
+                .expect("standard evaluator catalogue must be hashable");
         Self { adapters, digest }
     }
 
@@ -377,7 +393,10 @@ impl MissionEvaluatorCatalogue {
                 ("levels", &adapter.levels.join(" ")),
                 ("purpose", adapter.purpose.as_str()),
                 ("candidate_tools", &adapter.candidate_tools.join(" ")),
-                ("output_pointer_examples", &adapter.output_pointer_examples.join(" ")),
+                (
+                    "output_pointer_examples",
+                    &adapter.output_pointer_examples.join(" "),
+                ),
             ];
             let mut score = 0;
             let mut matched_fields = BTreeSet::new();
@@ -411,9 +430,12 @@ impl MissionEvaluatorCatalogue {
                     .iter()
                     .filter_map(|(field, value)| {
                         let field_tokens = tokens(value);
-                        field_tokens.iter().any(|candidate| {
-                            candidate == query_token || candidate.starts_with(query_token)
-                        }).then_some(*field)
+                        field_tokens
+                            .iter()
+                            .any(|candidate| {
+                                candidate == query_token || candidate.starts_with(query_token)
+                            })
+                            .then_some(*field)
                     })
                     .collect::<Vec<_>>();
                 if fields_for_token.is_empty() {
@@ -455,22 +477,19 @@ impl MissionEvaluatorCatalogue {
     /// The returned scaffold still requires normal `agent_mission` validation, including known
     /// step IDs and the final claim statement. No evaluator or domain tool is executed here.
     pub fn review(&self, request: &MissionEvaluatorReviewRequest) -> Result<Value, EvaluatorError> {
-        let discovery = request
-            .discovery
-            .as_object()
-            .ok_or_else(|| EvaluatorError::InvalidReview {
-                reason: "discovery must be an object".into(),
-            })?;
-        if discovery.get("workflow").and_then(Value::as_str)
-            != Some("mission_evaluator_discover")
-        {
+        let discovery =
+            request
+                .discovery
+                .as_object()
+                .ok_or_else(|| EvaluatorError::InvalidReview {
+                    reason: "discovery must be an object".into(),
+                })?;
+        if discovery.get("workflow").and_then(Value::as_str) != Some("mission_evaluator_discover") {
             return Err(EvaluatorError::InvalidReview {
                 reason: "discovery.workflow must be mission_evaluator_discover".into(),
             });
         }
-        if discovery.get("selection_posture").and_then(Value::as_str)
-            != Some("candidate_only")
-        {
+        if discovery.get("selection_posture").and_then(Value::as_str) != Some("candidate_only") {
             return Err(EvaluatorError::InvalidReview {
                 reason: "discovery.selection_posture must be candidate_only".into(),
             });
@@ -499,9 +518,11 @@ impl MissionEvaluatorCatalogue {
             let Some(adapter) = matched.get("adapter") else {
                 continue;
             };
-            let parsed: MissionEvaluatorAdapter = serde_json::from_value(adapter.clone())
-                .map_err(|error| EvaluatorError::InvalidReview {
-                    reason: format!("discovery adapter is invalid: {error}"),
+            let parsed: MissionEvaluatorAdapter =
+                serde_json::from_value(adapter.clone()).map_err(|error| {
+                    EvaluatorError::InvalidReview {
+                        reason: format!("discovery adapter is invalid: {error}"),
+                    }
                 })?;
             candidates.insert(parsed.id.clone(), parsed);
         }
@@ -539,7 +560,8 @@ impl MissionEvaluatorCatalogue {
                 row_errors.push("selection.claim_id must be a visible string of at most 128 bytes");
             }
             if !visible_text(&selection.adapter_id, 256) {
-                row_errors.push("selection.adapter_id must be a visible string of at most 256 bytes");
+                row_errors
+                    .push("selection.adapter_id must be a visible string of at most 256 bytes");
             }
             if !visible_text(&selection.domain, 256) {
                 row_errors.push("selection.domain must be a visible string of at most 256 bytes");
@@ -576,10 +598,13 @@ impl MissionEvaluatorCatalogue {
             row["candidate_found"] = json!(candidate.is_some());
             row["domain_supported"] = json!(domain_supported);
             if candidate.is_none() {
-                row_errors.push("selection.adapter_id is not present in the supplied discovery matches");
+                row_errors
+                    .push("selection.adapter_id is not present in the supplied discovery matches");
             }
             if candidate.is_some() && !domain_supported {
-                row_errors.push("selection.domain is not covered by the selected adapter's catalogue domains");
+                row_errors.push(
+                    "selection.domain is not covered by the selected adapter's catalogue domains",
+                );
             }
             if let Some(candidate) = candidate {
                 row["candidate_tools"] = json!(candidate.candidate_tools);
@@ -723,10 +748,7 @@ impl MissionEvaluatorCatalogue {
                 }));
                 continue;
             };
-            let claim_id = claim_object
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let claim_id = claim_object.get("id").and_then(Value::as_str).unwrap_or("");
             let bindings = claim_object
                 .get("evaluator_bindings")
                 .and_then(Value::as_array)
@@ -783,14 +805,16 @@ impl MissionEvaluatorCatalogue {
                         }));
                     }
                 }
-                let adapter = self.adapters.iter().find(|candidate| candidate.id == adapter_id);
+                let adapter = self
+                    .adapters
+                    .iter()
+                    .find(|candidate| candidate.id == adapter_id);
                 let domain_supported = adapter.is_some_and(|candidate| {
                     let requested = normalized(domain);
                     !requested.is_empty()
-                        && candidate
-                        .domains
-                        .iter()
-                        .any(|candidate_domain| normalized(candidate_domain).contains(&requested))
+                        && candidate.domains.iter().any(|candidate_domain| {
+                            normalized(candidate_domain).contains(&requested)
+                        })
                 });
                 if adapter.is_none() {
                     findings.push(json!({
@@ -815,7 +839,10 @@ impl MissionEvaluatorCatalogue {
                     }));
                 }
                 if outcome_state == "retained"
-                    && binding_object.get("output_digest").and_then(Value::as_str).is_none()
+                    && binding_object
+                        .get("output_digest")
+                        .and_then(Value::as_str)
+                        .is_none()
                 {
                     findings.push(json!({
                         "severity": "error",
@@ -829,10 +856,16 @@ impl MissionEvaluatorCatalogue {
                 } else if !domain_supported {
                     "unsupported_domain"
                 } else if outcome_state == "retained"
-                    && binding_object.get("output_digest").and_then(Value::as_str).is_some()
+                    && binding_object
+                        .get("output_digest")
+                        .and_then(Value::as_str)
+                        .is_some()
                 {
                     "replayed_retained"
-                } else if matches!(outcome_state, "refused" | "blocked" | "cancelled" | "output_omitted" | "pointer_missing") {
+                } else if matches!(
+                    outcome_state,
+                    "refused" | "blocked" | "cancelled" | "output_omitted" | "pointer_missing"
+                ) {
                     outcome_state
                 } else {
                     "unreported"
@@ -860,7 +893,9 @@ impl MissionEvaluatorCatalogue {
             } else {
                 "disagreement"
             };
-            let coverage = claim_object.get("evaluator_coverage").and_then(Value::as_object);
+            let coverage = claim_object
+                .get("evaluator_coverage")
+                .and_then(Value::as_object);
             if let Some(coverage) = coverage {
                 if let Some(expected) = coverage.get("outcome_counts") {
                     if expected != &json!(claim_states) {
@@ -873,7 +908,10 @@ impl MissionEvaluatorCatalogue {
                         }));
                     }
                 }
-                if let Some(expected) = coverage.get("distinct_output_digests").and_then(Value::as_u64) {
+                if let Some(expected) = coverage
+                    .get("distinct_output_digests")
+                    .and_then(Value::as_u64)
+                {
                     if expected != claim_digests.len() as u64 {
                         findings.push(json!({
                             "severity": "error",
@@ -884,7 +922,8 @@ impl MissionEvaluatorCatalogue {
                         }));
                     }
                 }
-                if let Some(expected) = coverage.get("disagreement_posture").and_then(Value::as_str) {
+                if let Some(expected) = coverage.get("disagreement_posture").and_then(Value::as_str)
+                {
                     if expected != replayed_disagreement_posture {
                         findings.push(json!({
                             "severity": "error",
@@ -988,6 +1027,203 @@ impl MissionEvaluatorCatalogue {
             ],
         }))
     }
+
+    /// Compare retained mission evaluator evidence with the current catalogue without executing
+    /// any evaluator or domain tool. Historical catalogue rows are not reconstructed from a
+    /// digest; the result therefore separates digest drift from current binding compatibility.
+    pub fn compare(
+        &self,
+        request: &MissionEvaluatorReplayCompareRequest,
+    ) -> Result<Value, EvaluatorError> {
+        let replay = self.replay(&MissionEvaluatorReplayRequest {
+            mission: request.mission.clone(),
+            include_fixtures: request.include_fixtures,
+            max_items: request.max_items,
+        })?;
+        let mission = request
+            .mission
+            .as_object()
+            .ok_or_else(|| EvaluatorError::InvalidReplay {
+                reason: "mission must be an object".into(),
+            })?;
+        let review = mission
+            .get("claim_lineage")
+            .and_then(Value::as_object)
+            .and_then(|lineage| lineage.get("evaluator_review"))
+            .and_then(Value::as_object)
+            .or_else(|| mission.get("evaluator_review").and_then(Value::as_object));
+        let adapter_ids = mission_referenced_adapter_ids(&request.mission);
+        let catalog_drift = self.catalog_drift(
+            review
+                .and_then(|value| value.get("catalog_digest"))
+                .and_then(Value::as_str),
+            review
+                .and_then(|value| value.get("review_id"))
+                .and_then(Value::as_str),
+            review
+                .and_then(|value| value.get("discovery_digest"))
+                .and_then(Value::as_str),
+            &adapter_ids,
+            "mission_review_provenance",
+        );
+        Ok(json!({
+            "schema": MISSION_EVALUATOR_REPLAY_COMPARE_SCHEMA_VERSION,
+            "workflow": "mission_evaluator_replay_compare",
+            "ok": true,
+            "mission_id": replay.get("mission_id").cloned().unwrap_or(Value::Null),
+            "replay": replay,
+            "catalog_drift": catalog_drift,
+            "execution": "not_started",
+            "guarantees": [
+                "the retained replay is compared against the current in-process evaluator catalogue without dispatch",
+                "historical review and discovery digests remain separate from the current catalogue digest",
+                "missing current adapters are reported rather than silently rebound"
+            ],
+            "limitations": [
+                "a digest identifies historical catalogue content but does not contain its row-by-row snapshot",
+                "the comparison cannot enumerate historical additions or removals unless the original catalogue rows were retained",
+                "digest drift and binding compatibility are structural evidence, not semantic, scientific, clinical, causal, or release validation"
+            ]
+        }))
+    }
+
+    /// Compare a compact durable replay summary after the original mission result has been
+    /// omitted. This keeps the same drift posture while refusing to imply that omitted rows can
+    /// be reconstructed.
+    pub fn compare_summary(&self, summary: &Value) -> Result<Value, EvaluatorError> {
+        let object = summary
+            .as_object()
+            .ok_or_else(|| EvaluatorError::InvalidReplay {
+                reason: "replay summary must be an object".into(),
+            })?;
+        if object.get("workflow").and_then(Value::as_str)
+            != Some("mission_evaluator_replay_summary")
+        {
+            return Err(EvaluatorError::InvalidReplay {
+                reason: "replay summary.workflow must be mission_evaluator_replay_summary".into(),
+            });
+        }
+        let adapter_ids = object
+            .get("referenced_adapter_ids")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let historical_catalog_digest = object
+            .get("historical_catalog_digest")
+            .and_then(Value::as_str);
+        let catalog_drift = self.catalog_drift(
+            historical_catalog_digest,
+            object.get("historical_review_id").and_then(Value::as_str),
+            object
+                .get("historical_discovery_digest")
+                .and_then(Value::as_str),
+            &adapter_ids,
+            "durable_replay_summary",
+        );
+        Ok(json!({
+            "schema": MISSION_EVALUATOR_REPLAY_COMPARE_SCHEMA_VERSION,
+            "workflow": "mission_evaluator_replay_compare",
+            "ok": true,
+            "mission_id": object.get("mission_id").cloned().unwrap_or(Value::Null),
+            "replay": summary,
+            "catalog_drift": catalog_drift,
+            "execution": "not_started",
+            "guarantees": [
+                "the comparison uses only the compact checkpoint summary and current catalogue",
+                "result omission and non-executing posture remain explicit"
+            ],
+            "limitations": [
+                "omitted raw outputs and historical catalogue rows cannot be reconstructed",
+                "summary-only comparison cannot enumerate exact historical adapter additions or removals",
+                "the comparison is structural evidence rather than semantic or release validation"
+            ]
+        }))
+    }
+
+    fn catalog_drift(
+        &self,
+        historical_catalog_digest: Option<&str>,
+        historical_review_id: Option<&str>,
+        historical_discovery_digest: Option<&str>,
+        referenced_adapter_ids: &BTreeSet<String>,
+        source: &str,
+    ) -> Value {
+        let current_catalog_digest = self.digest.to_string();
+        let current_adapter_ids = self
+            .adapters
+            .iter()
+            .map(|adapter| adapter.id.clone())
+            .collect::<BTreeSet<_>>();
+        let missing_referenced_adapters = referenced_adapter_ids
+            .difference(&current_adapter_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let compatible_referenced_adapters = referenced_adapter_ids
+            .intersection(&current_adapter_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let historical_digest_valid = historical_catalog_digest.is_some_and(valid_digest);
+        let digest_match = historical_catalog_digest
+            .filter(|_| historical_digest_valid)
+            .map(|value| value == current_catalog_digest);
+        let status = if historical_catalog_digest.is_none() {
+            "not_recorded"
+        } else if !historical_digest_valid {
+            "invalid_recorded_digest"
+        } else if !missing_referenced_adapters.is_empty() && digest_match == Some(true) {
+            "unchanged_with_missing_bindings"
+        } else if !missing_referenced_adapters.is_empty() {
+            "drifted_with_missing_bindings"
+        } else if digest_match == Some(true) {
+            "unchanged"
+        } else {
+            "drifted"
+        };
+        json!({
+            "status": status,
+            "historical_catalog_digest": historical_catalog_digest.map(str::to_string),
+            "current_catalog_digest": current_catalog_digest,
+            "digest_match": digest_match,
+            "historical_digest_valid": historical_catalog_digest.is_some() && historical_digest_valid,
+            "historical_review_id": historical_review_id.map(str::to_string),
+            "historical_discovery_digest": historical_discovery_digest.map(str::to_string),
+            "referenced_adapter_count": referenced_adapter_ids.len(),
+            "compatible_referenced_adapters": compatible_referenced_adapters,
+            "missing_referenced_adapters": missing_referenced_adapters,
+            "current_catalogue_adapter_count": self.adapters.len(),
+            "current_catalogue_group_count": self
+                .adapters
+                .iter()
+                .map(|adapter| adapter.group_id.as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            "comparison_scope": "historical_digest_and_current_binding_compatibility",
+            "historical_catalogue_rows_retained": false,
+            "source": source,
+        })
+    }
+}
+
+fn mission_referenced_adapter_ids(mission: &Value) -> BTreeSet<String> {
+    mission
+        .get("claim_lineage")
+        .and_then(|lineage| lineage.get("claims"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|claim| claim.get("evaluator_bindings"))
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|binding| binding.get("adapter_id"))
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
 }
 
 /// Fail-closed evaluator query errors.
@@ -1032,7 +1268,10 @@ fn adapter(
         domains: domains.iter().map(|value| (*value).into()).collect(),
         levels: levels.iter().map(|value| (*value).into()).collect(),
         purpose: purpose.into(),
-        candidate_tools: candidate_tools.iter().map(|value| (*value).into()).collect(),
+        candidate_tools: candidate_tools
+            .iter()
+            .map(|value| (*value).into())
+            .collect(),
         output_pointer_examples: output_pointer_examples
             .iter()
             .map(|value| (*value).into())
@@ -1142,10 +1381,18 @@ mod tests {
         assert_eq!(replay["execution"], json!("not_started"));
         assert_eq!(replay["fixtures"].as_array().unwrap().len(), 29);
         assert_eq!(replay["omitted_fixtures"], json!(0));
-        assert!(replay["fixtures"].as_array().unwrap().iter().all(|fixture| {
-            fixture["variants"].as_array().is_some_and(|variants| variants.len() == 4)
-                && fixture["guarantee"].as_str().is_some_and(|value| value.contains("structural"))
-        }));
+        assert!(replay["fixtures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|fixture| {
+                fixture["variants"]
+                    .as_array()
+                    .is_some_and(|variants| variants.len() == 4)
+                    && fixture["guarantee"]
+                        .as_str()
+                        .is_some_and(|value| value.contains("structural"))
+            }));
     }
 
     #[test]
@@ -1185,14 +1432,123 @@ mod tests {
         };
         let replay = catalogue.replay(&request).unwrap();
         assert_eq!(replay["replay_status"], json!("blocked"));
-        assert!(replay["findings"].as_array().unwrap().iter().any(|finding| {
-            finding["code"] == json!("outcome_count_mismatch")
-        }));
-        assert!(replay["findings"].as_array().unwrap().iter().any(|finding| {
-            finding["code"] == json!("unknown_adapter")
-        }));
+        assert!(replay["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| { finding["code"] == json!("outcome_count_mismatch") }));
+        assert!(replay["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| { finding["code"] == json!("unknown_adapter") }));
         assert_eq!(replay["fixtures"], json!([]));
         assert_eq!(replay["omitted_fixtures"], json!(29));
+    }
+
+    #[test]
+    fn replay_comparison_separates_digest_drift_from_binding_compatibility() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let mission = |catalog_digest: String, adapter_id: &str| {
+            json!({
+                "workflow": "agent_mission",
+                "plan": {"mission_id": "mission-compare"},
+                "claim_lineage": {
+                    "evaluator_review": {
+                        "present": true,
+                        "review_id": "b".repeat(64),
+                        "catalog_digest": catalog_digest,
+                        "discovery_digest": "c".repeat(64)
+                    },
+                    "claims": [{
+                        "id": "claim-1",
+                        "evaluator_bindings": [{
+                            "id": "binding-1",
+                            "adapter_id": adapter_id,
+                            "domain": "oncology",
+                            "step_id": "assay",
+                            "output_pointer": "/fidelity",
+                            "required": true,
+                            "outcome_state": "output_omitted"
+                        }],
+                        "evaluator_coverage": {
+                            "outcome_counts": {"output_omitted": 1},
+                            "distinct_output_digests": 0,
+                            "disagreement_posture": "unavailable"
+                        }
+                    }]
+                }
+            })
+        };
+        let unchanged = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission: mission(catalogue.digest().to_string(), "oncoworlds.assay_fidelity"),
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(unchanged["workflow"], "mission_evaluator_replay_compare");
+        assert_eq!(unchanged["catalog_drift"]["status"], "unchanged");
+        assert_eq!(unchanged["catalog_drift"]["digest_match"], true);
+        assert_eq!(
+            unchanged["catalog_drift"]["missing_referenced_adapters"],
+            json!([])
+        );
+
+        let drifted = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission: mission("a".repeat(64), "oncoworlds.assay_fidelity"),
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(drifted["catalog_drift"]["status"], "drifted");
+        assert_eq!(drifted["catalog_drift"]["digest_match"], false);
+
+        let missing = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission: mission("a".repeat(64), "removed.adapter"),
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(
+            missing["catalog_drift"]["status"],
+            "drifted_with_missing_bindings"
+        );
+        assert_eq!(
+            missing["catalog_drift"]["missing_referenced_adapters"],
+            json!(["removed.adapter"])
+        );
+    }
+
+    #[test]
+    fn summary_comparison_preserves_omission_and_historical_digest_limits() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let summary = json!({
+            "workflow": "mission_evaluator_replay_summary",
+            "mission_id": "mission-summary",
+            "historical_catalog_digest": "a".repeat(64),
+            "historical_review_id": "b".repeat(64),
+            "historical_discovery_digest": "c".repeat(64),
+            "referenced_adapter_ids": ["oncoworlds.assay_fidelity"],
+            "result_retained": true,
+            "result_digest": "d".repeat(64)
+        });
+        let comparison = catalogue.compare_summary(&summary).unwrap();
+        assert_eq!(comparison["catalog_drift"]["status"], "drifted");
+        assert_eq!(
+            comparison["catalog_drift"]["historical_catalogue_rows_retained"],
+            false
+        );
+        assert!(comparison["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| {
+                item.as_str()
+                    .is_some_and(|value| value.contains("historical catalogue rows"))
+            }));
     }
 
     #[test]

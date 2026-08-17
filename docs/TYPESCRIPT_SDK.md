@@ -718,6 +718,16 @@ within the checkpoint bound and `"summary_only"` when only the digest/count/cove
 retained; both modes preserve `execution: "not_started"`, explicit limitations, and navigable
 mission/claims/replay links.
 
+`missionEvaluatorReplayCompare(...)` exposes the MCP comparison contract, while
+`missionEvaluatorReplayCompareQuery(missionId, { include_fixtures, max_items })` reads the same
+catalogue-drift evidence through REST. The typed result keeps digest validity/match, historical
+review/discovery provenance, compatible and missing referenced adapters, and the explicit
+historical-row-retention limitation. `missionEvidenceBundle(missionId, { include_result,
+include_trace, include_fixtures, max_items })` exports one bounded content-addressed evidence
+bundle with retention/omission metadata, replay and drift projections, optional trace/result,
+execution provenance, and a 64-character `bundle_digest`; it never dispatches a domain tool or
+evaluator and never silently truncates an oversized export.
+
 ```typescript
 const page = await api.events(0, 100);
 const operations = await api.operationsSnapshot(page.page.next_after, 100);

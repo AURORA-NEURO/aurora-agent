@@ -263,12 +263,16 @@ import type {
   MissionEvaluatorDiscoverArgs,
   MissionEvaluatorDiscoverResult,
   MissionEvaluatorReplayArgs,
+  MissionEvaluatorReplayCompareArgs,
+  MissionEvaluatorReplayCompareResult,
   MissionEvaluatorReplayResult,
   MissionEvaluatorReplayQueryOptions,
   MissionEvaluatorReplayQueryResult,
   MissionEvaluatorReviewArgs,
   MissionEvaluatorReviewResult,
   MissionExecutionProvenanceResponse,
+  MissionEvidenceBundleOptions,
+  MissionEvidenceBundleResult,
   MissionJob,
   MissionJobStatus,
   MissionInventoryResponse,
@@ -873,6 +877,10 @@ export class ApiClient {
     return this.callTool<MissionEvaluatorReplayResult>("mission_evaluator_replay", args, options);
   }
 
+  async missionEvaluatorReplayCompare(args: MissionEvaluatorReplayCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvaluatorReplayCompareResult>> {
+    return this.callTool<MissionEvaluatorReplayCompareResult>("mission_evaluator_replay_compare", args, options);
+  }
+
   async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityAuditResult>> {
     return this.callTool<CapabilityAuditResult>("capability_audit", args, options);
   }
@@ -1263,6 +1271,64 @@ export class ApiClient {
     return this.request<MissionEvaluatorReplayQueryResult>(
       "GET",
       `/v1/missions/${encodeURIComponent(id)}/evaluator-replay?${query.toString()}`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Compare durable replay evidence with the current evaluator catalogue. */
+  async missionEvaluatorReplayCompareQuery(
+    missionId: string,
+    queryOptions: MissionEvaluatorReplayQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<MissionEvaluatorReplayCompareResult> {
+    const id = pathSegment(missionId, "mission id");
+    if (queryOptions.include_fixtures !== undefined && typeof queryOptions.include_fixtures !== "boolean") {
+      throw new ArgumentError("include_fixtures must be a boolean");
+    }
+    const maxItems = queryOptions.max_items ?? 128;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 512) {
+      throw new ArgumentError("max_items must be 1..=512");
+    }
+    const query = new URLSearchParams({
+      include_fixtures: String(queryOptions.include_fixtures ?? false),
+      max_items: String(maxItems),
+    });
+    return this.request<MissionEvaluatorReplayCompareResult>(
+      "GET",
+      `/v1/missions/${encodeURIComponent(id)}/evaluator-replay/compare?${query.toString()}`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Export a bounded, content-addressed mission evidence bundle. */
+  async missionEvidenceBundle(
+    missionId: string,
+    bundleOptions: MissionEvidenceBundleOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<MissionEvidenceBundleResult> {
+    const id = pathSegment(missionId, "mission id");
+    for (const [name, value] of [
+      ["include_result", bundleOptions.include_result],
+      ["include_trace", bundleOptions.include_trace],
+      ["include_fixtures", bundleOptions.include_fixtures],
+    ] as const) {
+      if (value !== undefined && typeof value !== "boolean") throw new ArgumentError(`${name} must be a boolean`);
+    }
+    const maxItems = bundleOptions.max_items ?? 128;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 512) {
+      throw new ArgumentError("max_items must be 1..=512");
+    }
+    const query = new URLSearchParams({
+      include_result: String(bundleOptions.include_result ?? false),
+      include_trace: String(bundleOptions.include_trace ?? true),
+      include_fixtures: String(bundleOptions.include_fixtures ?? false),
+      max_items: String(maxItems),
+    });
+    return this.request<MissionEvidenceBundleResult>(
+      "GET",
+      `/v1/missions/${encodeURIComponent(id)}/evidence-bundle?${query.toString()}`,
       undefined,
       options,
     );

@@ -33,8 +33,12 @@ from prism_sdk import (
     MissionEvaluatorQuery,
     MissionEvaluatorReplayReport,
     MissionEvaluatorReplayRequest,
+    MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayComparisonReport,
     MissionEvaluatorReplayQueryReport,
     MissionEvaluatorReplayQueryRequest,
+    MissionEvidenceBundleReport,
+    MissionEvidenceBundleRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -80,7 +84,9 @@ from prism_sdk import (
     capability_route_review_report,
     mission_evaluator_discover_report,
     mission_evaluator_replay_report,
+    mission_evaluator_replay_comparison_report,
     mission_evaluator_replay_query_report,
+    mission_evidence_bundle_report,
     adapter_plan_report,
     Client,
     MetricObservation,
@@ -435,6 +441,80 @@ def mission_evaluator_replay_query_payload(*, summary_only: bool = False) -> dic
         "execution": "not_started",
         "guarantees": ["evaluator and domain execution did not occur"],
         "limitations": ["replay is structural rather than semantic"],
+        "links": {
+            "mission": "/v1/missions/mission-python",
+            "claims": "/v1/missions/mission-python/claims",
+            "replay": "/v1/missions/mission-python/evaluator-replay",
+        },
+    }
+
+
+def mission_evaluator_replay_compare_payload(*, status: str = "unchanged") -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-api/mission-evaluator-replay-compare/0.1",
+        "workflow": "mission_evaluator_replay_compare",
+        "mission_id": "mission-python",
+        "replay": mission_evaluator_replay_payload(),
+        "catalog_drift": {
+            "status": status,
+            "historical_catalog_digest": "e" * 64,
+            "current_catalog_digest": "e" * 64,
+            "digest_match": status == "unchanged",
+            "historical_digest_valid": True,
+            "historical_review_id": "r" * 64,
+            "historical_discovery_digest": "d" * 64,
+            "referenced_adapter_count": 1,
+            "compatible_referenced_adapter_ids": ["oncoworlds.assay_fidelity"],
+            "missing_referenced_adapter_ids": [],
+            "current_catalogue_adapter_count": 29,
+            "current_catalogue_group_count": 29,
+            "comparison_scope": "historical_digest_and_current_binding_compatibility",
+            "historical_catalogue_rows_retained": False,
+            "source": "mission.claim_lineage.evaluator_review",
+        },
+        "execution": "not_started",
+        "guarantees": ["comparison is non-executing"],
+        "limitations": ["historical catalogue rows were not retained"],
+        "links": {
+            "mission": "/v1/missions/mission-python",
+            "replay": "/v1/missions/mission-python/evaluator-replay",
+            "evidence_bundle": "/v1/missions/mission-python/evidence-bundle",
+        },
+    }
+
+
+def mission_evidence_bundle_payload(*, summary_only: bool = True) -> dict:
+    replay = mission_evaluator_replay_query_payload(summary_only=summary_only)["replay"]
+    return {
+        "ok": True,
+        "schema": "bioprism-api/mission-evidence-bundle/0.1",
+        "workflow": "mission_evidence_bundle_export",
+        "mission_id": "mission-python",
+        "retention": {
+            "mode": "summary_only" if summary_only else "full",
+            "result_retained": not summary_only,
+            "summary_retained": True,
+            "result_included": False,
+            "result_omitted": {"bytes": 300_000, "sha256": "r" * 64} if summary_only else None,
+        },
+        "result": None,
+        "result_digest": None,
+        "execution_provenance": {"status": "succeeded", "recovered": False},
+        "evaluator_replay": replay,
+        "catalog_drift": mission_evaluator_replay_compare_payload()["catalog_drift"],
+        "trace": [{"sequence": 1, "event": "mission_succeeded"}],
+        "export": {
+            "include_result": False,
+            "include_trace": True,
+            "include_fixtures": False,
+            "max_items": 64,
+            "execution": "not_started",
+        },
+        "bundle_digest": "b" * 64,
+        "execution": "not_started",
+        "guarantees": ["bundle is content-addressed"],
+        "limitations": ["raw mission output was omitted"],
         "links": {
             "mission": "/v1/missions/mission-python",
             "claims": "/v1/missions/mission-python/claims",
@@ -1539,6 +1619,58 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=1)  # type: ignore[arg-type]
 
+    def test_mission_evaluator_replay_comparison_preserves_drift_and_scope(self) -> None:
+        request = MissionEvaluatorReplayCompareRequest(
+            {"workflow": "agent_mission"}, include_fixtures=False, max_items=64
+        )
+        self.assertEqual(
+            request.to_mcp_arguments(),
+            {"mission": {"workflow": "agent_mission"}, "include_fixtures": False, "max_items": 64},
+        )
+        report = MissionEvaluatorReplayComparisonReport.from_wire(mission_evaluator_replay_compare_payload())
+        self.assertEqual(report.status, "unchanged")
+        self.assertFalse(report.drifted)
+        self.assertFalse(report.catalog_drift["historical_catalogue_rows_retained"])
+        drifted = MissionEvaluatorReplayComparisonReport.from_wire(
+            mission_evaluator_replay_compare_payload(status="drifted")
+        )
+        self.assertTrue(drifted.drifted)
+        self.assertEqual(
+            mission_evaluator_replay_comparison_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evaluator_replay_compare_payload()}}}
+            ).mission_id,
+            "mission-python",
+        )
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayCompareRequest({"workflow": "agent_mission"}, max_items=513)
+
+    def test_mission_evidence_bundle_preserves_summary_retention_and_digest(self) -> None:
+        request = MissionEvidenceBundleRequest(
+            "mission-python", include_result=False, include_trace=True, include_fixtures=False, max_items=64
+        )
+        self.assertEqual(
+            request.to_query_params(),
+            {
+                "include_result": "false",
+                "include_trace": "true",
+                "include_fixtures": "false",
+                "max_items": "64",
+            },
+        )
+        report = MissionEvidenceBundleReport.from_wire(mission_evidence_bundle_payload())
+        self.assertTrue(report.summary_only)
+        self.assertFalse(report.result_included)
+        self.assertIsNone(report.result)
+        self.assertEqual(len(report.bundle_digest), 64)
+        self.assertEqual(
+            mission_evidence_bundle_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evidence_bundle_payload()}}}
+            ).execution,
+            "not_started",
+        )
+        with self.assertRaises(ArgumentError):
+            MissionEvidenceBundleRequest("mission-python", include_result=1)  # type: ignore[arg-type]
+
     def test_sync_http_mission_evaluator_replay_query_uses_bounded_route(self) -> None:
         payload = mission_evaluator_replay_query_payload(summary_only=True)
         with patch.object(ApiClient, "request", return_value=payload) as request:
@@ -1549,6 +1681,26 @@ class AnalyticsModelTests(unittest.TestCase):
         request.assert_called_once_with(
             "GET",
             "/v1/missions/mission-python/evaluator-replay?include_fixtures=false&max_items=64",
+        )
+
+    def test_sync_http_mission_evaluator_comparison_and_bundle_use_bounded_routes(self) -> None:
+        with patch.object(ApiClient, "request", return_value=mission_evaluator_replay_compare_payload()) as request:
+            report = ApiClient("http://127.0.0.1:8787").mission_evaluator_replay_compare_query_report(
+                MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=False, max_items=64)
+            )
+        self.assertEqual(report.status, "unchanged")
+        request.assert_called_once_with(
+            "GET",
+            "/v1/missions/mission-python/evaluator-replay/compare?include_fixtures=false&max_items=64",
+        )
+        with patch.object(ApiClient, "request", return_value=mission_evidence_bundle_payload()) as request:
+            bundle = ApiClient("http://127.0.0.1:8787").mission_evidence_bundle_report(
+                MissionEvidenceBundleRequest("mission-python", max_items=64)
+            )
+        self.assertTrue(bundle.summary_only)
+        request.assert_called_once_with(
+            "GET",
+            "/v1/missions/mission-python/evidence-bundle?include_result=false&include_trace=true&include_fixtures=false&max_items=64",
         )
 
     def test_async_http_mission_evaluator_replay_query_delegates_to_sync_transport(self) -> None:
@@ -1566,6 +1718,21 @@ class AnalyticsModelTests(unittest.TestCase):
         report = asyncio.run(exercise())
         self.assertFalse(report.summary_only)
         self.assertEqual(report.query["max_items"], 64)
+
+    def test_async_http_mission_evidence_bundle_delegates_to_sync_transport(self) -> None:
+        async def exercise() -> MissionEvidenceBundleReport:
+            with patch.object(ApiClient, "request", return_value=mission_evidence_bundle_payload()) as request:
+                report = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).mission_evidence_bundle_report(
+                    MissionEvidenceBundleRequest("mission-python", max_items=64)
+                )
+                request.assert_called_once_with(
+                    "GET",
+                    "/v1/missions/mission-python/evidence-bundle?include_result=false&include_trace=true&include_fixtures=false&max_items=64",
+                )
+                return report
+
+        report = asyncio.run(exercise())
+        self.assertTrue(report.summary_only)
 
     def test_mission_evaluator_review_request_rejects_duplicate_ids(self) -> None:
         with self.assertRaises(ArgumentError):
@@ -2173,6 +2340,18 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertEqual(report.bindings[0]["adapter_id"], "oncoworlds.assay_fidelity")
         replay.assert_called_once()
 
+    def test_sync_workspace_typed_mission_evaluator_replay_comparison(self) -> None:
+        with patch.object(
+            Workspace,
+            "mission_evaluator_replay_compare",
+            return_value=mission_evaluator_replay_compare_payload(),
+        ) as compare:
+            report = Workspace(None).mission_evaluator_replay_compare_report(  # type: ignore[arg-type]
+                MissionEvaluatorReplayCompareRequest({"workflow": "agent_mission"}, max_items=64)
+            )
+        self.assertEqual(report.status, "unchanged")
+        compare.assert_called_once()
+
     def test_sync_workspace_exposes_capability_audit(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).capability_audit(include_groups=False)
@@ -2461,6 +2640,19 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(report.ready)
         self.assertEqual(report.coverage["catalogue_group_count"], 29)
         replay.assert_awaited_once()
+
+    async def test_async_workspace_typed_mission_evaluator_replay_comparison(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "mission_evaluator_replay_compare",
+            new_callable=AsyncMock,
+            return_value=mission_evaluator_replay_compare_payload(),
+        ) as compare:
+            report = await AsyncWorkspace(None).mission_evaluator_replay_compare_report(  # type: ignore[arg-type]
+                {"mission": {"workflow": "agent_mission"}, "include_fixtures": False, "max_items": 64}
+            )
+        self.assertEqual(report.status, "unchanged")
+        compare.assert_awaited_once()
 
     async def test_async_workspace_exposes_capability_audit(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

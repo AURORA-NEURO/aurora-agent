@@ -28,10 +28,14 @@ from .capability import (
     CapabilityRouteReviewRequest,
     CapabilityRouteRequest,
     MissionEvaluatorQuery,
+    MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayComparisonReport,
     MissionEvaluatorReplayReport,
     MissionEvaluatorReplayRequest,
     MissionEvaluatorReplayQueryReport,
     MissionEvaluatorReplayQueryRequest,
+    MissionEvidenceBundleReport,
+    MissionEvidenceBundleRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -42,7 +46,9 @@ from .capability import (
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
     mission_evaluator_replay_report,
+    mission_evaluator_replay_comparison_report,
     mission_evaluator_replay_query_report,
+    mission_evidence_bundle_report,
 )
 from .capability_dashboard import CapabilityDashboardQueryArgs, CapabilityDashboardReport, capability_dashboard_report
 from .ci_evidence import CiExecutionEvidenceReport, CiExecutionEvidenceRequest, ci_execution_evidence_report
@@ -670,6 +676,66 @@ class ApiClient:
         """Return the typed durable evaluator replay query projection."""
 
         return mission_evaluator_replay_query_report(self.mission_evaluator_replay_query(request))
+
+    def mission_evaluator_replay_compare_query(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Compare durable replay evidence with the current evaluator catalogue."""
+
+        if isinstance(request, MissionEvaluatorReplayQueryRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvaluatorReplayQueryRequest(request)
+        elif isinstance(request, Mapping):
+            normalized = MissionEvaluatorReplayQueryRequest(**dict(request))
+        else:
+            raise ArgumentError("mission evaluator replay comparison query must be a request, mapping, or mission id")
+        self._mission_id(normalized.mission_id)
+        query = urlencode(normalized.to_query_params())
+        return self.request(
+            "GET",
+            f"/v1/missions/{quote(normalized.mission_id, safe='')}/evaluator-replay/compare?{query}",
+        )
+
+    def mission_evaluator_replay_compare_query_report(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed catalog-drift comparison evidence from the durable REST route."""
+
+        return mission_evaluator_replay_comparison_report(
+            self.mission_evaluator_replay_compare_query(request)
+        )
+
+    def mission_evidence_bundle(
+        self,
+        request: MissionEvidenceBundleRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Export a bounded content-addressed mission evidence bundle."""
+
+        if isinstance(request, MissionEvidenceBundleRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvidenceBundleRequest(request)
+        elif isinstance(request, Mapping):
+            normalized = MissionEvidenceBundleRequest(**dict(request))
+        else:
+            raise ArgumentError("mission evidence bundle must be a request, mapping, or mission id")
+        self._mission_id(normalized.mission_id)
+        query = urlencode(normalized.to_query_params())
+        return self.request(
+            "GET",
+            f"/v1/missions/{quote(normalized.mission_id, safe='')}/evidence-bundle?{query}",
+        )
+
+    def mission_evidence_bundle_report(
+        self,
+        request: MissionEvidenceBundleRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleReport:
+        """Return the typed durable mission evidence bundle."""
+
+        return mission_evidence_bundle_report(self.mission_evidence_bundle(request))
 
     def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Read a bounded cursor page from the authoritative clock-free mission trace."""
@@ -1511,6 +1577,23 @@ class ApiClient:
         """Return typed evaluator replay, fixture, and coverage evidence through HTTP."""
 
         return mission_evaluator_replay_report(self.mission_evaluator_replay(request))
+
+    def mission_evaluator_replay_compare(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compare a retained mission replay with the current catalogue over MCP."""
+
+        normalized = request if isinstance(request, MissionEvaluatorReplayCompareRequest) else MissionEvaluatorReplayCompareRequest(**dict(request))
+        return self.call_tool("mission_evaluator_replay_compare", normalized.to_mcp_arguments())
+
+    def mission_evaluator_replay_compare_report(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed MCP catalog-drift comparison evidence."""
+
+        return mission_evaluator_replay_comparison_report(self.mission_evaluator_replay_compare(request))
 
     def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         if not isinstance(include_groups, bool):
@@ -3809,6 +3892,40 @@ class AsyncApiClient:
 
         return mission_evaluator_replay_query_report(await self.mission_evaluator_replay_query(request))
 
+    async def mission_evaluator_replay_compare_query(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Async durable REST replay comparison."""
+
+        return await asyncio.to_thread(self.client.mission_evaluator_replay_compare_query, request)
+
+    async def mission_evaluator_replay_compare_query_report(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed async durable REST replay comparison evidence."""
+
+        return mission_evaluator_replay_comparison_report(
+            await self.mission_evaluator_replay_compare_query(request)
+        )
+
+    async def mission_evidence_bundle(
+        self,
+        request: MissionEvidenceBundleRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Async durable mission evidence bundle export."""
+
+        return await asyncio.to_thread(self.client.mission_evidence_bundle, request)
+
+    async def mission_evidence_bundle_report(
+        self,
+        request: MissionEvidenceBundleRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleReport:
+        """Return typed async durable mission evidence bundle."""
+
+        return mission_evidence_bundle_report(await self.mission_evidence_bundle(request))
+
     async def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Async bounded cursor page over the authoritative mission trace."""
 
@@ -4792,6 +4909,24 @@ class AsyncApiClient:
         """Return typed async evaluator replay and fixture evidence through HTTP."""
 
         return mission_evaluator_replay_report(await self.mission_evaluator_replay(request))
+
+    async def mission_evaluator_replay_compare(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async MCP replay comparison."""
+
+        return await asyncio.to_thread(self.client.mission_evaluator_replay_compare, request)
+
+    async def mission_evaluator_replay_compare_report(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed async MCP catalog-drift comparison evidence."""
+
+        return mission_evaluator_replay_comparison_report(
+            await self.mission_evaluator_replay_compare(request)
+        )
 
     async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         if not isinstance(include_groups, bool):

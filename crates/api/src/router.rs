@@ -10,7 +10,10 @@ use crate::events::{
     MAX_EVENT_STATE_FILE_BYTES, MAX_FILTERS,
 };
 use crate::http::{HttpRequest, HttpResponse};
-use bioprism_devplat::{MissionEvaluatorCatalogue, MissionEvaluatorReplayRequest};
+use bioprism_devplat::{
+    MissionEvaluatorCatalogue, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+};
+use bioprism_ids::ContentHash;
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -36,6 +39,7 @@ pub const MAX_MISSION_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PERSISTED_MISSION_RESULT_BYTES: usize = 256 * 1024;
 pub const MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES: usize = 64 * 1024;
 pub const MAX_PERSISTED_MISSION_PROVENANCE_BYTES: usize = 128 * 1024;
+pub const MAX_MISSION_EVIDENCE_BUNDLE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -534,6 +538,17 @@ impl ApiRouter {
                 self.mission_provenance(&request, &request_id)
             }
             ("GET", path)
+                if path.starts_with("/v1/missions/") && path.ends_with("/evidence-bundle") =>
+            {
+                self.mission_evidence_bundle(&request, &request_id)
+            }
+            ("GET", path)
+                if path.starts_with("/v1/missions/")
+                    && path.ends_with("/evaluator-replay/compare") =>
+            {
+                self.mission_evaluator_replay_compare(&request, &request_id)
+            }
+            ("GET", path)
                 if path.starts_with("/v1/missions/") && path.ends_with("/evaluator-replay") =>
             {
                 self.mission_evaluator_replay(&request, &request_id)
@@ -985,6 +1000,8 @@ impl ApiRouter {
                     "mission_execution_provenance": true,
                     "mission_claim_lineage": true,
                     "mission_evaluator_replay_query": true,
+                    "mission_evaluator_replay_compare": true,
+                    "mission_evidence_bundle_export": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -1016,6 +1033,8 @@ impl ApiRouter {
                     "mission_provenance": "/v1/missions/{mission_id}/provenance",
                     "mission_claims": "/v1/missions/{mission_id}/claims",
                     "mission_evaluator_replay": "/v1/missions/{mission_id}/evaluator-replay",
+                    "mission_evaluator_replay_compare": "/v1/missions/{mission_id}/evaluator-replay/compare",
+                    "mission_evidence_bundle": "/v1/missions/{mission_id}/evidence-bundle",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -2126,6 +2145,8 @@ impl ApiRouter {
                      "mission_provenance": "/v1/missions/{mission_id}/provenance",
                      "mission_claims": "/v1/missions/{mission_id}/claims",
                      "mission_evaluator_replay": "/v1/missions/{mission_id}/evaluator-replay",
+                     "mission_evaluator_replay_compare": "/v1/missions/{mission_id}/evaluator-replay/compare",
+                     "mission_evidence_bundle": "/v1/missions/{mission_id}/evidence-bundle",
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
@@ -3004,6 +3025,9 @@ impl ApiRouter {
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
                 "trace": format!("/v1/missions/{mission_id}/trace"),
+                "evaluator_replay": format!("/v1/missions/{mission_id}/evaluator-replay"),
+                "evaluator_replay_compare": format!("/v1/missions/{mission_id}/evaluator-replay/compare"),
+                "evidence_bundle": format!("/v1/missions/{mission_id}/evidence-bundle"),
             }),
         )
     }
@@ -3087,6 +3111,383 @@ impl ApiRouter {
                 }
             }),
         )
+    }
+
+    fn mission_evaluator_replay_compare(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let Some(mission_id) =
+            mission_id_nested(&request.path_segments(), "evaluator-replay", "compare")
+        else {
+            return self.error(
+                404,
+                "not_found",
+                "mission evaluator replay comparison route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if key != "include_fixtures" && key != "max_items" {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "mission evaluator replay comparison accepts only include_fixtures and max_items",
+                    request_id,
+                );
+            }
+        }
+        let include_fixtures = match query_bool(&query, "include_fixtures", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let max_items = match query_usize(&query, "max_items", 128) {
+            Ok(value) if (1..=512).contains(&value) => value,
+            Ok(_) | Err(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "max_items must be between 1 and 512",
+                    request_id,
+                )
+            }
+        };
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let query_value = json!({
+            "include_fixtures": include_fixtures,
+            "max_items": max_items
+        });
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let comparison = if let Some(result) = state.result.clone() {
+            catalogue.compare(&MissionEvaluatorReplayCompareRequest {
+                mission: result,
+                include_fixtures,
+                max_items,
+            })
+        } else if let Some(summary) = state.evaluator_replay_summary.clone() {
+            catalogue.compare_summary(&summary)
+        } else if let Some(omitted) = state.result_omitted.clone() {
+            return self.error(
+                410,
+                "mission_evaluator_replay_omitted",
+                &format!(
+                    "mission result and evaluator replay summary were omitted from the bounded registry snapshot ({} bytes, sha256 {})",
+                    omitted["bytes"], omitted["sha256"]
+                ),
+                request_id,
+            );
+        } else {
+            return self.error(
+                409,
+                "evaluator_replay_unavailable",
+                "mission evaluator replay comparison is available after a terminal mission report is retained",
+                request_id,
+            );
+        };
+        let comparison = match comparison {
+            Ok(comparison) => comparison,
+            Err(error) => {
+                return self.error(
+                    422,
+                    "evaluator_replay_comparison_invalid",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        let result_retained = state.result.is_some();
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "schema": "bioprism-api/mission-evaluator-replay-compare/0.1",
+                "workflow": "mission_evaluator_replay_compare",
+                "mission_id": mission_id,
+                "query": query_value,
+                "retention": {
+                    "mode": if result_retained { "full" } else { "summary_only" },
+                    "result_retained": result_retained,
+                    "summary_retained": state.evaluator_replay_summary.is_some(),
+                    "result_omitted": state.result_omitted.clone()
+                },
+                "replay": comparison["replay"].clone(),
+                "catalog_drift": comparison["catalog_drift"].clone(),
+                "execution": "not_started",
+                "guarantees": comparison["guarantees"].clone(),
+                "limitations": comparison["limitations"].clone(),
+                "links": {
+                    "mission": format!("/v1/missions/{mission_id}"),
+                    "replay": format!("/v1/missions/{mission_id}/evaluator-replay"),
+                    "compare": format!("/v1/missions/{mission_id}/evaluator-replay/compare"),
+                    "evidence_bundle": format!("/v1/missions/{mission_id}/evidence-bundle")
+                }
+            }),
+        )
+    }
+
+    fn mission_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), Some("evidence-bundle")) else {
+            return self.error(
+                404,
+                "not_found",
+                "mission evidence bundle route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "include_result" | "include_trace" | "include_fixtures" | "max_items"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "mission evidence bundle accepts only include_result, include_trace, include_fixtures, and max_items",
+                    request_id,
+                );
+            }
+        }
+        let include_result = match query_bool(&query, "include_result", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_trace = match query_bool(&query, "include_trace", true) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_fixtures = match query_bool(&query, "include_fixtures", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let max_items = match query_usize(&query, "max_items", 128) {
+            Ok(value) if (1..=512).contains(&value) => value,
+            Ok(_) | Err(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "max_items must be between 1 and 512",
+                    request_id,
+                )
+            }
+        };
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        if !is_terminal_mission_status(&state.status)
+            && state.result.is_none()
+            && state.evaluator_replay_summary.is_none()
+        {
+            return self.error(
+                409,
+                "evidence_bundle_unavailable",
+                "mission evidence bundle is available after a terminal mission report is retained",
+                request_id,
+            );
+        }
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let (replay, comparison) = if let Some(result) = state.result.clone() {
+            let replay = catalogue
+                .replay(&MissionEvaluatorReplayRequest {
+                    mission: result.clone(),
+                    include_fixtures,
+                    max_items,
+                })
+                .map_err(|error| error.to_string());
+            let comparison = catalogue
+                .compare(&MissionEvaluatorReplayCompareRequest {
+                    mission: result,
+                    include_fixtures: false,
+                    max_items,
+                })
+                .map_err(|error| error.to_string());
+            (replay, comparison)
+        } else if let Some(summary) = state.evaluator_replay_summary.clone() {
+            let comparison = catalogue
+                .compare_summary(&summary)
+                .map_err(|error| error.to_string());
+            (Ok(summary), comparison)
+        } else {
+            (Ok(Value::Null), Ok(Value::Null))
+        };
+        let replay = match replay {
+            Ok(replay) => replay,
+            Err(error) => {
+                return self.error(422, "evidence_bundle_replay_invalid", &error, request_id)
+            }
+        };
+        let comparison = match comparison {
+            Ok(comparison) => comparison,
+            Err(error) => {
+                return self.error(
+                    422,
+                    "evidence_bundle_comparison_invalid",
+                    &error,
+                    request_id,
+                )
+            }
+        };
+        let result_digest = state
+            .result
+            .as_ref()
+            .and_then(|result| ContentHash::of_value(result).ok())
+            .map(|digest| digest.to_string());
+        let mut bundle = json!({
+            "schema": "bioprism-api/mission-evidence-bundle/0.1",
+            "workflow": "mission_evidence_bundle_export",
+            "mission_id": mission_id,
+            "retention": {
+                "mode": if state.result.is_some() { "full" } else { "summary_only" },
+                "result_retained": state.result.is_some(),
+                "result_included": include_result && state.result.is_some(),
+                "summary_retained": state.evaluator_replay_summary.is_some(),
+                "result_omitted": state.result_omitted.clone()
+            },
+            "mission": {
+                "status": state.status,
+                "cancel_requested": state.cancel_requested,
+                "cancel_reason": state.cancel_reason,
+                "recovered_after_restart": state.recovered_after_restart,
+                "error": state.error,
+                "progress": mission_progress_json(&state.progress)
+            },
+            "result": if include_result {
+                state.result.clone().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            },
+            "result_digest": result_digest,
+            "execution_provenance": state.execution_provenance,
+            "claim_lineage": state
+                .result
+                .as_ref()
+                .and_then(|result| result.get("claim_lineage"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "evaluator_replay": replay,
+            "catalog_drift": comparison.get("catalog_drift").cloned().unwrap_or(Value::Null),
+            "trace": if include_trace {
+                json!(state.trace)
+            } else {
+                Value::Null
+            },
+            "export": {
+                "format": "json",
+                "include_result": include_result,
+                "include_trace": include_trace,
+                "include_fixtures": include_fixtures,
+                "max_items": max_items,
+                "execution": "not_started",
+                "digest_algorithm": "sha256"
+            },
+            "guarantees": [
+                "the bundle is assembled from the bounded local mission registry and does not execute a tool",
+                "every included result, replay, trace, provenance, and omission field remains separately inspectable",
+                "bundle_digest covers the canonical bundle object before the digest field is added"
+            ],
+            "limitations": [
+                "the bundle is a local evidence export, not a signature or proof of external storage",
+                "summary-only bundles cannot include omitted raw mission output or reconstruct historical catalogue rows",
+                "included evidence does not establish scientific, clinical, causal, operational, regulatory, or release truth"
+            ],
+            "links": {
+                "mission": format!("/v1/missions/{mission_id}"),
+                "claims": format!("/v1/missions/{mission_id}/claims"),
+                "replay": format!("/v1/missions/{mission_id}/evaluator-replay"),
+                "compare": format!("/v1/missions/{mission_id}/evaluator-replay/compare"),
+                "bundle": format!("/v1/missions/{mission_id}/evidence-bundle")
+            }
+        });
+        let bundle_digest = match ContentHash::of_value(&bundle) {
+            Ok(digest) => digest.to_string(),
+            Err(error) => {
+                return self.error(
+                    500,
+                    "evidence_bundle_digest_failed",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        bundle["bundle_digest"] = Value::String(bundle_digest);
+        let bundle_bytes = match serde_json::to_vec(&bundle) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return self.error(
+                    500,
+                    "evidence_bundle_serialize_failed",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        if bundle_bytes.len() > MAX_MISSION_EVIDENCE_BUNDLE_BYTES {
+            return self.error(
+                413,
+                "evidence_bundle_too_large",
+                &format!(
+                    "evidence bundle is {} bytes; disable include_result or narrow the export below the {}-byte bound",
+                    bundle_bytes.len(),
+                    MAX_MISSION_EVIDENCE_BUNDLE_BYTES
+                ),
+                request_id,
+            );
+        }
+        HttpResponse::json(200, &bundle)
     }
 
     fn mission_evaluator_replay(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
@@ -4163,6 +4564,8 @@ impl ApiRouter {
                     "/v1/missions/{mission_id}/provenance": { "get": { "responses": { "200": { "description": "retained execution gate, review, evaluator, and dispatch provenance" } } } },
                      "/v1/missions/{mission_id}/claims": { "get": { "responses": { "200": { "description": "bounded claim-to-step evidence lineage projection" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "terminal report was omitted from the bounded registry" } } } },
                      "/v1/missions/{mission_id}/evaluator-replay": { "get": { "parameters": [{ "name": "include_fixtures", "in": "query" }, { "name": "max_items", "in": "query" }], "responses": { "200": { "description": "durable full or summary-only evaluator replay query" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "mission result and replay summary were omitted" } } } },
+                     "/v1/missions/{mission_id}/evaluator-replay/compare": { "get": { "parameters": [{ "name": "include_fixtures", "in": "query" }, { "name": "max_items", "in": "query" }], "responses": { "200": { "description": "catalog-drift-aware replay comparison" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "mission result and replay summary were omitted" } } } },
+                     "/v1/missions/{mission_id}/evidence-bundle": { "get": { "parameters": [{ "name": "include_result", "in": "query" }, { "name": "include_trace", "in": "query" }, { "name": "include_fixtures", "in": "query" }, { "name": "max_items", "in": "query" }], "responses": { "200": { "description": "bounded content-addressed mission evidence bundle" }, "409": { "description": "mission is not yet terminal" } } } },
                     "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
@@ -5470,6 +5873,11 @@ fn evaluator_replay_summary(report: &Value, mission_id: &str) -> Option<Value> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let referenced_adapter_ids = mission_evaluator_binding_adapter_ids(report);
+    let review_provenance = replay
+        .get("review_provenance")
+        .cloned()
+        .unwrap_or(Value::Null);
     Some(json!({
         "schema": "bioprism-devplat-mission-evaluator-replay-summary/0.1",
         "workflow": "mission_evaluator_replay_summary",
@@ -5477,6 +5885,10 @@ fn evaluator_replay_summary(report: &Value, mission_id: &str) -> Option<Value> {
         "mission_digest": replay.get("mission_digest")?,
         "mission_status": replay.get("mission_status").cloned().unwrap_or(Value::Null),
         "catalog_digest": replay.get("catalog_digest")?,
+        "historical_catalog_digest": review_provenance.get("catalog_digest").cloned().unwrap_or(Value::Null),
+        "historical_review_id": review_provenance.get("review_id").cloned().unwrap_or(Value::Null),
+        "historical_discovery_digest": review_provenance.get("discovery_digest").cloned().unwrap_or(Value::Null),
+        "referenced_adapter_ids": referenced_adapter_ids,
         "binding_count": replay.get("binding_count")?,
         "omitted_bindings": replay.get("omitted_bindings")?,
         "state_counts": replay.get("state_counts")?,
@@ -5499,6 +5911,24 @@ fn evaluator_replay_summary(report: &Value, mission_id: &str) -> Option<Value> {
             "the summary is structural evidence and not scientific, clinical, causal, or release truth"
         ]
     }))
+}
+
+fn mission_evaluator_binding_adapter_ids(report: &Value) -> Vec<String> {
+    report
+        .get("claim_lineage")
+        .and_then(|lineage| lineage.get("claims"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|claim| claim.get("evaluator_bindings"))
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|binding| binding.get("adapter_id"))
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn value_omission(bytes: &[u8]) -> Value {
@@ -5717,6 +6147,26 @@ fn mission_id(
         if segments[3] != suffix {
             return None;
         }
+    }
+    if segments[2].is_empty() {
+        return None;
+    }
+    Some(segments[2].clone())
+}
+
+fn mission_id_nested(
+    segments: &Result<Vec<String>, crate::http::HttpError>,
+    first_suffix: &str,
+    second_suffix: &str,
+) -> Option<String> {
+    let segments = segments.as_ref().ok()?;
+    if segments.len() != 5
+        || segments[0] != "v1"
+        || segments[1] != "missions"
+        || segments[3] != first_suffix
+        || segments[4] != second_suffix
+    {
+        return None;
     }
     if segments[2].is_empty() {
         return None;
@@ -6082,6 +6532,28 @@ mod tests {
             "mission_evaluator_replay_summary"
         );
         assert_eq!(value["replay"]["coverage"]["catalogue_group_count"], 29);
+        let comparison = restored.handle(request(
+            "GET",
+            "/v1/missions/summary-only/evaluator-replay/compare?max_items=32",
+            json!({}),
+        ));
+        assert_eq!(comparison.status, 200);
+        let comparison: Value = serde_json::from_slice(&comparison.body).unwrap();
+        assert_eq!(comparison["catalog_drift"]["status"], "not_recorded");
+        let bundle = restored.handle(request(
+            "GET",
+            "/v1/missions/summary-only/evidence-bundle?include_result=false&include_trace=false",
+            json!({}),
+        ));
+        assert_eq!(bundle.status, 200);
+        let bundle: Value = serde_json::from_slice(&bundle.body).unwrap();
+        assert_eq!(bundle["retention"]["mode"], "summary_only");
+        assert_eq!(bundle["result"], Value::Null);
+        assert_eq!(
+            bundle["evaluator_replay"]["workflow"],
+            "mission_evaluator_replay_summary"
+        );
+        assert_eq!(bundle["bundle_digest"].as_str().unwrap().len(), 64);
         let invalid = restored.handle(request(
             "GET",
             "/v1/missions/summary-only/evaluator-replay?max_items=513",
@@ -7097,6 +7569,33 @@ mod tests {
             json!({}),
         ));
         assert_eq!(invalid_replay_query.status, 422);
+        let comparison = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evaluator-replay/compare?include_fixtures=false&max_items=32",
+            json!({}),
+        ));
+        assert_eq!(comparison.status, 200);
+        let comparison: Value = serde_json::from_slice(&comparison.body).unwrap();
+        assert_eq!(comparison["workflow"], "mission_evaluator_replay_compare");
+        assert_eq!(comparison["catalog_drift"]["status"], "not_recorded");
+        let bundle = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evidence-bundle?include_result=false&include_trace=false&max_items=32",
+            json!({}),
+        ));
+        assert_eq!(bundle.status, 200);
+        let bundle: Value = serde_json::from_slice(&bundle.body).unwrap();
+        assert_eq!(bundle["workflow"], "mission_evidence_bundle_export");
+        assert_eq!(bundle["retention"]["mode"], "full");
+        assert_eq!(bundle["result"], Value::Null);
+        assert_eq!(bundle["trace"], Value::Null);
+        assert_eq!(bundle["bundle_digest"].as_str().unwrap().len(), 64);
+        let invalid_bundle = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evidence-bundle?include_result=maybe",
+            json!({}),
+        ));
+        assert_eq!(invalid_bundle.status, 422);
         let trace = router.handle(request(
             "GET",
             "/v1/missions/api-async-1/trace?after=0&limit=64",
