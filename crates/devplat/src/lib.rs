@@ -208,6 +208,7 @@ pub mod citations;
 pub mod ci_evidence;
 pub mod claim;
 pub mod classify;
+pub mod delivery_receipt;
 pub mod error;
 pub mod exploit;
 pub mod engineering;
@@ -274,6 +275,11 @@ pub use execution_provenance::{
     audit_execution_provenance, DelegatedCheckEvidence, ExecutionProvenanceAudit,
     ExecutionProvenanceFinding, ExecutionProvenanceRequest, EXECUTION_PROVENANCE_SCHEMA,
     MAX_DELEGATED_CHECKS, MAX_FINDINGS,
+};
+pub use delivery_receipt::{
+    build_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
+    DeliveryReceiptFinding, DeliveryReceiptRequest, DeliveryReceiptTarget,
+    DELIVERY_RECEIPT_SCHEMA,
 };
 pub use mission::{
     apply_binding, plan_mission, MissionBinding, MissionError, MissionPlan, MissionPolicy,

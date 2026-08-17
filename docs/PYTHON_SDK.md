@@ -407,6 +407,11 @@ invent defaults:
   mission provenance as separate, opt-in release targets (`ci_execution_evidence` and
   `execution_provenance`). Each target is fail-closed when its evidence is absent or not ready;
   providing either signal does not imply provider execution, deployment approval, or release authority.
+- `DeveloperDeliveryReceiptRequest` and `developer_delivery_receipt(...)` recompute that audit and
+  return `DeveloperDeliveryReceiptReport` with canonical target rows, evidence presence/readiness,
+  target/delivery/receipt digests, and structural receipt findings across `Workspace`,
+  `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient`. The receipt is a joinable handoff, not a
+  signature, durable record, execution proof, or release approval.
 - `developer_platform_status(...)` exposes the in-repository developer-platform contract through
   sync MCP, async MCP, and HTTP. `DeveloperPlatformStatusReport` types the module classification
   ledger, every walkthrough's checkable/partly-outside/entirely-outside standing, cookbook

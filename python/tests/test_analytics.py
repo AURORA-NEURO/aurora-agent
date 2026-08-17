@@ -39,9 +39,12 @@ from prism_sdk import (
     CiExecutionEvidenceRequest,
     DeliveryReadinessReport,
     DeveloperDeliveryAuditReport,
+    DeveloperDeliveryReceiptReport,
+    DeveloperDeliveryReceiptRequest,
     DeveloperPlatformStatusArgs,
     DeveloperPlatformStatusReport,
     developer_delivery_audit_report,
+    developer_delivery_receipt_report,
     developer_platform_status_report,
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
@@ -327,6 +330,33 @@ def developer_delivery_audit_payload() -> dict:
         },
         "guarantees": ["no implicit release"],
         "limitations": ["external execution remains outside the workflow"],
+    }
+
+
+def developer_delivery_receipt_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_delivery_receipt",
+        "schema": "bioprism-devplat-delivery-receipt/0.1",
+        "receipt_id": "receipt-1",
+        "delivery_digest": "a" * 64,
+        "target_digest": "b" * 64,
+        "receipt_digest": "c" * 64,
+        "valid": True,
+        "receipt_ready": True,
+        "release_request_ready": True,
+        "structurally_valid": True,
+        "release_candidate": True,
+        "target_count": 1,
+        "available_target_count": 1,
+        "ready_target_count": 1,
+        "blocked_target_count": 0,
+        "ready_evidence_count": 1,
+        "targets": [{"target": "ci_execution_evidence", "available": True, "eligible": True, "blockers": [], "notes": [], "ready": True}],
+        "evidence": [{"name": "ci_evidence", "present": True, "ready": True, "digest": "d" * 64}],
+        "findings": [],
+        "guarantees": [],
+        "limitations": [],
     }
 
 
@@ -1194,6 +1224,20 @@ class AnalyticsModelTests(unittest.TestCase):
         )
         self.assertEqual(report.release_request.request_id, "delivery-1")
 
+    def test_developer_delivery_receipt_report_preserves_digest_bound_handoff(self) -> None:
+        report = DeveloperDeliveryReceiptReport.from_wire(developer_delivery_receipt_payload())
+        self.assertTrue(report.valid)
+        self.assertTrue(report.receipt_ready)
+        self.assertEqual(report.targets[0].target, "ci_execution_evidence")
+        self.assertEqual(report.evidence[0].digest, "d" * 64)
+        self.assertEqual(report.blocking_findings, ())
+
+    def test_developer_delivery_receipt_report_extracts_http_projection(self) -> None:
+        report = developer_delivery_receipt_report(
+            {"ok": True, "mcp": {"result": {"structuredContent": developer_delivery_receipt_payload()}}}
+        )
+        self.assertEqual(report.receipt_digest, "c" * 64)
+
     def test_developer_delivery_audit_report_rejects_duplicate_targets(self) -> None:
         payload = developer_delivery_audit_payload()
         payload["release_request"]["targets"].append(
@@ -1500,6 +1544,17 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             execution_provenance=None,
         )
 
+    def test_sync_workspace_typed_delivery_receipt_report(self) -> None:
+        request = DeveloperDeliveryReceiptRequest("receipt-1", {"release_request": {"id": "delivery-1", "targets": ["local_delivery"]}})
+        with patch.object(
+            Workspace,
+            "developer_delivery_receipt",
+            return_value=developer_delivery_receipt_payload(),
+        ) as receipt:
+            report = Workspace(None).developer_delivery_receipt_report(request)  # type: ignore[arg-type]
+        self.assertTrue(report.receipt_ready)
+        receipt.assert_called_once_with(request)
+
     def test_delivery_audit_report_preserves_explicit_ci_evidence_target(self) -> None:
         payload = developer_delivery_audit_payload()
         payload["ci_evidence"] = {"ci_evidence_ready": True, "audit": {"verification": "structural_only"}}
@@ -1781,6 +1836,18 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             ci_evidence=None,
             execution_provenance=None,
         )
+
+    async def test_async_workspace_typed_delivery_receipt_report(self) -> None:
+        request = DeveloperDeliveryReceiptRequest("receipt-1", {"release_request": {"id": "delivery-1", "targets": ["local_delivery"]}})
+        with patch.object(
+            AsyncWorkspace,
+            "developer_delivery_receipt",
+            new_callable=AsyncMock,
+            return_value=developer_delivery_receipt_payload(),
+        ) as receipt:
+            report = await AsyncWorkspace(None).developer_delivery_receipt_report(request)  # type: ignore[arg-type]
+        self.assertTrue(report.receipt_ready)
+        receipt.assert_awaited_once_with(request)
 
     async def test_async_workspace_typed_developer_platform_report(self) -> None:
         with patch.object(

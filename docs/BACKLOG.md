@@ -250,6 +250,10 @@ not ready, while unrelated local-delivery targets remain independently auditable
 The delivery audit also exposes a separate `execution_provenance` target, allowing a caller to
 request mission-trace readiness independently of CI evidence or to require both explicit signals;
 neither path silently upgrades structural evidence into execution authority.
+`developer_delivery_receipt` now recomputes that audit into a deterministic, content-addressed
+structural handoff. It sorts target rows canonically, preserves evidence presence/readiness and
+blockers, and emits delivery/target/receipt digests for cross-transport joins without timestamps;
+it does not add signatures, durable storage, provider execution, or release authority.
 `execution_provenance_audit` adds the corresponding mission-side handoff: returned plan identity,
 terminal results, deterministic trace ordering/tool identity, and delegated-check digests are
 reconciled in one structural projection. It does not replay a mission or replace external execution,

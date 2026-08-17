@@ -168,6 +168,8 @@ import type {
   DeliveriesResponse,
   DeveloperDeliveryAuditArgs,
   DeveloperDeliveryAuditResult,
+  DeveloperDeliveryReceiptArgs,
+  DeveloperDeliveryReceiptResult,
   DeveloperPlatformStatusArgs,
   DeveloperPlatformStatusResult,
   EpistemicVoiArgs,
@@ -556,6 +558,10 @@ export class ApiClient {
 
   async developerDeliveryAudit(args: DeveloperDeliveryAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryAuditResult>> {
     return this.callTool<DeveloperDeliveryAuditResult>("developer_delivery_audit", args, options);
+  }
+
+  async developerDeliveryReceipt(args: DeveloperDeliveryReceiptArgs, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperDeliveryReceiptResult>> {
+    return this.callTool<DeveloperDeliveryReceiptResult>("developer_delivery_receipt", args, options);
   }
 
   async developerPlatformStatus(args: DeveloperPlatformStatusArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DeveloperPlatformStatusResult>> {

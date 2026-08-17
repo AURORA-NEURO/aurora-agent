@@ -1266,6 +1266,53 @@ export interface DeveloperDeliveryAuditArgs extends JsonObject {
   release_request?: JsonObject;
 }
 
+export interface DeveloperDeliveryReceiptArgs extends JsonObject {
+  receipt_id: string;
+  delivery: JsonObject;
+}
+
+export interface DeveloperDeliveryReceiptTargetResult extends JsonObject {
+  target: string;
+  available: boolean;
+  eligible: boolean;
+  blockers: string[];
+  notes: string[];
+  ready: boolean;
+}
+
+export interface DeveloperDeliveryReceiptEvidenceResult extends JsonObject {
+  name: string;
+  present: boolean;
+  ready: boolean;
+  digest: string | null;
+}
+
+export interface DeveloperDeliveryReceiptResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_delivery_receipt";
+  schema: "bioprism-devplat-delivery-receipt/0.1";
+  receipt_id: string;
+  delivery_digest: string;
+  target_digest: string;
+  receipt_digest: string;
+  valid: boolean;
+  receipt_ready: boolean;
+  release_request_ready: boolean;
+  structurally_valid: boolean;
+  release_candidate: boolean;
+  target_count: number;
+  available_target_count: number;
+  ready_target_count: number;
+  blocked_target_count: number;
+  ready_evidence_count: number;
+  targets: DeveloperDeliveryReceiptTargetResult[];
+  evidence: DeveloperDeliveryReceiptEvidenceResult[];
+  findings: JsonObject[];
+  delivery: DeveloperDeliveryAuditResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface DeveloperDeliveryTargetResult extends JsonObject {
   target: string;
   available: boolean;

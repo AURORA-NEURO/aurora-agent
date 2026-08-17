@@ -714,6 +714,9 @@ without conflating structural evidence with execution authority.
 terminal results, deterministic trace, and delegated check digests into one structural artifact.
 It flags missing, duplicated, or identity-mismatched evidence, but never replays the mission or
 upgrades caller/provider evidence into execution authority.
+`developer_delivery_receipt` turns the resulting delivery audit into a deterministic,
+content-addressed structural handoff with canonical target/evidence rows and joinable digests; it
+still does not execute checks, contact providers, or approve a release.
 Typed discovery projections now preserve the complete matched group context—domains, Rust crates,
 CLI entrypoints, Python artifacts, ranked fields, matched tools, catalog digest, and optional
 authoritative tool schemas—so cross-domain routing can inspect coverage without falling back to

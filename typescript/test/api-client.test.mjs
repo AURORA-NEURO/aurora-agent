@@ -625,6 +625,31 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: ["no implicit release"],
         limitations: ["external execution remains outside the workflow"],
       } } } });
+      if (path === "/v1/tools/developer_delivery_receipt") return jsonResponse({ ok: true, tool: "developer_delivery_receipt", request_id: "r32", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "developer_delivery_receipt",
+        schema: "bioprism-devplat-delivery-receipt/0.1",
+        receipt_id: "receipt-ts-1",
+        delivery_digest: "a".repeat(64),
+        target_digest: "b".repeat(64),
+        receipt_digest: "c".repeat(64),
+        valid: true,
+        receipt_ready: true,
+        release_request_ready: true,
+        structurally_valid: true,
+        release_candidate: true,
+        target_count: 1,
+        available_target_count: 1,
+        ready_target_count: 1,
+        blocked_target_count: 0,
+        ready_evidence_count: 1,
+        targets: [{ target: "ci_execution_evidence", available: true, eligible: true, blockers: [], notes: [], ready: true }],
+        evidence: [{ name: "ci_evidence", present: true, ready: true, digest: "d".repeat(64) }],
+        findings: [],
+        delivery: { workflow: "developer_delivery_audit", ok: true },
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/repository_catalog") return jsonResponse({ ok: true, tool: "repository_catalog", request_id: "r11", mcp: { result: { structuredContent: { workflow: "repository_catalog", prefix: "docs/" } } } });
       if (path === "/v1/tools/repository_bundle") return jsonResponse({ ok: true, tool: "repository_bundle", request_id: "r12", mcp: { result: { structuredContent: { workflow: "repository_bundle", policy: "exhaustive" } } } });
       if (path === "/v1/tools/repository_impact") return jsonResponse({ ok: true, tool: "repository_impact", request_id: "r13", mcp: { result: { structuredContent: { workflow: "repository_impact", changed: "docs/README" } } } });
@@ -1788,6 +1813,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   const deliveryRequest = JSON.parse(seen.at(-1).init.body);
   assert.deepEqual(deliveryRequest.ci_evidence, { ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } });
   assert.deepEqual(deliveryRequest.execution_provenance, { mission: { plan: { mission_id: "mission-ts" } }, delegated_checks: [] });
+  const receipt = await client.developerDeliveryReceipt({
+    receipt_id: "receipt-ts-1",
+    delivery: { release_request: { id: "delivery-1", targets: ["ci_execution_evidence"] } },
+  });
+  assert.equal(receipt.mcp.result.structuredContent.workflow, "developer_delivery_receipt");
+  assert.equal(receipt.mcp.result.structuredContent.receipt_ready, true);
+  assert.equal(receipt.mcp.result.structuredContent.targets[0].ready, true);
+  const receiptRequest = JSON.parse(seen.at(-1).init.body);
+  assert.equal(receiptRequest.receipt_id, "receipt-ts-1");
+  assert.equal(receiptRequest.delivery.release_request.id, "delivery-1");
   const engineering = await client.engineeringManifestAudit({
     project: { id: "aurora-agent", version: "0.1.0", repository: "github.com/AURORA-NEURO/aurora-agent" },
     baseline: { language: "Rust 2021", runtime: "cargo", api: "MCP JSON-RPC", storage: "in-memory", observability: "structured", deployment: "local" },

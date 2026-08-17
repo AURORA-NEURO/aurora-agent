@@ -45,6 +45,11 @@ from .execution_provenance import (
     ExecutionProvenanceRequest,
     execution_provenance_report,
 )
+from .delivery_receipt import (
+    DeveloperDeliveryReceiptReport,
+    DeveloperDeliveryReceiptRequest,
+    developer_delivery_receipt_report,
+)
 from .conformance import ConformanceRunArgs, ConformanceRunReport, conformance_run_report
 from .context_requests import (
     ContextLayer,
@@ -2445,6 +2450,15 @@ class Workspace:
             arguments["release_request"] = release_request
         return self.tool("developer_delivery_audit", arguments)
 
+    def developer_delivery_receipt(
+        self,
+        request: DeveloperDeliveryReceiptRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Create a content-addressed receipt from a recomputed delivery audit."""
+
+        normalized = request if isinstance(request, DeveloperDeliveryReceiptRequest) else DeveloperDeliveryReceiptRequest.from_wire(request)
+        return self.tool("developer_delivery_receipt", normalized.to_mcp_arguments())
+
     def developer_platform_status(
         self,
         request: DeveloperPlatformStatusArgs | Mapping[str, Any] | None = None,
@@ -2774,6 +2788,14 @@ class Workspace:
                 execution_provenance=execution_provenance,
             )
         )
+
+    def developer_delivery_receipt_report(
+        self,
+        request: DeveloperDeliveryReceiptRequest | Mapping[str, Any],
+    ) -> DeveloperDeliveryReceiptReport:
+        """Return typed target/evidence digests and structural receipt readiness."""
+
+        return developer_delivery_receipt_report(self.developer_delivery_receipt(request))
 
     def bioatlas_publication_audit(
         self,
@@ -5261,6 +5283,15 @@ class AsyncWorkspace:
         )
         return (await self.client.call_tool("developer_delivery_audit", arguments)).require_ok()
 
+    async def developer_delivery_receipt(
+        self,
+        request: DeveloperDeliveryReceiptRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async content-addressed receipt from a recomputed delivery audit."""
+
+        normalized = request if isinstance(request, DeveloperDeliveryReceiptRequest) else DeveloperDeliveryReceiptRequest.from_wire(request)
+        return (await self.client.call_tool("developer_delivery_receipt", normalized.to_mcp_arguments())).require_ok()
+
     async def developer_platform_status(
         self,
         request: DeveloperPlatformStatusArgs | Mapping[str, Any] | None = None,
@@ -5586,6 +5617,14 @@ class AsyncWorkspace:
                 execution_provenance=execution_provenance,
             )
         )
+
+    async def developer_delivery_receipt_report(
+        self,
+        request: DeveloperDeliveryReceiptRequest | Mapping[str, Any],
+    ) -> DeveloperDeliveryReceiptReport:
+        """Return async typed target/evidence digests and structural receipt readiness."""
+
+        return developer_delivery_receipt_report(await self.developer_delivery_receipt(request))
 
     async def bioatlas_publication_audit(self, atlas: Mapping[str, Any] | BioAtlasPublicationAuditArgs, **kwargs: Any) -> dict[str, Any]:
         if isinstance(atlas, BioAtlasPublicationAuditArgs):

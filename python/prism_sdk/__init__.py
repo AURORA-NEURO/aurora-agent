@@ -122,6 +122,15 @@ from .execution_provenance import (
     ExecutionProvenanceRequest,
     execution_provenance_report,
 )
+from .delivery_receipt import (
+    DELIVERY_RECEIPT_SCHEMA,
+    DeliveryReceiptEvidenceReport,
+    DeliveryReceiptFindingReport,
+    DeliveryReceiptTargetReport,
+    DeveloperDeliveryReceiptReport,
+    DeveloperDeliveryReceiptRequest,
+    developer_delivery_receipt_report,
+)
 from .conformance import (
     ConformanceCaseReport,
     ConformanceOutcomeReport,
@@ -2258,6 +2267,13 @@ __all__ = [
     "ExecutionProvenanceReport",
     "ExecutionProvenanceRequest",
     "execution_provenance_report",
+    "DELIVERY_RECEIPT_SCHEMA",
+    "DeliveryReceiptEvidenceReport",
+    "DeliveryReceiptFindingReport",
+    "DeliveryReceiptTargetReport",
+    "DeveloperDeliveryReceiptReport",
+    "DeveloperDeliveryReceiptRequest",
+    "developer_delivery_receipt_report",
     "DeliveryTargetReport",
     "DeliveryReadinessReport",
     "DeliveryExternalSurfaceReport",

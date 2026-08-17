@@ -129,10 +129,10 @@ use bioprism_dataops::{
 };
 use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_execution_provenance, build_dashboard,
-    plan_mission, run_workbench,
+    build_delivery_receipt, plan_mission, run_workbench,
     standard_walkthroughs,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    CiExecutionEvidenceRequest, DevPlatReport, ExecutionProvenanceRequest, MissionReport,
+    CiExecutionEvidenceRequest, DeliveryReceiptRequest, DevPlatReport, ExecutionProvenanceRequest, MissionReport,
     MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
     WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
@@ -1475,6 +1475,7 @@ impl Server {
             "governance_schema_check" => self.governance_schema_check(&arguments),
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
+            "developer_delivery_receipt" => self.developer_delivery_receipt(&arguments),
             "engineering_manifest_audit" => self.engineering_manifest_audit(&arguments),
             "engineering_execution_plan" => self.engineering_execution_plan(&arguments),
             "release_pipeline_audit" => self.release_pipeline_audit(&arguments),
@@ -25127,6 +25128,39 @@ impl Server {
         }))
     }
 
+    fn developer_delivery_receipt(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot measure developer-delivery receipt input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("developer-delivery receipt input exceeds the 20000000-byte safety bound".into());
+        }
+        let receipt_id = arguments
+            .get("receipt_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("receipt_id is required and must be a non-empty string")?;
+        let delivery_arguments = arguments
+            .get("delivery")
+            .ok_or("delivery is required and must contain developer_delivery_audit arguments")?;
+        if !delivery_arguments.is_object() {
+            return Err("delivery must be an object".into());
+        }
+        let delivery = self.developer_delivery_audit(delivery_arguments)?;
+        let request = DeliveryReceiptRequest {
+            receipt_id: receipt_id.into(),
+            delivery: delivery.clone(),
+        };
+        let receipt = build_delivery_receipt(&request)?;
+        let mut output = serde_json::to_value(&receipt)
+            .map_err(|error| format!("cannot encode developer-delivery receipt: {error}"))?;
+        output["ok"] = json!(true);
+        output["workflow"] = json!("developer_delivery_receipt");
+        output["valid"] = json!(receipt.structurally_valid);
+        output["receipt_ready"] = json!(receipt.release_candidate);
+        output["delivery"] = delivery;
+        Ok(output)
+    }
+
     fn safety_posture(&self, arguments: &Value) -> Result<Value, String> {
         let include_threats = arguments
             .get("include_threats")
@@ -27025,7 +27059,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -29172,6 +29206,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, ci_execution_evidence, or execution_provenance. Omit it to receive no readiness claim." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "developer_delivery_receipt",
+            "description": "Create a deterministic, content-addressed structural handoff from a developer_delivery_audit request. The receipt canonicalizes explicit target rows, blockers, evidence presence/readiness, and digest identities so MCP/REST/SDK consumers can join delivery records without timestamps; it never executes checks, contacts providers, verifies signatures, approves deployment, or creates durable storage.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "receipt_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Caller-owned stable identifier for joining this receipt across transport records; it is not a timestamp or authority token." },
+                    "delivery": { "type": "object", "description": "Exact developer_delivery_audit arguments, including optional evidence and an explicit release_request. The server recomputes the delivery audit before building the receipt." }
+                },
+                "required": ["receipt_id", "delivery"]
             }
         }),
         json!({

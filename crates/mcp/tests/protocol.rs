@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 171);
+    assert_eq!(tools.len(), 172);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4221,6 +4221,65 @@ fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
 }
 
 #[test]
+fn developer_delivery_receipt_canonicalizes_explicit_targets_and_evidence() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "receipt contracts",
+        "triggers": ["push"],
+        "rust_toolchain": "stable",
+        "checks": [{"name": "tests", "run": "cargo test -p core", "required": true}]
+    });
+    let planned = call(
+        &mut server,
+        "developer_workbench",
+        json!({
+            "session": {"session_id": "receipt-ci", "owner": "agent-a", "goal": "receipt evidence", "artifacts": [], "cells": [], "changes": []},
+            "ci": ci.clone()
+        }),
+    );
+    let evidence = json!({
+        "run_id": "receipt-run",
+        "provider": "github_actions",
+        "source": "provider_observed",
+        "plan_digest": planned["ci"]["digest"].clone(),
+        "conclusion": "success",
+        "checks": [{"name": "tests", "status": "passed", "result_digest": "b".repeat(64)}]
+    });
+    let receipt = call(
+        &mut server,
+        "developer_delivery_receipt",
+        json!({
+            "receipt_id": "receipt-ci-1",
+            "delivery": {
+                "ci_evidence": {"ci": ci, "evidence": evidence},
+                "release_request": {"id": "receipt-delivery-1", "targets": ["ci_execution_evidence"]}
+            }
+        }),
+    );
+    assert_eq!(receipt["workflow"], json!("developer_delivery_receipt"));
+    assert_eq!(receipt["valid"], json!(true));
+    assert_eq!(receipt["receipt_ready"], json!(true));
+    assert_eq!(receipt["target_count"], json!(1));
+    assert_eq!(receipt["ready_target_count"], json!(1));
+    assert_eq!(receipt["evidence"][8]["name"], json!("ci_evidence"));
+    assert_eq!(receipt["evidence"][8]["ready"], json!(true));
+    assert_eq!(receipt["delivery"]["workflow"], json!("developer_delivery_audit"));
+    assert_eq!(receipt["receipt_digest"].as_str().unwrap().len(), 64);
+
+    let blocked = call(
+        &mut server,
+        "developer_delivery_receipt",
+        json!({
+            "receipt_id": "receipt-ci-2",
+            "delivery": {"release_request": {"id": "receipt-delivery-2", "targets": ["ci_execution_evidence"]}}
+        }),
+    );
+    assert_eq!(blocked["valid"], json!(true));
+    assert_eq!(blocked["receipt_ready"], json!(false));
+    assert_eq!(blocked["blocked_target_count"], json!(1));
+}
+
+#[test]
 fn execution_provenance_reconciles_mission_trace_and_delegated_checks() {
     let mut server = server();
     let mission = call(
@@ -4719,12 +4778,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(171));
-    assert_eq!(result["advertised_tool_count"], json!(171));
+    assert_eq!(result["unique_catalog_tools"], json!(172));
+    assert_eq!(result["advertised_tool_count"], json!(172));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(171));
-    assert_eq!(result["schema_quality"]["valid"], json!(171));
+    assert_eq!(result["schema_quality"]["checked"], json!(172));
+    assert_eq!(result["schema_quality"]["valid"], json!(172));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

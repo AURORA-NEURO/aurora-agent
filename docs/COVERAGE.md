@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 171 callable tools. That count is intentionally
+The MCP integration layer currently exposes 172 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -68,6 +68,11 @@ mission provenance can be requested independently or together without being conf
 terminal result coverage, contiguous trace sequence/tool identity, delegated-check status, and
 content digests are reconciled without mission replay or provider contact. Its ready flag is
 structural handoff evidence, not proof of execution authority.
+`developer_delivery_receipt` adds the stable handoff layer above these audits: it recomputes the
+delivery audit, canonicalizes explicit targets and evidence rows, and emits target/evidence/receipt
+digests suitable for joining MCP, REST, SDK, event, and webhook records without timestamps. The
+receipt remains structural-only and does not add signatures, durable storage, execution, or release
+authority.
 `release_audit` now provides the lower-level composition boundary beneath that delivery review:
 typed callers can supply exact delegated checks, retain each result digest and refusal, and inspect
 the strict required-gate conjunction while repository impact and developer-platform diagnostics stay

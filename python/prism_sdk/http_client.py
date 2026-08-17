@@ -35,6 +35,11 @@ from .capability import (
 from .capability_dashboard import CapabilityDashboardQueryArgs, CapabilityDashboardReport, capability_dashboard_report
 from .ci_evidence import CiExecutionEvidenceReport, CiExecutionEvidenceRequest, ci_execution_evidence_report
 from .execution_provenance import ExecutionProvenanceReport, ExecutionProvenanceRequest, execution_provenance_report
+from .delivery_receipt import (
+    DeveloperDeliveryReceiptReport,
+    DeveloperDeliveryReceiptRequest,
+    developer_delivery_receipt_report,
+)
 from .conformance import ConformanceRunReport, conformance_run_report
 from .context_requests import (
     ContextLayer,
@@ -738,6 +743,15 @@ class ApiClient:
         )
         return self.call_tool("developer_delivery_audit", arguments)
 
+    def developer_delivery_receipt(
+        self,
+        request: DeveloperDeliveryReceiptRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Create a content-addressed delivery receipt through the HTTP gateway."""
+
+        normalized = request if isinstance(request, DeveloperDeliveryReceiptRequest) else DeveloperDeliveryReceiptRequest.from_wire(request)
+        return self.call_tool("developer_delivery_receipt", normalized.to_mcp_arguments())
+
     def developer_platform_status(
         self,
         *,
@@ -1287,6 +1301,14 @@ class ApiClient:
                 execution_provenance=execution_provenance,
             )
         )
+
+    def developer_delivery_receipt_report(
+        self,
+        request: DeveloperDeliveryReceiptRequest | Mapping[str, Any],
+    ) -> DeveloperDeliveryReceiptReport:
+        """Return typed HTTP delivery receipt digests and readiness."""
+
+        return developer_delivery_receipt_report(self.developer_delivery_receipt(request))
 
     def capability_discover(
         self,
@@ -3498,6 +3520,15 @@ class AsyncApiClient:
         )
         return await self.call_tool("developer_delivery_audit", arguments)
 
+    async def developer_delivery_receipt(
+        self,
+        request: DeveloperDeliveryReceiptRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async content-addressed delivery receipt through the HTTP gateway."""
+
+        normalized = request if isinstance(request, DeveloperDeliveryReceiptRequest) else DeveloperDeliveryReceiptRequest.from_wire(request)
+        return await self.call_tool("developer_delivery_receipt", normalized.to_mcp_arguments())
+
     async def developer_platform_status(
         self,
         *,
@@ -4047,6 +4078,14 @@ class AsyncApiClient:
                 execution_provenance=execution_provenance,
             )
         )
+
+    async def developer_delivery_receipt_report(
+        self,
+        request: DeveloperDeliveryReceiptRequest | Mapping[str, Any],
+    ) -> DeveloperDeliveryReceiptReport:
+        """Return async typed HTTP delivery receipt digests and readiness."""
+
+        return developer_delivery_receipt_report(await self.developer_delivery_receipt(request))
 
     async def capability_discover(
         self,
