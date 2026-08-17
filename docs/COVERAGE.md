@@ -149,10 +149,12 @@ checkpoint. Terminal jobs restore their retained progress, traces, and size-limi
 queued/running jobs become explicit `failed` records with `recovered_after_restart` after a
 restart, never falsely claiming that interrupted work resumed. This is restart-aware mission
 inspection, not durable event storage, distributed scheduling, or effect rollback.
-An independent optional `--event-state` path now checkpoints retained event rows and cursor
-continuity under the same 64 MiB bound. It intentionally excludes webhook secrets, subscriptions,
-and pending deliveries; the API and both SDKs expose status/flush checks so operators can verify
-which recovery boundary is enabled instead of inferring it from a 2xx response.
+An independent optional `--event-state` path now checkpoints retained event rows, subscription
+metadata, and signed pending outbox envelopes under the same 64 MiB bound. It intentionally
+excludes webhook secrets: restored subscriptions pause with `secret_rebind_required` delivery
+rows until an explicit in-memory rebind re-signs them. The API and both SDKs expose status/flush
+and rebind checks so operators can verify the recovery boundary instead of inferring it from a
+2xx response.
 The API crate also exposes a bounded `DeliverySender`/`ApiRouter::deliver_once` cycle for embedded
 workers: successful signed sends are acknowledged, retryable failures advance through the existing
 ten-attempt cap, and permanent or exhausted failures remain pending. Network/TLS and egress policy

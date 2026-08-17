@@ -2385,6 +2385,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
       if (path.endsWith("/replay") && init.method === "POST") {
         return jsonResponse({ ok: true, replayed: [{ delivery_id: 1, subscription_id: "sub", attempt: 1, state: "pending", last_error: null, last_error_retryable: null, event_id: 2, event_type: "tool.completed", signature: "sha256=x", envelope: {} }] });
       }
+      if (path.endsWith("/rebind") && init.method === "POST") {
+        return jsonResponse({ ok: true, subscription: { id: "sub", endpoint: "https://example.test/hook", events: ["*"], active: true, created_at_sequence: 1, secret_bound: true, rebind_required: false }, resigned_deliveries: 1, secret_policy: "memory-only" });
+      }
       if (path.startsWith("/v1/delivery-receipts/")) return jsonResponse({ ok: true, workflow: "developer_delivery_receipt_events", receipt_id: "receipt-ts-1", found: true, page: { events: [{ id: 2, event_type: "tool.completed", subject: "developer_delivery_receipt", request_id: "req-2", payload: { delivery_receipt: { receipt_id: "receipt-ts-1" } } }], after: 0, next_after: 2, oldest: 1, newest: 2, gap: false, dropped_events: 0 } });
       if (path.startsWith("/v1/route-reviews/")) return jsonResponse({ ok: true, workflow: "capability_route_review_evidence", review_id: "a".repeat(64), found: true, page: { events: [{ id: 1, event_type: "tool.completed", subject: "capability_route_review", request_id: "req-1", payload: {} }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0 } });
       return new Response("id: 4\nevent: tool.completed\ndata: {\"ok\":true}\n\nevent: cursor_gap\ndata: {\"after\":0}\n\n", {
@@ -2412,6 +2415,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   assert.equal(deliveries.page.deliveries[0].state, "failed");
   const replayed = await client.replay("sub", [1]);
   assert.equal(replayed.replayed[0].state, "pending");
+  const rebound = await client.rebindSubscription("sub", "a-long-secret");
+  assert.equal(rebound.subscription.secret_bound, true);
+  assert.equal(rebound.resigned_deliveries, 1);
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
 });
 

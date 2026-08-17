@@ -281,6 +281,7 @@ import type {
   SseSnapshot,
   SubscribeOptions,
   SubscriptionListResponse,
+  SubscriptionRebindResponse,
   SubscriptionResponse,
   TelemetryProjectArgs,
   TelemetryProjectionResult,
@@ -421,7 +422,7 @@ export class ApiClient {
     return this.request<EventPersistenceStatus>("GET", "/v1/events/persistence", undefined, options);
   }
 
-  /** Force a bounded event cursor checkpoint; subscriptions and deliveries remain non-durable. */
+  /** Force a bounded event/outbox checkpoint; signing secrets remain memory-only. */
   async flushEventPersistence(options?: ClientRequestOptions): Promise<EventPersistenceStatus> {
     return this.request<EventPersistenceStatus>("POST", "/v1/events/persistence/flush", {}, options);
   }
@@ -1251,6 +1252,22 @@ export class ApiClient {
       payload.events = options_.events.map((event) => visible(event, "event filter", 128));
     }
     return this.request("POST", "/v1/webhooks/subscriptions", payload, requestOptions);
+  }
+
+  /** Rebind a restored webhook secret in memory and re-sign pending envelopes. */
+  async rebindSubscription(
+    subscriptionId: string,
+    secret: string,
+    options?: ClientRequestOptions,
+  ): Promise<SubscriptionRebindResponse> {
+    const id = pathSegment(subscriptionId, "subscription id");
+    visible(secret, "secret", 4_096);
+    return this.request(
+      "POST",
+      `/v1/webhooks/subscriptions/${encodeURIComponent(id)}/rebind`,
+      { secret },
+      options,
+    );
   }
 
   async deliveries(subscriptionId: string, after = 0, limit = 100, options?: ClientRequestOptions): Promise<DeliveriesResponse> {

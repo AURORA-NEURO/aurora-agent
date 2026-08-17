@@ -521,6 +521,9 @@ impl ApiRouter {
             ("DELETE", path) if path.starts_with("/v1/webhooks/subscriptions/") => {
                 self.delete_subscription(&request, &request_id)
             }
+            ("POST", path) if path.ends_with("/rebind") => {
+                self.rebind_subscription(&request, &request_id)
+            }
             ("GET", path) if path.ends_with("/deliveries") => {
                 self.list_deliveries(&request, &request_id)
             }
@@ -612,9 +615,10 @@ impl ApiRouter {
                 "retained_events": metrics.retained_events,
                 "next_event_id": metrics.next_event_id,
                 "dropped_events": metrics.dropped_events,
-                "subscriptions_durable": false,
-                "webhook_deliveries_durable": false,
-                "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established",
+                "subscriptions_durable": true,
+                "webhook_deliveries_durable": true,
+                "secrets_persisted": false,
+                "recovery_policy": "events, subscription metadata, and signed outbox rows restore; subscriptions pause until explicit in-memory secret rebind",
                 "flush": "/v1/events/persistence/flush"
             }),
         )
@@ -750,6 +754,8 @@ impl ApiRouter {
                     "signed_webhook_outbox": true,
                     "delivery_failure_inspection": true,
                     "bounded_delivery_replay": true,
+                    "restart_aware_webhook_metadata": true,
+                    "explicit_secret_rebind": true,
                     "grpc": false,
                     "tls": false,
                     "external_delivery_worker": false
@@ -1772,20 +1778,25 @@ impl ApiRouter {
             filters.as_deref(),
             secret,
         ) {
-            Ok(subscription) => HttpResponse::json(
-                201,
-                &json!({
-                    "ok": true,
-                    "subscription": subscription,
-                    "delivery": {
-                        "mode": "signed_outbox",
-                        "poll": "/v1/webhooks/subscriptions/{id}/deliveries",
-                        "ack": "/v1/webhooks/subscriptions/{id}/ack",
-                        "retry": "/v1/webhooks/subscriptions/{id}/retry",
-                        "replay": "/v1/webhooks/subscriptions/{id}/replay"
-                    }
-                }),
-            ),
+            Ok(subscription) => {
+                drop(events);
+                let _ = self.event_persistence.persist();
+                HttpResponse::json(
+                    201,
+                    &json!({
+                        "ok": true,
+                        "subscription": subscription,
+                        "delivery": {
+                            "mode": "signed_outbox",
+                            "poll": "/v1/webhooks/subscriptions/{id}/deliveries",
+                            "ack": "/v1/webhooks/subscriptions/{id}/ack",
+                            "retry": "/v1/webhooks/subscriptions/{id}/retry",
+                            "replay": "/v1/webhooks/subscriptions/{id}/replay",
+                            "rebind": "/v1/webhooks/subscriptions/{id}/rebind"
+                        }
+                    }),
+                )
+            }
             Err(error) => self.error(422, "invalid_subscription", &error, request_id),
         }
     }
@@ -1811,9 +1822,63 @@ impl ApiRouter {
             }
         };
         match events.remove_subscription(&id) {
-            Ok(true) => HttpResponse::json(200, &json!({ "ok": true, "deleted": id })),
+            Ok(true) => {
+                drop(events);
+                let _ = self.event_persistence.persist();
+                HttpResponse::json(200, &json!({ "ok": true, "deleted": id }))
+            }
             Ok(false) => self.error(404, "not_found", "subscription does not exist", request_id),
             Err(error) => self.error(409, "subscription_error", &error, request_id),
+        }
+    }
+
+    fn rebind_subscription(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(id) = subscription_id(&request.path_segments(), Some("rebind")) else {
+            return self.error(
+                404,
+                "not_found",
+                "subscription rebind route does not exist",
+                request_id,
+            );
+        };
+        let body = match self.json_object(request) {
+            Ok(body) => body,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let Some(secret) = body.get("secret").and_then(Value::as_str) else {
+            return self.error(
+                422,
+                "invalid_subscription_secret",
+                "secret is required for an in-memory subscription rebind",
+                request_id,
+            );
+        };
+        let mut events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match events.rebind_subscription(&id, secret) {
+            Ok((subscription, resigned_deliveries)) => {
+                drop(events);
+                let _ = self.event_persistence.persist();
+                HttpResponse::json(
+                    200,
+                    &json!({
+                        "ok": true,
+                        "subscription": subscription,
+                        "resigned_deliveries": resigned_deliveries,
+                        "secret_policy": "the supplied secret is held in memory only and is never returned or persisted"
+                    }),
+                )
+            }
+            Err(error) => self.error(404, "subscription_rebind_failed", &error, request_id),
         }
     }
 
@@ -1927,6 +1992,8 @@ impl ApiRouter {
         if retry {
             match events.retry(&id, &ids) {
                 Ok(deliveries) => {
+                    drop(events);
+                    let _ = self.event_persistence.persist();
                     HttpResponse::json(200, &json!({ "ok": true, "retried": deliveries }))
                 }
                 Err(error) => self.error(404, "not_found", &error, request_id),
@@ -1934,6 +2001,8 @@ impl ApiRouter {
         } else if replay {
             match events.replay(&id, &ids) {
                 Ok(deliveries) => {
+                    drop(events);
+                    let _ = self.event_persistence.persist();
                     HttpResponse::json(200, &json!({ "ok": true, "replayed": deliveries }))
                 }
                 Err(error) => self.error(404, "not_found", &error, request_id),
@@ -1941,6 +2010,8 @@ impl ApiRouter {
         } else {
             match events.acknowledge(&id, &ids) {
                 Ok(acknowledged) => {
+                    drop(events);
+                    let _ = self.event_persistence.persist();
                     HttpResponse::json(200, &json!({ "ok": true, "acknowledged": acknowledged }))
                 }
                 Err(error) => self.error(404, "not_found", &error, request_id),
@@ -2104,6 +2175,7 @@ impl ApiRouter {
                     "/v1/events/persistence": { "get": { "responses": { "200": { "description": "event cursor checkpoint status" } } } },
                     "/v1/events/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded event cursor checkpoint" } } } },
                     "/v1/webhooks/subscriptions": { "get": { "responses": { "200": { "description": "subscriptions" } } }, "post": { "responses": { "201": { "description": "subscription" } } } },
+                    "/v1/webhooks/subscriptions/{id}/rebind": { "post": { "parameters": [{ "name": "id", "in": "path", "required": true }], "responses": { "200": { "description": "in-memory secret rebind and pending-envelope re-sign" } } } },
                     "/v1/webhooks/subscriptions/{id}/deliveries": { "get": { "responses": { "200": { "description": "cursor page of inspectable pending deliveries and failure metadata" } } } },
                     "/v1/webhooks/subscriptions/{id}/ack": { "post": { "responses": { "200": { "description": "idempotent acknowledgement" } } } },
                     "/v1/webhooks/subscriptions/{id}/retry": { "post": { "responses": { "200": { "description": "advance selected deliveries by one retry attempt" } } } },
@@ -2785,7 +2857,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_event_state_restores_tool_cursor_but_not_webhook_state() {
+    fn durable_event_state_restores_cursor_and_requires_secret_rebind() {
         let path = test_state_path("events");
         let router = ApiRouter::new(
             std::env::current_dir().unwrap(),
@@ -2795,13 +2867,32 @@ mod tests {
             },
         )
         .unwrap();
+        let created = router.handle(request(
+            "POST",
+            "/v1/webhooks/subscriptions",
+            json!({
+                "id": "local",
+                "endpoint": "https://example.test/hook",
+                "secret": "a-secret-key"
+            }),
+        ));
+        assert_eq!(created.status, 201);
         let call = router.handle(request("POST", "/v1/tools/modality_catalog", json!({})));
         assert_eq!(call.status, 200);
+        let flush = router.handle(request("POST", "/v1/events/persistence/flush", json!({})));
+        assert_eq!(flush.status, 200);
+        let checkpoint = std::fs::read_to_string(&path).unwrap();
+        assert!(!checkpoint.contains("a-secret-key"));
+        assert!(checkpoint.contains("secrets_persisted"));
         let persistence = router.handle(request("GET", "/v1/events/persistence", json!({})));
         let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
         assert_eq!(persistence["enabled"], true);
-        assert_eq!(persistence["subscriptions_durable"], false);
+        assert_eq!(persistence["schema_version"], 2);
+        assert_eq!(persistence["subscriptions_durable"], true);
+        assert_eq!(persistence["webhook_deliveries_durable"], true);
+        assert_eq!(persistence["secrets_persisted"], false);
         assert_eq!(router.event_metrics().retained_events, 1);
+        assert_eq!(router.event_metrics().pending_deliveries, 1);
 
         let restored = ApiRouter::new(
             std::env::current_dir().unwrap(),
@@ -2813,8 +2904,45 @@ mod tests {
         .unwrap();
         assert_eq!(restored.event_metrics().retained_events, 1);
         assert_eq!(restored.event_metrics().next_event_id, 2);
-        let flush = restored.handle(request("POST", "/v1/events/persistence/flush", json!({})));
-        assert_eq!(flush.status, 200);
+        assert_eq!(restored.event_metrics().subscriptions, 1);
+        assert_eq!(restored.event_metrics().active_subscriptions, 0);
+        assert_eq!(restored.event_metrics().pending_deliveries, 1);
+        let listed = restored.handle(request("GET", "/v1/webhooks/subscriptions", json!({})));
+        let listed: Value = serde_json::from_slice(&listed.body).unwrap();
+        assert_eq!(listed["subscriptions"][0]["secret_bound"], false);
+        assert_eq!(listed["subscriptions"][0]["rebind_required"], true);
+        let pending = restored.handle(request(
+            "GET",
+            "/v1/webhooks/subscriptions/local/deliveries?after=0&limit=10",
+            json!({}),
+        ));
+        let pending: Value = serde_json::from_slice(&pending.body).unwrap();
+        assert_eq!(
+            pending["page"]["deliveries"][0]["state"],
+            "secret_rebind_required"
+        );
+        let old_signature = pending["page"]["deliveries"][0]["signature"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let rebind = restored.handle(request(
+            "POST",
+            "/v1/webhooks/subscriptions/local/rebind",
+            json!({"secret": "new-secret-key"}),
+        ));
+        assert_eq!(rebind.status, 200);
+        let rebind: Value = serde_json::from_slice(&rebind.body).unwrap();
+        assert_eq!(rebind["subscription"]["secret_bound"], true);
+        assert_eq!(rebind["subscription"]["rebind_required"], false);
+        assert_eq!(rebind["resigned_deliveries"], 1);
+        let rebound = restored.handle(request(
+            "GET",
+            "/v1/webhooks/subscriptions/local/deliveries?after=0&limit=10",
+            json!({}),
+        ));
+        let rebound: Value = serde_json::from_slice(&rebound.body).unwrap();
+        assert_eq!(rebound["page"]["deliveries"][0]["state"], "pending");
+        assert_ne!(rebound["page"]["deliveries"][0]["signature"], old_signature);
         let _ = std::fs::remove_file(path);
     }
 

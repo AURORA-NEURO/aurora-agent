@@ -29,8 +29,8 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
 | `POST /v1/rpc` | JSON-RPC/MCP-compatible request envelope for tools, resources, and lifecycle |
-| `GET /v1/events?after=N&limit=M&review_id=H` | Cursor page with retention-gap and dropped-event evidence; optional exact route-review filter |
-| `GET /v1/events/stream?after=N&limit=M&review_id=H` | A bounded Server-Sent Events snapshot, optionally filtered by an exact route-review id |
+| `GET /v1/events?after=N&limit=M&review_id=H` | Cursor page with retention-gap and dropped-event evidence; optional exact route-review or receipt filter |
+| `GET /v1/events/stream?after=N&limit=M&review_id=H` | A bounded Server-Sent Events snapshot, optionally filtered by an exact route-review or receipt id |
 | `GET /v1/route-reviews/{review_id}/evidence?after=N&limit=M` | Typed retained route-review evidence lookup |
 | `GET /v1/events/persistence` | Inspect bounded event cursor checkpoint status |
 | `POST /v1/events/persistence/flush` | Force an event cursor checkpoint and verify its write |
@@ -40,6 +40,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST .../{id}/retry` | Increment an attempt and recompute the signature, bounded at ten attempts |
 | `POST .../{id}/ack` | Idempotently remove acknowledged deliveries |
 | `POST .../{id}/replay` | Reset selected deliveries to attempt one after operator review |
+| `POST .../{id}/rebind` | Supply a secret in memory and re-sign restored pending envelopes |
 | `DELETE .../{id}` | Remove a subscription and its pending outbox |
 
 REST and MCP calls share the same in-process `bioprism-mcp::Server`. Every tool call emits a
@@ -71,19 +72,23 @@ converted to `failed`, marked `recovered_after_restart: true`, and reports that 
 resumed. `GET /v1/missions/{mission_id}` exposes `result_omitted` when a result body was not
 retained. Snapshot writes happen after acceptance, trace observation, cancellation, terminal
 completion, and deletion; a write failure rejects new acceptance and leaves existing process state
-intact. The snapshot is not an event-log or webhook-delivery journal, so event IDs, SSE cursors,
-subscriptions, and pending deliveries remain process-local.
+intact. The snapshot is not a distributed queue: it restores bounded event rows, subscription
+metadata, and signed pending outbox envelopes, but signing secrets remain process-local.
 `GET /v1/missions/persistence` reports whether checkpointing is enabled, the current file size,
 registry size, bounds, and the non-durable event/delivery distinction. The authenticated
 `POST /v1/missions/persistence/flush` route gives operators an explicit write/readiness check;
 it returns `409` when no state path was configured and `503` when the checkpoint cannot be written.
 
-Pass `--event-state <file>` to checkpoint the retained event cursor as a separate bounded JSON
-document. It restores event IDs, retention-gap accounting, and retained tool/mission events, but
-never writes webhook secrets, subscriptions, or pending deliveries. `GET /v1/events/persistence`
-and its authenticated `POST /v1/events/persistence/flush` counterpart expose the file bound,
-cursor metrics, and this non-durable delivery distinction. Event persistence and mission
-persistence are independent: an operator can enable either, both, or neither.
+Pass `--event-state <file>` to checkpoint the retained event cursor plus bounded subscription and
+outbox metadata as a separate JSON document. It restores event IDs, retention-gap accounting,
+retained tool/mission events, subscription endpoint/filter declarations, and signed pending
+envelopes, but never writes webhook secrets. Restored subscriptions are paused and delivery rows
+report `secret_rebind_required` until `POST /v1/webhooks/subscriptions/{id}/rebind` receives a
+fresh secret in memory; rebind re-signs pending envelopes and reactivates that subscription.
+`GET /v1/events/persistence` and its authenticated `POST /v1/events/persistence/flush` counterpart
+expose the file bound, cursor metrics, durability fields, and explicit secret policy.
+Event persistence and mission persistence are independent: an operator can enable either, both,
+or neither.
 
 ## Asynchronous missions
 
@@ -160,9 +165,10 @@ execute a scheduler, or claim delivery success merely because an envelope was cr
 Embedded Rust deployments can use `bioprism_api::DeliverySender` and
 `ApiRouter::deliver_once(...)` for the same bounded cycle: the callback receives the endpoint and
 already-signed envelope, while the router acknowledges successes, advances retryable attempts up
-to ten, and leaves permanent/exhausted failures pending with a typed `DeliveryRunReport`. The
+to ten, leaves secret-unbound rows blocked, and leaves permanent/exhausted failures pending with a typed `DeliveryRunReport`. The
 callback still owns HTTP/TLS, egress policy, and transport classification.
-Each delivery row also carries `state` (`pending`, `retryable`, `failed`, or `exhausted`),
+Each delivery row also carries `state` (`pending`, `retryable`, `failed`, `exhausted`, or
+`secret_rebind_required`),
 `last_error`, and `last_error_retryable`. A failed row remains pending for inspection; replay is
 an explicit bounded reset that keeps the delivery ID stable for receiver idempotency, resets the
 attempt to one, re-signs the envelope, and clears the prior failure. It never creates an
@@ -171,12 +177,12 @@ unbounded duplicate or treats operator intent as a successful send.
 ## Explicit nonclaims
 
 The dependency-free boundary does not implement HTTP/2 gRPC, TLS termination, an identity provider,
-durable event storage, a distributed mission queue, or a consumer-repository GitHub Action. Those
-are deployment/artifact surfaces. The optional mission snapshot is deliberately narrower than
-durable event storage: it restores bounded mission state and explicitly fails interrupted work
-instead of claiming recovery. The `capabilities` response reports these distinctions so clients
-can route to an operator's proxy, queue, or delivery worker instead of inferring them from REST
-routes.
+distributed event storage, a distributed mission queue, or a consumer-repository GitHub Action.
+Those are deployment/artifact surfaces. The optional event snapshot is bounded local recovery, not
+a consensus log or distributed delivery service; the mission snapshot restores bounded mission
+state and explicitly fails interrupted work instead of claiming recovery. The `capabilities`
+response reports these distinctions so clients can route to an operator's proxy, queue, or delivery
+worker instead of inferring them from REST routes.
 
 The Python standard-library SDK exposes the same HTTP surface through `prism_sdk.ApiClient` and
 `prism_sdk.AsyncApiClient`; the stdio MCP client remains available for local, process-confined

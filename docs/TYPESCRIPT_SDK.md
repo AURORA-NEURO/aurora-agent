@@ -664,6 +664,8 @@ const subscription = await api.subscribe(
 const deliveries = await api.deliveries(subscription.subscription.id);
 // An operator-owned worker sends the signed envelope, then acknowledges only accepted ids.
 await api.acknowledge(subscription.subscription.id, deliveries.page.deliveries.map((d) => d.delivery_id));
+// After an event-state restart, restore the signing secret in memory before retry/replay.
+await api.rebindSubscription(subscription.subscription.id, "a-long-operator-managed-secret");
 // Explicit operator recovery keeps delivery IDs stable and resets selected attempts.
 await api.replay(subscription.subscription.id, deliveries.page.deliveries.map((d) => d.delivery_id));
 ```
@@ -672,7 +674,8 @@ The SSE route is a bounded snapshot, not a streaming connection. `eventStream` r
 text, parsed events, content type, and next cursor so an application can decide whether to poll,
 persist, or hand off to a real EventSource implementation. The webhook methods only manage the
 server-side outbox. They do not send to endpoint URLs, retry on their own, or expose subscription
-secrets.
+secrets. Event-state checkpoints can restore metadata and signed pending rows, but restored
+subscriptions remain paused until `rebindSubscription` supplies the secret again.
 
 ## Compatibility posture
 

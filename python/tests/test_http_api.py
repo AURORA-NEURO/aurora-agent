@@ -374,6 +374,8 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "tool": self.path.rsplit("/", 1)[-1], "mcp": {"result": body}})
         elif self.path == "/v1/tools/adapter_plan":
             self._send(200, {"ok": True, "tool": "adapter_plan", "mcp": {"result": body}})
+        elif self.path.endswith("/rebind"):
+            self._send(200, {"ok": True, "subscription": {"id": "sub", "endpoint": "https://example.test/hook", "events": ["*"], "active": True, "created_at_sequence": 1, "secret_bound": True, "rebind_required": False}, "resigned_deliveries": 1, "secret_policy": "memory-only"})
         elif self.path.endswith("/replay"):
             self._send(200, {"ok": True, "replayed": [{"delivery_id": 1, "subscription_id": "sub", "attempt": 1, "state": "pending", "last_error": None, "last_error_retryable": None, "event_id": 2, "event_type": "tool.completed", "signature": "sha256=x", "envelope": {}}]})
         else:
@@ -878,6 +880,7 @@ class HttpApiClientTests(unittest.TestCase):
             client.delivery_receipt_events("bad\nreceipt")
         self.assertIsInstance(client.event_persistence(), EventPersistenceStatus)
         self.assertIsInstance(client.flush_event_persistence(), EventPersistenceStatus)
+        self.assertEqual(client.rebind_subscription("sub", "a-long-secret")["resigned_deliveries"], 1)
         with self.assertRaises(ArgumentError):
             client.event_page(after=True)
         with self.assertRaises(ApiError) as error:

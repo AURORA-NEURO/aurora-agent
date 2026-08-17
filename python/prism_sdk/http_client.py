@@ -3379,6 +3379,18 @@ class ApiClient:
             payload["events"] = list(events)
         return self.request("POST", "/v1/webhooks/subscriptions", payload)
 
+    def rebind_subscription(self, subscription_id: str, secret: str) -> dict[str, Any]:
+        """Rebind a restored webhook secret in memory and re-sign pending envelopes."""
+
+        self._subscription_id(subscription_id)
+        if not isinstance(secret, str) or len(secret) < 8 or len(secret) > 4096 or any(ord(character) < 0x20 for character in secret):
+            raise ArgumentError("secret must contain 8..=4096 printable characters")
+        return self.request(
+            "POST",
+            f"/v1/webhooks/subscriptions/{subscription_id}/rebind",
+            {"secret": secret},
+        )
+
     def deliveries(self, subscription_id: str, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
         self._subscription_id(subscription_id)
         if after < 0 or not 1 <= limit <= 1000:
@@ -3635,6 +3647,11 @@ class AsyncApiClient:
         """Async typed cursor page over pending signed deliveries."""
 
         return await asyncio.to_thread(self.client.delivery_page, subscription_id, after=after, limit=limit)
+
+    async def rebind_subscription(self, subscription_id: str, secret: str) -> dict[str, Any]:
+        """Async in-memory webhook secret rebind and pending-envelope re-sign."""
+
+        return await asyncio.to_thread(self.client.rebind_subscription, subscription_id, secret)
 
     async def replay(self, subscription_id: str, delivery_ids: Sequence[int]) -> dict[str, Any]:
         """Async explicit bounded replay that resets selected delivery attempts."""

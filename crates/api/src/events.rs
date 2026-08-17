@@ -17,7 +17,8 @@ pub const MAX_ENDPOINT_BYTES: usize = 2048;
 pub const MAX_SECRET_BYTES: usize = 4096;
 pub const MAX_FILTERS: usize = 32;
 pub const MAX_RETRY_ATTEMPTS: u32 = 10;
-pub const EVENT_STATE_SCHEMA_VERSION: u64 = 1;
+pub const EVENT_STATE_SCHEMA_VERSION: u64 = 2;
+const LEGACY_EVENT_STATE_SCHEMA_VERSION: u64 = 1;
 pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_DELIVERY_WORKER_BATCH: usize = 100;
 pub const MAX_DELIVERY_ERROR_BYTES: usize = 8 * 1024;
@@ -42,16 +43,18 @@ pub struct EventPage {
     pub dropped_events: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionView {
     pub id: String,
     pub endpoint: String,
     pub events: Vec<String>,
     pub active: bool,
     pub created_at_sequence: u64,
+    pub secret_bound: bool,
+    pub rebind_required: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookEnvelope {
     pub delivery_id: u64,
     pub subscription_id: String,
@@ -111,6 +114,7 @@ pub struct DeliveryRunReport {
     pub retried: usize,
     pub failed: usize,
     pub exhausted: usize,
+    pub blocked: usize,
     pub pending: usize,
     pub failures: Vec<DeliveryFailure>,
 }
@@ -151,7 +155,7 @@ struct Subscription {
     secret: Vec<u8>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PendingDelivery {
     envelope: WebhookEnvelope,
     last_error: Option<String>,
@@ -220,9 +224,11 @@ impl EventLog {
             .get("schema_version")
             .and_then(Value::as_u64)
             .ok_or_else(|| "event state snapshot has no schema_version".to_string())?;
-        if schema_version != EVENT_STATE_SCHEMA_VERSION {
+        if schema_version != EVENT_STATE_SCHEMA_VERSION
+            && schema_version != LEGACY_EVENT_STATE_SCHEMA_VERSION
+        {
             return Err(format!(
-                "unsupported event state schema version {schema_version}; expected {EVENT_STATE_SCHEMA_VERSION}"
+                "unsupported event state schema version {schema_version}; expected {LEGACY_EVENT_STATE_SCHEMA_VERSION} or {EVENT_STATE_SCHEMA_VERSION}"
             ));
         }
         let mut log = Self::new(capacity)?;
@@ -272,21 +278,136 @@ impl EventLog {
         if log.next_event_id == 0 {
             return Err("event state snapshot next_event_id must not overflow".into());
         }
+        if schema_version == EVENT_STATE_SCHEMA_VERSION {
+            if document
+                .get("subscriptions_durable")
+                .and_then(Value::as_bool)
+                != Some(true)
+                || document
+                    .get("webhook_deliveries_durable")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+            {
+                return Err(
+                    "event state snapshot must explicitly declare durable subscription and outbox metadata"
+                        .into(),
+                );
+            }
+            if document.get("secrets_persisted").and_then(Value::as_bool) != Some(false) {
+                return Err(
+                    "event state snapshot must explicitly declare secrets_persisted=false".into(),
+                );
+            }
+            log.next_delivery_id = document
+                .get("next_delivery_id")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| "event state snapshot has no next_delivery_id".to_string())?;
+            log.dropped_deliveries = document
+                .get("dropped_deliveries")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if log.next_delivery_id == 0 {
+                return Err("event state snapshot next_delivery_id must not overflow".into());
+            }
+            let subscriptions = document
+                .get("subscriptions")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "event state snapshot has no subscriptions array".to_string())?;
+            if subscriptions.len() > 256 {
+                return Err("event state snapshot contains too many subscriptions".into());
+            }
+            for value in subscriptions {
+                let mut view: SubscriptionView =
+                    serde_json::from_value(value.clone()).map_err(|error| {
+                        format!("event state snapshot contains an invalid subscription: {error}")
+                    })?;
+                validate_subscription_view(&view)?;
+                if log.subscriptions.contains_key(&view.id) {
+                    return Err(format!(
+                        "event state snapshot contains duplicate subscription {:?}",
+                        view.id
+                    ));
+                }
+                // The persisted endpoint and filters remain inspectable, but the subscription is
+                // paused until the operator explicitly supplies its secret again.
+                view.active = false;
+                view.secret_bound = false;
+                view.rebind_required = true;
+                log.subscriptions.insert(
+                    view.id.clone(),
+                    Subscription {
+                        view,
+                        secret: Vec::new(),
+                    },
+                );
+            }
+            let deliveries = document
+                .get("deliveries")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "event state snapshot has no deliveries array".to_string())?;
+            if deliveries.len() > log.delivery_capacity {
+                return Err(format!(
+                    "event state snapshot contains {} deliveries above the {}-row bound",
+                    deliveries.len(),
+                    log.delivery_capacity
+                ));
+            }
+            for value in deliveries {
+                let pending: PendingDelivery =
+                    serde_json::from_value(value.clone()).map_err(|error| {
+                        format!("event state snapshot contains an invalid delivery: {error}")
+                    })?;
+                validate_pending_delivery(&pending)?;
+                let subscription_id = &pending.envelope.subscription_id;
+                if !log.subscriptions.contains_key(subscription_id) {
+                    return Err(format!(
+                        "event state snapshot delivery references unknown subscription {subscription_id:?}"
+                    ));
+                }
+                if log
+                    .deliveries
+                    .insert(pending.envelope.delivery_id, pending)
+                    .is_some()
+                {
+                    return Err("event state snapshot contains duplicate delivery ids".into());
+                }
+            }
+            if let Some(last_id) = log.deliveries.keys().next_back().copied() {
+                log.next_delivery_id = log.next_delivery_id.max(last_id.saturating_add(1));
+            }
+            if log.next_delivery_id == 0 {
+                return Err("event state snapshot next_delivery_id must not overflow".into());
+            }
+        }
         Ok(log)
     }
 
-    /// Atomically write a bounded event-only checkpoint. Secrets and delivery state never enter it.
+    /// Atomically write a bounded checkpoint for events plus non-secret subscription/outbox state.
+    /// Signing secrets never enter the snapshot; restored subscriptions are paused until an
+    /// operator explicitly rebinds each secret in memory.
     pub fn checkpoint_to_path(&self, path: &std::path::Path) -> Result<usize, String> {
         let mut events = self.events.iter().cloned().collect::<Vec<_>>();
         let mut dropped_events = self.dropped_events;
+        let subscriptions = self
+            .subscriptions
+            .values()
+            .map(|subscription| subscription.view.clone())
+            .collect::<Vec<_>>();
+        let deliveries = self.deliveries.values().cloned().collect::<Vec<_>>();
         loop {
             let document = json!({
                 "schema_version": EVENT_STATE_SCHEMA_VERSION,
                 "next_event_id": self.next_event_id,
+                "next_delivery_id": self.next_delivery_id,
                 "dropped_events": dropped_events,
+                "dropped_deliveries": self.dropped_deliveries,
                 "events": events,
-                "subscriptions_durable": false,
-                "webhook_deliveries_durable": false,
+                "subscriptions": subscriptions,
+                "deliveries": deliveries,
+                "subscriptions_durable": true,
+                "webhook_deliveries_durable": true,
+                "secrets_persisted": false,
+                "recovery_policy": "restored subscriptions are paused until explicit secret rebind; signed outbox rows remain inspectable and are re-signed only after rebind",
             });
             let bytes = serde_json::to_vec_pretty(&document)
                 .map_err(|error| format!("event state could not be serialized: {error}"))?;
@@ -366,6 +487,7 @@ impl EventLog {
             .values()
             .filter(|subscription| {
                 subscription.view.active
+                    && subscription.view.secret_bound
                     && subscription
                         .view
                         .events
@@ -421,6 +543,8 @@ impl EventLog {
             events: filters,
             active: true,
             created_at_sequence: self.next_event_id,
+            secret_bound: true,
+            rebind_required: false,
         };
         self.subscriptions.insert(
             subscription_id,
@@ -437,6 +561,36 @@ impl EventLog {
             .values()
             .map(|subscription| subscription.view.clone())
             .collect()
+    }
+
+    /// Rebind a restored subscription's signing secret in memory.
+    ///
+    /// The secret is never returned or persisted. Existing pending envelopes are re-signed with
+    /// the newly supplied secret before the subscription becomes active, so a restored outbox
+    /// cannot accidentally send an envelope authenticated by an unavailable pre-restart secret.
+    pub fn rebind_subscription(
+        &mut self,
+        id: &str,
+        secret: &str,
+    ) -> Result<(SubscriptionView, usize), String> {
+        validate_secret(secret)?;
+        let subscription = self
+            .subscriptions
+            .get_mut(id)
+            .ok_or_else(|| format!("unknown subscription {id:?}"))?;
+        subscription.secret = secret.as_bytes().to_vec();
+        subscription.view.secret_bound = true;
+        subscription.view.rebind_required = false;
+        subscription.view.active = true;
+        let mut resigned = 0;
+        for delivery in self.deliveries.values_mut() {
+            if delivery.envelope.subscription_id == id {
+                delivery.envelope.signature =
+                    sign_envelope(&subscription.secret, &delivery.envelope);
+                resigned += 1;
+            }
+        }
+        Ok((subscription.view.clone(), resigned))
     }
 
     pub fn remove_subscription(&mut self, id: &str) -> Result<bool, String> {
@@ -531,7 +685,13 @@ impl EventLog {
                     && delivery.envelope.delivery_id > after
             })
             .take(limit)
-            .map(delivery_view)
+            .map(|delivery| {
+                let secret_bound = self
+                    .subscriptions
+                    .get(&delivery.envelope.subscription_id)
+                    .is_some_and(|subscription| subscription.view.secret_bound);
+                delivery_view(delivery, secret_bound)
+            })
             .collect::<Vec<_>>();
         let next_after = deliveries
             .last()
@@ -576,11 +736,7 @@ impl EventLog {
         if ids.len() > 1000 {
             return Err("a single retry request may contain at most 1000 ids".into());
         }
-        let secret = self
-            .subscriptions
-            .get(subscription_id)
-            .map(|subscription| subscription.secret.clone())
-            .ok_or_else(|| format!("unknown subscription {subscription_id:?}"))?;
+        let secret = self.bound_secret(subscription_id)?;
         let mut retried = Vec::new();
         for id in ids {
             let Some(delivery) = self.deliveries.get_mut(id) else {
@@ -593,7 +749,7 @@ impl EventLog {
             }
             delivery.envelope.attempt += 1;
             delivery.envelope.signature = sign_envelope(&secret, &delivery.envelope);
-            retried.push(delivery_view(delivery));
+            retried.push(delivery_view(delivery, true));
         }
         Ok(retried)
     }
@@ -612,11 +768,7 @@ impl EventLog {
         if ids.len() > 1000 {
             return Err("a single replay request may contain at most 1000 ids".into());
         }
-        let secret = self
-            .subscriptions
-            .get(subscription_id)
-            .map(|subscription| subscription.secret.clone())
-            .ok_or_else(|| format!("unknown subscription {subscription_id:?}"))?;
+        let secret = self.bound_secret(subscription_id)?;
         let mut replayed = Vec::new();
         for id in ids {
             let Some(delivery) = self.deliveries.get_mut(id) else {
@@ -629,7 +781,7 @@ impl EventLog {
             delivery.last_error = None;
             delivery.last_error_retryable = None;
             delivery.envelope.signature = sign_envelope(&secret, &delivery.envelope);
-            replayed.push(delivery_view(delivery));
+            replayed.push(delivery_view(delivery, true));
         }
         Ok(replayed)
     }
@@ -642,7 +794,7 @@ impl EventLog {
             active_subscriptions: self
                 .subscriptions
                 .values()
-                .filter(|subscription| subscription.view.active)
+                .filter(|subscription| subscription.view.active && subscription.view.secret_bound)
                 .count(),
             pending_deliveries: self.deliveries.len(),
             dropped_deliveries: self.dropped_deliveries,
@@ -672,6 +824,7 @@ impl EventLog {
             retried: 0,
             failed: 0,
             exhausted: 0,
+            blocked: 0,
             pending: 0,
             failures: Vec::new(),
         };
@@ -680,6 +833,11 @@ impl EventLog {
                 break;
             }
             let page = self.deliveries(&subscription.id, 0, remaining)?;
+            if !subscription.secret_bound {
+                report.blocked += page.deliveries.len();
+                remaining = remaining.saturating_sub(page.deliveries.len());
+                continue;
+            }
             for delivery in page.deliveries {
                 if remaining == 0 {
                     break;
@@ -783,14 +941,27 @@ impl EventLog {
             Err(format!("unknown subscription {id:?}"))
         }
     }
+
+    fn bound_secret(&self, id: &str) -> Result<Vec<u8>, String> {
+        let subscription = self
+            .subscriptions
+            .get(id)
+            .ok_or_else(|| format!("unknown subscription {id:?}"))?;
+        if !subscription.view.secret_bound || subscription.secret.is_empty() {
+            return Err(format!(
+                "subscription {id:?} requires an explicit secret rebind before retry or replay"
+            ));
+        }
+        Ok(subscription.secret.clone())
+    }
 }
 
-fn delivery_view(delivery: &PendingDelivery) -> DeliveryView {
+fn delivery_view(delivery: &PendingDelivery, secret_bound: bool) -> DeliveryView {
     DeliveryView {
         delivery_id: delivery.envelope.delivery_id,
         subscription_id: delivery.envelope.subscription_id.clone(),
         attempt: delivery.envelope.attempt,
-        state: delivery_state(delivery),
+        state: delivery_state(delivery, secret_bound),
         last_error: delivery.last_error.clone(),
         last_error_retryable: delivery.last_error_retryable,
         event_id: delivery.envelope.event.id,
@@ -800,7 +971,10 @@ fn delivery_view(delivery: &PendingDelivery) -> DeliveryView {
     }
 }
 
-fn delivery_state(delivery: &PendingDelivery) -> String {
+fn delivery_state(delivery: &PendingDelivery, secret_bound: bool) -> String {
+    if !secret_bound {
+        return "secret_rebind_required".into();
+    }
     match delivery.last_error_retryable {
         None => "pending".into(),
         Some(false) => "failed".into(),
@@ -862,6 +1036,54 @@ fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
 
 fn hex_digest(digest: &[u8]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn validate_subscription_view(view: &SubscriptionView) -> Result<(), String> {
+    validate_token(&view.id, MAX_SUBSCRIPTION_ID_BYTES, "subscription id")?;
+    validate_endpoint(&view.endpoint)?;
+    if view.events.is_empty() || view.events.len() > MAX_FILTERS {
+        return Err(format!(
+            "subscription events must contain between 1 and {MAX_FILTERS} filters"
+        ));
+    }
+    for filter in &view.events {
+        validate_token(filter, MAX_EVENT_TYPE_BYTES, "event filter")?;
+    }
+    if view.created_at_sequence == 0 {
+        return Err("subscription created_at_sequence must be positive".into());
+    }
+    Ok(())
+}
+
+fn validate_pending_delivery(delivery: &PendingDelivery) -> Result<(), String> {
+    let envelope = &delivery.envelope;
+    if envelope.delivery_id == 0 || envelope.event.id == 0 {
+        return Err("delivery ids must be positive".into());
+    }
+    if !(1..=MAX_RETRY_ATTEMPTS).contains(&envelope.attempt) {
+        return Err(format!(
+            "delivery attempt must be between 1 and {MAX_RETRY_ATTEMPTS}"
+        ));
+    }
+    validate_token(
+        &envelope.subscription_id,
+        MAX_SUBSCRIPTION_ID_BYTES,
+        "delivery subscription id",
+    )?;
+    validate_token(
+        &envelope.event.event_type,
+        MAX_EVENT_TYPE_BYTES,
+        "delivery event type",
+    )?;
+    validate_token(&envelope.event.subject, 256, "delivery event subject")?;
+    validate_token(&envelope.event.request_id, 256, "delivery event request id")?;
+    validate_token(&envelope.signature, 256, "delivery signature")?;
+    if let Some(error) = &delivery.last_error {
+        if error.len() > MAX_DELIVERY_ERROR_BYTES || error.bytes().any(|byte| byte < 0x20) {
+            return Err("delivery last_error is unbounded or contains control bytes".into());
+        }
+    }
+    Ok(())
 }
 
 fn validate_token(value: &str, maximum: usize, label: &str) -> Result<(), String> {

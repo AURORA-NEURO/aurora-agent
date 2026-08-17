@@ -167,6 +167,8 @@ export interface SubscriptionView extends JsonObject {
   events: string[];
   active: boolean;
   created_at_sequence: number;
+  secret_bound: boolean;
+  rebind_required: boolean;
 }
 
 export interface SubscriptionResponse extends JsonObject {
@@ -179,6 +181,13 @@ export interface SubscriptionResponse extends JsonObject {
     retry: string;
     [key: string]: JsonValue;
   };
+}
+
+export interface SubscriptionRebindResponse extends JsonObject {
+  ok: boolean;
+  subscription: SubscriptionView;
+  resigned_deliveries: number;
+  secret_policy: string;
 }
 
 export interface SubscriptionListResponse extends JsonObject {
@@ -199,7 +208,7 @@ export interface DeliveryView extends JsonObject {
   delivery_id: number;
   subscription_id: string;
   attempt: number;
-  state: "pending" | "retryable" | "failed" | "exhausted";
+  state: "pending" | "retryable" | "failed" | "exhausted" | "secret_rebind_required";
   last_error: string | null;
   last_error_retryable: boolean | null;
   event_id: number;
@@ -7078,8 +7087,9 @@ export interface EventPersistenceStatus extends JsonObject {
   retained_events: number;
   next_event_id: number;
   dropped_events: number;
-  subscriptions_durable: false;
-  webhook_deliveries_durable: false;
+  subscriptions_durable: boolean;
+  webhook_deliveries_durable: boolean;
+  secrets_persisted: false;
   recovery_policy: string;
   flush: string;
 }

@@ -545,7 +545,9 @@ invent defaults:
   `mission_persistence()` and `flush_mission_persistence()` provide typed operator checks for
   the optional checkpoint without implying durable event cursors or webhook delivery state.
   `event_persistence()` and `flush_event_persistence()` provide the corresponding typed event
-  cursor checkpoint check; subscription secrets and pending deliveries are explicitly non-durable.
+  and outbox checkpoint checks; endpoint/filter metadata and signed pending envelopes can restore,
+  while secrets remain non-durable. `rebind_subscription(...)` supplies a secret in memory,
+  re-signs pending envelopes, and reactivates a paused restored subscription.
 - `ToolCatalogue`, `ToolCallPlan`, and `tool_checked(...)` provide a checked escape hatch for the
   complete live MCP catalogue, including domains that do not yet have a handwritten convenience
   method. The catalogue is copied from `tools/list` or `/v1/tools`, deduplicated, bounded, and

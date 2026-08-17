@@ -316,15 +316,15 @@ It exposes the exact MCP tool catalogue through REST and JSON-RPC, bounded healt
 routes, cursor-addressable event pages/SSE snapshots, receipt-correlated event queries, signed webhook outbox registration, retry,
 and acknowledgement. `--mission-state` adds an optional bounded, atomic checkpoint for mission
 status, progress, traces, and size-limited result metadata; interrupted queued/running missions
-are marked failed after restart instead of being falsely resumed. Event cursors, subscriptions,
-and pending deliveries remain process-local. `--event-state` separately checkpoints the bounded
-event cursor while never persisting webhook secrets or delivery state. It deliberately reports
+are marked failed after restart instead of being falsely resumed. `--event-state` checkpoints
+retained events, subscription metadata, and signed pending outbox rows while never persisting
+webhook secrets; restored subscriptions pause until an explicit in-memory `/rebind` call. It deliberately reports
 gRPC, TLS termination, distributed scheduling, and external delivery as absent rather than
 inferring them from an HTTP listener.
 Embedded Rust consumers can plug an egress-controlled `DeliverySender` into
 `ApiRouter::deliver_once(...)` to acknowledge successful signed webhook sends and classify bounded
 retryable/permanent failures without giving the gateway arbitrary network access.
-Delivery pages expose pending, retryable, failed, and exhausted state with the last transport error;
+Delivery pages expose pending, retryable, failed, exhausted, and `secret_rebind_required` state with the last transport error;
 `POST .../{id}/replay` is an explicit operator reset that preserves the delivery ID, resets the
 attempt budget, and re-signs without claiming delivery.
 The serving path uses one immutable shared router across connection threads, atomically allocates

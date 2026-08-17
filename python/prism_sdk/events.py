@@ -208,6 +208,9 @@ class EventPersistenceStatus:
     retained_events: int
     next_event_id: int
     dropped_events: int
+    subscriptions_durable: bool
+    webhook_deliveries_durable: bool
+    secrets_persisted: bool
     recovery_policy: str
 
     @classmethod
@@ -224,9 +227,16 @@ class EventPersistenceStatus:
         file_bytes = raw.get("file_bytes")
         if file_bytes is not None:
             file_bytes = _non_negative("event persistence file_bytes", file_bytes)
+        subscriptions_durable = raw.get("subscriptions_durable")
+        webhook_deliveries_durable = raw.get("webhook_deliveries_durable")
+        secrets_persisted = raw.get("secrets_persisted", False)
+        if not isinstance(subscriptions_durable, bool) or not isinstance(webhook_deliveries_durable, bool):
+            raise ArgumentError("event persistence durability fields must be booleans")
+        if not isinstance(secrets_persisted, bool):
+            raise ArgumentError("event persistence secrets_persisted must be a boolean")
+        if secrets_persisted:
+            raise ArgumentError("event persistence must never persist webhook secrets")
         recovery_policy = _text("event persistence recovery_policy", raw.get("recovery_policy"))
-        if raw.get("subscriptions_durable") is not False or raw.get("webhook_deliveries_durable") is not False:
-            raise ArgumentError("event persistence must make subscriptions and deliveries non-durable")
         return cls(
             raw,
             enabled,
@@ -237,6 +247,9 @@ class EventPersistenceStatus:
             non_negative("retained_events"),
             non_negative("next_event_id"),
             non_negative("dropped_events"),
+            subscriptions_durable,
+            webhook_deliveries_durable,
+            secrets_persisted,
             recovery_policy,
         )
 
