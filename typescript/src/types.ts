@@ -4871,6 +4871,7 @@ export interface DomainReportProjectArgs extends JsonObject {
   source_tool: string;
   report: JsonObject;
   claim_posture: DomainReportClaimPosture;
+  source_plan_digest?: string | null;
   parent_digests?: string[];
 }
 
@@ -4980,6 +4981,7 @@ export interface DomainEvidenceIntakeArgs extends JsonObject {
   request?: JsonValue;
   response: JsonValue;
   outcome: DomainEvidenceIntakeOutcome;
+  source_plan_digest: string | null;
   claim_posture: DomainReportClaimPosture;
   parent_digests?: string[];
 }

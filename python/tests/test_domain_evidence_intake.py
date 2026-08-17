@@ -156,7 +156,10 @@ class DomainEvidenceIntakeModelTests(unittest.TestCase):
         self.assertIn("request", normalized.to_arguments())
         report = DomainEvidenceIntakeReport.from_wire(intake_payload())
         self.assertEqual(report.outcome, "observed")
+        self.assertIsNone(report.source_plan_digest)
         self.assertEqual(report.artifact_registry["kind"], "domain_evidence_intake")
+        bound = DomainEvidenceIntakeRequest(**{**request().__dict__, "source_plan_digest": "f" * 64})
+        self.assertEqual(bound.to_arguments()["source_plan_digest"], "f" * 64)
         with self.assertRaises(ArgumentError):
             DomainEvidenceIntakeRequest(
                 group_id="biological_domains",

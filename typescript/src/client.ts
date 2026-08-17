@@ -574,6 +574,7 @@ export class ApiClient {
     if (!isObject(args.report) || !isObject(args.claim_posture)) throw new ArgumentError("report and claim_posture must be objects");
     if (args.claim_posture.status === undefined || !["observed", "derived", "review_required", "refused", "not_applicable"].includes(args.claim_posture.status)) throw new ArgumentError("claim_posture.status is invalid");
     if (!Array.isArray(args.claim_posture.does_not_claim) || args.claim_posture.does_not_claim.length < 1 || args.claim_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("claim_posture.does_not_claim must be non-empty");
+    if (args.source_plan_digest !== undefined && args.source_plan_digest !== null && (typeof args.source_plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.source_plan_digest))) throw new ArgumentError("source_plan_digest must be a lowercase SHA-256 digest or null");
     if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
     return this.request<DomainReportProjectResult>("POST", "/v1/domain-reports", args, options);
   }

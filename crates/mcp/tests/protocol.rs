@@ -1149,6 +1149,26 @@ fn domain_evidence_source_plan_is_catalogue_bound_digest_addressed_and_non_execu
         json!("domain_evidence_source_plan")
     );
     assert_eq!(first["plan_digest"].as_str().unwrap().len(), 64);
+    let bound_intake = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-plan-subject",
+            "source_tool": "modality_catalog",
+            "response": {"status": "bounded"},
+            "outcome": "observed",
+            "source_plan_digest": first["plan_digest"].clone(),
+            "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(bound_intake["source_plan_digest"], first["plan_digest"]);
+    assert!(bound_intake["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|digest| digest == &first["plan_digest"]));
     let second = call(&mut server, "domain_evidence_source_plan", arguments);
     assert_eq!(second["artifact_registry"]["already_present"], json!(true));
     let credential_refused = call(

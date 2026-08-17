@@ -202,6 +202,9 @@ envelope is embedded in a canonical domain report, and the intake artifact is in
 declared artifact parents. Outcomes remain `observed`, `partial`, `refused`, `error`, or
 `unknown`; the route never invokes the source tool or promotes a response into truth, execution,
 provenance completeness, scientific/clinical validity, release readiness, or external effects.
+An optional `source_plan_digest` binds intake to a retained source plan; the MCP boundary checks
+exact group, subject, source-tool, and domain compatibility before indexing and adds that plan
+identity to the intake's parent set. Unbound legacy intake remains valid and restorable.
 `GET /v1/domain-evidence/coverage` audits that retained intake boundary against the authoritative
 catalogue. It preserves missing groups, intake outcomes, source tools, subjects, reported domains,
 declared tools, missing source tools/domains, optional exact intake digests, and per-domain counts.

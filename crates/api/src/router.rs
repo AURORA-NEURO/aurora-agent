@@ -11457,7 +11457,7 @@ mod tests {
             json!({
                 "group_id": "biological_domains",
                 "domains": ["modalities"],
-                "subject_id": "api-source-plan-subject",
+                "subject_id": "api-intake-subject",
                 "source_tool": "modality_catalog",
                 "connector_kind": "literature",
                 "locator_kind": "uri",
@@ -11475,7 +11475,7 @@ mod tests {
         assert_eq!(source["artifact_registry"]["indexed"], true);
         let source_artifacts = router.handle(request(
             "GET",
-            "/v1/artifacts?kind=domain_evidence_source_plan&subject_id=api-source-plan-subject",
+            "/v1/artifacts?kind=domain_evidence_source_plan&subject_id=api-intake-subject",
             json!({}),
         ));
         assert_eq!(source_artifacts.status, 200);
@@ -11492,6 +11492,7 @@ mod tests {
                 "request": {"modality": "single_cell"},
                 "response": {"status": "bounded", "modalities": ["single_cell"]},
                 "outcome": "observed",
+                "source_plan_digest": source["plan_digest"].clone(),
                 "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
             }),
         ));
@@ -11499,6 +11500,7 @@ mod tests {
         let response: Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(response["workflow"], "domain_evidence_intake");
         assert_eq!(response["request_supplied"], true);
+        assert_eq!(response["source_plan_digest"], source["plan_digest"]);
         assert_eq!(response["request_digest"].as_str().unwrap().len(), 64);
         assert_eq!(response["response_digest"].as_str().unwrap().len(), 64);
         assert_eq!(response["artifact_registry"]["indexed"], true);

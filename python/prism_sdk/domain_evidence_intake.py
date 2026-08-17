@@ -38,6 +38,7 @@ class DomainEvidenceIntakeRequest:
     claim_posture: Mapping[str, Any]
     request: Any = _MISSING
     parent_digests: tuple[str, ...] = ()
+    source_plan_digest: str | None = None
 
     def __post_init__(self) -> None:
         _text("domain evidence intake group_id", self.group_id)
@@ -69,6 +70,8 @@ class DomainEvidenceIntakeRequest:
             raise ArgumentError("domain evidence intake parent_digests must contain at most 128 values")
         for digest in self.parent_digests:
             _digest("domain evidence intake parent digest", digest)
+        if self.source_plan_digest is not None:
+            _digest("domain evidence intake source plan digest", self.source_plan_digest)
 
     @property
     def request_supplied(self) -> bool:
@@ -85,6 +88,8 @@ class DomainEvidenceIntakeRequest:
             "claim_posture": dict(self.claim_posture),
             "parent_digests": list(self.parent_digests),
         }
+        if self.source_plan_digest is not None:
+            result["source_plan_digest"] = self.source_plan_digest
         if self.request is not _MISSING:
             result["request"] = self.request
         return result
@@ -98,6 +103,7 @@ class DomainEvidenceIntakeReport:
     subject_id: str
     source_tool: str
     outcome: str
+    source_plan_digest: str | None
     request_supplied: bool
     request_digest: str
     response_digest: str
@@ -138,6 +144,11 @@ class DomainEvidenceIntakeReport:
             subject_id=_text("domain evidence intake subject_id", raw.get("subject_id")),
             source_tool=_text("domain evidence intake source_tool", raw.get("source_tool")),
             outcome=outcome,
+            source_plan_digest=(
+                None
+                if raw.get("source_plan_digest") is None
+                else _digest("domain evidence intake source plan digest", raw.get("source_plan_digest"))
+            ),
             request_supplied=request_supplied,
             request_digest=_digest("domain evidence intake request digest", raw.get("request_digest")),
             response_digest=_digest("domain evidence intake response digest", raw.get("response_digest")),

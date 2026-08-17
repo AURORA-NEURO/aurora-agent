@@ -75,8 +75,21 @@ pub fn intake_domain_evidence(request: &Value) -> Result<Value, DomainEvidenceIn
         .get("claim_posture")
         .cloned()
         .ok_or_else(|| DomainEvidenceIntakeError::InvalidField("claim_posture".into()))?;
-    let parent_digests =
+    let source_plan_digest = optional_digest(object, "source_plan_digest")?;
+    let mut parent_digests =
         digest_array(object, "parent_digests", MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS)?;
+    if let Some(source_plan_digest) = &source_plan_digest {
+        if !parent_digests.contains(source_plan_digest) {
+            if parent_digests.len() >= MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS {
+                return Err(DomainEvidenceIntakeError::TooManyItems {
+                    field: "parent_digests".into(),
+                    maximum: MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS,
+                });
+            }
+            parent_digests.push(source_plan_digest.clone());
+            parent_digests.sort();
+        }
+    }
     let request_digest = digest_value(&request_value)?;
     let response_digest = digest_value(&response)?;
 
@@ -92,7 +105,8 @@ pub fn intake_domain_evidence(request: &Value) -> Result<Value, DomainEvidenceIn
         "response": response,
         "request_digest": request_digest,
         "response_digest": response_digest,
-        "outcome": outcome
+        "outcome": outcome,
+        "source_plan_digest": source_plan_digest,
     });
     let intake_digest = digest_without_field(&observation, "intake_digest")?;
     let report = project_domain_report(&json!({
@@ -118,6 +132,7 @@ pub fn intake_domain_evidence(request: &Value) -> Result<Value, DomainEvidenceIn
         "response_digest": response_digest,
         "intake_digest": intake_digest,
         "outcome": outcome,
+        "source_plan_digest": source_plan_digest,
         "parent_digests": parent_digests,
         "report": report,
         "readiness_claimed": false,
@@ -159,6 +174,7 @@ pub fn validate_domain_evidence_intake(value: &Value) -> Result<(), DomainEviden
     let request_digest = required_digest(object, "request_digest")?;
     let response_digest = required_digest(object, "response_digest")?;
     let intake_digest = required_digest(object, "intake_digest")?;
+    let source_plan_digest = optional_digest(object, "source_plan_digest")?;
     let outcome = required_text(object, "outcome")?;
     if !INTAKE_OUTCOMES.contains(&outcome.as_str()) {
         return Err(DomainEvidenceIntakeError::InvalidOutcome(outcome));
@@ -213,6 +229,17 @@ pub fn validate_domain_evidence_intake(value: &Value) -> Result<(), DomainEviden
     {
         return Err(DomainEvidenceIntakeError::InvalidField(
             "report.report.intake.metadata".into(),
+        ));
+    }
+    let observation_source_plan_digest = observation
+        .get("source_plan_digest")
+        .and_then(Value::as_str);
+    let object_source_plan_digest = object.get("source_plan_digest").and_then(Value::as_str);
+    if observation_source_plan_digest != source_plan_digest.as_deref()
+        || object_source_plan_digest != source_plan_digest.as_deref()
+    {
+        return Err(DomainEvidenceIntakeError::InvalidField(
+            "source_plan_digest".into(),
         ));
     }
     let request_value = observation.get("request").ok_or_else(|| {
@@ -278,6 +305,24 @@ fn required_digest(
     ContentHash::parse(value.clone())
         .map_err(|_| DomainEvidenceIntakeError::DigestMismatch(field.into()))?;
     Ok(value)
+}
+
+fn optional_digest(
+    object: &Map<String, Value>,
+    field: &str,
+) -> Result<Option<String>, DomainEvidenceIntakeError> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => {
+            let digest = value
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| DomainEvidenceIntakeError::InvalidField(field.into()))?;
+            ContentHash::parse(digest.to_string())
+                .map_err(|_| DomainEvidenceIntakeError::DigestMismatch(field.into()))?;
+            Ok(Some(digest.to_string()))
+        }
+    }
 }
 
 fn digest_array(
@@ -428,6 +473,31 @@ mod tests {
         assert_eq!(result["request_supplied"], false);
         assert_eq!(result["outcome"], "refused");
         assert_eq!(result["report"]["report"]["intake"]["request"], Value::Null);
+        let mut legacy = intake_domain_evidence(&request()).unwrap();
+        legacy.as_object_mut().unwrap().remove("source_plan_digest");
+        legacy["report"]["report"]["intake"]
+            .as_object_mut()
+            .unwrap()
+            .remove("source_plan_digest");
+        legacy["intake_digest"] =
+            json!(ContentHash::of_value(&legacy["report"]["report"]["intake"])
+                .unwrap()
+                .to_string());
+        validate_domain_evidence_intake(&legacy).unwrap();
+    }
+
+    #[test]
+    fn intake_binds_an_optional_source_plan_into_observation_and_parents() {
+        let mut value = request();
+        value["source_plan_digest"] = json!("f".repeat(64));
+        let result = intake_domain_evidence(&value).unwrap();
+        assert_eq!(result["source_plan_digest"], json!("f".repeat(64)));
+        assert_eq!(result["parent_digests"], json!(["f".repeat(64)]));
+        assert_eq!(
+            result["report"]["report"]["intake"]["source_plan_digest"],
+            json!("f".repeat(64))
+        );
+        validate_domain_evidence_intake(&result).unwrap();
     }
 
     #[test]

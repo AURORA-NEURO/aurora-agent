@@ -3249,6 +3249,72 @@ impl Server {
     /// response, a refusal, or an externally produced envelope, but this operation never calls
     /// the named source tool on their behalf.
     fn domain_evidence_intake(&self, arguments: &Value) -> Result<Value, String> {
+        if let Some(source_plan_digest) =
+            arguments.get("source_plan_digest").and_then(Value::as_str)
+        {
+            let group_id = arguments
+                .get("group_id")
+                .and_then(Value::as_str)
+                .ok_or("source-plan-bound intake omitted group_id")?;
+            let subject_id = arguments
+                .get("subject_id")
+                .and_then(Value::as_str)
+                .ok_or("source-plan-bound intake omitted subject_id")?;
+            let source_tool = arguments
+                .get("source_tool")
+                .and_then(Value::as_str)
+                .ok_or("source-plan-bound intake omitted source_tool")?;
+            let domains = arguments
+                .get("domains")
+                .and_then(Value::as_array)
+                .ok_or("source-plan-bound intake omitted domains")?;
+            let records = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?
+                .records_for_audit();
+            let plan = records
+                .iter()
+                .find(|record| {
+                    record.kind == "domain_evidence_source_plan"
+                        && record.artifact.get("plan_digest").and_then(Value::as_str)
+                            == Some(source_plan_digest)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "source_plan_digest {source_plan_digest:?} is not a retained source plan"
+                    )
+                })?;
+            if plan.artifact.get("group_id").and_then(Value::as_str) != Some(group_id)
+                || plan.artifact.get("subject_id").and_then(Value::as_str) != Some(subject_id)
+            {
+                return Err("source plan group_id or subject_id does not match intake".into());
+            }
+            if plan
+                .artifact
+                .get("source_tool")
+                .and_then(Value::as_str)
+                .is_some_and(|planned_tool| planned_tool != source_tool)
+            {
+                return Err("source plan source_tool does not match intake".into());
+            }
+            let planned_domains = plan
+                .artifact
+                .get("domains")
+                .and_then(Value::as_array)
+                .ok_or("retained source plan omitted domains")?;
+            for domain in domains.iter().filter_map(Value::as_str) {
+                if !planned_domains
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|planned| planned.eq_ignore_ascii_case(domain))
+                {
+                    return Err(format!(
+                        "source plan does not cover intake domain {domain:?}"
+                    ));
+                }
+            }
+        }
         let intake = bioprism_devplat::intake_domain_evidence(arguments)
             .map_err(|error| format!("domain evidence intake refused: {error}"))?;
         let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
@@ -3338,6 +3404,7 @@ impl Server {
             "response_digest": intake.get("response_digest"),
             "intake_digest": intake.get("intake_digest"),
             "outcome": intake.get("outcome"),
+            "source_plan_digest": intake.get("source_plan_digest"),
             "parent_digests": intake.get("parent_digests"),
             "report": report,
             "intake": intake,
@@ -29831,6 +29898,7 @@ pub fn tool_definitions() -> Vec<Value> {
                     "response": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Required raw JSON response, refusal, or error envelope to retain." },
                     "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"], "description": "Caller-declared envelope outcome; no outcome is inferred from response shape." },
                     "claim_posture": { "type": "object", "description": "Explicit domain-report claim posture with status, non-claims, and optional limitations." },
+                    "source_plan_digest": { "type": ["string", "null"], "description": "Optional exact plan_digest from a retained domain_evidence_source_plan; when supplied, group, subject, source tool, and domains must match before intake is indexed." },
                     "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional lowercase SHA-256 artifact parents already known or intentionally missing." }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "response", "outcome", "claim_posture"]

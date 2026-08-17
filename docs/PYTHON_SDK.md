@@ -48,7 +48,9 @@ plus the `Workspace` and `AsyncWorkspace` helpers, retain optional request JSON,
 JSON, explicit observed/partial/refused/error/unknown outcome, separate request/response digests,
 and the indexed `domain_evidence_intake` artifact. The client preserves request omission versus
 supplied null and does not infer execution, provenance completeness, scientific validity, or
-readiness from an intake record.
+readiness from an intake record. `DomainEvidenceIntakeRequest.source_plan_digest` optionally binds
+the envelope to a retained external-source plan; when present, the server verifies scope
+compatibility before indexing and preserves the digest in the normalized intake and parent set.
 `DomainEvidenceIntakeCoverageRequest` and `DomainEvidenceIntakeCoverageReport` expose the
 catalogue-wide intake audit through REST, the REST/MCP dispatcher, `Workspace`, and
 `AsyncWorkspace`. Coverage keeps missing groups, observed/partial/refused/error/unknown
