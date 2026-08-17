@@ -97,6 +97,8 @@ from .capability import (
     MissionEvaluatorCoverageReport,
     MissionEvaluatorMatchReport,
     MissionEvaluatorQuery,
+    MissionEvaluatorReplayReport,
+    MissionEvaluatorReplayRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -106,6 +108,7 @@ from .capability import (
     capability_route_review_report,
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
+    mission_evaluator_replay_report,
 )
 from .capability_dashboard import (
     CAPABILITY_DASHBOARD_SCHEMA,
@@ -2294,6 +2297,8 @@ __all__ = [
     "MissionEvaluatorSearchReport",
     "MissionEvaluatorReviewReport",
     "MissionEvaluatorReviewRequest",
+    "MissionEvaluatorReplayReport",
+    "MissionEvaluatorReplayRequest",
     "CapabilityRouteNeed",
     "CapabilityRouteNeedReport",
     "CapabilityRouteCoverage",
@@ -2316,6 +2321,7 @@ __all__ = [
     "capability_audit_report",
     "mission_evaluator_discover_report",
     "mission_evaluator_review_report",
+    "mission_evaluator_replay_report",
     "CAPABILITY_DASHBOARD_SCHEMA",
     "DEFAULT_DASHBOARD_GROUPS",
     "MAX_DASHBOARD_GROUPS",

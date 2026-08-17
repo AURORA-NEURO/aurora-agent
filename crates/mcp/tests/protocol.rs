@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 177);
+    assert_eq!(tools.len(), 178);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1323,6 +1323,28 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
     assert_eq!(mission["execution"], json!("planned"));
     assert_eq!(mission["claim_lineage"]["evaluator_review"]["present"], json!(true));
     assert_eq!(mission["claim_lineage"]["claims"][0]["evaluator_review"]["review_status"], json!("ready"));
+
+    let replay = call(
+        &mut server,
+        "mission_evaluator_replay",
+        json!({"mission": mission, "include_fixtures": true, "max_items": 64}),
+    );
+    assert_eq!(replay["workflow"], json!("mission_evaluator_replay"));
+    assert_eq!(replay["execution"], json!("not_started"));
+    assert_eq!(replay["coverage"]["catalogue_adapter_count"], json!(29));
+    assert_eq!(replay["fixtures"].as_array().unwrap().len(), 29);
+    assert_eq!(replay["fixtures"][0]["variants"].as_array().unwrap().len(), 4);
+    assert_eq!(replay["coverage"]["complete"], json!(false));
+
+    let replayed_inconsistent = call(
+        &mut server,
+        "mission_evaluator_replay",
+        json!({"mission": {"workflow": "agent_mission", "plan": {"mission_id": "replay-inconsistent"}, "mission_status": "planned", "claim_lineage": {"claims": [{"id": "fidelity-claim", "evaluator_bindings": [{"id": "assay-evaluator", "adapter_id": "oncoworlds.assay_fidelity", "domain": "oncology", "step_id": "assay", "output_pointer": "/fidelity", "required": true, "outcome_state": "retained", "output_digest": "x".repeat(64)}], "evaluator_coverage": {"outcome_counts": {}, "distinct_output_digests": 1, "disagreement_posture": "single_observation"}}]}}}),
+    );
+    assert_eq!(replayed_inconsistent["replay_status"], json!("blocked"));
+    assert!(replayed_inconsistent["findings"].as_array().unwrap().iter().any(|finding| {
+        finding["code"] == json!("outcome_count_mismatch")
+    }));
 
     let mut mismatched_review = ready.clone();
     mismatched_review["bindings"][0]["domain"] = json!("unrelated");
@@ -5246,12 +5268,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(177));
-    assert_eq!(result["advertised_tool_count"], json!(177));
+    assert_eq!(result["unique_catalog_tools"], json!(178));
+    assert_eq!(result["advertised_tool_count"], json!(178));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(177));
-    assert_eq!(result["schema_quality"]["valid"], json!(177));
+    assert_eq!(result["schema_quality"]["checked"], json!(178));
+    assert_eq!(result["schema_quality"]["valid"], json!(178));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

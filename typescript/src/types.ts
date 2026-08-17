@@ -4343,6 +4343,80 @@ export interface MissionEvaluatorReviewResult extends JsonObject {
   limitations: string[];
 }
 
+export interface MissionEvaluatorReplayArgs extends JsonObject {
+  mission: JsonObject;
+  include_fixtures?: boolean;
+  max_items?: number;
+}
+
+export interface MissionEvaluatorReplayBindingResult extends JsonObject {
+  id?: string;
+  claim_id: string;
+  adapter_id: string;
+  domain: string;
+  outcome_state?: string;
+  output_digest?: string;
+  catalog_match: boolean;
+  domain_supported: boolean;
+  replay_state: string;
+}
+
+export interface MissionEvaluatorReplayClaimResult extends JsonObject {
+  claim_id: string;
+  binding_count: number;
+  returned_binding_count: number;
+  outcome_counts: JsonObject;
+  distinct_output_digests: number;
+  disagreement_posture: JsonValue;
+}
+
+export interface MissionEvaluatorReplayCoverageResult extends JsonObject {
+  catalogue_adapter_count: number;
+  catalogue_group_count: number;
+  replayed_adapter_count: number;
+  replayed_group_count: number;
+  unrepresented_adapters: string[];
+  unrepresented_groups: string[];
+  complete: boolean;
+}
+
+export interface MissionEvaluatorReplayFixtureResult extends JsonObject {
+  fixture_id: string;
+  adapter_id: string;
+  group_id: string;
+  domains: string[];
+  levels: string[];
+  output_pointer: string;
+  retained_output: JsonValue;
+  retained_output_digest: string;
+  variants: JsonValue[];
+  guarantee: string;
+}
+
+export interface MissionEvaluatorReplayResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evaluator_replay";
+  mission_id: string;
+  mission_digest: string;
+  mission_status: JsonValue;
+  review_provenance: JsonValue;
+  catalog_digest: string;
+  binding_count: number;
+  omitted_bindings: number;
+  state_counts: JsonObject;
+  claims: MissionEvaluatorReplayClaimResult[];
+  bindings: MissionEvaluatorReplayBindingResult[];
+  coverage: MissionEvaluatorReplayCoverageResult;
+  findings: JsonObject[];
+  replay_status: "ready" | "blocked";
+  execution: "not_started";
+  fixtures: MissionEvaluatorReplayFixtureResult[];
+  omitted_fixtures: number;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CapabilityAuditGroupResult extends JsonObject {
   id: string;
   domains: string[];

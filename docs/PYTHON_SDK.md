@@ -484,6 +484,13 @@ invent defaults:
   and RFC 6901 pointer fields; `MissionEvaluatorReviewReport` exposes ready/blocked status, findings,
   candidate membership, domain support, proposed binding rows, catalog/discovery digests, and the
   explicit `execution: "not_started"` posture across sync and async Workspace/HTTP clients.
+- `mission_evaluator_replay(...)` audits a retained `agent_mission` report without dispatching an
+  evaluator. `MissionEvaluatorReplayRequest` bounds the mission payload, fixture inclusion, and row
+  count; `MissionEvaluatorReplayReport` preserves recomputed outcome/digest counts, adapter/domain
+  matches, disagreement and omission findings, represented/missing catalogue groups, and structural
+  retained/refused/omitted/disagreement fixtures for every standard adapter. `ready` only means the
+  structural audit found no findings; it is not semantic, scientific, clinical, causal, or release
+  validation.
 - `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
   `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
   ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool

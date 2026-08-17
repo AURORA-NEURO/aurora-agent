@@ -285,8 +285,8 @@ pub use engineering_plan::{
 };
 pub use evaluator::{
     EvaluatorError, MissionEvaluatorAdapter, MissionEvaluatorCatalogue, MissionEvaluatorMatch,
-    MissionEvaluatorQuery, MissionEvaluatorReviewRequest, MissionEvaluatorSearch,
-    MissionEvaluatorSelection, MISSION_EVALUATOR_SCHEMA_VERSION,
+    MissionEvaluatorQuery, MissionEvaluatorReplayRequest, MissionEvaluatorReviewRequest,
+    MissionEvaluatorSearch, MissionEvaluatorSelection, MISSION_EVALUATOR_SCHEMA_VERSION,
 };
 pub use execution_provenance::{
     audit_execution_provenance, DelegatedCheckEvidence, ExecutionProvenanceAudit,

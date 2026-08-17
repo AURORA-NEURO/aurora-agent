@@ -170,7 +170,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 177-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 178-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
@@ -705,6 +705,12 @@ digest and exact claim-binding rows before nested dispatch. `MissionClaimEvaluat
 outcome state, step refusal/error, output source/type/size, and digest-group disagreement evidence,
 while `MissionClaimLineageProjection.evaluator_review` preserves review provenance without claiming
 semantic truth.
+`missionEvaluatorReplay(...)` performs the corresponding non-executing structural audit over a retained
+`agent_mission` response. Its typed result replays adapter identity and domain labels, recomputes
+outcome/digest counts, exposes disagreement and omission findings, reports represented and missing
+catalogue groups, and can return four explicit retained/refused/omitted/disagreement fixture variants
+for every standard adapter. `execution: "not_started"` and the structural-only guarantees remain
+explicit: replay does not rerun an evaluator or establish scientific, clinical, causal, or release truth.
 
 ```typescript
 const page = await api.events(0, 100);

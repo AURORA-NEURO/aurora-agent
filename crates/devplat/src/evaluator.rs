@@ -21,9 +21,19 @@ const DEFAULT_MAX_ITEMS: usize = 32;
 const MAX_FILTER_BYTES: usize = 512;
 const MAX_REVIEW_SELECTIONS: usize = 64;
 const MAX_BINDINGS_PER_CLAIM: usize = 16;
+const MAX_REPLAY_ITEMS: usize = 512;
+const DEFAULT_REPLAY_ITEMS: usize = 128;
 
 fn default_max_items() -> usize {
     DEFAULT_MAX_ITEMS
+}
+
+fn default_include_fixtures() -> bool {
+    true
+}
+
+fn default_replay_items() -> usize {
+    DEFAULT_REPLAY_ITEMS
 }
 
 fn validate_filter(field: &'static str, value: &Option<String>) -> Result<(), EvaluatorError> {
@@ -92,6 +102,10 @@ fn visible_text(value: &str, maximum: usize) -> bool {
         && !value
             .chars()
             .any(|character| character == '\0' || character == '\n' || character == '\r')
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// One explicit evaluator candidate. The candidate is descriptive and non-executable.
@@ -200,11 +214,95 @@ pub struct MissionEvaluatorReviewRequest {
     pub selections: Vec<MissionEvaluatorSelection>,
 }
 
+/// Input to the non-executing replay/audit projection for a retained agent mission report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissionEvaluatorReplayRequest {
+    pub mission: Value,
+    #[serde(default = "default_include_fixtures")]
+    pub include_fixtures: bool,
+    #[serde(default = "default_replay_items")]
+    pub max_items: usize,
+}
+
 /// Validated evaluator catalogue with a content digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissionEvaluatorCatalogue {
     adapters: Vec<MissionEvaluatorAdapter>,
     digest: ContentHash,
+}
+
+fn fixture_output_for_pointer(adapter: &MissionEvaluatorAdapter, pointer: &str, signal: &str) -> Value {
+    let leaf = json!({
+        "fixture_signal": signal,
+        "adapter_id": adapter.id,
+        "group_id": adapter.group_id,
+        "domain": adapter.domains.first().cloned().unwrap_or_default(),
+        "non_semantic": true,
+    });
+    if pointer.is_empty() {
+        return leaf;
+    }
+    let mut output = leaf;
+    let tokens = pointer
+        .split('/')
+        .skip(1)
+        .map(|token| token.replace("~1", "/").replace("~0", "~"))
+        .collect::<Vec<_>>();
+    for token in tokens.into_iter().rev() {
+        let mut object = serde_json::Map::new();
+        object.insert(token, output);
+        output = Value::Object(object);
+    }
+    output
+}
+
+fn evaluator_fixture(adapter: &MissionEvaluatorAdapter) -> Value {
+    let output_pointer = adapter
+        .output_pointer_examples
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    let retained_output = fixture_output_for_pointer(adapter, &output_pointer, "retained");
+    let retained_value = if output_pointer.is_empty() {
+        retained_output.clone()
+    } else {
+        retained_output
+            .pointer(&output_pointer)
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let disagreement_output = fixture_output_for_pointer(adapter, &output_pointer, "disagreement");
+    let retained_digest = ContentHash::of_value(&retained_value)
+        .map(|digest| digest.to_string())
+        .unwrap_or_default();
+    let disagreement_digest = ContentHash::of_value(
+        if output_pointer.is_empty() {
+            &disagreement_output
+        } else {
+            disagreement_output
+                .pointer(&output_pointer)
+                .unwrap_or(&disagreement_output)
+        },
+    )
+    .map(|digest| digest.to_string())
+    .unwrap_or_default();
+    json!({
+        "fixture_id": format!("mission-evaluator::{}", adapter.id),
+        "adapter_id": adapter.id,
+        "group_id": adapter.group_id,
+        "domains": adapter.domains,
+        "levels": adapter.levels,
+        "output_pointer": output_pointer,
+        "retained_output": retained_output,
+        "retained_output_digest": retained_digest,
+        "variants": [
+            { "state": "retained", "pointer_resolves": true, "output_retained": true },
+            { "state": "refused", "pointer_resolves": false, "output_retained": false, "step_status": "refused" },
+            { "state": "omitted", "pointer_resolves": false, "output_retained": false, "step_status": "succeeded" },
+            { "state": "disagreement", "pointer_resolves": true, "output_retained": true, "distinct_output_digest": disagreement_digest }
+        ],
+        "guarantee": "structural fixture coverage only; no evaluator, domain tool, or semantic claim was executed"
+    })
 }
 
 impl MissionEvaluatorCatalogue {
@@ -556,6 +654,340 @@ impl MissionEvaluatorCatalogue {
             ],
         }))
     }
+
+    /// Replay retained mission lineage against the current evaluator catalogue without executing
+    /// an evaluator or domain tool. The projection is intentionally structural: it checks adapter
+    /// identity, label coverage, output-digest shape, outcome accounting, disagreement summaries,
+    /// and catalogue coverage, while the generated fixtures exercise every catalogue row.
+    pub fn replay(&self, request: &MissionEvaluatorReplayRequest) -> Result<Value, EvaluatorError> {
+        if !(1..=MAX_REPLAY_ITEMS).contains(&request.max_items) {
+            return Err(EvaluatorError::InvalidReplayLimit {
+                value: request.max_items,
+            });
+        }
+        let mission = request
+            .mission
+            .as_object()
+            .ok_or_else(|| EvaluatorError::InvalidReplay {
+                reason: "mission must be an object".into(),
+            })?;
+        if mission.get("workflow").and_then(Value::as_str) != Some("agent_mission") {
+            return Err(EvaluatorError::InvalidReplay {
+                reason: "mission.workflow must be agent_mission".into(),
+            });
+        }
+        let mission_id = mission
+            .get("plan")
+            .and_then(Value::as_object)
+            .and_then(|plan| plan.get("mission_id"))
+            .or_else(|| mission.get("mission_id"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| EvaluatorError::InvalidReplay {
+                reason: "mission must contain a non-empty mission_id or plan.mission_id".into(),
+            })?;
+        let mission_digest = ContentHash::of_value(&request.mission)
+            .map_err(|error| EvaluatorError::Canonicalisation(error.to_string()))?
+            .to_string();
+        let lineage = mission
+            .get("claim_lineage")
+            .and_then(Value::as_object)
+            .ok_or_else(|| EvaluatorError::InvalidReplay {
+                reason: "mission.claim_lineage must be an object".into(),
+            })?;
+        let claims = lineage
+            .get("claims")
+            .and_then(Value::as_array)
+            .ok_or_else(|| EvaluatorError::InvalidReplay {
+                reason: "mission.claim_lineage.claims must be an array".into(),
+            })?;
+        let mut findings = Vec::new();
+        let mut binding_rows = Vec::new();
+        let mut claim_rows = Vec::new();
+        let mut state_counts = BTreeMap::<String, usize>::new();
+        let mut replayed_adapter_ids = BTreeSet::new();
+        let mut replayed_group_ids = BTreeSet::new();
+        let mut returned_bindings = 0usize;
+        let mut omitted_bindings = 0usize;
+
+        for (claim_index, claim) in claims.iter().enumerate() {
+            if claim_index >= request.max_items {
+                omitted_bindings = omitted_bindings.saturating_add(1);
+                continue;
+            }
+            let Some(claim_object) = claim.as_object() else {
+                findings.push(json!({
+                    "severity": "error",
+                    "code": "claim_row_not_object",
+                    "claim_index": claim_index,
+                }));
+                continue;
+            };
+            let claim_id = claim_object
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let bindings = claim_object
+                .get("evaluator_bindings")
+                .and_then(Value::as_array)
+                .ok_or_else(|| EvaluatorError::InvalidReplay {
+                    reason: format!("claim `{claim_id}` evaluator_bindings must be an array"),
+                })?;
+            let mut claim_states = BTreeMap::<String, usize>::new();
+            let mut claim_digests = BTreeSet::new();
+            let mut claim_returned_bindings = 0usize;
+            for (binding_index, binding) in bindings.iter().enumerate() {
+                let include_binding = returned_bindings < request.max_items;
+                if !include_binding {
+                    omitted_bindings = omitted_bindings.saturating_add(1);
+                } else {
+                    returned_bindings += 1;
+                    claim_returned_bindings += 1;
+                }
+                let Some(binding_object) = binding.as_object() else {
+                    findings.push(json!({
+                        "severity": "error",
+                        "code": "binding_row_not_object",
+                        "claim_id": claim_id,
+                        "binding_index": binding_index,
+                    }));
+                    continue;
+                };
+                let binding_id = binding_object
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let adapter_id = binding_object
+                    .get("adapter_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let domain = binding_object
+                    .get("domain")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let outcome_state = binding_object
+                    .get("outcome_state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unreported");
+                *state_counts.entry(outcome_state.to_string()).or_default() += 1;
+                *claim_states.entry(outcome_state.to_string()).or_default() += 1;
+                if let Some(digest) = binding_object.get("output_digest").and_then(Value::as_str) {
+                    if valid_digest(digest) {
+                        claim_digests.insert(digest.to_string());
+                    } else {
+                        findings.push(json!({
+                            "severity": "error",
+                            "code": "invalid_output_digest",
+                            "claim_id": claim_id,
+                            "binding_id": binding_id,
+                        }));
+                    }
+                }
+                let adapter = self.adapters.iter().find(|candidate| candidate.id == adapter_id);
+                let domain_supported = adapter.is_some_and(|candidate| {
+                    let requested = normalized(domain);
+                    !requested.is_empty()
+                        && candidate
+                        .domains
+                        .iter()
+                        .any(|candidate_domain| normalized(candidate_domain).contains(&requested))
+                });
+                if adapter.is_none() {
+                    findings.push(json!({
+                        "severity": "error",
+                        "code": "unknown_adapter",
+                        "claim_id": claim_id,
+                        "binding_id": binding_id,
+                        "adapter_id": adapter_id,
+                    }));
+                } else {
+                    replayed_adapter_ids.insert(adapter_id.to_string());
+                    replayed_group_ids.insert(adapter.unwrap().group_id.clone());
+                }
+                if adapter.is_some() && !domain_supported {
+                    findings.push(json!({
+                        "severity": "error",
+                        "code": "unsupported_domain_label",
+                        "claim_id": claim_id,
+                        "binding_id": binding_id,
+                        "adapter_id": adapter_id,
+                        "domain": domain,
+                    }));
+                }
+                if outcome_state == "retained"
+                    && binding_object.get("output_digest").and_then(Value::as_str).is_none()
+                {
+                    findings.push(json!({
+                        "severity": "error",
+                        "code": "retained_without_output_digest",
+                        "claim_id": claim_id,
+                        "binding_id": binding_id,
+                    }));
+                }
+                let replay_state = if adapter.is_none() {
+                    "unknown_adapter"
+                } else if !domain_supported {
+                    "unsupported_domain"
+                } else if outcome_state == "retained"
+                    && binding_object.get("output_digest").and_then(Value::as_str).is_some()
+                {
+                    "replayed_retained"
+                } else if matches!(outcome_state, "refused" | "blocked" | "cancelled" | "output_omitted" | "pointer_missing") {
+                    outcome_state
+                } else {
+                    "unreported"
+                };
+                let mut row = binding.clone();
+                row["claim_id"] = json!(claim_id);
+                row["catalog_match"] = json!(adapter.is_some());
+                row["domain_supported"] = json!(domain_supported);
+                row["replay_state"] = json!(replay_state);
+                if include_binding {
+                    binding_rows.push(row);
+                }
+            }
+            let retained_count = claim_states.get("retained").copied().unwrap_or_default();
+            let replayed_disagreement_posture = if bindings.is_empty() {
+                "not_requested"
+            } else if retained_count == 0 {
+                "unavailable"
+            } else if retained_count < bindings.len() {
+                "partial"
+            } else if retained_count == 1 {
+                "single_observation"
+            } else if claim_digests.len() == 1 {
+                "unanimous_digest"
+            } else {
+                "disagreement"
+            };
+            let coverage = claim_object.get("evaluator_coverage").and_then(Value::as_object);
+            if let Some(coverage) = coverage {
+                if let Some(expected) = coverage.get("outcome_counts") {
+                    if expected != &json!(claim_states) {
+                        findings.push(json!({
+                            "severity": "error",
+                            "code": "outcome_count_mismatch",
+                            "claim_id": claim_id,
+                            "expected": expected,
+                            "replayed": claim_states,
+                        }));
+                    }
+                }
+                if let Some(expected) = coverage.get("distinct_output_digests").and_then(Value::as_u64) {
+                    if expected != claim_digests.len() as u64 {
+                        findings.push(json!({
+                            "severity": "error",
+                            "code": "digest_count_mismatch",
+                            "claim_id": claim_id,
+                            "expected": expected,
+                            "replayed": claim_digests.len(),
+                        }));
+                    }
+                }
+                if let Some(expected) = coverage.get("disagreement_posture").and_then(Value::as_str) {
+                    if expected != replayed_disagreement_posture {
+                        findings.push(json!({
+                            "severity": "error",
+                            "code": "disagreement_posture_mismatch",
+                            "claim_id": claim_id,
+                            "expected": expected,
+                            "replayed": replayed_disagreement_posture,
+                        }));
+                    }
+                }
+            } else if !bindings.is_empty() {
+                findings.push(json!({
+                    "severity": "error",
+                    "code": "missing_evaluator_coverage",
+                    "claim_id": claim_id,
+                }));
+            }
+            claim_rows.push(json!({
+                "claim_id": claim_id,
+                "binding_count": bindings.len(),
+                "returned_binding_count": claim_returned_bindings,
+                "outcome_counts": claim_states,
+                "distinct_output_digests": claim_digests.len(),
+                "disagreement_posture": coverage
+                    .and_then(|value| value.get("disagreement_posture"))
+                    .cloned()
+                    .unwrap_or(Value::String("unreported".into())),
+                "replayed_disagreement_posture": replayed_disagreement_posture,
+            }));
+        }
+        let catalogue_adapter_ids = self
+            .adapters
+            .iter()
+            .map(|adapter| adapter.id.clone())
+            .collect::<BTreeSet<_>>();
+        let catalogue_group_ids = self
+            .adapters
+            .iter()
+            .map(|adapter| adapter.group_id.clone())
+            .collect::<BTreeSet<_>>();
+        let unrepresented_adapters = catalogue_adapter_ids
+            .difference(&replayed_adapter_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let unrepresented_groups = catalogue_group_ids
+            .difference(&replayed_group_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let omitted_fixtures = if request.include_fixtures {
+            self.adapters.len().saturating_sub(request.max_items)
+        } else {
+            self.adapters.len()
+        };
+        let fixtures = if request.include_fixtures {
+            self.adapters
+                .iter()
+                .take(request.max_items)
+                .map(evaluator_fixture)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let ready = findings.is_empty();
+        Ok(json!({
+            "schema": MISSION_EVALUATOR_SCHEMA_VERSION,
+            "workflow": "mission_evaluator_replay",
+            "ok": true,
+            "mission_id": mission_id,
+            "mission_digest": mission_digest,
+            "mission_status": mission.get("mission_status").cloned().unwrap_or(Value::Null),
+            "review_provenance": lineage.get("evaluator_review").cloned().unwrap_or(json!({"present": false})),
+            "catalog_digest": self.digest.to_string(),
+            "binding_count": returned_bindings,
+            "omitted_bindings": omitted_bindings,
+            "state_counts": state_counts,
+            "claims": claim_rows,
+            "bindings": binding_rows,
+            "coverage": {
+                "catalogue_adapter_count": self.adapters.len(),
+                "catalogue_group_count": catalogue_group_ids.len(),
+                "replayed_adapter_count": replayed_adapter_ids.len(),
+                "replayed_group_count": replayed_group_ids.len(),
+                "unrepresented_adapters": unrepresented_adapters,
+                "unrepresented_groups": unrepresented_groups,
+                "complete": replayed_group_ids.len() == catalogue_group_ids.len(),
+            },
+            "findings": findings,
+            "replay_status": if ready { "ready" } else { "blocked" },
+            "execution": "not_started",
+            "fixtures": fixtures,
+            "omitted_fixtures": omitted_fixtures,
+            "guarantees": [
+                "replay inspects retained mission lineage and current catalogue labels only",
+                "fixture rows cover every standard evaluator adapter without invoking a tool",
+                "refusal, omission, pointer, digest, and disagreement states remain explicit",
+            ],
+            "limitations": [
+                "replay does not rerun an evaluator or validate domain semantics",
+                "catalogue coverage is structural and does not establish scientific, clinical, causal, or release truth",
+                "a complete replay still requires caller-supplied retained mission outputs",
+            ],
+        }))
+    }
 }
 
 /// Fail-closed evaluator query errors.
@@ -579,6 +1011,10 @@ pub enum EvaluatorError {
     StaleDiscovery { expected: String, received: String },
     #[error("cannot canonicalise evaluator review: {0}")]
     Canonicalisation(String),
+    #[error("invalid evaluator replay: {reason}")]
+    InvalidReplay { reason: String },
+    #[error("evaluator replay max_items must be between 1 and {MAX_REPLAY_ITEMS}, got {value}")]
+    InvalidReplayLimit { value: usize },
 }
 
 fn adapter(
@@ -686,6 +1122,89 @@ mod tests {
         assert!(matches!(
             MissionEvaluatorCatalogue::standard().search(&query),
             Err(EvaluatorError::EmptyFilter { field: "level" })
+        ));
+    }
+
+    #[test]
+    fn replay_fixtures_cover_every_adapter_without_execution() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let request = MissionEvaluatorReplayRequest {
+            mission: json!({
+                "workflow": "agent_mission",
+                "plan": {"mission_id": "mission-fixtures"},
+                "claim_lineage": {"claims": []}
+            }),
+            include_fixtures: true,
+            max_items: MAX_REPLAY_ITEMS,
+        };
+        let replay = catalogue.replay(&request).unwrap();
+        assert_eq!(replay["workflow"], json!("mission_evaluator_replay"));
+        assert_eq!(replay["execution"], json!("not_started"));
+        assert_eq!(replay["fixtures"].as_array().unwrap().len(), 29);
+        assert_eq!(replay["omitted_fixtures"], json!(0));
+        assert!(replay["fixtures"].as_array().unwrap().iter().all(|fixture| {
+            fixture["variants"].as_array().is_some_and(|variants| variants.len() == 4)
+                && fixture["guarantee"].as_str().is_some_and(|value| value.contains("structural"))
+        }));
+    }
+
+    #[test]
+    fn replay_recomputes_claim_accounting_and_reports_unknown_rows() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let request = MissionEvaluatorReplayRequest {
+            mission: json!({
+                "workflow": "agent_mission",
+                "plan": {"mission_id": "mission-audit"},
+                "claim_lineage": {"claims": [{
+                    "id": "claim-1",
+                    "evaluator_bindings": [
+                        {
+                            "id": "known",
+                            "adapter_id": "oncoworlds.assay_fidelity",
+                            "domain": "oncology",
+                            "outcome_state": "retained",
+                            "output_digest": "a".repeat(64)
+                        },
+                        {
+                            "id": "unknown",
+                            "adapter_id": "missing.adapter",
+                            "domain": "unknown",
+                            "outcome_state": "retained",
+                            "output_digest": "b".repeat(64)
+                        }
+                    ],
+                    "evaluator_coverage": {
+                        "outcome_counts": {"retained": 1},
+                        "distinct_output_digests": 1,
+                        "disagreement_posture": "unreported"
+                    }
+                }]}
+            }),
+            include_fixtures: false,
+            max_items: DEFAULT_REPLAY_ITEMS,
+        };
+        let replay = catalogue.replay(&request).unwrap();
+        assert_eq!(replay["replay_status"], json!("blocked"));
+        assert!(replay["findings"].as_array().unwrap().iter().any(|finding| {
+            finding["code"] == json!("outcome_count_mismatch")
+        }));
+        assert!(replay["findings"].as_array().unwrap().iter().any(|finding| {
+            finding["code"] == json!("unknown_adapter")
+        }));
+        assert_eq!(replay["fixtures"], json!([]));
+        assert_eq!(replay["omitted_fixtures"], json!(29));
+    }
+
+    #[test]
+    fn replay_rejects_zero_limit() {
+        let request = MissionEvaluatorReplayRequest {
+            mission: json!({"workflow": "agent_mission"}),
+            include_fixtures: false,
+            max_items: 0,
+        };
+        assert!(matches!(
+            MissionEvaluatorCatalogue::standard().replay(&request),
+            Err(EvaluatorError::InvalidReplayLimit { value: 0 })
         ));
     }
 }

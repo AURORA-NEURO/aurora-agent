@@ -1040,6 +1040,104 @@ def mission_evaluator_review_report(value: Mapping[str, Any]) -> MissionEvaluato
 
 
 @dataclass(frozen=True)
+class MissionEvaluatorReplayRequest:
+    """Request a structural replay of one retained agent mission report."""
+
+    mission: Mapping[str, Any]
+    include_fixtures: bool = True
+    max_items: int = 128
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mission", dict(_route_mapping("mission evaluator replay mission", self.mission)))
+        if not isinstance(self.include_fixtures, bool):
+            raise ArgumentError("mission evaluator replay include_fixtures must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 512:
+            raise ArgumentError("mission evaluator replay max_items must be between 1 and 512")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {
+            "mission": dict(self.mission),
+            "include_fixtures": self.include_fixtures,
+            "max_items": self.max_items,
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayReport:
+    """Typed structural replay, coverage, fixture, and refusal evidence for a mission report."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    mission_digest: str
+    catalog_digest: str
+    binding_count: int
+    omitted_bindings: int
+    state_counts: Mapping[str, int]
+    claims: tuple[dict[str, Any], ...]
+    bindings: tuple[dict[str, Any], ...]
+    coverage: Mapping[str, Any]
+    findings: tuple[dict[str, Any], ...]
+    replay_status: str
+    execution: str
+    fixtures: tuple[dict[str, Any], ...]
+    omitted_fixtures: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorReplayReport":
+        raw = _tool_payload(value, "mission_evaluator_replay")
+        if raw.get("workflow") != "mission_evaluator_replay":
+            raise ArgumentError("mission evaluator replay workflow is invalid")
+        claims = raw.get("claims", [])
+        bindings = raw.get("bindings", [])
+        fixtures = raw.get("fixtures", [])
+        findings = raw.get("findings", [])
+        for name, candidate in (("claims", claims), ("bindings", bindings), ("fixtures", fixtures), ("findings", findings)):
+            if not isinstance(candidate, Sequence) or isinstance(candidate, (str, bytes)):
+                raise ArgumentError(f"mission evaluator replay {name} must be an array")
+        status = _route_text("mission evaluator replay status", raw.get("replay_status"))
+        if status not in {"ready", "blocked"}:
+            raise ArgumentError(f"unknown mission evaluator replay status: {status}")
+        state_counts = raw.get("state_counts", {})
+        coverage = raw.get("coverage", {})
+        if not isinstance(state_counts, Mapping) or not isinstance(coverage, Mapping):
+            raise ArgumentError("mission evaluator replay state_counts and coverage must be objects")
+        return cls(
+            raw=raw,
+            mission_id=_route_text("mission evaluator replay mission id", raw.get("mission_id")),
+            mission_digest=_route_text("mission evaluator replay mission digest", raw.get("mission_digest")),
+            catalog_digest=_route_text("mission evaluator replay catalog digest", raw.get("catalog_digest")),
+            binding_count=_route_count("mission evaluator replay binding count", raw.get("binding_count")),
+            omitted_bindings=_route_count("mission evaluator replay omitted bindings", raw.get("omitted_bindings", 0)),
+            state_counts={str(key): _route_count(f"mission evaluator replay state {key}", value) for key, value in state_counts.items()},
+            claims=tuple(_route_mapping("mission evaluator replay claim", item) for item in claims),
+            bindings=tuple(_route_mapping("mission evaluator replay binding", item) for item in bindings),
+            coverage=dict(coverage),
+            findings=tuple(_route_mapping("mission evaluator replay finding", item) for item in findings),
+            replay_status=status,
+            execution=_route_text("mission evaluator replay execution", raw.get("execution")),
+            fixtures=tuple(_route_mapping("mission evaluator replay fixture", item) for item in fixtures),
+            omitted_fixtures=_route_count("mission evaluator replay omitted fixtures", raw.get("omitted_fixtures", 0)),
+        )
+
+    @property
+    def ready(self) -> bool:
+        return self.replay_status == "ready" and not self.findings
+
+    @property
+    def catalogue_complete(self) -> bool:
+        return self.coverage.get("complete") is True
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evaluator_replay_report(value: Mapping[str, Any]) -> MissionEvaluatorReplayReport:
+    """Parse a direct MCP result or HTTP envelope from mission evaluator replay."""
+
+    return MissionEvaluatorReplayReport.from_wire(value)
+
+
+@dataclass(frozen=True)
 class MissionEvaluatorAdapterReport:
     """One typed candidate row from mission evaluator discovery."""
 
@@ -1196,6 +1294,8 @@ __all__ = [
     "MissionEvaluatorReviewRequest",
     "MissionEvaluatorBindingReport",
     "MissionEvaluatorReviewReport",
+    "MissionEvaluatorReplayRequest",
+    "MissionEvaluatorReplayReport",
     "MissionEvaluatorAdapterReport",
     "MissionEvaluatorMatchReport",
     "MissionEvaluatorCoverageReport",
@@ -1206,4 +1306,5 @@ __all__ = [
     "capability_audit_report",
     "mission_evaluator_discover_report",
     "mission_evaluator_review_report",
+    "mission_evaluator_replay_report",
 ]

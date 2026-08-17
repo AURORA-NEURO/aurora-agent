@@ -139,7 +139,8 @@ use bioprism_devplat::{
     DeliveryReceiptVerificationRequest,
     DevPlatReport, ExecutionProvenanceRequest, MissionReport, mission_claim_lineage_with_review,
     MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
-    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReviewRequest,
+    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayRequest,
+    MissionEvaluatorReviewRequest,
     MISSION_EVALUATOR_SCHEMA_VERSION,
     WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
@@ -1509,6 +1510,7 @@ impl Server {
             "capability_discover" => self.capability_discover(&arguments),
             "mission_evaluator_discover" => self.mission_evaluator_discover(&arguments),
             "mission_evaluator_review" => self.mission_evaluator_review(&arguments),
+            "mission_evaluator_replay" => self.mission_evaluator_replay(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
@@ -22332,6 +22334,27 @@ impl Server {
         Ok(output)
     }
 
+    /// Replay retained mission evaluator lineage against the current catalogue without dispatch.
+    fn mission_evaluator_replay(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode mission evaluator replay input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("mission evaluator replay input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: MissionEvaluatorReplayRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid mission evaluator replay input: {error}"))?;
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let output = catalogue
+            .replay(&request)
+            .map_err(|error| format!("mission evaluator replay refused: {error}"))?;
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure mission evaluator replay result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err("mission evaluator replay result exceeds the 20000000-byte safety bound".into());
+        }
+        Ok(output)
+    }
+
     /// Verify that the explicit cross-domain catalogue and authoritative MCP tool definitions
     /// describe the same callable surface.
     ///
@@ -27306,7 +27329,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29726,6 +29749,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     }
                 },
                 "required": ["discovery", "selections"]
+            }
+        }),
+        json!({
+            "name": "mission_evaluator_replay",
+            "description": "Replay a retained agent_mission claim_lineage against the current digest-bound evaluator catalogue without executing any evaluator or domain tool. It validates adapter identity, domain-label coverage, outcome counts, output-digest shape, disagreement summaries, and coverage across all 29 evaluator groups, and returns deterministic structural fixtures for retained/refused/omitted/disagreement variants.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission": { "type": "object", "description": "The exact agent_mission report containing workflow, plan or mission_id, mission_status, and claim_lineage." },
+                    "include_fixtures": { "type": "boolean", "default": true, "description": "Include one bounded structural fixture family for every standard evaluator adapter." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128, "description": "Maximum retained claims/binding rows returned by the replay projection." }
+                },
+                "required": ["mission"]
             }
         }),
         json!({

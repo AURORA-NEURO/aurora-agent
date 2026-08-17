@@ -28,6 +28,8 @@ from prism_sdk import (
     MissionEvaluatorBindingReport,
     MissionEvaluatorCoverageReport,
     MissionEvaluatorQuery,
+    MissionEvaluatorReplayReport,
+    MissionEvaluatorReplayRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -72,6 +74,7 @@ from prism_sdk import (
     capability_route_report,
     capability_route_review_report,
     mission_evaluator_discover_report,
+    mission_evaluator_replay_report,
     adapter_plan_report,
     Client,
     MetricObservation,
@@ -320,6 +323,68 @@ def mission_evaluator_review_payload() -> dict:
         "execution": "not_started",
         "guarantees": ["no evaluator or domain tool was executed"],
         "limitations": ["step existence and claim statement validity are checked only by the later agent_mission request"],
+    }
+
+
+def mission_evaluator_replay_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-mission-evaluator/0.1",
+        "workflow": "mission_evaluator_replay",
+        "mission_id": "mission-python",
+        "mission_digest": "m" * 64,
+        "mission_status": "succeeded",
+        "review_provenance": {"present": True, "review_id": "r" * 64},
+        "catalog_digest": "e" * 64,
+        "binding_count": 1,
+        "omitted_bindings": 0,
+        "state_counts": {"retained": 1},
+        "claims": [{
+            "claim_id": "fidelity-claim",
+            "binding_count": 1,
+            "returned_binding_count": 1,
+            "outcome_counts": {"retained": 1},
+            "distinct_output_digests": 1,
+            "disagreement_posture": "single_evaluator_no_disagreement_claimed",
+        }],
+        "bindings": [{
+            "id": "assay-evaluator",
+            "claim_id": "fidelity-claim",
+            "adapter_id": "oncoworlds.assay_fidelity",
+            "domain": "oncology",
+            "outcome_state": "retained",
+            "output_digest": "f" * 64,
+            "catalog_match": True,
+            "domain_supported": True,
+            "replay_state": "replayed_retained",
+        }],
+        "coverage": {
+            "catalogue_adapter_count": 29,
+            "catalogue_group_count": 29,
+            "replayed_adapter_count": 1,
+            "replayed_group_count": 1,
+            "unrepresented_adapters": ["benchmark.portfolio_coverage"],
+            "unrepresented_groups": ["benchmark_pack_portfolio"],
+            "complete": False,
+        },
+        "findings": [],
+        "replay_status": "ready",
+        "execution": "not_started",
+        "omitted_fixtures": 28,
+        "fixtures": [{
+            "fixture_id": "mission-evaluator::oncoworlds.assay_fidelity",
+            "adapter_id": "oncoworlds.assay_fidelity",
+            "group_id": "oncoworlds_models_and_assays",
+            "domains": ["oncology"],
+            "levels": ["evaluation"],
+            "output_pointer": "/fidelity",
+            "retained_output": {"fidelity": {"non_semantic": True}},
+            "retained_output_digest": "f" * 64,
+            "variants": [{"state": "retained"}, {"state": "refused"}, {"state": "omitted"}, {"state": "disagreement"}],
+            "guarantee": "structural fixture coverage only",
+        }],
+        "guarantees": ["no evaluator or domain tool was executed"],
+        "limitations": ["catalogue coverage is structural"],
     }
 
 
@@ -1378,6 +1443,29 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(report.proposed_bindings[0]["step_id"], "assay")
         self.assertEqual(report.binding_posture, "ready_for_mission_claim_bindings")
 
+    def test_mission_evaluator_replay_report_preserves_fixture_and_coverage_evidence(self) -> None:
+        report = MissionEvaluatorReplayReport.from_wire(mission_evaluator_replay_payload())
+        self.assertTrue(report.ready)
+        self.assertFalse(report.catalogue_complete)
+        self.assertEqual(report.coverage["catalogue_adapter_count"], 29)
+        self.assertEqual(report.omitted_fixtures, 28)
+        self.assertEqual(report.bindings[0]["replay_state"], "replayed_retained")
+        self.assertEqual(len(report.fixtures[0]["variants"]), 4)
+        self.assertEqual(
+            mission_evaluator_replay_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evaluator_replay_payload()}}}
+            ).mission_id,
+            "mission-python",
+        )
+
+    def test_mission_evaluator_replay_request_enforces_bounds_and_serializes(self) -> None:
+        request = MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, include_fixtures=False, max_items=64)
+        self.assertEqual(request.to_mcp_arguments(), {"mission": {"workflow": "agent_mission"}, "include_fixtures": False, "max_items": 64})
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, max_items=0)
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, include_fixtures=1)  # type: ignore[arg-type]
+
     def test_mission_evaluator_review_request_rejects_duplicate_ids(self) -> None:
         with self.assertRaises(ArgumentError):
             MissionEvaluatorReviewRequest(
@@ -1971,6 +2059,19 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertTrue(report.ready)
         review.assert_called_once()
 
+    def test_sync_workspace_typed_mission_evaluator_replay(self) -> None:
+        with patch.object(
+            Workspace,
+            "mission_evaluator_replay",
+            return_value=mission_evaluator_replay_payload(),
+        ) as replay:
+            report = Workspace(None).mission_evaluator_replay_report(  # type: ignore[arg-type]
+                MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, max_items=64)
+            )
+        self.assertTrue(report.ready)
+        self.assertEqual(report.bindings[0]["adapter_id"], "oncoworlds.assay_fidelity")
+        replay.assert_called_once()
+
     def test_sync_workspace_exposes_capability_audit(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).capability_audit(include_groups=False)
@@ -2245,6 +2346,20 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertTrue(report.ready)
         review.assert_awaited_once()
+
+    async def test_async_workspace_typed_mission_evaluator_replay(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "mission_evaluator_replay",
+            new_callable=AsyncMock,
+            return_value=mission_evaluator_replay_payload(),
+        ) as replay:
+            report = await AsyncWorkspace(None).mission_evaluator_replay_report(  # type: ignore[arg-type]
+                {"mission": {"workflow": "agent_mission"}, "include_fixtures": False, "max_items": 64}
+            )
+        self.assertTrue(report.ready)
+        self.assertEqual(report.coverage["catalogue_group_count"], 29)
+        replay.assert_awaited_once()
 
     async def test_async_workspace_exposes_capability_audit(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:
