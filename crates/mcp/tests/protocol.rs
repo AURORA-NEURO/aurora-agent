@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 173);
+    assert_eq!(tools.len(), 174);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -4167,6 +4167,51 @@ fn ci_execution_evidence_audit_reconciles_plan_and_run_without_execution() {
 }
 
 #[test]
+fn ci_provider_normalize_projects_github_payload_into_auditable_evidence() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "provider-normalizer",
+        "triggers": ["push"],
+        "rust_toolchain": "stable",
+        "offline": true,
+        "checks": [
+            {"name": "tests", "run": "cargo test --workspace --offline", "required": true},
+            {"name": "lint", "run": "cargo clippy --workspace --offline", "required": false}
+        ]
+    });
+    let normalized = call(
+        &mut server,
+        "ci_provider_normalize",
+        json!({
+            "ci": ci.clone(),
+            "provider": "github_actions",
+            "payload": {
+                "run": {"id": 9001, "conclusion": "success", "html_url": "https://example.test/runs/9001"},
+                "jobs": [
+                    {"name": "tests", "conclusion": "success"},
+                    {"name": "lint", "conclusion": "success"}
+                ]
+            }
+        }),
+    );
+    assert_eq!(normalized["workflow"], json!("ci_provider_normalize"));
+    assert_eq!(normalized["provider"], json!("github_actions"));
+    assert_eq!(normalized["source"], json!("provider_observed"));
+    assert_eq!(normalized["run_id"], json!("9001"));
+    assert_eq!(normalized["derived_result_digest_count"], json!(2));
+    assert_eq!(normalized["evidence"]["checks"][0]["status"], json!("passed"));
+    assert_eq!(normalized["evidence"]["run_url"], json!("https://example.test/runs/9001"));
+
+    let audited = call(
+        &mut server,
+        "ci_execution_evidence_audit",
+        json!({"ci": ci, "evidence": normalized["evidence"].clone()}),
+    );
+    assert_eq!(audited["valid"], json!(true));
+    assert_eq!(audited["ci_evidence_ready"], json!(true));
+}
+
+#[test]
 fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
     let mut server = server();
     let ci = json!({
@@ -4801,12 +4846,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(173));
-    assert_eq!(result["advertised_tool_count"], json!(173));
+    assert_eq!(result["unique_catalog_tools"], json!(174));
+    assert_eq!(result["advertised_tool_count"], json!(174));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(173));
-    assert_eq!(result["schema_quality"]["valid"], json!(173));
+    assert_eq!(result["schema_quality"]["checked"], json!(174));
+    assert_eq!(result["schema_quality"]["valid"], json!(174));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

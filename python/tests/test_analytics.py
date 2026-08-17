@@ -37,6 +37,8 @@ from prism_sdk import (
     ConformanceRunReport,
     ConformanceSuiteReport,
     CiExecutionEvidenceRequest,
+    CiProviderNormalizationReport,
+    CiProviderNormalizationRequest,
     DeliveryReadinessReport,
     DeveloperDeliveryAuditReport,
     DeveloperDeliveryReceiptReport,
@@ -49,6 +51,7 @@ from prism_sdk import (
     developer_delivery_receipt_report,
     developer_delivery_receipt_verification_report,
     developer_platform_status_report,
+    ci_provider_normalization_report,
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
     ClaimRequest,
@@ -880,6 +883,49 @@ def conformance_run_payload() -> dict:
 
 
 class AnalyticsModelTests(unittest.TestCase):
+    def test_ci_provider_normalization_request_and_report_preserve_derived_digests(self) -> None:
+        request = CiProviderNormalizationRequest(
+            {"workflow": "contracts"},
+            "github_actions",
+            {"run": {"id": 9001, "conclusion": "success"}, "jobs": [{"name": "tests"}]},
+        )
+        self.assertEqual(request.to_mcp_arguments()["provider"], "github_actions")
+        payload = {
+            "ok": True,
+            "workflow": "ci_provider_normalize",
+            "schema": "bioprism-devplat-ci-provider-normalization/0.1",
+            "provider": "github_actions",
+            "source": "provider_observed",
+            "payload_digest": "p" * 64,
+            "run_id": "9001",
+            "conclusion": "success",
+            "check_count": 1,
+            "derived_result_digest_count": 1,
+            "warnings": ["derived_result_digest:tests"],
+            "evidence": {"run_id": "9001", "checks": []},
+            "normalization": {
+                "provider": "github_actions",
+                "source": "provider_observed",
+                "payload_digest": "p" * 64,
+                "run_id": "9001",
+                "conclusion": "success",
+                "check_count": 1,
+                "derived_result_digest_count": 1,
+                "warnings": ["derived_result_digest:tests"],
+                "guarantees": [],
+                "limitations": [],
+            },
+        }
+        report = CiProviderNormalizationReport.from_wire(payload)
+        self.assertEqual(report.payload_digest, "p" * 64)
+        self.assertEqual(report.derived_result_digest_count, 1)
+        self.assertEqual(
+            ci_provider_normalization_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": payload}}}
+            ).run_id,
+            "9001",
+        )
+
     def test_biological_adapter_registry_distinguishes_dependency_states(self) -> None:
         request = AdapterPlanRequest(
             "scan-1",

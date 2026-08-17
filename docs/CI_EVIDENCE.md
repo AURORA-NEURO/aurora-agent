@@ -38,6 +38,19 @@ check names, reports missing checks, and does not collapse `failed`, `skipped`, 
 `unknown` into a pass. `caller_attested` and `provider_observed` identify provenance only; they are
 not cryptographic verification claims.
 
+## Provider normalization
+
+`ci_provider_normalize` is the ingestion boundary before the audit. It accepts either a bounded
+GitHub Actions-shaped payload (`run` plus `jobs`) or a generic payload (`run_id`, `conclusion`, and
+`checks`) and returns the exact `CiRunEvidence` shape above, already bound to a regenerated plan
+digest. Provider statuses are mapped to the canonical pass/fail/skipped/cancelled/unknown states.
+
+Provider payloads commonly lack per-check result digests. In that case the normalizer derives a
+content digest from the supplied check object and emits both `derived_result_digest_count` and
+per-check warning labels. A supplied but malformed digest is refused rather than silently replaced.
+The derived digest identifies the caller-supplied payload object; it is not a log, signature, or
+provider-authentication proof. The route remains non-networked and non-executing.
+
 ## Result semantics
 
 `valid`/`structurally_valid` means the plan digest and exact check/evidence structure reconcile.
@@ -54,8 +67,11 @@ safe, clinically valid, scientifically valid, or deployed.
 ## SDK surfaces
 
 - Python: `CiExecutionEvidenceRequest`, `CiExecutionEvidenceReport`, and sync/async Workspace and
-  HTTP methods.
+  HTTP methods. `CiProviderNormalizationRequest` and `CiProviderNormalizationReport` expose the
+  corresponding provider normalizer.
 - TypeScript: `CiExecutionEvidenceArgs`, `CiExecutionEvidenceResult`, and
-  `ApiClient.ciExecutionEvidenceAudit(...)`.
-- MCP: the `ci_execution_evidence_audit` tool with the
-  `bioprism-devplat-ci-execution-evidence/0.1` schema.
+  `ApiClient.ciExecutionEvidenceAudit(...)`, plus `CiProviderNormalizationArgs`,
+  `CiProviderNormalizationResult`, and `ApiClient.ciProviderNormalize(...)`.
+- MCP: the `ci_execution_evidence_audit` and `ci_provider_normalize` tools with the
+  `bioprism-devplat-ci-execution-evidence/0.1` and
+  `bioprism-devplat-ci-provider-normalization/0.1` schemas.

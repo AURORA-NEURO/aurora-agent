@@ -124,6 +124,23 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
+      if (path === "/v1/tools/ci_provider_normalize") return jsonResponse({ ok: true, tool: "ci_provider_normalize", request_id: "r29", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "ci_provider_normalize",
+        schema: "bioprism-devplat-ci-provider-normalization/0.1",
+        provider: "github_actions",
+        source: "provider_observed",
+        payload_digest: "q".repeat(64),
+        run_id: "9001",
+        conclusion: "success",
+        check_count: 1,
+        derived_result_digest_count: 1,
+        warnings: ["derived_result_digest:tests"],
+        evidence: { run_id: "9001", provider: "github_actions", source: "provider_observed", plan_digest: "p".repeat(64), conclusion: "success", checks: [{ name: "tests", status: "passed", result_digest: "r".repeat(64) }] },
+        normalization: { provider: "github_actions", source: "provider_observed", payload_digest: "q".repeat(64), run_id: "9001", conclusion: "success", check_count: 1, derived_result_digest_count: 1, warnings: ["derived_result_digest:tests"], guarantees: [], limitations: [] },
+        guarantees: [],
+        limitations: [],
+      } } } });
       if (path === "/v1/tools/execution_provenance_audit") return jsonResponse({ ok: true, tool: "execution_provenance_audit", request_id: "r28", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "execution_provenance_audit",
@@ -1621,6 +1638,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(ciEvidence.mcp.result.structuredContent.workflow, "ci_execution_evidence_audit");
   assert.equal(ciEvidence.mcp.result.structuredContent.ci_evidence_ready, true);
   assert.equal(ciEvidence.mcp.result.structuredContent.audit.verification, "structural_only");
+  const normalizedCi = await client.ciProviderNormalize({
+    ci: { workflow: "contracts" },
+    provider: "github_actions",
+    payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] },
+  });
+  assert.equal(normalizedCi.mcp.result.structuredContent.workflow, "ci_provider_normalize");
+  assert.equal(normalizedCi.mcp.result.structuredContent.derived_result_digest_count, 1);
+  assert.equal(normalizedCi.mcp.result.structuredContent.evidence.checks[0].status, "passed");
   const provenance = await client.executionProvenanceAudit({
     mission: { plan: { mission_id: "mission-ts", digest: "p".repeat(64) }, execution: "executed" },
     delegated_checks: [{ name: "unit_tests", kind: "test", required: true, status: "passed", result_digest: "r".repeat(64), source: "caller_attested" }],

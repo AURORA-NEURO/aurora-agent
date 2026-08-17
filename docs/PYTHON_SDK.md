@@ -399,6 +399,11 @@ invent defaults:
   digests, missing/unknown/duplicate/non-passing findings, provider provenance, structural-only
   verification, and the bounded `ci_evidence_ready` handoff. It never executes or authenticates a
   provider run; see [`docs/CI_EVIDENCE.md`](CI_EVIDENCE.md).
+- `CiProviderNormalizationRequest` and `ci_provider_normalize(...)` convert a bounded GitHub
+  Actions-shaped or generic provider payload into the canonical evidence envelope consumed by the
+  audit. `CiProviderNormalizationReport` preserves provider/source, payload digest, derived-digest
+  warnings, and normalized evidence across `Workspace`, `AsyncWorkspace`, `ApiClient`, and
+  `AsyncApiClient`; it does not contact or authenticate a provider.
 - `execution_provenance_audit(...)` reconciles an `agent_mission` report with terminal results,
   contiguous trace identity, and optional delegated checks. `ExecutionProvenanceReport` preserves
   content digests, missingness, non-passing checks, and the structural-only `provenance_ready`

@@ -229,6 +229,8 @@ import type {
   WeaveLangCompileArgs,
   WeaveLangCompileResult,
   DeveloperWorkbenchArgs,
+  CiProviderNormalizationArgs,
+  CiProviderNormalizationResult,
   CiExecutionEvidenceArgs,
   CiExecutionEvidenceResult,
   ExecutionProvenanceArgs,
@@ -692,6 +694,10 @@ export class ApiClient {
 
   async ciExecutionEvidenceAudit(args: CiExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiExecutionEvidenceResult>> {
     return this.callTool<CiExecutionEvidenceResult>("ci_execution_evidence_audit", args, options);
+  }
+
+  async ciProviderNormalize(args: CiProviderNormalizationArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiProviderNormalizationResult>> {
+    return this.callTool<CiProviderNormalizationResult>("ci_provider_normalize", args, options);
   }
 
   async executionProvenanceAudit(args: ExecutionProvenanceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ExecutionProvenanceResult>> {

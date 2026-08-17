@@ -244,6 +244,11 @@ digests, reconciles exact check names and requiredness, and keeps caller/provide
 missingness, failure, cancellation, and structural-only verification visible. A complete passing
 report can become a bounded handoff signal, but it is not provider authentication, log retrieval,
 deployment approval, or scientific validity.
+`ci_provider_normalize` now closes the provider-shape ingestion gap before that audit: bounded
+GitHub Actions and generic payloads map into canonical `CiRunEvidence`, missing result digests are
+derived and labeled, supplied malformed digests are refused, and unknown/non-passing statuses stay
+visible to the downstream audit. It remains caller-supplied structural normalization rather than
+provider contact, signature verification, log retrieval, or external CI execution.
 `developer_delivery_audit` now accepts that result only through an explicit `ci_evidence` argument;
 the independent `ci_execution_evidence` release target is fail-closed when the evidence is absent or
 not ready, while unrelated local-delivery targets remain independently auditable.

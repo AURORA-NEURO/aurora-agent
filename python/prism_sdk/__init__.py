@@ -113,6 +113,12 @@ from .ci_evidence import (
     CiExecutionEvidenceRequest,
     ci_execution_evidence_report,
 )
+from .ci_provider import (
+    CI_PROVIDER_NORMALIZATION_SCHEMA,
+    CiProviderNormalizationReport,
+    CiProviderNormalizationRequest,
+    ci_provider_normalization_report,
+)
 from .execution_provenance import (
     EXECUTION_PROVENANCE_SCHEMA,
     MAX_DELEGATED_CHECKS,
@@ -2263,6 +2269,10 @@ __all__ = [
     "CiExecutionEvidenceReport",
     "CiExecutionEvidenceRequest",
     "ci_execution_evidence_report",
+    "CI_PROVIDER_NORMALIZATION_SCHEMA",
+    "CiProviderNormalizationReport",
+    "CiProviderNormalizationRequest",
+    "ci_provider_normalization_report",
     "EXECUTION_PROVENANCE_SCHEMA",
     "MAX_DELEGATED_CHECKS",
     "DelegatedCheckEvidenceArgs",

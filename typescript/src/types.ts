@@ -3886,6 +3886,13 @@ export interface CiExecutionEvidenceArgs extends JsonObject {
   evidence: JsonObject;
 }
 
+export interface CiProviderNormalizationArgs extends JsonObject {
+  ci: JsonObject;
+  provider: "github_actions" | "generic";
+  payload: JsonObject;
+  source?: "caller_attested" | "provider_observed";
+}
+
 export interface CiEvidenceFindingResult extends JsonObject {
   code: string;
   severity: string;
@@ -3930,6 +3937,35 @@ export interface CiExecutionEvidenceResult extends JsonObject {
   plan_digest: string;
   evidence_digest: string;
   audit: CiExecutionEvidenceAuditResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiProviderNormalizationEvidenceResult extends JsonObject {
+  run_id: string;
+  provider: string;
+  source: string;
+  plan_digest: string;
+  conclusion: string;
+  checks: JsonObject[];
+  environment_digest?: string | null;
+  run_url?: string | null;
+}
+
+export interface CiProviderNormalizationResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_provider_normalize";
+  schema: "bioprism-devplat-ci-provider-normalization/0.1";
+  provider: string;
+  source: string;
+  payload_digest: string;
+  run_id: string;
+  conclusion: string;
+  check_count: number;
+  derived_result_digest_count: number;
+  warnings: string[];
+  evidence: CiProviderNormalizationEvidenceResult;
+  normalization: JsonObject;
   guarantees: string[];
   limitations: string[];
 }

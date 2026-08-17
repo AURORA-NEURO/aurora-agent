@@ -34,6 +34,11 @@ from .capability import (
 )
 from .capability_dashboard import CapabilityDashboardQueryArgs, CapabilityDashboardReport, capability_dashboard_report
 from .ci_evidence import CiExecutionEvidenceReport, CiExecutionEvidenceRequest, ci_execution_evidence_report
+from .ci_provider import (
+    CiProviderNormalizationReport,
+    CiProviderNormalizationRequest,
+    ci_provider_normalization_report,
+)
 from .execution_provenance import ExecutionProvenanceReport, ExecutionProvenanceRequest, execution_provenance_report
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
@@ -1391,6 +1396,23 @@ class ApiClient:
         """Return typed structural CI evidence through HTTP."""
 
         return ci_execution_evidence_report(self.ci_execution_evidence_audit(request))
+
+    def ci_provider_normalize(
+        self,
+        request: CiProviderNormalizationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize a caller-supplied provider payload through the HTTP gateway."""
+
+        normalized = request if isinstance(request, CiProviderNormalizationRequest) else CiProviderNormalizationRequest(**dict(request))
+        return self.call_tool("ci_provider_normalize", normalized.to_mcp_arguments())
+
+    def ci_provider_normalization_report(
+        self,
+        request: CiProviderNormalizationRequest | Mapping[str, Any],
+    ) -> CiProviderNormalizationReport:
+        """Return typed provider-normalization evidence through HTTP."""
+
+        return ci_provider_normalization_report(self.ci_provider_normalize(request))
 
     def execution_provenance_audit(
         self,
@@ -4187,6 +4209,23 @@ class AsyncApiClient:
         """Return typed structural CI evidence through async HTTP."""
 
         return ci_execution_evidence_report(await self.ci_execution_evidence_audit(request))
+
+    async def ci_provider_normalize(
+        self,
+        request: CiProviderNormalizationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.ci_provider_normalize`."""
+
+        normalized = request if isinstance(request, CiProviderNormalizationRequest) else CiProviderNormalizationRequest(**dict(request))
+        return await self.call_tool("ci_provider_normalize", normalized.to_mcp_arguments())
+
+    async def ci_provider_normalization_report(
+        self,
+        request: CiProviderNormalizationRequest | Mapping[str, Any],
+    ) -> CiProviderNormalizationReport:
+        """Return typed provider-normalization evidence through async HTTP."""
+
+        return ci_provider_normalization_report(await self.ci_provider_normalize(request))
 
     async def execution_provenance_audit(
         self,

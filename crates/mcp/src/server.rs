@@ -130,9 +130,11 @@ use bioprism_dataops::{
 use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_execution_provenance, build_dashboard,
     build_delivery_receipt, plan_mission, run_workbench, verify_delivery_receipt,
+    normalize_ci_provider_payload,
     standard_walkthroughs,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    CiExecutionEvidenceRequest, DeliveryReceiptRequest, DeliveryReceiptVerificationRequest,
+    CiExecutionEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
+    DeliveryReceiptVerificationRequest,
     DevPlatReport, ExecutionProvenanceRequest, MissionReport,
     MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
     WorkbenchRequest,
@@ -1487,6 +1489,7 @@ impl Server {
             "sandbox_runtime_simulate" => self.sandbox_runtime_simulate(&arguments),
             "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
+            "ci_provider_normalize" => self.ci_provider_normalize(&arguments),
             "ci_execution_evidence_audit" => self.ci_execution_evidence_audit(&arguments),
             "execution_provenance_audit" => self.execution_provenance_audit(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
@@ -24213,6 +24216,46 @@ impl Server {
         }))
     }
 
+    /// Normalize a caller-supplied provider payload into canonical CI evidence.
+    ///
+    /// This is intentionally separate from the evidence audit: normalization understands
+    /// provider-shaped fields, while the audit owns plan binding and readiness semantics.
+    fn ci_provider_normalize(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode CI provider normalization input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("CI provider normalization input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: CiProviderNormalizationRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid CI provider normalization input: {error}"))?;
+        let normalized = normalize_ci_provider_payload(&request)
+            .map_err(|error| format!("CI provider normalization refused: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "workflow": "ci_provider_normalize",
+            "schema": bioprism_devplat::CI_PROVIDER_NORMALIZATION_SCHEMA,
+            "provider": normalized.provider,
+            "source": normalized.source,
+            "payload_digest": normalized.payload_digest,
+            "run_id": normalized.run_id,
+            "conclusion": normalized.conclusion,
+            "check_count": normalized.check_count,
+            "derived_result_digest_count": normalized.derived_result_digest_count,
+            "warnings": normalized.warnings,
+            "evidence": normalized.evidence,
+            "normalization": normalized,
+            "guarantees": [
+                "provider-shaped input is converted into canonical CiRunEvidence before structural auditing",
+                "missing result digests are derived deterministically and remain labeled as derived",
+                "unknown and non-passing provider states remain visible to ci_execution_evidence_audit"
+            ],
+            "limitations": [
+                "the route accepts caller-supplied payloads and does not contact or authenticate a provider",
+                "normalization does not fetch logs, execute checks, verify signatures, or approve a release"
+            ]
+        }))
+    }
+
     fn engineering_manifest_audit(&self, arguments: &Value) -> Result<Value, String> {
         let raw_manifest = arguments
             .get("manifest")
@@ -27087,7 +27130,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_provider_normalize", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -29504,6 +29547,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "ci": { "type": "object", "description": "Optional CiRequest with workflow, triggers, rust_toolchain, checks, and offline. Generated YAML is returned but never executed or written." }
                 },
                 "required": ["session"]
+            }
+        }),
+        json!({
+            "name": "ci_provider_normalize",
+            "description": "Normalize a caller-supplied GitHub Actions-shaped or generic provider payload into canonical CiRunEvidence. Missing per-check result digests are derived from the supplied check objects and labeled; unknown and non-passing states remain visible to ci_execution_evidence_audit. This route never contacts a provider, verifies signatures, fetches logs, executes checks, or grants release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ci": { "type": "object", "description": "Canonical CiRequest used to regenerate and bind the plan digest: workflow, triggers, rust_toolchain, checks, and optional offline." },
+                    "provider": { "type": "string", "enum": ["github_actions", "generic"], "description": "Provider payload shape to normalize." },
+                    "payload": { "type": "object", "description": "For github_actions: run plus jobs (or a flat run with jobs). For generic: run_id, conclusion, and checks. Provider payloads are caller-supplied and never authenticated here." },
+                    "source": { "type": "string", "enum": ["caller_attested", "provider_observed"], "description": "Optional provenance label. Defaults to provider_observed for github_actions and caller_attested for generic." }
+                },
+                "required": ["ci", "provider", "payload"]
             }
         }),
         json!({

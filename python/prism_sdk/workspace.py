@@ -40,6 +40,11 @@ from .ci_evidence import (
     CiExecutionEvidenceRequest,
     ci_execution_evidence_report,
 )
+from .ci_provider import (
+    CiProviderNormalizationReport,
+    CiProviderNormalizationRequest,
+    ci_provider_normalization_report,
+)
 from .execution_provenance import (
     ExecutionProvenanceReport,
     ExecutionProvenanceRequest,
@@ -1511,6 +1516,23 @@ class Workspace:
         """Return typed structural CI evidence and release-candidate findings."""
 
         return ci_execution_evidence_report(self.ci_execution_evidence_audit(request))
+
+    def ci_provider_normalize(
+        self,
+        request: CiProviderNormalizationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize a caller-supplied provider payload into canonical CI evidence."""
+
+        normalized = request if isinstance(request, CiProviderNormalizationRequest) else CiProviderNormalizationRequest(**dict(request))
+        return self.tool("ci_provider_normalize", normalized.to_mcp_arguments())
+
+    def ci_provider_normalization_report(
+        self,
+        request: CiProviderNormalizationRequest | Mapping[str, Any],
+    ) -> CiProviderNormalizationReport:
+        """Return typed provider-normalization evidence and derived-digest warnings."""
+
+        return ci_provider_normalization_report(self.ci_provider_normalize(request))
 
     def execution_provenance_audit(
         self,
@@ -4379,6 +4401,23 @@ class AsyncWorkspace:
         """Return typed CI evidence through async MCP."""
 
         return ci_execution_evidence_report(await self.ci_execution_evidence_audit(request))
+
+    async def ci_provider_normalize(
+        self,
+        request: CiProviderNormalizationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`Workspace.ci_provider_normalize`."""
+
+        normalized = request if isinstance(request, CiProviderNormalizationRequest) else CiProviderNormalizationRequest(**dict(request))
+        return await self.tool("ci_provider_normalize", normalized.to_mcp_arguments())
+
+    async def ci_provider_normalization_report(
+        self,
+        request: CiProviderNormalizationRequest | Mapping[str, Any],
+    ) -> CiProviderNormalizationReport:
+        """Return typed provider-normalization evidence through async MCP."""
+
+        return ci_provider_normalization_report(await self.ci_provider_normalize(request))
 
     async def execution_provenance_audit(
         self,
