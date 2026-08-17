@@ -34,6 +34,14 @@ methods exercise the same implementation through the REST/MCP dispatcher. `Works
 catalogue membership, claim posture, limitations, and exact artifact digest; coverage reports
 enumerate missing capability groups. These models do not interpret report count or indexing as
 execution, scientific, clinical, provenance, or release readiness.
+`DomainEvidenceHarmonizeRequest`, `DomainEvidenceLink`, and
+`DomainEvidenceHarmonizationReport` provide the next explicit join boundary. The sync and async
+HTTP clients expose `domain_evidence_harmonize()` and `domain_evidence_harmonize_tool()`, while
+`Workspace` and `AsyncWorkspace` expose the MCP helper and typed report projection. The request
+requires exact same-subject reports and explicit support/qualification/contradiction/context
+roles; the typed result preserves traceability state, contradiction posture, catalogue digest,
+and artifact digest without treating report presence or a support link as a scientific or release
+claim.
 
 ## Lifecycle
 

@@ -1298,6 +1298,9 @@ impl ApiRouter {
                 self.domain_report_coverage(&request, &request_id)
             }
             ("POST", "/v1/domain-reports") => self.domain_report_project(&request, &request_id),
+            ("POST", "/v1/domain-evidence/harmonize") => {
+                self.domain_evidence_harmonize(&request, &request_id)
+            }
             ("GET", "/v1/artifacts") => self.query_artifacts(&request, &request_id),
             ("POST", "/v1/artifacts") => self.register_artifact(&request, &request_id),
             ("GET", "/v1/artifacts/persistence") => self.artifact_persistence_status(),
@@ -3267,6 +3270,7 @@ impl ApiRouter {
                     "domain_workflows": "/v1/domain-workflows",
                     "domain_reports": "/v1/domain-reports",
                     "domain_report_coverage": "/v1/domain-reports/coverage",
+                    "domain_evidence_harmonize": "/v1/domain-evidence/harmonize",
                     "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
                     "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
@@ -3337,6 +3341,7 @@ impl ApiRouter {
                     "artifact_registry_persistence": self.config.artifact_state_path.is_some(),
                     "domain_report_projection": true,
                     "domain_report_coverage": true,
+                    "domain_evidence_harmonization": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -3840,6 +3845,18 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_report_project",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_harmonize(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_harmonize",
             Value::Object(arguments),
         )
     }
@@ -7063,6 +7080,7 @@ impl ApiRouter {
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/domain-reports": { "post": { "responses": { "200": { "description": "bounded domain-report projection" } } } },
                     "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
+                    "/v1/domain-evidence/harmonize": { "post": { "responses": { "200": { "description": "digest-addressed domain evidence harmonization" }, "422": { "description": "report identity, catalogue, or traceability input was refused" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/persistence": { "get": { "responses": { "200": { "description": "restart-aware mission snapshot status" } } } },
@@ -11253,6 +11271,98 @@ mod tests {
                 "source_tool": "modality_catalog",
                 "report": {},
                 "claim_posture": {"status": "refused", "does_not_claim": ["truth"]}
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn domain_evidence_route_harmonizes_reports_and_preserves_artifact_lineage() {
+        let artifact_path = test_state_path("domain-evidence-route");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let first = router.handle(request(
+            "POST",
+            "/v1/domain-reports",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-harmonization-subject",
+                "source_tool": "modality_catalog",
+                "report": {"observations": ["modality contract retained"]},
+                "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+            }),
+        ));
+        let second = router.handle(request(
+            "POST",
+            "/v1/domain-reports",
+            json!({
+                "group_id": "biological_ir_and_query",
+                "domains": ["BioQL syntax"],
+                "subject_id": "api-harmonization-subject",
+                "source_tool": "bioql_compile",
+                "report": {"observations": ["query syntax contract retained"]},
+                "claim_posture": {"status": "review_required", "does_not_claim": ["execution"]}
+            }),
+        ));
+        assert_eq!(first.status, 200);
+        assert_eq!(second.status, 200);
+        let first: Value = serde_json::from_slice(&first.body).unwrap();
+        let second: Value = serde_json::from_slice(&second.body).unwrap();
+        let harmonized = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/harmonize",
+            json!({
+                "subject_id": "api-harmonization-subject",
+                "claim": {"id": "api-claim-1", "statement": "opaque"},
+                "reports": [first["report"].clone(), second["report"].clone()],
+                "links": [
+                    {"report_index": 0, "role": "supports"},
+                    {"report_index": 1, "role": "qualifies", "note": "syntax is not execution"}
+                ],
+                "required_group_ids": ["biological_domains", "biological_ir_and_query"],
+                "required_domains": ["modalities", "BioQL syntax"]
+            }),
+        ));
+        assert_eq!(
+            harmonized.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&harmonized.body)
+        );
+        let harmonized: Value = serde_json::from_slice(&harmonized.body).unwrap();
+        assert_eq!(harmonized["workflow"], "domain_evidence_harmonize");
+        assert_eq!(
+            harmonized["harmonization"]["coverage"]["traceability_state"],
+            "complete"
+        );
+        assert_eq!(harmonized["harmonization"]["readiness_claimed"], false);
+        assert_eq!(harmonized["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            harmonized["artifact_registry"]["verification"]["method"],
+            "domain_evidence_harmonization"
+        );
+        let artifacts = router.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_harmonization&subject_id=api-harmonization-subject",
+            json!({}),
+        ));
+        assert_eq!(artifacts.status, 200);
+        let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
+        assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/harmonize",
+            json!({
+                "subject_id": "api-other-subject",
+                "claim": {"id": "api-claim-refused"},
+                "reports": [first["report"].clone()],
+                "links": [{"report_index": 0, "role": "context"}]
             }),
         ));
         assert_eq!(refused.status, 422);

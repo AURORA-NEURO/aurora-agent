@@ -213,6 +213,7 @@ pub mod claim;
 pub mod classify;
 pub mod cross_domain_audit;
 pub mod delivery_receipt;
+pub mod domain_evidence;
 pub mod domain_report;
 pub mod engineering;
 pub mod engineering_plan;
@@ -285,6 +286,12 @@ pub use delivery_receipt::{
     build_delivery_receipt, verify_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
     DeliveryReceiptFinding, DeliveryReceiptRequest, DeliveryReceiptTarget,
     DeliveryReceiptVerification, DeliveryReceiptVerificationRequest, DELIVERY_RECEIPT_SCHEMA,
+};
+pub use domain_evidence::{
+    harmonize_domain_evidence, validate_domain_evidence_harmonization, DomainEvidenceError,
+    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_HARMONIZATION_BYTES, MAX_DOMAIN_EVIDENCE_LINKS,
+    MAX_DOMAIN_EVIDENCE_REPORTS, MAX_DOMAIN_EVIDENCE_REQUIREMENTS, MAX_DOMAIN_EVIDENCE_TEXT_BYTES,
 };
 pub use domain_report::{
     project_domain_report, validate_domain_report, DomainReportError,

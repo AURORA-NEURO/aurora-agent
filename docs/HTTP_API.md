@@ -33,6 +33,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
 | `POST /v1/domain-reports` | Validate and index one explicit report projection for a declared capability group and source tool |
 | `GET /v1/domain-reports/coverage?group_id=&domain=&max_groups=&include_report_digests=` | Count retained structured report projections across the capability catalogue |
+| `POST /v1/domain-evidence/harmonize` | Join exact same-subject domain reports into an explicit, digest-addressed traceability artifact |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
 | `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows |
 | `GET /v1/domain-workflows/reconciliations/{reconciliation_digest}` | Fetch one digest-verified reconciliation report |
@@ -182,6 +183,14 @@ and returned with the artifact lookup and catalogue digest. It does not execute 
 subject/source/status summaries, missing group ids, and an exact coverage digest. Coverage means
 local indexed projection presence only; it is not execution coverage, scientific validity,
 provenance completeness, reproducibility, release readiness, or external-effect completion.
+`POST /v1/domain-evidence/harmonize` accepts canonical domain-report bodies or projection wrappers,
+requires exact subject identity, validates each report's source tool and domain labels against the
+authoritative catalogue, and requires every report to have an explicit `supports`, `qualifies`,
+`contradicts`, or `context` link. Qualification and contradiction links require caller notes;
+missing required groups/domains and link coverage remain visible in the result. The operation
+indexes a digest-addressed harmonization artifact with report digests as parents, always keeps
+`readiness_claimed: false`, and does not choose between conflicting reports or claim scientific,
+clinical, causal, provenance, publication, release, or execution validity.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

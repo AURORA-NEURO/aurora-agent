@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 193);
+    assert_eq!(tools.len(), 194);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -833,6 +833,136 @@ fn domain_report_projection_refuses_unknown_source_and_domain_claims() {
         .as_str()
         .unwrap()
         .contains("not declared"));
+}
+
+#[test]
+fn domain_evidence_harmonization_indexes_traceability_idempotently() {
+    let mut server = server();
+    let first = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "harmonization-subject",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["modality contract retained"]},
+            "claim_posture": {
+                "status": "observed",
+                "does_not_claim": ["clinical validity"]
+            }
+        }),
+    );
+    let second = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_ir_and_query",
+            "domains": ["BioQL syntax"],
+            "subject_id": "harmonization-subject",
+            "source_tool": "bioql_compile",
+            "report": {"observations": ["query syntax contract retained"]},
+            "claim_posture": {
+                "status": "review_required",
+                "does_not_claim": ["query execution", "biological truth"],
+                "limitations": ["no source dataset supplied"]
+            }
+        }),
+    );
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(second["artifact_registry"]["indexed"], json!(true));
+
+    let arguments = json!({
+        "subject_id": "harmonization-subject",
+        "claim": {"id": "claim-opaque-1", "statement": "caller-owned claim"},
+        "reports": [first["report"].clone(), second["report"].clone()],
+        "links": [
+            {"report_index": 0, "role": "supports"},
+            {"report_index": 1, "role": "qualifies", "note": "syntax coverage is not execution"}
+        ],
+        "required_group_ids": ["biological_domains", "biological_ir_and_query"],
+        "required_domains": ["modalities", "BioQL syntax"]
+    });
+    let harmonized = call(&mut server, "domain_evidence_harmonize", arguments.clone());
+    assert_eq!(harmonized["workflow"], json!("domain_evidence_harmonize"));
+    assert_eq!(
+        harmonized["harmonization"]["coverage"]["traceability_state"],
+        json!("complete")
+    );
+    assert_eq!(
+        harmonized["harmonization"]["coverage"]["all_reports_linked"],
+        json!(true)
+    );
+    assert_eq!(
+        harmonized["harmonization"]["posture"]["qualification_link_count"],
+        json!(1)
+    );
+    assert_eq!(harmonized["readiness_claimed"], json!(false));
+    assert_eq!(harmonized["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        harmonized["artifact_registry"]["verification"]["method"],
+        json!("domain_evidence_harmonization")
+    );
+
+    let replay = call(&mut server, "domain_evidence_harmonize", arguments);
+    assert_eq!(
+        harmonized["artifact_registry"]["content_digest"],
+        replay["artifact_registry"]["content_digest"]
+    );
+    assert_eq!(replay["artifact_registry"]["already_present"], json!(true));
+}
+
+#[test]
+fn domain_evidence_harmonization_refuses_subject_or_catalogue_mismatch() {
+    let mut server = server();
+    let report = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "subject-a",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["bounded"]},
+            "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+        }),
+    )["report"]
+        .clone();
+    let mismatched = call(
+        &mut server,
+        "domain_evidence_harmonize",
+        json!({
+            "subject_id": "subject-b",
+            "claim": {"id": "claim-mismatch"},
+            "reports": [report],
+            "links": [{"report_index": 0, "role": "context"}]
+        }),
+    );
+    assert_eq!(mismatched["__isError"], json!(true));
+    assert!(mismatched["error"].as_str().unwrap().contains("subject"));
+
+    let invalid_catalogue = call(
+        &mut server,
+        "domain_evidence_harmonize",
+        json!({
+            "subject_id": "subject-a",
+            "claim": {"id": "claim-catalogue"},
+            "reports": [{
+                "schema": "bioprism-devplat-domain-report/0.1",
+                "workflow": "domain_report_project",
+                "subject_id": "subject-a",
+                "group_id": "biological_domains",
+                "source_tool": "modality_catalog",
+                "domains": ["not-declared"],
+                "report": {},
+                "claim_posture": {"status": "observed", "does_not_claim": ["truth"]},
+                "parent_digests": [],
+                "non_claims": ["truth"]
+            }],
+            "links": [{"report_index": 0, "role": "context"}]
+        }),
+    );
+    assert_eq!(invalid_catalogue["__isError"], json!(true));
 }
 
 #[test]
@@ -6227,12 +6357,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(193));
-    assert_eq!(result["advertised_tool_count"], json!(193));
+    assert_eq!(result["unique_catalog_tools"], json!(194));
+    assert_eq!(result["advertised_tool_count"], json!(194));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(193));
-    assert_eq!(result["schema_quality"]["valid"], json!(193));
+    assert_eq!(result["schema_quality"]["checked"], json!(194));
+    assert_eq!(result["schema_quality"]["valid"], json!(194));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

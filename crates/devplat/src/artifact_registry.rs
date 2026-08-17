@@ -11,6 +11,9 @@
 //! separate field. That prevents a bundle's internal digest convention from being confused with
 //! the digest used by this cross-domain index.
 
+use crate::domain_evidence::{
+    validate_domain_evidence_harmonization, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+};
 use crate::domain_report::{validate_domain_report, DOMAIN_REPORT_SCHEMA_VERSION};
 use crate::evidence_bundle::verify_mission_evidence_bundle;
 use bioprism_ids::ContentHash;
@@ -39,6 +42,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "mission_report",
     "evaluator_replay",
     "domain_report",
+    "domain_evidence_harmonization",
     "external_reference",
 ];
 
@@ -613,6 +617,24 @@ fn verify_known_artifact(
                     "state": "verified_integrity",
                     "method": "domain_report_projection",
                     "schema": DOMAIN_REPORT_SCHEMA_VERSION
+                }),
+            ))
+        }
+        "domain_evidence_harmonization"
+            if artifact.get("schema").and_then(Value::as_str)
+                == Some(DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION) =>
+        {
+            validate_domain_evidence_harmonization(artifact).map_err(|error| {
+                ArtifactRegistryError::InvalidInput(format!(
+                    "domain evidence harmonization verification failed: {error}"
+                ))
+            })?;
+            Ok((
+                None,
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_evidence_harmonization",
+                    "schema": DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION
                 }),
             ))
         }

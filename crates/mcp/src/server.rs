@@ -139,7 +139,8 @@ use bioprism_devplat::{
     MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
-    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
+    WorkbenchRequest, CAPABILITY_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
     DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
     DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
     ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
@@ -1365,6 +1366,7 @@ impl Server {
             "factory_authority_verify" => self.factory_authority_verify(&arguments),
             "artifact_registry_audit" => self.artifact_registry_audit(&arguments),
             "domain_report_project" => self.domain_report_project(&arguments),
+            "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -3031,6 +3033,101 @@ impl Server {
             .map_err(|error| format!("domain report coverage could not be hashed: {error}"))?;
         result["coverage_digest"] = json!(coverage_digest.to_string());
         Ok(result)
+    }
+
+    /// Harmonize explicit domain reports into a traceability artifact without interpreting the
+    /// caller's claim. The catalogue checks here prevent a report row from smuggling in an
+    /// undeclared source tool or domain label before the harmonization is indexed.
+    fn domain_evidence_harmonize(&self, arguments: &Value) -> Result<Value, String> {
+        let harmonization = bioprism_devplat::harmonize_domain_evidence(arguments)
+            .map_err(|error| format!("domain evidence harmonization refused: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let reports = harmonization
+            .get("reports")
+            .and_then(Value::as_array)
+            .ok_or("harmonization omitted reports")?;
+        let mut artifact_domains = BTreeSet::new();
+        let mut parent_digests = Vec::new();
+        for row in reports {
+            let group_id = row
+                .get("group_id")
+                .and_then(Value::as_str)
+                .ok_or("harmonization report row omitted group_id")?;
+            let source_tool = row
+                .get("source_tool")
+                .and_then(Value::as_str)
+                .ok_or("harmonization report row omitted source_tool")?;
+            let group = catalogue
+                .groups()
+                .iter()
+                .find(|group| group.id == group_id)
+                .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+            if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+                return Err(format!(
+                    "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+            let domains = row
+                .get("domains")
+                .and_then(Value::as_array)
+                .ok_or("harmonization report row omitted domains")?;
+            for domain in domains.iter().filter_map(Value::as_str) {
+                if !group
+                    .domains
+                    .iter()
+                    .any(|declared| declared.eq_ignore_ascii_case(domain))
+                {
+                    return Err(format!(
+                        "domain label {domain:?} is not declared by capability group {group_id:?}"
+                    ));
+                }
+                artifact_domains.insert(domain.to_string());
+            }
+            if let Some(digest) = row.get("digest").and_then(Value::as_str) {
+                parent_digests.push(digest.to_string());
+            }
+        }
+        let subject_id = harmonization
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("harmonization omitted subject_id")?;
+        let projection = self.index_artifact_projection(
+            "domain_evidence_harmonization",
+            subject_id,
+            artifact_domains.into_iter().collect(),
+            parent_digests,
+            harmonization.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain evidence harmonization could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+            "harmonization": harmonization,
+            "artifact_registry": projection,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "all report source tools and domain labels were checked against the authoritative capability catalogue",
+                "the harmonization artifact is indexed by exact JSON content digest with report digests as parents",
+                "explicit support, qualification, contradiction, and context roles remain separate"
+            ],
+            "does_not_claim": [
+                "traceability proves any claim or chooses between contradictory reports",
+                "harmonization proves scientific, clinical, regulatory, publication, or release validity",
+                "artifact indexing proves provenance completeness or external effect completion"
+            ]
+        }))
     }
 
     fn context_compare(&self, arguments: &Value) -> Result<Value, String> {
@@ -28915,7 +29012,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29156,7 +29253,7 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "cross_store", "verify_snapshot"], "description": "Operation to perform; defaults to query. cross_store compares exact identities across the artifact, evidence, and reconciliation registries." },
                     "registration": { "type": "object", "description": "For register: {kind, subject_id, domains, parent_digests, declared_digest?, artifact}." },
-                    "kind": { "type": "string", "description": "For query: artifact kind such as mission_evidence_bundle, workflow_reconciliation, evaluator_replay, or domain_report." },
+                    "kind": { "type": "string", "description": "For query: artifact kind such as mission_evidence_bundle, workflow_reconciliation, evaluator_replay, domain_report, or domain_evidence_harmonization." },
                     "domain": { "type": "string", "description": "For query: one explicit domain label." },
                     "subject_id": { "type": "string", "description": "For query: mission or subject identifier." },
                     "after": { "type": "string", "description": "For query: exclusive content-digest cursor." },
@@ -29199,6 +29296,22 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_report_digests": { "type": "boolean", "description": "For coverage: include exact indexed report digests per group; defaults false." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "domain_evidence_harmonize",
+            "description": "Harmonize explicit canonical domain-report projections into a digest-addressed traceability artifact. The operation requires exact subject identity, validates every report and source-tool/domain declaration against the workspace catalogue, requires every report to have an explicit support/qualification/contradiction/context link, preserves missing requirements and contradiction posture, and always requires human review; it never interprets the claim or asserts scientific, clinical, causal, publication, release, provenance, or readiness validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Exact subject identity shared by every canonical domain report." },
+                    "claim": { "type": "object", "description": "Opaque caller claim descriptor: {id, statement?, scope?}; the statement is retained but not interpreted." },
+                    "reports": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "object" }, "description": "Canonical domain_report bodies or project-response wrappers. Every report must have the same subject_id and is content-digested exactly." },
+                    "links": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "type": "object" }, "description": "Explicit links {report_index, role, note?, report_digest?}; role is supports, qualifies, contradicts, or context. Qualifies and contradicts require a note." },
+                    "required_group_ids": { "type": "array", "maxItems": 64, "items": { "type": "string" }, "description": "Optional capability groups that must be represented; missing groups remain explicit." },
+                    "required_domains": { "type": "array", "maxItems": 64, "items": { "type": "string" }, "description": "Optional domain labels that must be represented; missing labels remain explicit." }
+                },
+                "required": ["subject_id", "claim", "reports", "links"]
             }
         }),
         json!({

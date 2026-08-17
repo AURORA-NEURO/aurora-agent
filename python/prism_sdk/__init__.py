@@ -49,6 +49,14 @@ from .domain_reports import (
     DomainReportProjectReport,
     DomainReportProjectRequest,
 )
+from .domain_evidence import (
+    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_LINK_ROLES,
+    DomainEvidenceHarmonizationReport,
+    DomainEvidenceHarmonizeRequest,
+    DomainEvidenceLink,
+)
 from .biological import (
     AdapterDescriptor,
     AdapterDescriptorReport,
@@ -2673,6 +2681,12 @@ __all__ = [
     "DomainReportProjectReport",
     "DomainReportCoverageRequest",
     "DomainReportCoverageReport",
+    "DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA",
+    "DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW",
+    "DOMAIN_EVIDENCE_LINK_ROLES",
+    "DomainEvidenceLink",
+    "DomainEvidenceHarmonizeRequest",
+    "DomainEvidenceHarmonizationReport",
     "INCIDENT_CLASSES",
     "CONTAINMENT_ACTIONS",
     "AUDIT_EVENTS",

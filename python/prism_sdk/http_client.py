@@ -34,6 +34,10 @@ from .domain_reports import (
     DomainReportProjectReport,
     DomainReportProjectRequest,
 )
+from .domain_evidence import (
+    DomainEvidenceHarmonizationReport,
+    DomainEvidenceHarmonizeRequest,
+)
 from .capability import (
     CapabilityAuditReport,
     CapabilitySearchReport,
@@ -803,6 +807,34 @@ class ApiClient:
         )
         return DomainReportCoverageReport.from_wire(
             self.call_tool("domain_report_project", normalized.to_arguments())
+        )
+
+    def domain_evidence_harmonize(
+        self,
+        request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceHarmonizationReport:
+        """Join exact domain reports into a traceability-only artifact over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizeRequest)
+            else DomainEvidenceHarmonizeRequest(**dict(request))
+        )
+        return DomainEvidenceHarmonizationReport.from_wire(
+            self.request("POST", "/v1/domain-evidence/harmonize", normalized.to_arguments())
+        )
+
+    def domain_evidence_harmonize_tool(
+        self,
+        request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceHarmonizationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizeRequest)
+            else DomainEvidenceHarmonizeRequest(**dict(request))
+        )
+        return DomainEvidenceHarmonizationReport.from_wire(
+            self.call_tool("domain_evidence_harmonize", normalized.to_arguments())
         )
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
@@ -4552,6 +4584,18 @@ class AsyncApiClient:
         request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
     ) -> DomainReportCoverageReport:
         return await asyncio.to_thread(self.client.domain_report_coverage_tool, request)
+
+    async def domain_evidence_harmonize(
+        self,
+        request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceHarmonizationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_harmonize, request)
+
+    async def domain_evidence_harmonize_tool(
+        self,
+        request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceHarmonizationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_harmonize_tool, request)
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

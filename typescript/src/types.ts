@@ -4939,6 +4939,37 @@ export interface DomainReportCoverageResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export type DomainEvidenceLinkRole = "supports" | "qualifies" | "contradicts" | "context";
+
+export interface DomainEvidenceLinkArgs extends JsonObject {
+  report_index: number;
+  role: DomainEvidenceLinkRole;
+  note?: string;
+  report_digest?: string;
+}
+
+export interface DomainEvidenceHarmonizeArgs extends JsonObject {
+  subject_id: string;
+  claim: JsonObject;
+  reports: JsonObject[];
+  links: DomainEvidenceLinkArgs[];
+  required_group_ids?: string[];
+  required_domains?: string[];
+}
+
+export interface DomainEvidenceHarmonizationResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-harmonization/0.1";
+  workflow: "domain_evidence_harmonize";
+  harmonization: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;
@@ -7834,6 +7865,7 @@ export type ArtifactKind =
   | "mission_report"
   | "evaluator_replay"
   | "domain_report"
+  | "domain_evidence_harmonization"
   | "external_reference";
 
 export interface ArtifactRegistrationArgs extends JsonObject {

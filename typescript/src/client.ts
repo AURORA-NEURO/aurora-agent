@@ -34,6 +34,8 @@ import type {
   DomainReportProjectResult,
   DomainReportCoverageOptions,
   DomainReportCoverageResult,
+  DomainEvidenceHarmonizeArgs,
+  DomainEvidenceHarmonizationResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -602,6 +604,37 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainReportCoverageResult>> {
     return this.callTool<DomainReportCoverageResult>("domain_report_project", { ...args, operation: "coverage" }, options);
+  }
+
+  /** Join exact domain reports into a digest-addressed, review-required traceability artifact. */
+  async domainEvidenceHarmonize(
+    args: DomainEvidenceHarmonizeArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceHarmonizationResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence arguments must be an object");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    if (!isObject(args.claim) || typeof args.claim.id !== "string" || args.claim.id.trim().length === 0) throw new ArgumentError("claim.id must be a non-empty string");
+    if (!Array.isArray(args.reports) || args.reports.length < 1 || args.reports.length > 64 || args.reports.some((report) => !isObject(report))) throw new ArgumentError("reports must contain 1..=64 objects");
+    if (!Array.isArray(args.links) || args.links.length < 1 || args.links.length > 256 || args.links.some((link) => !isObject(link))) throw new ArgumentError("links must contain 1..=256 objects");
+    for (const [index, link] of args.links.entries()) {
+      if (!Number.isSafeInteger(link.report_index) || link.report_index < 0 || link.report_index >= args.reports.length) throw new ArgumentError(`links[${index}].report_index is out of range`);
+      if (!["supports", "qualifies", "contradicts", "context"].includes(link.role)) throw new ArgumentError(`links[${index}].role is invalid`);
+      if (link.note !== undefined && typeof link.note !== "string") throw new ArgumentError(`links[${index}].note must be a string`);
+      if ((link.role === "qualifies" || link.role === "contradicts") && (!link.note || link.note.trim().length === 0)) throw new ArgumentError(`links[${index}].note is required for ${link.role}`);
+      if (link.report_digest !== undefined && !/^[0-9a-fA-F]{64}$/.test(link.report_digest)) throw new ArgumentError(`links[${index}].report_digest must be a SHA-256 digest`);
+    }
+    for (const [name, value] of [["required_group_ids", args.required_group_ids], ["required_domains", args.required_domains]] as const) {
+      if (value !== undefined && (!Array.isArray(value) || value.length > 64 || value.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError(`${name} must contain at most 64 non-empty strings`);
+    }
+    return this.request<DomainEvidenceHarmonizationResult>("POST", "/v1/domain-evidence/harmonize", args, options);
+  }
+
+  /** Invoke the harmonizer through the REST tool dispatcher. */
+  async domainEvidenceHarmonizeTool(
+    args: DomainEvidenceHarmonizeArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceHarmonizationResult>> {
+    return this.callTool<DomainEvidenceHarmonizationResult>("domain_evidence_harmonize", args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

@@ -18,6 +18,7 @@ ARTIFACT_KINDS = (
     "mission_report",
     "evaluator_replay",
     "domain_report",
+    "domain_evidence_harmonization",
     "external_reference",
 )
 
