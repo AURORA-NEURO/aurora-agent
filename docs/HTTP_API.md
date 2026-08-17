@@ -20,6 +20,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /healthz`, `GET /readyz` | Liveness/readiness and retention metrics |
 | `GET /v1/capabilities` | Tool/resource counts, transport support, limits, and workspace catalogue |
 | `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
+| `GET /v1/operations/snapshot?after=N&limit=M` | One bounded operator control-plane snapshot joining event, mission, persistence, recovery, and capability summaries |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
@@ -115,6 +116,28 @@ boundary is configured, whether a checkpoint is present, what is restored, what 
 restored, whether the observed digest was verified, and the required operator action. `automatic_resume` and
 `automatic_external_delivery` are always false for this gateway. The matrix is an operational
 decision surface, not a distributed coordination protocol.
+
+## Operations snapshot
+
+`GET /v1/operations/snapshot` is the dashboard/bootstrap surface for operators that need one
+consistent read across domains. `after` defaults to `0`; `limit` defaults to `100` and is bounded
+to `256`. Unknown query keys and limits outside that range are refused. The response contains:
+
+- `recent_events`, a normal cursor page with `next_after`, `gap`, and dropped-row accounting;
+- `event_metrics` and bounded mission `status_counts`, including recovered and cancellation
+  counts without returning terminal reports;
+- nested mission and event persistence status with file size, schema, digest, integrity, and
+  durability fields;
+- the complete `/v1/recovery` matrix and a compact capability/transport summary; and
+- a `consistency` declaration that makes the read model's clock-free, non-atomic cross-store
+  composition explicit; and
+- `operator_actions`, `guarantees`, and `non_claims` that keep follow-up work and absent
+  guarantees visible to dashboards and handoff tooling.
+
+The snapshot is clock-free and read-only. It does not dispatch a tool, resume a mission, send a
+webhook, establish receiver acceptance, or validate a scientific/clinical claim. Consumers should
+store `recent_events.next_after` as their next cursor and treat `recent_events.gap: true` as an
+explicit retention boundary rather than silently treating the page as complete history.
 
 ## Asynchronous missions
 

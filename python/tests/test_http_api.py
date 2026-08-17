@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsSnapshot, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -336,6 +336,30 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "workflow": "developer_delivery_receipt_events", "receipt_id": "receipt-http-1", "found": True, "page": {"events": [{"id": 2, "event_type": "tool.completed", "subject": "developer_delivery_receipt", "request_id": "req-2", "payload": {"delivery_receipt": {"receipt_id": "receipt-http-1"}}}], "after": 0, "next_after": 2, "oldest": 1, "newest": 2, "gap": False, "dropped_events": 0}})
         elif self.path.startswith("/v1/webhooks/subscriptions/") and "/attempts" in self.path:
             self._send(200, {"ok": True, "page": {"attempts": [{"attempt_id": 1, "delivery_id": 1, "subscription_id": "sub", "event_id": 2, "event_type": "tool.completed", "attempt": 1, "action": "send", "outcome": "accepted", "receiver_accepted": True, "retryable": None, "error": None, "signature": "sha256=x"}], "after": 0, "next_after": 1, "oldest": 1, "newest": 1, "gap": False, "dropped_attempts": 0}})
+        elif self.path.startswith("/v1/operations/snapshot"):
+            self._send(200, {
+                "ok": True,
+                "schema": "bioprism-operations-snapshot/0.1",
+                "service": "bioprism",
+                "api_version": "v1",
+                "protocol_version": "2025-06-18",
+                "after": 0,
+                "limit": 2,
+                "recent_events": {"events": [{"id": 1, "event_type": "tool.completed", "subject": "modality_catalog", "request_id": "req-1", "payload": {}}], "after": 0, "next_after": 1, "oldest": 1, "newest": 1, "gap": False, "dropped_events": 0},
+                "event_metrics": {"retained_events": 1, "dropped_events": 0, "subscriptions": 1, "active_subscriptions": 1, "pending_deliveries": 1, "dropped_deliveries": 0, "next_event_id": 2, "next_delivery_id": 2, "retained_delivery_attempts": 1, "dropped_delivery_attempts": 0, "next_attempt_id": 2},
+                "mission_summary": {"total": 1, "status_counts": {"succeeded": 1}, "recovered_after_restart": 0, "cancel_requested": 0, "registry_capacity": 4096},
+                "persistence": {
+                    "missions": {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 2, "state_digest": None, "integrity_verified": None, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "event_log_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "terminal snapshots restore"},
+                    "events": {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 5, "state_digest": None, "integrity_verified": None, "max_file_bytes": 64 * 1024 * 1024, "retained_events": 1, "next_event_id": 2, "dropped_events": 0, "subscriptions_durable": True, "webhook_deliveries_durable": True, "delivery_attempts_durable": True, "delivery_receipt_metadata_durable": True, "secrets_persisted": False, "retained_delivery_attempts": 1, "dropped_delivery_attempts": 0, "next_attempt_id": 2, "recovery_policy": "events restore"},
+                },
+                "recovery": {"ok": True, "schema": "bioprism-recovery-matrix/0.1", "scope": "single-process-api-instance", "automatic_resume": False, "automatic_external_delivery": False, "boundaries": [{"id": "webhook_signing_secrets", "configured": True, "checkpoint_present": False, "schema_version": None, "state_digest": None, "restores": [], "does_not_restore": ["all signing secrets"], "operator_action": "rebind"}], "observed": {"subscriptions": 1, "pending_deliveries": 1}, "guarantees": ["boundaries are explicit"], "non_claims": ["secret recovery"], "links": {}},
+                "consistency": {"read_model": "bounded composition of process-local stores", "cross_store_atomic": False, "event_cursor_authoritative": True, "clock_free": True, "underlying_routes_remain_authoritative": True},
+                "capabilities": {"tool_count": 10, "resource_count": 2, "rest_tools": True, "json_rpc": True, "event_cursor": True, "async_missions": True, "mission_inventory": True, "operations_snapshot": True, "delivery_attempt_provenance": True, "external_delivery_worker": False},
+                "operator_actions": ["inspect"],
+                "guarantees": ["bounded"],
+                "non_claims": ["external effects"],
+                "links": {},
+            })
         elif self.path == "/v1/recovery":
             self._send(200, {"ok": True, "schema": "bioprism-recovery-matrix/0.1", "scope": "single-process-api-instance", "automatic_resume": False, "automatic_external_delivery": False, "boundaries": [{"id": "webhook_signing_secrets", "configured": True, "checkpoint_present": False, "schema_version": None, "state_digest": None, "restores": [], "does_not_restore": ["all signing secrets"], "operator_action": "rebind"}], "observed": {"subscriptions": 1, "pending_deliveries": 1}, "guarantees": ["boundaries are explicit"], "non_claims": ["secret recovery"], "links": {"event_persistence": "/v1/events/persistence"}})
         elif self.path.startswith("/v1/events/stream"):
@@ -896,6 +920,12 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertIsInstance(recovery, RecoveryMatrix)
         self.assertFalse(recovery.automatic_resume)
         self.assertFalse(recovery.boundaries[0].checkpoint_present)
+        snapshot = client.operations_snapshot(limit=2)
+        self.assertIsInstance(snapshot, OperationsSnapshot)
+        self.assertEqual(snapshot.recent_events.events[0].id, 1)
+        self.assertEqual(snapshot.mission_summary["status_counts"]["succeeded"], 1)
+        self.assertFalse(snapshot.recovery.automatic_external_delivery)
+        self.assertFalse(snapshot.consistency["cross_store_atomic"])
         self.assertEqual(client.rebind_subscription("sub", "a-long-secret")["resigned_deliveries"], 1)
         with self.assertRaises(ArgumentError):
             client.event_page(after=True)
@@ -1166,6 +1196,9 @@ class HttpApiClientTests(unittest.TestCase):
             typed_inventory = await client.mission_inventory(status="succeeded", limit=5)
             self.assertIsInstance(typed_inventory, MissionInventoryPage)
             self.assertTrue(typed_inventory.missions[0].terminal)
+            snapshot = await client.operations_snapshot(limit=2)
+            self.assertIsInstance(snapshot, OperationsSnapshot)
+            self.assertEqual(snapshot.limit, 2)
             self.assertTrue((await client.cancel_mission("async-1", "operator stop")).cancel_requested)
             self.assertEqual(
                 (await client.capability_route("async route", [{"id": "release", "tool": "bundle_verify"}]))["mcp"]["result"]["goal"],

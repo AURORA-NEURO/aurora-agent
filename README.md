@@ -333,6 +333,13 @@ inferring them from an HTTP listener.
 `GET /v1/recovery` and the Python/TypeScript `recovery_matrix`/`recoveryMatrix` helpers provide
 one operator matrix that keeps mission restoration, event rows, subscription metadata, pending
 outbox evidence, delivery-attempt provenance, secrets, and external effects separate. The
+`GET /v1/operations/snapshot?after=N&limit=M` route and matching typed SDK helpers compose that
+matrix with one bounded event page, event metrics, mission status counts, persistence digests,
+capability transport flags, and actionable operator follow-ups. It is designed as a dashboard
+bootstrap and handoff surface: it never returns unbounded mission reports, executes no tools, and
+does not turn local observations into scientific validity, receiver acceptance, or automatic
+recovery claims. The event cursor remains authoritative, so consumers should persist
+`recent_events.next_after` and inspect `gap` before declaring continuity.
 `GET /v1/webhooks/subscriptions/{id}/attempts` route and matching SDK helpers expose the
 provenance cursor with explicit retention gaps and dropped-row accounting. Receipt-bearing rows
 are also available through `/v1/delivery-receipts/{receipt_id}/attempts`, which joins the same

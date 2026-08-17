@@ -2391,6 +2391,28 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
       if (path.endsWith("/rebind") && init.method === "POST") {
         return jsonResponse({ ok: true, subscription: { id: "sub", endpoint: "https://example.test/hook", events: ["*"], active: true, created_at_sequence: 1, secret_bound: true, rebind_required: false }, resigned_deliveries: 1, secret_policy: "memory-only" });
       }
+      if (path === "/v1/operations/snapshot") {
+        return jsonResponse({
+          ok: true,
+          schema: "bioprism-operations-snapshot/0.1",
+          service: "bioprism",
+          api_version: "v1",
+          protocol_version: "2025-06-18",
+          after: 0,
+          limit: 2,
+          recent_events: { events: [{ id: 1, event_type: "tool.completed", subject: "modality_catalog", request_id: "req-1", payload: {} }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0 },
+          event_metrics: { retained_events: 1, dropped_events: 0, subscriptions: 1, active_subscriptions: 1, pending_deliveries: 1, dropped_deliveries: 0, next_event_id: 2, next_delivery_id: 2, retained_delivery_attempts: 1, dropped_delivery_attempts: 0, next_attempt_id: 2 },
+          mission_summary: { total: 1, status_counts: { succeeded: 1 }, recovered_after_restart: 0, cancel_requested: 0, registry_capacity: 4096 },
+          persistence: { missions: {}, events: {} },
+          recovery: {},
+          consistency: { read_model: "bounded composition of process-local stores", cross_store_atomic: false, event_cursor_authoritative: true, clock_free: true, underlying_routes_remain_authoritative: true },
+          capabilities: { tool_count: 10, resource_count: 2, rest_tools: true, json_rpc: true, event_cursor: true, async_missions: true, mission_inventory: true, operations_snapshot: true, delivery_attempt_provenance: true, external_delivery_worker: false },
+          operator_actions: ["inspect"],
+          guarantees: ["bounded"],
+          non_claims: ["external effects"],
+          links: {},
+        });
+      }
       if (path === "/v1/recovery") {
         return jsonResponse({
           ok: true,
@@ -2444,6 +2466,11 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   const recovery = await client.recoveryMatrix();
   assert.equal(recovery.automatic_resume, false);
   assert.equal(recovery.boundaries[0].checkpoint_present, false);
+  const operations = await client.operationsSnapshot(0, 2);
+  assert.equal(operations.schema, "bioprism-operations-snapshot/0.1");
+  assert.equal(operations.mission_summary.status_counts.succeeded, 1);
+  assert.equal(operations.recent_events.events[0].id, 1);
+  assert.equal(operations.consistency.cross_store_atomic, false);
   await assert.rejects(client.acknowledge("sub", [0]), ArgumentError);
 });
 

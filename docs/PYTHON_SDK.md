@@ -549,6 +549,13 @@ invent defaults:
   file matches that digest.
   `recovery_matrix()` and its async counterpart provide one typed matrix that keeps mission,
   event, subscription, outbox, secret, and external-effect recovery boundaries separate.
+  `operations_snapshot(after=..., limit=...)` and its async counterpart return a typed
+  `OperationsSnapshot` that composes a bounded `EventPage`, event metrics, mission status-count
+  evidence, typed mission/event persistence checks, the recovery matrix, capability flags, and
+  consistency declaration, and operator action/non-claim text. The cursor remains explicit in
+  `snapshot.recent_events`; the
+  model rejects non-reconciling mission counts and missing required metrics, and the snapshot is
+  read-only evidence rather than a mission resume, webhook send, or scientific verdict.
   `event_persistence()` and `flush_event_persistence()` provide the corresponding typed event
   and outbox checkpoint checks; endpoint/filter metadata and signed pending envelopes can restore,
   while secrets remain non-durable. They expose the current checkpoint's optional `state_digest`

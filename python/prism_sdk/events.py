@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .errors import ArgumentError, ProtocolError
+from .mission import MissionPersistenceStatus
 
 
 MAX_EVENT_PAGE = 1000
@@ -422,6 +423,164 @@ class RecoveryMatrix:
         return dict(self.raw)
 
 
+MAX_OPERATIONS_SNAPSHOT_LIMIT = 256
+
+
+@dataclass(frozen=True)
+class OperationsSnapshot:
+    """Typed bounded control-plane evidence assembled by the HTTP gateway."""
+
+    raw: dict[str, Any]
+    schema: str
+    service: str
+    api_version: str
+    protocol_version: str
+    after: int
+    limit: int
+    recent_events: EventPage
+    event_metrics: dict[str, int]
+    mission_summary: dict[str, Any]
+    mission_persistence: MissionPersistenceStatus
+    event_persistence: EventPersistenceStatus
+    recovery: RecoveryMatrix
+    consistency: dict[str, Any]
+    capabilities: dict[str, Any]
+    operator_actions: tuple[str, ...]
+    guarantees: tuple[str, ...]
+    non_claims: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsSnapshot":
+        raw = _mapping("operations snapshot", value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("operations snapshot must be successful")
+        schema = _text("operations snapshot schema", raw.get("schema"))
+        if schema != "bioprism-operations-snapshot/0.1":
+            raise ArgumentError("operations snapshot schema is invalid")
+        after = _non_negative("operations snapshot after", raw.get("after"))
+        limit = raw.get("limit")
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= MAX_OPERATIONS_SNAPSHOT_LIMIT
+        ):
+            raise ArgumentError(
+                f"operations snapshot limit must be between 1 and {MAX_OPERATIONS_SNAPSHOT_LIMIT}"
+            )
+        recent_events = EventPage.from_wire(raw.get("recent_events"))
+        if recent_events.after != after:
+            raise ArgumentError("operations snapshot after must match the event page")
+
+        metrics_raw = _mapping("operations snapshot event_metrics", raw.get("event_metrics"))
+        metric_names = (
+            "retained_events",
+            "dropped_events",
+            "subscriptions",
+            "active_subscriptions",
+            "pending_deliveries",
+            "dropped_deliveries",
+            "next_event_id",
+            "next_delivery_id",
+            "retained_delivery_attempts",
+            "dropped_delivery_attempts",
+            "next_attempt_id",
+        )
+        event_metrics = {
+            name: _non_negative(f"operations snapshot event_metrics {name}", metrics_raw.get(name))
+            for name in metric_names
+        }
+
+        summary_raw = _mapping("operations snapshot mission_summary", raw.get("mission_summary"))
+        total = _non_negative("operations snapshot mission total", summary_raw.get("total"))
+        counts_raw = _mapping(
+            "operations snapshot mission status_counts", summary_raw.get("status_counts")
+        )
+        status_counts = {
+            _text("operations snapshot mission status", name): _non_negative(
+                f"operations snapshot mission status_counts {name}", count
+            )
+            for name, count in counts_raw.items()
+        }
+        if sum(status_counts.values()) != total:
+            raise ArgumentError("operations snapshot mission status counts must reconcile")
+        mission_summary = dict(summary_raw)
+        mission_summary["total"] = total
+        mission_summary["status_counts"] = status_counts
+        for name in ("recovered_after_restart", "cancel_requested", "registry_capacity"):
+            mission_summary[name] = _non_negative(
+                f"operations snapshot mission {name}", summary_raw.get(name)
+            )
+        if mission_summary["recovered_after_restart"] > total:
+            raise ArgumentError("operations snapshot recovered mission count exceeds total")
+        if mission_summary["cancel_requested"] > total:
+            raise ArgumentError("operations snapshot cancellation count exceeds total")
+
+        persistence = _mapping("operations snapshot persistence", raw.get("persistence"))
+        mission_persistence = MissionPersistenceStatus.from_wire(persistence.get("missions"))
+        event_persistence = EventPersistenceStatus.from_wire(persistence.get("events"))
+        recovery = RecoveryMatrix.from_wire(raw.get("recovery"))
+        consistency_raw = _mapping("operations snapshot consistency", raw.get("consistency"))
+        consistency = dict(consistency_raw)
+        if not isinstance(consistency.get("read_model"), str):
+            raise ArgumentError("operations snapshot consistency read_model must be text")
+        for name in (
+            "cross_store_atomic",
+            "event_cursor_authoritative",
+            "clock_free",
+            "underlying_routes_remain_authoritative",
+        ):
+            if not isinstance(consistency.get(name), bool):
+                raise ArgumentError(f"operations snapshot consistency {name} must be a boolean")
+
+        capabilities_raw = _mapping("operations snapshot capabilities", raw.get("capabilities"))
+        capabilities = dict(capabilities_raw)
+        for name in ("tool_count", "resource_count"):
+            capabilities[name] = _non_negative(
+                f"operations snapshot capabilities {name}", capabilities_raw.get(name)
+            )
+        for name in (
+            "rest_tools",
+            "json_rpc",
+            "event_cursor",
+            "async_missions",
+            "mission_inventory",
+            "operations_snapshot",
+            "delivery_attempt_provenance",
+            "external_delivery_worker",
+        ):
+            candidate = capabilities_raw.get(name)
+            if not isinstance(candidate, bool):
+                raise ArgumentError(f"operations snapshot capability {name} must be a boolean")
+
+        return cls(
+            raw=raw,
+            schema=schema,
+            service=_text("operations snapshot service", raw.get("service")),
+            api_version=_text("operations snapshot api_version", raw.get("api_version")),
+            protocol_version=_text(
+                "operations snapshot protocol_version", raw.get("protocol_version")
+            ),
+            after=after,
+            limit=limit,
+            recent_events=recent_events,
+            event_metrics=event_metrics,
+            mission_summary=mission_summary,
+            mission_persistence=mission_persistence,
+            event_persistence=event_persistence,
+            recovery=recovery,
+            consistency=consistency,
+            capabilities=capabilities,
+            operator_actions=_texts(
+                "operations snapshot operator_actions", raw.get("operator_actions")
+            ),
+            guarantees=_texts("operations snapshot guarantees", raw.get("guarantees")),
+            non_claims=_texts("operations snapshot non_claims", raw.get("non_claims")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 @dataclass(frozen=True)
 class DeliveryView:
     """One signed webhook delivery plus operator-visible failure and replay state."""
@@ -720,6 +879,8 @@ __all__ = [
     "EventPersistenceStatus",
     "RecoveryBoundary",
     "RecoveryMatrix",
+    "MAX_OPERATIONS_SNAPSHOT_LIMIT",
+    "OperationsSnapshot",
     "DeliveryView",
     "DeliveryPage",
     "DeliveryAttempt",

@@ -71,12 +71,14 @@ from .developer_platform import (
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
 from .events import (
     MAX_EVENT_PAGE,
+    MAX_OPERATIONS_SNAPSHOT_LIMIT,
     DeliveryAttemptPage,
     DeliveryPage,
     DeliveryReceiptAttempts,
     DeliveryReceiptEvents,
     EventPage,
     EventPersistenceStatus,
+    OperationsSnapshot,
     RecoveryMatrix,
     RouteReviewEvidence,
     SseSnapshot,
@@ -3382,6 +3384,23 @@ class ApiClient:
 
         return RecoveryMatrix.from_wire(self.request("GET", "/v1/recovery"))
 
+    def operations_snapshot(self, *, after: int = 0, limit: int = 100) -> OperationsSnapshot:
+        """Return one bounded operator snapshot across events, missions, and recovery."""
+
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= MAX_OPERATIONS_SNAPSHOT_LIMIT
+        ):
+            raise ArgumentError(
+                f"limit must be between 1 and {MAX_OPERATIONS_SNAPSHOT_LIMIT}"
+            )
+        return OperationsSnapshot.from_wire(
+            self.request("GET", f"/v1/operations/snapshot?after={after}&limit={limit}")
+        )
+
     def flush_event_persistence(self) -> EventPersistenceStatus:
         """Force an event cursor checkpoint and return typed bounded status."""
 
@@ -3678,6 +3697,15 @@ class AsyncApiClient:
         """Async typed recovery-boundary matrix."""
 
         return await asyncio.to_thread(self.client.recovery_matrix)
+
+    async def operations_snapshot(
+        self, *, after: int = 0, limit: int = 100
+    ) -> OperationsSnapshot:
+        """Async bounded operator snapshot across events, missions, and recovery."""
+
+        return await asyncio.to_thread(
+            self.client.operations_snapshot, after=after, limit=limit
+        )
 
     async def flush_event_persistence(self) -> EventPersistenceStatus:
         """Async forced event cursor checkpoint with typed bounded status."""

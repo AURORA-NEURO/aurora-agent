@@ -7171,6 +7171,59 @@ export interface RecoveryMatrix extends JsonObject {
   links: Record<string, string>;
 }
 
+export interface OperationsSnapshotMissionSummary extends JsonObject {
+  total: number;
+  status_counts: Record<string, number>;
+  recovered_after_restart: number;
+  cancel_requested: number;
+  registry_capacity: number;
+}
+
+export interface OperationsSnapshotCapabilities extends JsonObject {
+  tool_count: number;
+  resource_count: number;
+  rest_tools: boolean;
+  json_rpc: boolean;
+  event_cursor: boolean;
+  async_missions: boolean;
+  mission_inventory: boolean;
+  operations_snapshot: boolean;
+  delivery_attempt_provenance: boolean;
+  external_delivery_worker: boolean;
+}
+
+export interface OperationsSnapshotConsistency extends JsonObject {
+  read_model: string;
+  cross_store_atomic: false;
+  event_cursor_authoritative: true;
+  clock_free: true;
+  underlying_routes_remain_authoritative: true;
+}
+
+export interface OperationsSnapshot extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-operations-snapshot/0.1";
+  service: string;
+  api_version: string;
+  protocol_version: string;
+  after: number;
+  limit: number;
+  recent_events: EventPage;
+  event_metrics: EventMetrics;
+  mission_summary: OperationsSnapshotMissionSummary;
+  persistence: {
+    missions: MissionPersistenceStatus;
+    events: EventPersistenceStatus;
+  };
+  recovery: RecoveryMatrix;
+  consistency: OperationsSnapshotConsistency;
+  capabilities: OperationsSnapshotCapabilities;
+  operator_actions: string[];
+  guarantees: string[];
+  non_claims: string[];
+  links: Record<string, string>;
+}
+
 export interface MissionStepPreflight extends JsonObject {
   id: string;
   tool: string;

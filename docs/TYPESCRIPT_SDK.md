@@ -656,9 +656,16 @@ effects; its delivery-attempt boundary is separately queryable; `automatic_resum
 `missionPersistence()` and `eventPersistence()` separately expose their checkpoint schema and
 optional content digests plus `integrity_verified`; a digest is an integrity correlation, not a
 claim of distributed consensus.
+`operationsSnapshot(after, limit)` returns the typed `OperationsSnapshot` control-plane view:
+one bounded event cursor page, event metrics, reconciled mission status counts, nested persistence
+status, the recovery matrix, compact capability flags, and explicit operator actions and
+non-claims, including the explicit non-atomic cross-store consistency declaration. It is a
+read-only dashboard/bootstrap call; it does not execute tools, resume jobs,
+send webhooks, or promote local observations into scientific or receiver-acceptance claims.
 
 ```typescript
 const page = await api.events(0, 100);
+const operations = await api.operationsSnapshot(page.page.next_after, 100);
 const stream = await api.eventStream(page.page.next_after, 100);
 const receiptEvents = await api.deliveryReceiptEvents("receipt-2026-08-1", 0, 100);
 const receiptAttempts = await api.deliveryReceiptAttempts("receipt-2026-08-1", 0, 100);

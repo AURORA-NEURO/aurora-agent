@@ -26,6 +26,7 @@ pub const DEFAULT_EVENT_CAPACITY: usize = 4096;
 pub const MAX_MISSION_JOBS: usize = 4096;
 pub const MAX_MISSION_LIST_LIMIT: usize = 256;
 pub const MAX_MISSION_TRACE_EVENTS: usize = 4096;
+pub const MAX_OPERATIONS_SNAPSHOT_LIMIT: usize = 256;
 pub const MISSION_STATE_SCHEMA_VERSION: u64 = 2;
 const LEGACY_MISSION_STATE_SCHEMA_VERSION: u64 = 1;
 pub const MAX_MISSION_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
@@ -487,6 +488,7 @@ impl ApiRouter {
             ("GET", "/v1") => self.index(),
             ("GET", "/v1/capabilities") => self.capabilities(),
             ("GET", "/v1/recovery") => self.recovery_matrix(),
+            ("GET", "/v1/operations/snapshot") => self.operations_snapshot(&request, &request_id),
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
@@ -839,6 +841,174 @@ impl ApiRouter {
         )
     }
 
+    fn operations_snapshot(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if key != "after" && key != "limit" {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "operations snapshot accepts only after and limit",
+                    request_id,
+                );
+            }
+        }
+        let after = match query_u64(&query, "after", 0) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let limit = match query_usize(&query, "limit", 100) {
+            Ok(value) if (1..=MAX_OPERATIONS_SNAPSHOT_LIMIT).contains(&value) => value,
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    &format!("limit must be between 1 and {MAX_OPERATIONS_SNAPSHOT_LIMIT}"),
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+
+        let recent_events = match self.events.lock() {
+            Ok(events) => match events.events(after, limit) {
+                Ok(page) => serde_json::to_value(page).unwrap_or_else(|_| json!({})),
+                Err(error) => return self.error(422, "invalid_query", &error, request_id),
+            },
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let metrics = self.event_metrics();
+        let mission_summary = match self.operations_mission_summary() {
+            Ok(summary) => summary,
+            Err(code) => {
+                return self.error(500, code, "mission registry is unavailable", request_id)
+            }
+        };
+        let mission_persistence = response_value(self.mission_persistence_status());
+        let event_persistence = response_value(self.event_persistence_status());
+        let recovery = response_value(self.recovery_matrix());
+        let mut operator_actions = vec![
+            "advance the event cursor with recent_events.next_after and inspect gap before claiming continuity".to_string(),
+            "use recovery.boundaries and persistence digests before treating restart state as authoritative".to_string(),
+            "treat tool completion as local evidence; verify any external delivery or scientific claim independently".to_string(),
+        ];
+        if metrics.pending_deliveries > 0 {
+            operator_actions.push(
+                "inspect pending webhook deliveries and correlated delivery attempts through the outbox routes".to_string(),
+            );
+        }
+        if self.config.event_state_path.is_none() {
+            operator_actions.push(
+                "configure event_state_path if event rows, subscriptions, outbox rows, and attempt provenance must survive restart".to_string(),
+            );
+        }
+        if self.config.mission_state_path.is_none() {
+            operator_actions.push(
+                "configure mission_state_path if terminal mission snapshots must survive restart"
+                    .to_string(),
+            );
+        }
+
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "schema": "bioprism-operations-snapshot/0.1",
+                "service": SERVER_NAME,
+                "api_version": API_VERSION,
+                "protocol_version": PROTOCOL_VERSION,
+                "after": after,
+                "limit": limit,
+                "recent_events": recent_events,
+                "event_metrics": metrics,
+                "mission_summary": mission_summary,
+                "persistence": {
+                    "missions": mission_persistence,
+                    "events": event_persistence
+                },
+                "recovery": recovery,
+                "consistency": {
+                    "read_model": "bounded composition of process-local stores",
+                    "cross_store_atomic": false,
+                    "event_cursor_authoritative": true,
+                    "clock_free": true,
+                    "underlying_routes_remain_authoritative": true
+                },
+                "capabilities": {
+                    "tool_count": bioprism_mcp::tool_definitions().len(),
+                    "resource_count": bioprism_mcp::resource_definitions().len(),
+                    "rest_tools": true,
+                    "json_rpc": true,
+                    "event_cursor": true,
+                    "async_missions": true,
+                    "mission_inventory": true,
+                    "operations_snapshot": true,
+                    "delivery_attempt_provenance": true,
+                    "external_delivery_worker": false
+                },
+                "operator_actions": operator_actions,
+                "guarantees": [
+                    "the event page is bounded by the caller-supplied cursor and the server limit",
+                    "mission counts come from the process-local authoritative registry without returning terminal reports",
+                    "persistence and recovery views retain their existing digest, integrity, and non-claim semantics",
+                    "the snapshot reports local evidence and capability boundaries; it does not execute tools or external effects"
+                ],
+                "non_claims": [
+                    "scientific validity or clinical safety",
+                    "network delivery or receiver acceptance",
+                    "automatic mission resumption",
+                    "distributed ordering, consensus, or cross-instance state"
+                ],
+                "links": {
+                    "events": "/v1/events",
+                    "missions": "/v1/missions",
+                    "recovery": "/v1/recovery",
+                    "mission_persistence": "/v1/missions/persistence",
+                    "event_persistence": "/v1/events/persistence",
+                    "capabilities": "/v1/capabilities",
+                    "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
+                }
+            }),
+        )
+    }
+
+    fn operations_mission_summary(&self) -> Result<Value, &'static str> {
+        let jobs = self
+            .mission_jobs
+            .lock()
+            .map_err(|_| "mission_registry_unavailable")?;
+        let mut status_counts = BTreeMap::<String, usize>::new();
+        let mut recovered_after_restart = 0usize;
+        let mut cancel_requested = 0usize;
+        for job in jobs.values() {
+            let state = job_state(job).map_err(|_| "mission_state_unavailable")?;
+            *status_counts.entry(state.status).or_default() += 1;
+            if state.recovered_after_restart {
+                recovered_after_restart += 1;
+            }
+            if state.cancel_requested {
+                cancel_requested += 1;
+            }
+        }
+        Ok(json!({
+            "total": jobs.len(),
+            "status_counts": status_counts,
+            "recovered_after_restart": recovered_after_restart,
+            "cancel_requested": cancel_requested,
+            "registry_capacity": MAX_MISSION_JOBS
+        }))
+    }
+
     fn flush_event_persistence(&self, request_id: &str) -> HttpResponse {
         if self.config.event_state_path.is_none() {
             return self.error(
@@ -929,6 +1099,7 @@ impl ApiRouter {
                     "openapi": "/v1/openapi.json",
                     "capabilities": "/v1/capabilities",
                     "recovery": "/v1/recovery",
+                    "operations_snapshot": "/v1/operations/snapshot",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
                     "mission_persistence": "/v1/missions/persistence",
@@ -967,6 +1138,7 @@ impl ApiRouter {
                     "delivery_receipt_attempt_provenance": true,
                     "route_review_evidence": true,
                     "recovery_matrix": true,
+                    "operations_snapshot": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
@@ -2470,6 +2642,7 @@ impl ApiRouter {
                     "/readyz": { "get": { "responses": { "200": { "description": "readiness" } } } },
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
                     "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
+                    "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
@@ -2507,6 +2680,15 @@ impl ApiRouter {
 
 fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
     job.state.lock().map(|state| state.clone()).map_err(|_| ())
+}
+
+fn response_value(response: HttpResponse) -> Value {
+    serde_json::from_slice(&response.body).unwrap_or_else(|_| {
+        json!({
+            "ok": false,
+            "error": "internal response could not be represented as JSON"
+        })
+    })
 }
 
 fn mission_checkpoint_digest(document: &Value) -> Result<String, String> {
@@ -3361,6 +3543,66 @@ mod tests {
         assert_eq!(matrix["observed"]["retained_events"], 0);
         let _ = std::fs::remove_file(mission_path);
         let _ = std::fs::remove_file(event_path);
+    }
+
+    #[test]
+    fn operations_snapshot_composes_bounded_operator_evidence() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let event = router.handle(request("POST", "/v1/tools/modality_catalog", json!({})));
+        assert_eq!(event.status, 200);
+
+        let response = router.handle(request(
+            "GET",
+            "/v1/operations/snapshot?after=0&limit=1",
+            json!({}),
+        ));
+        assert_eq!(response.status, 200);
+        let snapshot: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(snapshot["schema"], "bioprism-operations-snapshot/0.1");
+        assert_eq!(snapshot["after"], 0);
+        assert_eq!(snapshot["limit"], 1);
+        assert_eq!(
+            snapshot["recent_events"]["events"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(snapshot["event_metrics"]["retained_events"], 1);
+        assert_eq!(snapshot["mission_summary"]["total"], 0);
+        assert_eq!(snapshot["persistence"]["events"]["enabled"], false);
+        assert_eq!(snapshot["recovery"]["automatic_resume"], false);
+        assert_eq!(snapshot["consistency"]["cross_store_atomic"], false);
+        assert_eq!(snapshot["consistency"]["clock_free"], true);
+        assert_eq!(snapshot["capabilities"]["operations_snapshot"], true);
+        assert!(snapshot["operator_actions"].as_array().unwrap().len() >= 3);
+        assert!(snapshot["non_claims"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| {
+                item.as_str()
+                    .is_some_and(|value| value.contains("network delivery"))
+            }));
+    }
+
+    #[test]
+    fn operations_snapshot_rejects_unbounded_or_unknown_queries() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let too_large = router.handle(request(
+            "GET",
+            "/v1/operations/snapshot?limit=257",
+            json!({}),
+        ));
+        assert_eq!(too_large.status, 422);
+        let unknown = router.handle(request(
+            "GET",
+            "/v1/operations/snapshot?status=running",
+            json!({}),
+        ));
+        assert_eq!(unknown.status, 400);
     }
 
     #[test]

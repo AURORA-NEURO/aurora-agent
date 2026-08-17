@@ -260,6 +260,7 @@ import type {
   MissionRouteSelection,
   MissionTracePage,
   MissionWaitOptions,
+  OperationsSnapshot,
   RecoveryMatrix,
   RepositoryBundleArgs,
   RepositoryCatalogArgs,
@@ -412,6 +413,24 @@ export class ApiClient {
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */
   async recoveryMatrix(options?: ClientRequestOptions): Promise<RecoveryMatrix> {
     return this.request<RecoveryMatrix>("GET", "/v1/recovery", undefined, options);
+  }
+
+  /** Inspect one bounded operator snapshot across events, missions, persistence, and recovery. */
+  async operationsSnapshot(
+    after = 0,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<OperationsSnapshot> {
+    cursor(after, "after");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) {
+      throw new ArgumentError("limit must be 1..=256");
+    }
+    return this.request<OperationsSnapshot>(
+      "GET",
+      `/v1/operations/snapshot?after=${after}&limit=${limit}`,
+      undefined,
+      options,
+    );
   }
 
   async tools(options?: ClientRequestOptions): Promise<ToolsResponse["tools"]> {
