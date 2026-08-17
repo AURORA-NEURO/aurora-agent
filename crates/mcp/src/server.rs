@@ -129,15 +129,17 @@ use bioprism_devplat::{
     build_domain_acquisition_catalogue, build_domain_workflow_catalogue,
     execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload,
-    normalize_domain_evidence_provider, plan_domain_evidence_source, plan_mission,
-    reconcile_domain_workflow, record_domain_evidence_provider_external_payload, run_workbench,
-    scaffold_domain_workflow, standard_walkthroughs, verify_delivery_receipt,
+    normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
+    plan_domain_evidence_source, plan_mission, reconcile_domain_workflow,
+    record_domain_evidence_provider_external_payload, run_workbench, scaffold_domain_workflow,
+    standard_walkthroughs, verify_delivery_receipt,
     verify_domain_evidence_provider_external_payload_replay,
     verify_domain_evidence_provider_replay, verify_mission_evidence_bundle, ArtifactRegistry,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
     CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
     DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
-    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadReceiptRequest,
+    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DomainEvidenceProviderExternalPayloadReceiptRequest,
     DomainEvidenceProviderExternalPayloadReplayRequest, DomainEvidenceProviderHandoffRequest,
     DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
     DomainWorkflowReconciliationRegistry, EngineeringManifest, EngineeringPlanRequest,
@@ -150,7 +152,10 @@ use bioprism_devplat::{
     DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA,
@@ -1403,6 +1408,9 @@ impl Server {
             }
             "domain_evidence_provider_external_payload_replay_verify" => {
                 self.domain_evidence_provider_external_payload_replay_verify(&arguments)
+            }
+            "domain_evidence_provider_external_payload_normalize" => {
+                self.domain_evidence_provider_external_payload_normalize(&arguments)
             }
             "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
@@ -3699,6 +3707,96 @@ impl Server {
             "does_not_claim": [
                 "external-store accessibility, byte re-reading, decryption, or provider contact",
                 "payload or provider authenticity, retention, scientific, clinical, provenance, or release validity"
+            ]
+        }))
+    }
+
+    /// Materialize a bounded caller-owned JSON payload against an external receipt, then pass
+    /// the digest-verified value through ordinary provider normalization and domain intake.
+    /// Neither this bridge nor the receipt registration opens the caller locator.
+    fn domain_evidence_provider_external_payload_normalize(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode external payload normalization input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "external payload normalization input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadNormalizationRequest =
+            serde_json::from_value(arguments.clone()).map_err(|error| {
+                format!("invalid external payload normalization input: {error}")
+            })?;
+        let bridged = normalize_domain_evidence_provider_external_payload(&request)
+            .map_err(|error| format!("external payload normalization refused: {error}"))?;
+        let receipt_artifact = serde_json::to_value(&bridged.receipt)
+            .map_err(|error| format!("cannot encode external payload receipt artifact: {error}"))?;
+        let mut receipt_parents = bridged.receipt.parent_digests.clone();
+        receipt_parents.push(bridged.receipt.handoff_digest.clone());
+        let receipt_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload",
+                "subject_id": bridged.receipt.subject_id,
+                "domains": bridged.receipt.domains,
+                "parent_digests": receipt_parents,
+                "declared_digest": bridged.receipt.receipt_digest,
+                "artifact": receipt_artifact
+            }
+        }))?;
+        let intake = self.domain_evidence_intake(&bridged.normalization.intake_arguments)?;
+        let catalogue_digest = intake
+            .get("catalogue_digest")
+            .and_then(Value::as_str)
+            .ok_or("external payload normalization intake omitted catalogue_digest")?;
+        let normalization = &bridged.normalization;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
+            "group_id": normalization.group_id,
+            "domains": normalization.domains,
+            "subject_id": normalization.subject_id,
+            "source_tool": normalization.source_tool,
+            "connector_kind": normalization.connector_kind,
+            "provider": normalization.provider,
+            "outcome": normalization.outcome,
+            "payload_digest": normalization.payload_digest,
+            "request_digest": normalization.request_digest,
+            "response": normalization.response,
+            "shape_audit": normalization.shape_audit,
+            "record_index": normalization.record_index,
+            "normalization": normalization,
+            "receipt": bridged.receipt,
+            "receipt_digest": bridged.receipt.receipt_digest,
+            "materialization": {
+                "mode": "canonical_json",
+                "matched": true,
+                "materialized_payload_digest": bridged.materialized_payload_digest,
+                "receipt_payload_digest": bridged.receipt.payload_digest,
+                "receipt_byte_length": bridged.receipt.byte_length,
+                "receipt_content_encoding": bridged.receipt.content_encoding,
+                "locator_opened": false
+            },
+            "intake": intake,
+            "artifact_registry": intake.get("artifact_registry"),
+            "receipt_artifact_registry": receipt_registry,
+            "catalogue_digest": catalogue_digest,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "the caller-materialized canonical JSON digest exactly matches the external receipt payload digest",
+                "the verified materialization uses the ordinary provider shape audit and catalogue-bound intake path",
+                "the external locator remains unopened and the receipt remains an explicit lineage parent"
+            ],
+            "does_not_claim": [
+                "external-store accessibility, transfer completion, decryption, or byte inspection beyond the supplied materialization",
+                "provider authenticity, payload authenticity, scientific, clinical, causal, provenance, regulatory, or release validity",
+                "execution or external effects; readiness remains false"
             ]
         }))
     }
@@ -30195,6 +30293,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_provider_connector_handoff",
         "domain_evidence_provider_external_payload_receipt",
         "domain_evidence_provider_external_payload_replay_verify",
+        "domain_evidence_provider_external_payload_normalize",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -30679,6 +30778,42 @@ pub fn tool_definitions() -> Vec<Value> {
                     "expected_byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator", "expected_receipt_digest", "expected_handoff_digest", "expected_payload_digest", "expected_byte_length"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_normalize",
+            "description": "Materialize a bounded caller-owned JSON provider payload against an external receipt, require its canonical JSON digest to match the receipt payload digest, and then route it through ordinary provider shape auditing and catalogue-bound intake. The bridge never opens the caller locator, copies an out-of-line payload implicitly, authenticates a provider, or claims readiness.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string" },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string" },
+                    "transfer_id": { "type": "string" },
+                    "payload_digest": { "type": "string", "description": "Receipt digest of the canonical JSON representation supplied in payload." },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string" },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"], "default": "unknown" },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"], "default": "unknown" },
+                    "attempt_id": { "type": ["string", "null"] },
+                    "payload": { "type": ["object", "array"], "description": "Explicit bounded JSON materialization; its canonical digest must equal payload_digest." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"] },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"], "default": "unknown" },
+                    "claim_posture": { "type": "object" },
+                    "source_plan_digest": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator", "payload"]
             }
         }),
         json!({

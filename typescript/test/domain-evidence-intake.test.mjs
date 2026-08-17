@@ -429,6 +429,42 @@ const providerExternalReplay = {
   does_not_claim: ["store accessibility"],
 };
 
+const providerExternalNormalizationArgs = {
+  ...providerExternalReceiptArgs,
+  payload: { records: [{ id: "pmid:1", title: "opaque" }] },
+  outcome: "observed",
+};
+
+const providerExternalNormalization = {
+  ok: true,
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-normalization/0.1",
+  workflow: "domain_evidence_provider_external_payload_normalize",
+  group_id: "biological_domains",
+  domains: ["oncology"],
+  subject_id: "provider-ts",
+  source_tool: "literature_bind_check",
+  connector_kind: "literature",
+  provider: "pubmed",
+  outcome: "observed",
+  payload_digest: "b".repeat(64),
+  request_digest: null,
+  response: { provider: "pubmed", payload_digest: "b".repeat(64) },
+  shape_audit: {},
+  record_index: {},
+  normalization: {},
+  receipt: providerExternalReceipt.receipt,
+  receipt_digest: "e".repeat(64),
+  materialization: { mode: "canonical_json", matched: true, materialized_payload_digest: "b".repeat(64), locator_opened: false },
+  intake: {},
+  artifact_registry: { created: true, indexed: true },
+  receipt_artifact_registry: { created: true, indexed: true },
+  catalogue_digest: "f".repeat(64),
+  readiness_claimed: false,
+  execution: "not_started",
+  guarantees: [],
+  does_not_claim: ["provider authenticity"],
+};
+
 test("domain evidence intake REST and tool clients preserve exact envelope metadata", async () => {
   const seen = [];
   const client = new ApiClient({
@@ -449,6 +485,7 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
       if (url.pathname === "/v1/tools/domain_evidence_provider_connector_handoff") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_connector_handoff", mcp: { result: { structuredContent: providerHandoff } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_provider_external_payload_receipt") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_external_payload_receipt", mcp: { result: { structuredContent: providerExternalReceipt } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_provider_external_payload_replay_verify") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_external_payload_replay_verify", mcp: { result: { structuredContent: providerExternalReplay } } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/tools/domain_evidence_provider_external_payload_normalize") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_external_payload_normalize", mcp: { result: { structuredContent: providerExternalNormalization } } }), { status: 200, headers: { "content-type": "application/json" } });
       throw new Error(`unexpected path ${url.pathname}`);
     },
   });
@@ -472,6 +509,8 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   assert.equal((await client.domainEvidenceProviderExternalPayloadReceiptTool(providerExternalReceiptArgs)).mcp.result.structuredContent.receipt.byte_length, 4096);
   assert.equal((await client.domainEvidenceProviderExternalPayloadReplayVerify(providerExternalReplayArgs)).mcp.result.structuredContent.replay_status, "matched");
   assert.equal((await client.domainEvidenceProviderExternalPayloadReplayVerifyTool(providerExternalReplayArgs)).mcp.result.structuredContent.replay.matches.receipt_digest, true);
+  assert.equal((await client.domainEvidenceProviderExternalPayloadNormalize(providerExternalNormalizationArgs)).mcp.result.structuredContent.materialization.locator_opened, false);
+  assert.equal((await client.domainEvidenceProviderExternalPayloadNormalizeTool(providerExternalNormalizationArgs)).mcp.result.structuredContent.outcome, "observed");
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");
   assert.equal(seen[2].url.searchParams.get("include_intake_digests"), "true");
   assert.equal(seen[4].url.pathname, "/v1/domain-evidence/sources");
@@ -518,6 +557,10 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   );
   await assert.rejects(
     client.domainEvidenceProviderExternalPayloadReplayVerify({ ...providerExternalReplayArgs, payload: { records: [] } }),
+    ArgumentError,
+  );
+  await assert.rejects(
+    client.domainEvidenceProviderExternalPayloadNormalize({ ...providerExternalNormalizationArgs, credential_material: "never" }),
     ArgumentError,
   );
 });

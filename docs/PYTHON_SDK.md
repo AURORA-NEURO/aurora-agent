@@ -122,6 +122,9 @@ the receipt does not prove that the external object can be fetched or decrypted.
 `DomainEvidenceProviderExternalPayloadReplayVerificationReport` add a metadata-only replay
 check for the receipt digest, handoff digest, payload digest, and byte length. Matching and drift
 remain explicit, and the helper never fetches or inspects caller-managed storage.
+`DomainEvidenceProviderExternalPayloadNormalizationRequest` adds the explicit materialization
+bridge: the caller supplies bounded JSON, while the core verifies its canonical digest and byte
+length against the receipt before reusing the ordinary normalization and intake report helpers.
 
 ## Lifecycle
 

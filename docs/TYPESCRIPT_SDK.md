@@ -17,6 +17,9 @@ core, while `available`, `durable`, and `not_started` stay explicitly typed.
 `domainEvidenceProviderExternalPayloadReplayVerify()` compares the retained receipt digest,
 handoff digest, payload digest, and byte length without opening the caller locator; its typed
 result exposes each match dimension and preserves the mismatch/non-readiness boundary.
+`domainEvidenceProviderExternalPayloadNormalize()` carries the bounded caller-materialization
+contract into the typed SDK and exposes receipt/materialization/intake lineage while retaining
+the digest, locator, and readiness boundaries.
 
 The repository ships `typescript/`, a small ESM package for clients that can use the standard
 Fetch API. It is intentionally an integration layer over `bioprism-api`, not a second domain

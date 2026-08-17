@@ -282,6 +282,11 @@ digest, byte length, transfer identity, storage backend, locator class/reference
 availability, retention, and the connector-handoff parent. The receipt is durably indexed and
 snapshot-verified, but the core never opens the locator, fetches, decrypts, or inspects the bytes;
 `available` and `durable` remain caller assertions until an external executor proves otherwise.
+`POST /v1/tools/domain_evidence_provider_external_payload_normalize` is the explicit materialized
+path: callers supply a bounded canonical JSON value, the core recomputes its digest and byte
+length against the external receipt, then passes the verified value through provider shape audit
+and catalogue-bound intake. A digest or byte-length mismatch is refused; the locator is never
+opened and readiness remains false.
 `POST /v1/tools/domain_evidence_provider_external_payload_replay_verify` re-checks the retained
 receipt's handoff digest, payload digest, byte length, and canonical receipt digest against
 caller-supplied expectations. It is metadata-only, never opens the locator, and records both a

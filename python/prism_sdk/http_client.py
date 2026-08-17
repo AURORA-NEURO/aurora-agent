@@ -79,8 +79,11 @@ from .domain_evidence_provider_external import (
     DomainEvidenceProviderExternalPayloadReceiptRequest,
     DomainEvidenceProviderExternalPayloadReplayRequest,
     DomainEvidenceProviderExternalPayloadReplayVerificationReport,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DomainEvidenceProviderExternalPayloadNormalizationReport,
     domain_evidence_provider_external_payload_receipt_report,
     domain_evidence_provider_external_payload_replay_verification_report,
+    domain_evidence_provider_external_payload_normalization_report,
 )
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
@@ -1210,6 +1213,38 @@ class ApiClient:
         return domain_evidence_provider_external_payload_replay_verification_report(
             self.call_tool(
                 "domain_evidence_provider_external_payload_replay_verify", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_normalize(
+        self,
+        request: DomainEvidenceProviderExternalPayloadNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadNormalizationRequest)
+            else DomainEvidenceProviderExternalPayloadNormalizationRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_normalization_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_normalize",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_normalize_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadNormalizationRequest)
+            else DomainEvidenceProviderExternalPayloadNormalizationRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_normalization_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_normalize", normalized.to_mcp_arguments()
             )
         )
 
@@ -5144,6 +5179,22 @@ class AsyncApiClient:
     ) -> DomainEvidenceProviderExternalPayloadReplayVerificationReport:
         return await asyncio.to_thread(
             self.client.domain_evidence_provider_external_payload_replay_verify_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_normalize(
+        self,
+        request: DomainEvidenceProviderExternalPayloadNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_normalize, request
+        )
+
+    async def domain_evidence_provider_external_payload_normalize_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_normalize_tool, request
         )
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:

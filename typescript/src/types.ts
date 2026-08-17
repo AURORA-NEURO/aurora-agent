@@ -5268,6 +5268,45 @@ export interface DomainEvidenceProviderExternalPayloadReplayVerifyResult extends
   does_not_claim: string[];
 }
 
+export interface DomainEvidenceProviderExternalPayloadNormalizationArgs extends DomainEvidenceProviderExternalPayloadReceiptArgs {
+  payload: JsonObject | JsonValue[];
+  request?: JsonValue;
+  outcome?: DomainEvidenceIntakeOutcome;
+  claim_posture?: DomainReportClaimPosture;
+  parent_digests?: string[];
+  source_plan_digest?: string | null;
+}
+
+export interface DomainEvidenceProviderExternalPayloadNormalizationResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-normalization/0.1";
+  workflow: "domain_evidence_provider_external_payload_normalize";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  provider: string;
+  outcome: DomainEvidenceIntakeOutcome;
+  payload_digest: string;
+  request_digest: string | null;
+  response: JsonObject;
+  shape_audit: DomainEvidenceProviderShapeAudit;
+  record_index: DomainEvidenceProviderRecordIndex;
+  normalization: JsonObject;
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  receipt_digest: string;
+  materialization: JsonObject;
+  intake: JsonObject;
+  artifact_registry: JsonObject;
+  receipt_artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
   candidate_fields: string[];
   present_record_count: number;

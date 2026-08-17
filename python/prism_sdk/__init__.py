@@ -85,13 +85,18 @@ from .domain_evidence_provider_external import (
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
     MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_BYTES,
     DomainEvidenceProviderExternalPayloadReceiptReport,
     DomainEvidenceProviderExternalPayloadReceiptRequest,
     DomainEvidenceProviderExternalPayloadReplayRequest,
     DomainEvidenceProviderExternalPayloadReplayVerificationReport,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DomainEvidenceProviderExternalPayloadNormalizationReport,
     domain_evidence_provider_external_payload_receipt_report,
     domain_evidence_provider_external_payload_replay_verification_report,
+    domain_evidence_provider_external_payload_normalization_report,
 )
 from .analytics import (
     AnalyticsDirection,

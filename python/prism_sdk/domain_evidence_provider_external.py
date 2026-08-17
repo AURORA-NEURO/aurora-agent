@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+import json
+from typing import Any, Mapping, Sequence
 
 from .artifacts import _digest, _mapping, _text
 from .capability import _route_strings, _route_text, _tool_payload
+from .domain_evidence_provider import (
+    DomainEvidenceProviderNormalizationReport,
+    domain_evidence_provider_normalization_report,
+)
 from .domain_reports import _bounded_text_list
 from .errors import ArgumentError
 
@@ -14,6 +19,8 @@ DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA = "bioprism-devplat-domain-evid
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW = "domain_evidence_provider_external_payload_receipt"
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA = "bioprism-devplat-domain-evidence-provider-external-payload-replay/0.1"
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW = "domain_evidence_provider_external_payload_replay_verify"
+DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA = "bioprism-devplat-domain-evidence-provider-external-payload-normalization/0.1"
+DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW = "domain_evidence_provider_external_payload_normalize"
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_CONNECTOR_KINDS = (
     "literature", "clinical_trial", "fhir", "object_store", "provider_api"
 )
@@ -24,6 +31,7 @@ DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LOCATOR_KINDS = ("opaque", "uri", "pat
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_AVAILABILITIES = ("available", "partial", "missing", "unknown")
 DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_RETENTIONS = ("ephemeral", "durable", "unknown")
 MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_BYTES = 64 * 1024 * 1024 * 1024
+_MISSING = object()
 
 
 def _lower_digest(name: str, value: Any) -> str:
@@ -36,6 +44,13 @@ def _reject_unknown(name: str, raw: Mapping[str, Any], allowed: set[str]) -> Non
     unknown = sorted(set(raw) - allowed)
     if unknown:
         raise ArgumentError(f"{name} contains unsupported fields: {', '.join(unknown)}")
+
+
+def _json_value(name: str, value: Any) -> None:
+    try:
+        json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError) as error:
+        raise ArgumentError(f"{name} must be JSON serializable") from error
 
 
 @dataclass(frozen=True)
@@ -333,6 +348,125 @@ class DomainEvidenceProviderExternalPayloadReplayVerificationReport:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class DomainEvidenceProviderExternalPayloadNormalizationRequest:
+    """Explicitly materialize a canonical JSON payload for receipt-verified normalization."""
+
+    receipt: DomainEvidenceProviderExternalPayloadReceiptRequest
+    payload: Any
+    request: Any = _MISSING
+    outcome: str = "unknown"
+    claim_posture: Mapping[str, Any] | None = None
+    parent_digests: tuple[str, ...] = ()
+    source_plan_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.payload, (Mapping, Sequence)) or isinstance(self.payload, (str, bytes)):
+            raise ArgumentError("external provider payload materialization must be an object or array")
+        _json_value("external provider payload materialization", self.payload)
+        if self.request is not _MISSING:
+            _json_value("external provider normalization request", self.request)
+        if self.claim_posture is not None:
+            _json_value("external provider normalization claim_posture", self.claim_posture)
+        if len(self.parent_digests) > 128:
+            raise ArgumentError("external provider normalization parent_digests must contain at most 128 values")
+        for parent in self.parent_digests:
+            _lower_digest("external provider normalization parent digest", parent)
+        if self.source_plan_digest is not None:
+            _lower_digest("external provider normalization source_plan_digest", self.source_plan_digest)
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceProviderExternalPayloadNormalizationRequest":
+        raw = _mapping("external provider payload normalization request", value)
+        extras = {"payload", "request", "outcome", "claim_posture", "parent_digests", "source_plan_digest"}
+        receipt_raw = {name: item for name, item in raw.items() if name not in extras}
+        return cls(
+            receipt=DomainEvidenceProviderExternalPayloadReceiptRequest.from_wire(receipt_raw),
+            payload=raw.get("payload"),
+            request=raw["request"] if "request" in raw else _MISSING,
+            outcome=_route_text("external provider normalization outcome", raw.get("outcome", "unknown")),
+            claim_posture=raw.get("claim_posture"),
+            parent_digests=_bounded_text_list("external provider normalization parent_digests", raw.get("parent_digests", []), maximum=128),
+            source_plan_digest=(
+                None
+                if raw.get("source_plan_digest") is None
+                else _lower_digest("external provider normalization source_plan_digest", raw.get("source_plan_digest"))
+            ),
+        )
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result = {
+            **self.receipt.to_mcp_arguments(),
+            "payload": self.payload,
+            "outcome": self.outcome,
+            "parent_digests": list(self.parent_digests),
+        }
+        if self.request is not _MISSING:
+            result["request"] = self.request
+        if self.claim_posture is not None:
+            result["claim_posture"] = dict(self.claim_posture)
+        if self.source_plan_digest is not None:
+            result["source_plan_digest"] = self.source_plan_digest
+        return result
+
+
+@dataclass(frozen=True)
+class DomainEvidenceProviderExternalPayloadNormalizationReport:
+    raw: dict[str, Any]
+    receipt: Mapping[str, Any]
+    receipt_digest: str
+    materialized_payload_digest: str
+    materialization: Mapping[str, Any]
+    normalization: DomainEvidenceProviderNormalizationReport
+    intake: Mapping[str, Any]
+    artifact_registry: Mapping[str, Any]
+    receipt_artifact_registry: Mapping[str, Any]
+    catalogue_digest: str
+    readiness_claimed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceProviderExternalPayloadNormalizationReport":
+        raw = _tool_payload(value, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW)
+        if raw.get("ok") is not True or raw.get("readiness_claimed") is not False:
+            raise ArgumentError("external provider payload normalization is not successful or ready")
+        receipt = _mapping("external provider normalization receipt", raw.get("receipt"))
+        materialization = _mapping("external provider normalization materialization", raw.get("materialization"))
+        if materialization.get("matched") is not True or materialization.get("locator_opened") is not False:
+            raise ArgumentError("external provider materialization must be digest-matched and unopened")
+        receipt_digest = _lower_digest("external provider normalization receipt_digest", raw.get("receipt_digest"))
+        materialized_digest = _lower_digest("external provider normalization materialized_payload_digest", raw.get("materialized_payload_digest"))
+        if materialized_digest != _lower_digest("external provider normalization materialization digest", materialization.get("materialized_payload_digest")):
+            raise ArgumentError("external provider materialization digest fields disagree")
+        artifact_registry = _mapping("external provider normalization artifact registry", raw.get("artifact_registry"))
+        receipt_artifact_registry = _mapping("external provider normalization receipt registry", raw.get("receipt_artifact_registry"))
+        if artifact_registry.get("indexed") is not True:
+            raise ArgumentError("external provider normalization intake artifact is not indexed")
+        if receipt_artifact_registry.get("ok") is not True or not (
+            receipt_artifact_registry.get("created") is True
+            or receipt_artifact_registry.get("already_present") is True
+        ):
+            raise ArgumentError("external provider normalization receipt artifact was not registered")
+        normalization_raw = dict(raw)
+        normalization_raw["workflow"] = "domain_evidence_provider_normalize"
+        normalization = domain_evidence_provider_normalization_report(normalization_raw)
+        return cls(
+            raw=raw,
+            receipt=receipt,
+            receipt_digest=receipt_digest,
+            materialized_payload_digest=materialized_digest,
+            materialization=materialization,
+            normalization=normalization,
+            intake=_mapping("external provider normalization intake", raw.get("intake")),
+            artifact_registry=artifact_registry,
+            receipt_artifact_registry=receipt_artifact_registry,
+            catalogue_digest=_lower_digest("external provider normalization catalogue_digest", raw.get("catalogue_digest")),
+            readiness_claimed=False,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def domain_evidence_provider_external_payload_receipt_report(value: Mapping[str, Any]) -> DomainEvidenceProviderExternalPayloadReceiptReport:
     return DomainEvidenceProviderExternalPayloadReceiptReport.from_wire(value)
 
@@ -341,11 +475,17 @@ def domain_evidence_provider_external_payload_replay_verification_report(value: 
     return DomainEvidenceProviderExternalPayloadReplayVerificationReport.from_wire(value)
 
 
+def domain_evidence_provider_external_payload_normalization_report(value: Mapping[str, Any]) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+    return DomainEvidenceProviderExternalPayloadNormalizationReport.from_wire(value)
+
+
 __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA",
+    "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_CONNECTOR_KINDS",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_STORAGE_BACKENDS",
     "DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LOCATOR_KINDS",
@@ -358,4 +498,7 @@ __all__ = [
     "DomainEvidenceProviderExternalPayloadReplayRequest",
     "DomainEvidenceProviderExternalPayloadReplayVerificationReport",
     "domain_evidence_provider_external_payload_replay_verification_report",
+    "DomainEvidenceProviderExternalPayloadNormalizationRequest",
+    "DomainEvidenceProviderExternalPayloadNormalizationReport",
+    "domain_evidence_provider_external_payload_normalization_report",
 ]

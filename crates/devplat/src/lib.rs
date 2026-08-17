@@ -218,6 +218,7 @@ pub mod domain_evidence;
 pub mod domain_evidence_intake;
 pub mod domain_evidence_provider;
 pub mod domain_evidence_provider_external;
+pub mod domain_evidence_provider_external_normalization;
 pub mod domain_evidence_provider_handoff;
 pub mod domain_evidence_source;
 pub mod domain_evidence_source_execution;
@@ -342,6 +343,14 @@ pub use domain_evidence_provider_external::{
     MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_DOMAINS,
     MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_PARENTS,
     MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_TEXT_BYTES,
+};
+pub use domain_evidence_provider_external_normalization::{
+    normalize_domain_evidence_provider_external_payload,
+    DomainEvidenceProviderExternalPayloadNormalization,
+    DomainEvidenceProviderExternalPayloadNormalizationError,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
 };
 pub use domain_evidence_provider_handoff::{
     handoff_domain_evidence_provider, DomainEvidenceProviderAuthPosture,
