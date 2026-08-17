@@ -204,6 +204,7 @@ class EventPersistenceStatus:
     file_present: bool
     file_bytes: int | None
     schema_version: int
+    state_digest: str | None
     max_file_bytes: int
     retained_events: int
     next_event_id: int
@@ -227,6 +228,15 @@ class EventPersistenceStatus:
         file_bytes = raw.get("file_bytes")
         if file_bytes is not None:
             file_bytes = _non_negative("event persistence file_bytes", file_bytes)
+        state_digest = raw.get("state_digest")
+        if state_digest is not None and (
+            not isinstance(state_digest, str)
+            or len(state_digest) != 64
+            or any(character not in "0123456789abcdef" for character in state_digest)
+        ):
+            raise ArgumentError(
+                "event persistence state_digest must be 64 lowercase hexadecimal characters"
+            )
         subscriptions_durable = raw.get("subscriptions_durable")
         webhook_deliveries_durable = raw.get("webhook_deliveries_durable")
         secrets_persisted = raw.get("secrets_persisted", False)
@@ -243,6 +253,7 @@ class EventPersistenceStatus:
             file_present,
             file_bytes,
             non_negative("schema_version"),
+            state_digest,
             non_negative("max_file_bytes"),
             non_negative("retained_events"),
             non_negative("next_event_id"),

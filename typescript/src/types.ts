@@ -7083,6 +7083,7 @@ export interface EventPersistenceStatus extends JsonObject {
   file_present: boolean;
   file_bytes: number | null;
   schema_version: number;
+  state_digest: string | null;
   max_file_bytes: number;
   retained_events: number;
   next_event_id: number;

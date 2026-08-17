@@ -318,7 +318,10 @@ and acknowledgement. `--mission-state` adds an optional bounded, atomic checkpoi
 status, progress, traces, and size-limited result metadata; interrupted queued/running missions
 are marked failed after restart instead of being falsely resumed. `--event-state` checkpoints
 retained events, subscription metadata, and signed pending outbox rows while never persisting
-webhook secrets; restored subscriptions pause until an explicit in-memory `/rebind` call. It deliberately reports
+webhook secrets; the current schema-3 checkpoint is content-addressed with a SHA-256
+`state_digest`, and startup rejects tampering before restoring rows. Schema-1 and schema-2
+checkpoints remain readable for migration and are upgraded on the next flush. Restored
+subscriptions pause until an explicit in-memory `/rebind` call. It deliberately reports
 gRPC, TLS termination, distributed scheduling, and external delivery as absent rather than
 inferring them from an HTTP listener.
 Embedded Rust consumers can plug an egress-controlled `DeliverySender` into

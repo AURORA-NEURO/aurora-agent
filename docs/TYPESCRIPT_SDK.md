@@ -674,16 +674,18 @@ The SSE route is a bounded snapshot, not a streaming connection. `eventStream` r
 text, parsed events, content type, and next cursor so an application can decide whether to poll,
 persist, or hand off to a real EventSource implementation. The webhook methods only manage the
 server-side outbox. They do not send to endpoint URLs, retry on their own, or expose subscription
-secrets. Event-state checkpoints can restore metadata and signed pending rows, but restored
+secrets. Event-state persistence status exposes the optional content `state_digest` for operator
+correlation. Event-state checkpoints can restore metadata and signed pending rows, but restored
 subscriptions remain paused until `rebindSubscription` supplies the secret again.
 
 ## Compatibility posture
 
 The API's `capabilities` response is the runtime compatibility anchor. Clients should check
 `tool_count`, transport flags, and limits before enabling a workflow. REST and JSON-RPC calls share
-the same in-process dispatcher, but gRPC, TLS termination, durable event storage, and an external
-delivery worker remain deployment responsibilities. A client must not infer those features from
-the presence of an HTTP listener.
+the same in-process dispatcher, but gRPC, TLS termination, distributed event consensus, and an
+external delivery worker remain deployment responsibilities. The optional event-state file is a
+bounded local checkpoint with explicit migration and secret-rebind semantics; a client must not
+infer distributed durability or outbound delivery from the presence of an HTTP listener.
 
 ## Engineering manifest audit
 

@@ -155,6 +155,9 @@ excludes webhook secrets: restored subscriptions pause with `secret_rebind_requi
 rows until an explicit in-memory rebind re-signs them. The API and both SDKs expose status/flush
 and rebind checks so operators can verify the recovery boundary instead of inferring it from a
 2xx response.
+Schema 3 adds a content SHA-256 digest over the unsigned checkpoint document; schema 1 and
+schema 2 are accepted as migration inputs, while tampered schema-3 files are rejected before
+any state is restored.
 The API crate also exposes a bounded `DeliverySender`/`ApiRouter::deliver_once` cycle for embedded
 workers: successful signed sends are acknowledged, retryable failures advance through the existing
 ten-attempt cap, and permanent or exhausted failures remain pending. Network/TLS and egress policy

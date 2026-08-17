@@ -87,8 +87,12 @@ report `secret_rebind_required` until `POST /v1/webhooks/subscriptions/{id}/rebi
 fresh secret in memory; rebind re-signs pending envelopes and reactivates that subscription.
 `GET /v1/events/persistence` and its authenticated `POST /v1/events/persistence/flush` counterpart
 expose the file bound, cursor metrics, durability fields, and explicit secret policy.
-Event persistence and mission persistence are independent: an operator can enable either, both,
-or neither.
+The writer currently emits event-state schema 3, which binds every persisted field except the
+digest itself to a lowercase SHA-256 `state_digest`; startup rejects a modified, truncated, or
+partially rewritten schema-3 document before restoring any rows. Schema 1 and schema 2 snapshots
+remain readable as bounded migrations without a digest, and the next successful flush upgrades
+them to schema 3. Event persistence and mission persistence are independent: an operator can
+enable either, both, or neither.
 
 ## Asynchronous missions
 

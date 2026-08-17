@@ -603,6 +603,18 @@ impl ApiRouter {
             .and_then(|path| std::fs::metadata(path).ok())
             .map(|metadata| metadata.len());
         let metrics = self.event_metrics();
+        let state_digest = self
+            .config
+            .event_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .and_then(|document| {
+                document
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
         HttpResponse::json(
             200,
             &json!({
@@ -611,6 +623,7 @@ impl ApiRouter {
                 "file_present": file_bytes.is_some(),
                 "file_bytes": file_bytes,
                 "schema_version": EVENT_STATE_SCHEMA_VERSION,
+                "state_digest": state_digest,
                 "max_file_bytes": MAX_EVENT_STATE_FILE_BYTES,
                 "retained_events": metrics.retained_events,
                 "next_event_id": metrics.next_event_id,
@@ -2887,7 +2900,8 @@ mod tests {
         let persistence = router.handle(request("GET", "/v1/events/persistence", json!({})));
         let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
         assert_eq!(persistence["enabled"], true);
-        assert_eq!(persistence["schema_version"], 2);
+        assert_eq!(persistence["schema_version"], EVENT_STATE_SCHEMA_VERSION);
+        assert_eq!(persistence["state_digest"].as_str().unwrap().len(), 64);
         assert_eq!(persistence["subscriptions_durable"], true);
         assert_eq!(persistence["webhook_deliveries_durable"], true);
         assert_eq!(persistence["secrets_persisted"], false);
@@ -2943,6 +2957,46 @@ mod tests {
         let rebound: Value = serde_json::from_slice(&rebound.body).unwrap();
         assert_eq!(rebound["page"]["deliveries"][0]["state"], "pending");
         assert_ne!(rebound["page"]["deliveries"][0]["signature"], old_signature);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn tampered_event_checkpoint_is_rejected_before_restore() {
+        let path = test_state_path("events-tampered");
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                event_state_path: Some(path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            router
+                .handle(request("POST", "/v1/tools/modality_catalog", json!({})))
+                .status,
+            200
+        );
+        assert_eq!(
+            router
+                .handle(request("POST", "/v1/events/persistence/flush", json!({})))
+                .status,
+            200
+        );
+        let mut checkpoint: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        checkpoint["dropped_events"] = json!(checkpoint["dropped_events"].as_u64().unwrap() + 1);
+        std::fs::write(&path, serde_json::to_vec_pretty(&checkpoint).unwrap()).unwrap();
+
+        let error = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                event_state_path: Some(path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .err()
+        .expect("tampered event checkpoint must be rejected");
+        assert!(error.contains("state_digest"));
         let _ = std::fs::remove_file(path);
     }
 

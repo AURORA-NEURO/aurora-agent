@@ -17,8 +17,9 @@ pub const MAX_ENDPOINT_BYTES: usize = 2048;
 pub const MAX_SECRET_BYTES: usize = 4096;
 pub const MAX_FILTERS: usize = 32;
 pub const MAX_RETRY_ATTEMPTS: u32 = 10;
-pub const EVENT_STATE_SCHEMA_VERSION: u64 = 2;
+pub const EVENT_STATE_SCHEMA_VERSION: u64 = 3;
 const LEGACY_EVENT_STATE_SCHEMA_VERSION: u64 = 1;
+const PREVIOUS_EVENT_STATE_SCHEMA_VERSION: u64 = 2;
 pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_DELIVERY_WORKER_BATCH: usize = 100;
 pub const MAX_DELIVERY_ERROR_BYTES: usize = 8 * 1024;
@@ -225,11 +226,15 @@ impl EventLog {
             .and_then(Value::as_u64)
             .ok_or_else(|| "event state snapshot has no schema_version".to_string())?;
         if schema_version != EVENT_STATE_SCHEMA_VERSION
+            && schema_version != PREVIOUS_EVENT_STATE_SCHEMA_VERSION
             && schema_version != LEGACY_EVENT_STATE_SCHEMA_VERSION
         {
             return Err(format!(
-                "unsupported event state schema version {schema_version}; expected {LEGACY_EVENT_STATE_SCHEMA_VERSION} or {EVENT_STATE_SCHEMA_VERSION}"
+                "unsupported event state schema version {schema_version}; expected {LEGACY_EVENT_STATE_SCHEMA_VERSION}, {PREVIOUS_EVENT_STATE_SCHEMA_VERSION}, or {EVENT_STATE_SCHEMA_VERSION}"
             ));
+        }
+        if schema_version == EVENT_STATE_SCHEMA_VERSION {
+            verify_checkpoint_digest(&document)?;
         }
         let mut log = Self::new(capacity)?;
         log.next_event_id = document
@@ -278,7 +283,9 @@ impl EventLog {
         if log.next_event_id == 0 {
             return Err("event state snapshot next_event_id must not overflow".into());
         }
-        if schema_version == EVENT_STATE_SCHEMA_VERSION {
+        if schema_version == PREVIOUS_EVENT_STATE_SCHEMA_VERSION
+            || schema_version == EVENT_STATE_SCHEMA_VERSION
+        {
             if document
                 .get("subscriptions_durable")
                 .and_then(Value::as_bool)
@@ -395,7 +402,7 @@ impl EventLog {
             .collect::<Vec<_>>();
         let deliveries = self.deliveries.values().cloned().collect::<Vec<_>>();
         loop {
-            let document = json!({
+            let mut document = json!({
                 "schema_version": EVENT_STATE_SCHEMA_VERSION,
                 "next_event_id": self.next_event_id,
                 "next_delivery_id": self.next_delivery_id,
@@ -409,6 +416,11 @@ impl EventLog {
                 "secrets_persisted": false,
                 "recovery_policy": "restored subscriptions are paused until explicit secret rebind; signed outbox rows remain inspectable and are re-signed only after rebind",
             });
+            let state_digest = checkpoint_digest(&document)?;
+            document
+                .as_object_mut()
+                .expect("event checkpoint document is an object")
+                .insert("state_digest".into(), Value::String(state_digest));
             let bytes = serde_json::to_vec_pretty(&document)
                 .map_err(|error| format!("event state could not be serialized: {error}"))?;
             if bytes.len() <= MAX_EVENT_STATE_FILE_BYTES {
@@ -1034,6 +1046,38 @@ fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     output
 }
 
+fn checkpoint_digest(document: &Value) -> Result<String, String> {
+    let bytes = serde_json::to_vec(document)
+        .map_err(|error| format!("event state digest could not be serialized: {error}"))?;
+    Ok(hex_digest(&Sha256::digest(&bytes)))
+}
+
+fn verify_checkpoint_digest(document: &Value) -> Result<(), String> {
+    let stored = document
+        .get("state_digest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "event state schema 3 requires state_digest".to_string())?;
+    if stored.len() != 64
+        || !stored
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err("event state state_digest must be 64 lowercase hexadecimal characters".into());
+    }
+    let mut unsigned = document.clone();
+    unsigned
+        .as_object_mut()
+        .ok_or_else(|| "event state snapshot must be a JSON object".to_string())?
+        .remove("state_digest");
+    let computed = checkpoint_digest(&unsigned)?;
+    if computed != stored {
+        return Err(format!(
+            "event state state_digest mismatch: expected {stored}, computed {computed}"
+        ));
+    }
+    Ok(())
+}
+
 fn hex_digest(digest: &[u8]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -1352,6 +1396,15 @@ mod tests {
         assert_eq!(restored.metrics().next_event_id, 4);
         assert_eq!(restored.metrics().subscriptions, 0);
         assert_eq!(restored.metrics().pending_deliveries, 0);
+
+        let mut schema_two =
+            serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap();
+        schema_two["schema_version"] = json!(2);
+        schema_two.as_object_mut().unwrap().remove("state_digest");
+        std::fs::write(&path, serde_json::to_vec_pretty(&schema_two).unwrap()).unwrap();
+        let migrated = EventLog::from_checkpoint_path(2, Some(&path)).unwrap();
+        assert_eq!(migrated.metrics().next_event_id, 4);
+        assert_eq!(migrated.metrics().retained_events, 2);
         let _ = std::fs::remove_file(path);
     }
 

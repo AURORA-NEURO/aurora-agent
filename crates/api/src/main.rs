@@ -58,7 +58,7 @@ fn main() {
                      REST tools: POST /v1/tools/<name> with a JSON object body.\n\
                      JSON-RPC: POST /v1/rpc. Events: GET /v1/events or /v1/events/stream.\n\
                      Missions: POST /v1/missions; --mission-state enables bounded restart-aware snapshots.\n\
-                     Events: --event-state enables bounded cursor checkpoints; subscriptions/deliveries remain non-durable.\n\
+                     Events: --event-state enables bounded event, subscription, and signed outbox checkpoints; secrets remain process-local.\n\
                      Webhooks: register, poll signed deliveries, retry, and acknowledge.\n\
                      The gateway does not terminate TLS, speak gRPC, or send arbitrary outbound requests."
                 );
