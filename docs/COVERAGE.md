@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 209 callable tools. That count is intentionally
+The MCP integration layer currently exposes 210 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -44,6 +44,11 @@ and Python-delegated adapter id/version, source and input/output digests, explic
 conformance outcomes, bounded semantic-loss rows, and artifact registration are retained through
 MCP and both SDKs. It is caller-supplied evidence only; the core does not import dependencies,
 execute adapters, or convert `verified`/`lossless` labels into readiness.
+`adapter_execution_evidence_query` adds the complementary bounded read model: deterministic
+cursoring and status filters over retained adapter artifacts, with explicit source-plan/intake/
+external-payload/workflow-reconciliation parent joins plus missing and unclassified parent states.
+It never infers provenance from matching labels, and a complete join remains review evidence rather
+than execution, scientific validity, or readiness.
 `metrics_analytics_audit` adds a bounded domain-neutral arithmetic kernel for scalar summaries,
 paired robustness/cross-modal/translation/design contrasts, cost and latency, replicate spread,
 and probability calibration while keeping declared and missing evidence out of measured values.

@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 209);
+    assert_eq!(tools.len(), 210);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -7459,6 +7459,27 @@ fn adapter_execution_evidence_binds_declared_adapter_scope_and_loss_posture() {
     assert_eq!(evidence["execution"], json!("not_started"));
     assert_eq!(evidence["readiness_claimed"], json!(false));
 
+    let queried = call(
+        &mut server,
+        "adapter_execution_evidence_query",
+        json!({"subject_id": "adapter-subject-1", "include_artifacts": true}),
+    );
+    assert_eq!(queried["ok"], json!(true));
+    assert_eq!(
+        queried["workflow"],
+        json!("adapter_execution_evidence_query")
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        queried["rows"][0]["join_status"],
+        json!("bound_with_missing_parents")
+    );
+    assert_eq!(
+        queried["rows"][0]["evidence_artifact"]["evidence_digest"],
+        evidence["evidence_digest"]
+    );
+    assert_eq!(queried["readiness_claimed"], json!(false));
+
     let inconsistent = call(
         &mut server,
         "adapter_execution_evidence",
@@ -7572,6 +7593,11 @@ fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
                 .unwrap()
                 .iter()
                 .any(|tool| tool == "adapter_execution_evidence")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "adapter_execution_evidence_query")
             && route["interpretation"]["status"].is_string()
             && route["limitations"].as_array().is_some()
     }));
@@ -7607,12 +7633,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(209));
-    assert_eq!(result["advertised_tool_count"], json!(209));
+    assert_eq!(result["unique_catalog_tools"], json!(210));
+    assert_eq!(result["advertised_tool_count"], json!(210));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(209));
-    assert_eq!(result["schema_quality"]["valid"], json!(209));
+    assert_eq!(result["schema_quality"]["checked"], json!(210));
+    assert_eq!(result["schema_quality"]["valid"], json!(210));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

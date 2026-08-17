@@ -520,6 +520,10 @@ declared adapter/source identity, digest bindings, execution/conformance states,
 counts, and refusal codes; `AdapterExecutionEvidenceResult` retains the indexed artifact and the
 literal `execution: "not_started"`/`readiness_claimed: false` boundary. The Fetch client records
 caller observations only and never imports dependencies or executes an adapter.
+`adapterExecutionEvidenceQuery` and its `Tool` alias provide the bounded read model for retained
+adapter rows. `AdapterExecutionEvidenceQueryResult` preserves cursor state, status filters, and
+explicit source/workflow parent-join posture, including missing and unclassified parents; it does
+not infer provenance or convert a complete join into readiness.
 `conformanceRun` returns typed `ConformanceRunResult` suite and release evidence, including fixture
 drift, test-pyramid counts, bounded case outcomes, and all unmet noncompensatory gates. A null
 `results` field means case details were not requested; it is not an empty-suite claim.

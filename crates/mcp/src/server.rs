@@ -132,17 +132,17 @@ use bioprism_devplat::{
     handoff_domain_evidence_provider, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload,
     normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
-    plan_domain_evidence_source, plan_mission,
+    plan_domain_evidence_source, plan_mission, query_adapter_execution_evidence,
     query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
     record_adapter_execution_evidence, record_domain_evidence_provider_external_payload,
     run_workbench, scaffold_domain_workflow, standard_walkthroughs, verify_delivery_receipt,
     verify_domain_evidence_provider_external_payload_replay,
     verify_domain_evidence_provider_replay, verify_mission_evidence_bundle,
-    AdapterExecutionEvidenceRequest, ArtifactRegistry, CapabilityCatalogue,
-    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
-    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
-    DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
-    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    AdapterExecutionEvidenceQueryRequest, AdapterExecutionEvidenceRequest, ArtifactRegistry,
+    CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
+    CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
+    DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
+    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
     DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
     DomainEvidenceProviderExternalPayloadLineageAuditRequest,
     DomainEvidenceProviderExternalPayloadNormalizationRequest,
@@ -1467,6 +1467,7 @@ impl Server {
             "hub_lock" => self.hub_lock(&arguments),
             "adapter_plan" => self.adapter_plan(&arguments),
             "adapter_execution_evidence" => self.adapter_execution_evidence(&arguments),
+            "adapter_execution_evidence_query" => self.adapter_execution_evidence_query(&arguments),
             "tabular_ingest" => self.tabular_ingest(&arguments),
             "observed_world_declare" => self.observed_world_declare(&arguments),
             "world_claim_check" => self.world_claim_check(&arguments),
@@ -8330,6 +8331,32 @@ impl Server {
         result["adapter"] = adapter_summary;
         result["artifact_registry"] = projection;
         Ok(result)
+    }
+
+    /// Query retained adapter observations and classify only explicit parent joins to source or
+    /// workflow projections. The query never executes adapters or infers provenance from labels.
+    fn adapter_execution_evidence_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode adapter execution evidence query: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "adapter execution evidence query exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let request: AdapterExecutionEvidenceQueryRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid adapter execution evidence query: {error}"))?;
+        let (records, generation) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            (registry.records_for_audit(), registry.generation())
+        };
+        let report = query_adapter_execution_evidence(&records, generation, request)
+            .map_err(|error| format!("adapter execution evidence query refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode adapter execution evidence query: {error}"))
     }
 
     fn tabular_ingest(&self, arguments: &Value) -> Result<Value, String> {
@@ -30616,6 +30643,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_provider_external_payload_execution_evidence",
         "domain_evidence_provider_external_payload_evidence_query",
         "adapter_execution_evidence",
+        "adapter_execution_evidence_query",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -31748,6 +31776,28 @@ pub fn tool_definitions() -> Vec<Value> {
                     "attempt_id": { "type": ["string", "null"] }
                 },
                 "required": ["group_id", "domains", "subject_id", "adapter_id", "adapter_version", "source_id", "input_digest", "execution_status", "conformance_status", "semantic_loss_status"]
+            }
+        }),
+        json!({
+            "name": "adapter_execution_evidence_query",
+            "description": "Query the bounded digest-ordered adapter execution evidence registry by capability group, domain, subject, adapter, source, execution, conformance, or semantic-loss state. The result classifies only explicit retained parent links to source projections and workflow reconciliations; it never infers provenance from labels and never executes adapters, imports dependencies, fetches sources, or changes workflow state.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": ["string", "null"] },
+                    "domain": { "type": ["string", "null"] },
+                    "subject_id": { "type": ["string", "null"] },
+                    "adapter_id": { "type": ["string", "null"] },
+                    "source_id": { "type": ["string", "null"] },
+                    "execution_status": { "type": ["string", "null"], "enum": ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown", null] },
+                    "conformance_status": { "type": ["string", "null"], "enum": ["verified", "partial", "refused", "not_run", "unknown", null] },
+                    "semantic_loss_status": { "type": ["string", "null"], "enum": ["lossless", "lossy", "unknown", "not_applicable", null] },
+                    "after": { "type": ["string", "null"], "description": "Exclusive content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 128, "default": 100 },
+                    "include_artifacts": { "type": "boolean", "default": false }
+                },
+                "required": []
             }
         }),
         json!({

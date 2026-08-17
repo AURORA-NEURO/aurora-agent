@@ -66,6 +66,8 @@ import type {
   AdapterPlanResult,
   AdapterExecutionEvidenceArgs,
   AdapterExecutionEvidenceResult,
+  AdapterExecutionEvidenceQueryArgs,
+  AdapterExecutionEvidenceQueryResult,
   DomainAcquisitionArgs,
   DomainAcquisitionResult,
   TabularIngestArgs,
@@ -1782,6 +1784,27 @@ export class ApiClient {
 
   async adapterExecutionEvidenceTool(args: AdapterExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceResult>> {
     return this.adapterExecutionEvidence(args, options);
+  }
+
+  async adapterExecutionEvidenceQuery(args: AdapterExecutionEvidenceQueryArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("adapter execution evidence query arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain], ["subject_id", args.subject_id], ["adapter_id", args.adapter_id], ["source_id", args.source_id]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string or null`);
+    }
+    const executionStatuses = ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown"];
+    const conformanceStatuses = ["verified", "partial", "refused", "not_run", "unknown"];
+    const lossStatuses = ["lossless", "lossy", "unknown", "not_applicable"];
+    if (args.execution_status !== undefined && args.execution_status !== null && !executionStatuses.includes(args.execution_status)) throw new ArgumentError("execution_status is invalid");
+    if (args.conformance_status !== undefined && args.conformance_status !== null && !conformanceStatuses.includes(args.conformance_status)) throw new ArgumentError("conformance_status is invalid");
+    if (args.semantic_loss_status !== undefined && args.semantic_loss_status !== null && !lossStatuses.includes(args.semantic_loss_status)) throw new ArgumentError("semantic_loss_status is invalid");
+    if (args.after !== undefined && args.after !== null && (typeof args.after !== "string" || !/^[0-9a-f]{64}$/.test(args.after))) throw new ArgumentError("after must be a lowercase SHA-256 digest or null");
+    if (args.max_items !== undefined && (!Number.isSafeInteger(args.max_items) || args.max_items < 1 || args.max_items > 128)) throw new ArgumentError("max_items must be between 1 and 128");
+    if (args.include_artifacts !== undefined && typeof args.include_artifacts !== "boolean") throw new ArgumentError("include_artifacts must be boolean");
+    return this.callTool<AdapterExecutionEvidenceQueryResult>("adapter_execution_evidence_query", args, options);
+  }
+
+  async adapterExecutionEvidenceQueryTool(args: AdapterExecutionEvidenceQueryArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceQueryResult>> {
+    return this.adapterExecutionEvidenceQuery(args, options);
   }
 
   async domainAcquisitionCatalogue(args: DomainAcquisitionArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DomainAcquisitionResult>> {

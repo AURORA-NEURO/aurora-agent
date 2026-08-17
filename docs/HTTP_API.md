@@ -315,6 +315,11 @@ input identity, and explicit execution, conformance, and semantic-loss states; b
 output/item/byte evidence, refusal codes, parent digests, and an idempotent evidence artifact remain
 visible. The gateway checks adapter and catalogue membership but does not execute adapters, import
 optional packages, fetch sources, or promote caller assertions into readiness.
+`POST /v1/tools/adapter_execution_evidence_query` is the read-only companion. It cursor-pages
+retained adapter rows, filters by adapter/source/status identity, and classifies only explicit
+parent-digest joins to source plans, intake/external-payload projections, and workflow
+reconciliations. Missing and unclassified parents remain visible; the query does not infer
+provenance from labels, execute adapters, fetch sources, or change workflow state.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

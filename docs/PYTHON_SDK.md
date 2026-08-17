@@ -865,7 +865,12 @@ invent defaults:
   identity, input/output digests, execution and conformance status, bounded semantic-loss entries,
   item/byte counts, refusal codes, and artifact registration. The helper records caller evidence;
   it never executes a Python/native adapter, imports dependencies, fetches bytes, or claims
-  readiness from `verified` or `lossless` labels.
+readiness from `verified` or `lossless` labels.
+- `AdapterExecutionEvidenceQueryRequest` and `AdapterExecutionEvidenceQueryReport` expose the
+  read-only adapter evidence index through all four sync/async HTTP and workspace facades. Queries
+  are bounded and cursorable, preserve execution/conformance/loss filters, and classify explicit
+  source-plan, intake/external-payload, and workflow-reconciliation parent joins while keeping
+  missing parents visible. They do not infer provenance or execute adapters.
 - `DomainAcquisitionQuery`, `domain_acquisition_report(...)`, and the sync/async
   `Workspace`/`ApiClient` helpers expose the digest-bound `domain_acquisition_catalogue` route.
   Each selected domain keeps bounded transport (`file`/plain `generic_http` versus

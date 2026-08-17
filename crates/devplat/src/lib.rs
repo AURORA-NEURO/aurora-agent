@@ -202,6 +202,7 @@
 //! stating: a section can look two-thirds unimplemented while the platform underneath it is not.
 
 pub mod adapter_execution_evidence;
+pub mod adapter_execution_evidence_query;
 pub mod artifact_registry;
 pub mod audit;
 pub mod capability;
@@ -257,6 +258,12 @@ pub use adapter_execution_evidence::{
     MAX_ADAPTER_EXECUTION_EVIDENCE_BYTES, MAX_ADAPTER_EXECUTION_EVIDENCE_DOMAINS,
     MAX_ADAPTER_EXECUTION_EVIDENCE_ITEMS, MAX_ADAPTER_EXECUTION_EVIDENCE_LOSSES,
     MAX_ADAPTER_EXECUTION_EVIDENCE_PARENTS, MAX_ADAPTER_EXECUTION_EVIDENCE_TEXT_BYTES,
+};
+pub use adapter_execution_evidence_query::{
+    query_adapter_execution_evidence, AdapterExecutionEvidenceJoinProjection,
+    AdapterExecutionEvidenceQueryReport, AdapterExecutionEvidenceQueryRequest,
+    AdapterExecutionEvidenceQueryRow, ADAPTER_EXECUTION_EVIDENCE_QUERY_SCHEMA,
+    ADAPTER_EXECUTION_EVIDENCE_QUERY_WORKFLOW, MAX_ADAPTER_EXECUTION_EVIDENCE_QUERY_ITEMS,
 };
 pub use artifact_registry::{
     ArtifactRecord, ArtifactRegistry, ArtifactRegistryError, ARTIFACT_REGISTRY_GET_SCHEMA_VERSION,

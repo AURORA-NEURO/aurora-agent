@@ -40,6 +40,7 @@ const CALLER_MANAGED_EVIDENCE_TOOLS: &[&str] = &[
     "domain_evidence_provider_external_payload_execution_evidence",
     "domain_evidence_provider_external_payload_evidence_query",
     "adapter_execution_evidence",
+    "adapter_execution_evidence_query",
     "domain_evidence_provider_normalize",
     "domain_evidence_provider_replay_verify",
 ];

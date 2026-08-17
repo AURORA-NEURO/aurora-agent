@@ -31,6 +31,14 @@ from .adapter_execution_evidence import (
     AdapterExecutionEvidenceReport,
     adapter_execution_evidence_report,
 )
+from .adapter_execution_evidence_query import (
+    ADAPTER_EXECUTION_EVIDENCE_QUERY_SCHEMA,
+    ADAPTER_EXECUTION_EVIDENCE_QUERY_WORKFLOW,
+    MAX_ADAPTER_EXECUTION_EVIDENCE_QUERY_ITEMS,
+    AdapterExecutionEvidenceQueryReport,
+    AdapterExecutionEvidenceQueryRequest,
+    adapter_execution_evidence_query_report,
+)
 from .source_adapter import (
     MAX_SOURCE_ADAPTER_ID_BYTES,
     MAX_SOURCE_ADAPTER_PROVENANCE_ITEMS,
@@ -3536,6 +3544,12 @@ __all__ = [
     "adapter_plan",
     "adapter_plan_report",
     "adapter_execution_evidence_report",
+    "ADAPTER_EXECUTION_EVIDENCE_QUERY_SCHEMA",
+    "ADAPTER_EXECUTION_EVIDENCE_QUERY_WORKFLOW",
+    "MAX_ADAPTER_EXECUTION_EVIDENCE_QUERY_ITEMS",
+    "AdapterExecutionEvidenceQueryReport",
+    "AdapterExecutionEvidenceQueryRequest",
+    "adapter_execution_evidence_query_report",
     "domain_acquisition_report",
     "conformance_run_report",
     "RELEASE_ADVISORY_ONLY_KINDS",

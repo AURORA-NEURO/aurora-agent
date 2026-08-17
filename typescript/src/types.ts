@@ -5722,6 +5722,73 @@ export interface AdapterExecutionEvidenceResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface AdapterExecutionEvidenceQueryArgs extends JsonObject {
+  group_id?: string | null;
+  domain?: string | null;
+  subject_id?: string | null;
+  adapter_id?: string | null;
+  source_id?: string | null;
+  execution_status?: AdapterExecutionEvidenceExecutionStatus | null;
+  conformance_status?: AdapterExecutionEvidenceConformanceStatus | null;
+  semantic_loss_status?: AdapterExecutionEvidenceSemanticLossStatus | null;
+  after?: string | null;
+  max_items?: number;
+  include_artifacts?: boolean;
+}
+
+export type AdapterExecutionEvidenceJoinStatus = "unbound" | "source_bound" | "workflow_bound" | "source_and_workflow_bound" | "bound_with_missing_parents" | "parents_present_unclassified";
+
+export interface AdapterExecutionEvidenceJoinProjection extends JsonObject {
+  source_plan_digests: string[];
+  intake_digests: string[];
+  external_payload_digests: string[];
+  workflow_reconciliation_digests: string[];
+  missing_parent_digests: string[];
+  unclassified_parent_digests: string[];
+  source_bound: boolean;
+  workflow_bound: boolean;
+}
+
+export interface AdapterExecutionEvidenceQueryRow extends JsonObject {
+  row_digest: string;
+  content_digest: string;
+  evidence_digest: string;
+  subject_id: string;
+  group_id: string;
+  domains: string[];
+  adapter_id: string;
+  adapter_version: string;
+  source_id: string;
+  input_digest: string;
+  output_digest: string | null;
+  execution_status: AdapterExecutionEvidenceExecutionStatus;
+  conformance_status: AdapterExecutionEvidenceConformanceStatus;
+  semantic_loss_status: AdapterExecutionEvidenceSemanticLossStatus;
+  loss_count: number;
+  parent_digests: string[];
+  attestation_posture: "caller_asserted";
+  join_status: AdapterExecutionEvidenceJoinStatus;
+  joins: AdapterExecutionEvidenceJoinProjection;
+  evidence_artifact?: JsonObject | null;
+}
+
+export interface AdapterExecutionEvidenceQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-adapter-execution-evidence-query/0.1";
+  workflow: "adapter_execution_evidence_query";
+  filters: AdapterExecutionEvidenceQueryArgs;
+  registry_generation: number;
+  registry_size: number;
+  rows: AdapterExecutionEvidenceQueryRow[];
+  next_after: string | null;
+  has_more: boolean;
+  query_digest: string;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;

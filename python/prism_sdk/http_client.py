@@ -23,6 +23,11 @@ from .adapter_execution_evidence import (
     AdapterExecutionEvidenceRequest,
     adapter_execution_evidence_report,
 )
+from .adapter_execution_evidence_query import (
+    AdapterExecutionEvidenceQueryReport,
+    AdapterExecutionEvidenceQueryRequest,
+    adapter_execution_evidence_query_report,
+)
 from .artifacts import (
     ArtifactCrossStoreAuditReport,
     ArtifactGetReport,
@@ -3022,6 +3027,23 @@ class ApiClient:
         request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
     ) -> AdapterExecutionEvidenceReport:
         return adapter_execution_evidence_report(self.adapter_execution_evidence(request))
+
+    def adapter_execution_evidence_query(
+        self,
+        request: AdapterExecutionEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query retained adapter observations and explicit source/workflow joins."""
+
+        normalized = request or AdapterExecutionEvidenceQueryRequest()
+        if not isinstance(normalized, AdapterExecutionEvidenceQueryRequest):
+            normalized = AdapterExecutionEvidenceQueryRequest.from_wire(request or {})
+        return self.call_tool("adapter_execution_evidence_query", normalized.to_mcp_arguments())
+
+    def adapter_execution_evidence_query_report(
+        self,
+        request: AdapterExecutionEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> AdapterExecutionEvidenceQueryReport:
+        return adapter_execution_evidence_query_report(self.adapter_execution_evidence_query(request))
 
     def domain_acquisition_catalogue(
         self,
@@ -6990,6 +7012,23 @@ class AsyncApiClient:
         request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
     ) -> AdapterExecutionEvidenceReport:
         return adapter_execution_evidence_report(await self.adapter_execution_evidence(request))
+
+    async def adapter_execution_evidence_query(
+        self,
+        request: AdapterExecutionEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.adapter_execution_evidence_query`."""
+
+        normalized = request or AdapterExecutionEvidenceQueryRequest()
+        if not isinstance(normalized, AdapterExecutionEvidenceQueryRequest):
+            normalized = AdapterExecutionEvidenceQueryRequest.from_wire(request or {})
+        return await self.call_tool("adapter_execution_evidence_query", normalized.to_mcp_arguments())
+
+    async def adapter_execution_evidence_query_report(
+        self,
+        request: AdapterExecutionEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> AdapterExecutionEvidenceQueryReport:
+        return adapter_execution_evidence_query_report(await self.adapter_execution_evidence_query(request))
 
     async def domain_acquisition_catalogue(
         self,
