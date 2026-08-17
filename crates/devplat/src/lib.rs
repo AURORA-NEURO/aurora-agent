@@ -315,13 +315,15 @@ pub use domain_evidence_intake::{
 pub use domain_evidence_provider::{
     normalize_domain_evidence_provider, verify_domain_evidence_provider_replay,
     DomainEvidenceProviderNormalization, DomainEvidenceProviderNormalizationError,
-    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
-    DomainEvidenceProviderReplayVerification, DomainEvidenceProviderShapeAudit,
-    DomainEvidenceProviderShapeCoverage, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
-    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderRecordIndex,
+    DomainEvidenceProviderReplayRequest, DomainEvidenceProviderReplayVerification,
+    DomainEvidenceProviderShapeAudit, DomainEvidenceProviderShapeCoverage,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA,
     MAX_DOMAIN_EVIDENCE_PROVIDER_BYTES, MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS,
-    MAX_DOMAIN_EVIDENCE_PROVIDER_PARENTS, MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_PARENTS, MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES,
 };
 pub use domain_evidence_source::{
     plan_domain_evidence_source, validate_domain_evidence_source_plan,

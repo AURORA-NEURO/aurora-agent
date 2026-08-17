@@ -1351,6 +1351,8 @@ fn domain_evidence_provider_normalize_retains_caller_managed_payload_with_explic
         normalized["shape_audit"]["identifier_coverage"]["present_record_count"],
         json!(1)
     );
+    assert_eq!(normalized["record_index"]["indexed_record_count"], json!(1));
+    assert_eq!(normalized["record_index"]["omitted_record_count"], json!(0));
     assert_eq!(normalized["intake"]["outcome"], json!("observed"));
     assert_eq!(
         normalized["intake"]["artifact_registry"]["indexed"],

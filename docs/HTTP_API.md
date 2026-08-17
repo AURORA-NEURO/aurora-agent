@@ -260,7 +260,9 @@ connector-specific container recognition, record and malformed-row counts, ident
 field-presence coverage, object-store content-digest coverage, warnings, and a shape-only digest.
 `shape_audit` never includes provider identifiers or payload values and does not interpret them as
 scientific or clinical facts. It does not contact, authenticate, or interpret the provider response,
-and defaults an omitted outcome to `unknown`.
+and defaults an omitted outcome to `unknown`. The response additionally includes a bounded
+digest-only `record_index` with row-count, omitted-row, and index-digest fields for safe
+cross-provider deduplication; it does not expose row contents.
 `POST /v1/tools/domain_evidence_provider_replay_verify` recomputes the same caller-managed
 normalization and compares required payload, request, shape, normalization, and intake digests.
 It returns `matched`/`mismatch` dimensions and registers only the value-free replay verification

@@ -21,10 +21,13 @@ pub const DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA: &str =
 pub const DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA: &str =
     "bioprism-devplat-domain-evidence-provider-replay/0.1";
 pub const DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW: &str = "domain_evidence_provider_replay_verify";
+pub const DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA: &str =
+    "bioprism-devplat-domain-evidence-provider-record-index/0.1";
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_BYTES: usize = 20_000_000;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES: usize = 512;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS: usize = 64;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_PARENTS: usize = 128;
+pub const MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS: usize = 2_048;
 
 const CONNECTOR_KINDS: &[&str] = &[
     "literature",
@@ -107,6 +110,21 @@ pub struct DomainEvidenceProviderShapeAudit {
     pub shape_digest: String,
 }
 
+/// Bounded per-record identities for deduplication and row-level drift review. The index stores
+/// only canonical SHA-256 row digests; it never exposes a record identifier or field value.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DomainEvidenceProviderRecordIndex {
+    pub schema: String,
+    pub connector_kind: String,
+    pub recognized_container: Option<String>,
+    pub record_count: usize,
+    pub indexed_record_count: usize,
+    pub omitted_record_count: usize,
+    pub row_digests: Vec<String>,
+    pub index_digest: String,
+    pub limitations: Vec<String>,
+}
+
 /// Re-submit one caller-managed payload and compare it with a prior retained normalization
 /// without contacting the named provider. The expected digests make omissions and substitutions
 /// visible instead of treating a successful parse as a replay match.
@@ -148,6 +166,7 @@ pub struct DomainEvidenceProviderReplayVerification {
     pub matches: BTreeMap<String, bool>,
     pub differences: Vec<String>,
     pub shape_audit: DomainEvidenceProviderShapeAudit,
+    pub record_index: DomainEvidenceProviderRecordIndex,
     pub replay_digest: String,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
@@ -169,6 +188,7 @@ pub struct DomainEvidenceProviderNormalization {
     pub request_digest: Option<String>,
     pub response: Value,
     pub shape_audit: DomainEvidenceProviderShapeAudit,
+    pub record_index: DomainEvidenceProviderRecordIndex,
     /// Internal composition input; never duplicate the full intake envelope in the public result.
     #[serde(skip)]
     pub intake_arguments: Value,
@@ -614,6 +634,95 @@ fn audit_provider_shape(
     audit_provider_payload(connector_kind, payload)
 }
 
+fn record_values_for_index(
+    connector_kind: &str,
+    payload: &Value,
+    shape_audit: &DomainEvidenceProviderShapeAudit,
+) -> Vec<Value> {
+    let Some(container) = shape_audit.recognized_container.as_deref() else {
+        return Vec::new();
+    };
+    if connector_kind == "fhir" {
+        if container == "resource" {
+            return vec![payload.clone()];
+        }
+        return payload
+            .get("entry")
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|entry| {
+                        entry
+                            .get("resource")
+                            .cloned()
+                            .unwrap_or_else(|| entry.clone())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+    if container == "$root" {
+        return payload.as_array().cloned().unwrap_or_default();
+    }
+    payload
+        .as_object()
+        .and_then(|object| object.get(container))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn build_record_index(
+    connector_kind: &str,
+    payload: &Value,
+    shape_audit: &DomainEvidenceProviderShapeAudit,
+) -> Result<DomainEvidenceProviderRecordIndex, DomainEvidenceProviderNormalizationError> {
+    let values = record_values_for_index(connector_kind, payload, shape_audit);
+    let record_count = values.len();
+    let indexed_values = values
+        .iter()
+        .take(MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS);
+    let row_digests = indexed_values
+        .map(canonical_digest)
+        .collect::<Result<Vec<_>, _>>()?;
+    let omitted_record_count = record_count.saturating_sub(row_digests.len());
+    let mut digest_input = json!({
+        "schema": DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA,
+        "connector_kind": connector_kind,
+        "recognized_container": shape_audit.recognized_container,
+        "record_count": record_count,
+        "indexed_record_count": row_digests.len(),
+        "omitted_record_count": omitted_record_count,
+        "row_digests": row_digests,
+    });
+    let index_digest = canonical_digest(&digest_input)?;
+    digest_input["index_digest"] = json!(index_digest);
+    Ok(DomainEvidenceProviderRecordIndex {
+        schema: DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA.into(),
+        connector_kind: connector_kind.into(),
+        recognized_container: shape_audit.recognized_container.clone(),
+        record_count,
+        indexed_record_count: digest_input["row_digests"]
+            .as_array()
+            .map_or(0, Vec::len),
+        omitted_record_count,
+        row_digests: digest_input["row_digests"]
+            .as_array()
+            .expect("record index row digests are an array")
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        index_digest,
+        limitations: vec![
+            "row digests identify canonical JSON rows but do not reveal row values or identifiers".into(),
+            "the index is bounded and explicitly reports omitted rows above the configured item limit".into(),
+            "a row digest match does not establish provider authenticity, semantic equivalence, or domain validity".into(),
+        ],
+    })
+}
+
 /// Normalize one caller-owned provider response; no network or provider call occurs here.
 pub fn normalize_domain_evidence_provider(
     request: &DomainEvidenceProviderNormalizationRequest,
@@ -669,6 +778,7 @@ pub fn normalize_domain_evidence_provider(
     let payload_digest = canonical_digest(&request.payload)?;
     let request_digest = request.request.as_ref().map(canonical_digest).transpose()?;
     let shape_audit = audit_provider_shape(&connector_kind, &request.payload)?;
+    let record_index = build_record_index(&connector_kind, &request.payload, &shape_audit)?;
     let mut response = Map::new();
     response.insert("provider".into(), json!(provider));
     response.insert("connector_kind".into(), json!(connector_kind));
@@ -708,6 +818,7 @@ pub fn normalize_domain_evidence_provider(
         request_digest,
         response,
         shape_audit,
+        record_index,
         intake_arguments,
         guarantees: vec![
             "provider metadata and payload receive separate explicit structural identities".into(),
@@ -832,6 +943,7 @@ pub fn verify_domain_evidence_provider_replay(
         matches,
         differences,
         shape_audit: normalized.shape_audit,
+        record_index: normalized.record_index,
         replay_digest: String::new(),
         guarantees: vec![
             "replay compares independently recomputed payload, request, shape, normalization, and intake identities".into(),
@@ -889,7 +1001,15 @@ mod tests {
                 .missing_record_count,
             0
         );
+        assert_eq!(normalized.record_index.record_count, 1);
+        assert_eq!(normalized.record_index.indexed_record_count, 1);
+        assert_eq!(normalized.record_index.omitted_record_count, 0);
+        assert_eq!(normalized.record_index.row_digests.len(), 1);
+        assert_eq!(normalized.record_index.index_digest.len(), 64);
         assert!(!serde_json::to_string(&normalized.shape_audit)
+            .unwrap()
+            .contains("pmid:1"));
+        assert!(!serde_json::to_string(&normalized.record_index)
             .unwrap()
             .contains("pmid:1"));
         assert_eq!(
@@ -974,6 +1094,33 @@ mod tests {
             .missing_fields
             .iter()
             .any(|field| field == "records.array"));
+    }
+
+    #[test]
+    fn record_index_is_bounded_and_reports_omitted_rows() {
+        let mut request = base_request();
+        request.payload = json!({
+            "records": (0..(MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS + 3))
+                .map(|index| json!({"id": format!("opaque-{index}")}))
+                .collect::<Vec<_>>()
+        });
+        let normalized = normalize_domain_evidence_provider(&request).unwrap();
+        assert_eq!(
+            normalized.record_index.record_count,
+            MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS + 3
+        );
+        assert_eq!(
+            normalized.record_index.indexed_record_count,
+            MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS
+        );
+        assert_eq!(normalized.record_index.omitted_record_count, 3);
+        assert_eq!(
+            normalized.record_index.row_digests.len(),
+            MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS
+        );
+        assert!(!serde_json::to_string(&normalized.record_index)
+            .unwrap()
+            .contains("opaque-"));
     }
 
     #[test]

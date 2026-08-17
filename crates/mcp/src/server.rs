@@ -3447,6 +3447,7 @@ impl Server {
             "request_digest": normalized.request_digest,
             "response": normalized.response,
             "shape_audit": normalized.shape_audit,
+            "record_index": normalized.record_index,
             "normalization": normalized,
             "intake": intake,
             "artifact_registry": intake.get("artifact_registry"),
@@ -30331,7 +30332,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "domain_evidence_provider_normalize",
-            "description": "Normalize caller-supplied literature, clinical-trial, FHIR, object-store, or provider-API payloads into the same catalogue-bound domain-evidence intake artifact used by bounded source reads. The route returns a structural-only shape audit with recognized-container, row, identifier-presence, and object-store digest-coverage facts. It preserves explicit provider/payload/request digests and caller-supplied observed/partial/refused/error/unknown outcomes, but never contacts or authenticates a provider, interprets domain values, or claims provenance, scientific, clinical, or release validity.",
+            "description": "Normalize caller-supplied literature, clinical-trial, FHIR, object-store, or provider-API payloads into the same catalogue-bound domain-evidence intake artifact used by bounded source reads. The route returns a structural-only shape audit with recognized-container, row, identifier-presence, and object-store digest-coverage facts plus a bounded digest-only record index for deduplication. It preserves explicit provider/payload/request digests and caller-supplied observed/partial/refused/error/unknown outcomes, but never contacts or authenticates a provider, interprets domain values, or claims provenance, scientific, clinical, or release validity.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

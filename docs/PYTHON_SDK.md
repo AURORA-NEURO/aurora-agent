@@ -97,6 +97,8 @@ intake/coverage path as bounded source reads. The typed `shape_audit` reports a 
 record/invalid-row counts, identifier field-presence coverage, and object-store content-digest
 coverage where applicable. Its `shape_digest` is computed from those shape facts rather than
 payload values; it never echoes identifiers or promotes field presence into evidence validity.
+The typed `record_index` adds at most 2,048 canonical row digests, reports omitted rows explicitly,
+and supports digest-only deduplication without exposing record contents.
 Provider authentication, signatures, retrieval, terminology expansion, and scientific/clinical
 interpretation remain explicit non-claims.
 `DomainEvidenceProviderReplayRequest` and

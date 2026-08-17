@@ -120,7 +120,8 @@ returns a typed structural `shape_audit` with `structured`, `partial`, `refused`
 field-presence coverage, and optional object-store content-digest coverage. The audit digest is
 based on shape facts and deliberately excludes payload values. The SDK does not contact providers
 or infer authenticity, terminology, scientific, clinical, or release validity from normalized
-fields.
+fields. The result also carries a bounded `record_index` of canonical row digests with explicit
+omission counts for digest-only deduplication; row digests do not expose identifiers or values.
 `domainEvidenceProviderReplayVerify` and its `Tool` alias re-submit a caller-managed payload
 against the retained payload, request, shape, normalization, and intake digests. The typed result
 keeps every match dimension and the idempotent value-free replay artifact visible; a mismatch is

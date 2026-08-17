@@ -69,6 +69,17 @@ def payload() -> dict:
             "limitations": ["structural only"],
             "shape_digest": "e" * 64,
         },
+        "record_index": {
+            "schema": "bioprism-devplat-domain-evidence-provider-record-index/0.1",
+            "connector_kind": "literature",
+            "recognized_container": "records",
+            "record_count": 1,
+            "indexed_record_count": 1,
+            "omitted_record_count": 0,
+            "row_digests": ["9" * 64],
+            "index_digest": "a" * 64,
+            "limitations": ["digest-only"],
+        },
         "intake": {"workflow": "domain_evidence_intake", "outcome": "observed"},
         "artifact_registry": {"indexed": True},
         "catalogue_digest": "d" * 64,
@@ -103,6 +114,7 @@ def replay_payload() -> dict:
         "matches": {"payload_digest": True, "request_digest": True, "shape_digest": True, "normalization_digest": True, "intake_digest": True},
         "differences": [],
         "shape_audit": shape,
+        "record_index": payload()["record_index"],
         "replay_digest": "8" * 64,
         "guarantees": ["structural"],
         "limitations": ["no provider contact"],
@@ -144,12 +156,14 @@ def test_request_is_explicit_and_provider_report_preserves_digests() -> None:
     assert report.artifact_registry["indexed"] is True
     assert report.shape_audit.status == "structured"
     assert report.shape_audit.identifier_coverage.present_record_count == 1
+    assert report.record_index.indexed_record_count == 1
     replay = replay_request().to_mcp_arguments()
     assert replay["expected_intake_digest"] == "1" * 64
     replay_report = domain_evidence_provider_replay_verification_report(replay_payload())
     assert replay_report.matched is True
     assert replay_report.replay_status == "matched"
     assert replay_report.shape_audit.status == "structured"
+    assert replay_report.record_index.row_digests == ("9" * 64,)
 
 
 def test_request_rejects_non_provider_connectors_and_scalar_payloads() -> None:

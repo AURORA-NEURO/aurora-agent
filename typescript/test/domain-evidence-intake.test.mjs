@@ -179,6 +179,17 @@ const providerNormalization = {
     limitations: ["structural only"],
     shape_digest: "m".repeat(64),
   },
+  record_index: {
+    schema: "bioprism-devplat-domain-evidence-provider-record-index/0.1",
+    connector_kind: "literature",
+    recognized_container: "records",
+    record_count: 0,
+    indexed_record_count: 0,
+    omitted_record_count: 0,
+    row_digests: [],
+    index_digest: "a".repeat(64),
+    limitations: ["digest-only"],
+  },
   normalization: { payload_digest: "j".repeat(64) },
   intake: { workflow: "domain_evidence_intake", outcome: "unknown" },
   artifact_registry: { indexed: true, kind: "domain_evidence_intake", content_digest: "k".repeat(64) },
@@ -227,6 +238,7 @@ const providerReplay = {
     matches: { payload_digest: true, request_digest: true, shape_digest: true, normalization_digest: true, intake_digest: true },
     differences: [],
     shape_audit: providerNormalization.shape_audit,
+    record_index: providerNormalization.record_index,
     replay_digest: "e".repeat(64),
     guarantees: [],
     limitations: [],
@@ -280,6 +292,7 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.provider, "pubmed");
   assert.equal((await client.domainEvidenceProviderNormalizeTool(providerNormalizationArgs)).mcp.result.structuredContent.outcome, "unknown");
   assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.shape_audit.status, "unclassified");
+  assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.record_index.omitted_record_count, 0);
   assert.equal((await client.domainEvidenceProviderReplayVerify(providerReplayArgs)).mcp.result.structuredContent.replay_status, "matched");
   assert.equal((await client.domainEvidenceProviderReplayVerifyTool(providerReplayArgs)).mcp.result.structuredContent.replay.matched, true);
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");

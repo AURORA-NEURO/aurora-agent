@@ -17,6 +17,8 @@ DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW = "domain_evidence_provider_norm
 DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA = "bioprism-devplat-domain-evidence-provider-replay/0.1"
 DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW = "domain_evidence_provider_replay_verify"
 DOMAIN_EVIDENCE_PROVIDER_REPLAY_STATUSES = ("matched", "mismatch")
+DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA = "bioprism-devplat-domain-evidence-provider-record-index/0.1"
+MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS = 2048
 DOMAIN_EVIDENCE_PROVIDER_CONNECTOR_KINDS = ("literature", "clinical_trial", "fhir", "object_store", "provider_api")
 DOMAIN_EVIDENCE_PROVIDER_OUTCOMES = ("observed", "partial", "refused", "error", "unknown")
 DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA = "bioprism-devplat-domain-evidence-provider-shape-audit/0.1"
@@ -120,6 +122,57 @@ class DomainEvidenceProviderShapeAudit:
                 "domain evidence provider shape audit limitations", raw.get("limitations", [])
             ),
             shape_digest=_digest("domain evidence provider shape digest", raw.get("shape_digest")),
+        )
+
+
+@dataclass(frozen=True)
+class DomainEvidenceProviderRecordIndex:
+    """Bounded canonical row identities with explicit omission accounting."""
+
+    schema: str
+    connector_kind: str
+    recognized_container: str | None
+    record_count: int
+    indexed_record_count: int
+    omitted_record_count: int
+    row_digests: tuple[str, ...]
+    index_digest: str
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "DomainEvidenceProviderRecordIndex":
+        raw = _mapping("domain evidence provider record index", value)
+        schema = _route_text("domain evidence provider record index schema", raw.get("schema"))
+        if schema != DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA:
+            raise ArgumentError("domain evidence provider record index schema is unsupported")
+        recognized_container = raw.get("recognized_container")
+        if recognized_container is not None:
+            recognized_container = _route_text(
+                "domain evidence provider record index container", recognized_container
+            )
+        row_digests = raw.get("row_digests")
+        if not isinstance(row_digests, Sequence) or isinstance(row_digests, (str, bytes)):
+            raise ArgumentError("domain evidence provider record index row_digests must be an array")
+        if len(row_digests) > MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS:
+            raise ArgumentError("domain evidence provider record index exceeds its item bound")
+        return cls(
+            schema=schema,
+            connector_kind=_route_text("domain evidence provider record index connector", raw.get("connector_kind")),
+            recognized_container=recognized_container,
+            record_count=_route_count("domain evidence provider record count", raw.get("record_count")),
+            indexed_record_count=_route_count(
+                "domain evidence provider indexed record count", raw.get("indexed_record_count")
+            ),
+            omitted_record_count=_route_count(
+                "domain evidence provider omitted record count", raw.get("omitted_record_count")
+            ),
+            row_digests=tuple(
+                _digest("domain evidence provider row digest", digest) for digest in row_digests
+            ),
+            index_digest=_digest("domain evidence provider index digest", raw.get("index_digest")),
+            limitations=_route_strings(
+                "domain evidence provider record index limitations", raw.get("limitations", [])
+            ),
         )
 
 
@@ -244,6 +297,7 @@ class DomainEvidenceProviderNormalizationReport:
     request_digest: str | None
     response: Mapping[str, Any]
     shape_audit: DomainEvidenceProviderShapeAudit
+    record_index: DomainEvidenceProviderRecordIndex
     intake: Mapping[str, Any]
     artifact_registry: Mapping[str, Any]
     catalogue_digest: str
@@ -277,6 +331,7 @@ class DomainEvidenceProviderNormalizationReport:
             ),
             response=_mapping("domain evidence provider response", raw.get("response")),
             shape_audit=DomainEvidenceProviderShapeAudit.from_wire(raw.get("shape_audit")),
+            record_index=DomainEvidenceProviderRecordIndex.from_wire(raw.get("record_index")),
             intake=_mapping("domain evidence provider intake", raw.get("intake")),
             artifact_registry=artifact_registry,
             catalogue_digest=_digest("domain evidence provider catalogue digest", raw.get("catalogue_digest")),
@@ -330,6 +385,7 @@ class DomainEvidenceProviderReplayVerificationReport:
     matches: Mapping[str, Any]
     differences: tuple[str, ...]
     shape_audit: DomainEvidenceProviderShapeAudit
+    record_index: DomainEvidenceProviderRecordIndex
     replay_digest: str
     artifact_registry: Mapping[str, Any]
 
@@ -380,6 +436,7 @@ class DomainEvidenceProviderReplayVerificationReport:
             matches=_mapping("domain evidence provider replay matches", replay.get("matches")),
             differences=_route_strings("domain evidence provider replay differences", replay.get("differences", [])),
             shape_audit=DomainEvidenceProviderShapeAudit.from_wire(replay.get("shape_audit")),
+            record_index=DomainEvidenceProviderRecordIndex.from_wire(replay.get("record_index")),
             replay_digest=_digest("domain evidence provider replay digest", replay.get("replay_digest")),
             artifact_registry=_mapping("domain evidence provider replay artifact registry", raw.get("artifact_registry")),
         )
@@ -402,6 +459,9 @@ __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_REPLAY_STATUSES",
     "DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW",
+    "DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA",
+    "MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS",
+    "DomainEvidenceProviderRecordIndex",
     "DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_SHAPE_STATUSES",
     "DomainEvidenceProviderShapeAudit",

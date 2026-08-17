@@ -5095,6 +5095,18 @@ export interface DomainEvidenceProviderShapeAudit extends JsonObject {
   shape_digest: string;
 }
 
+export interface DomainEvidenceProviderRecordIndex extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-record-index/0.1";
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  recognized_container: string | null;
+  record_count: number;
+  indexed_record_count: number;
+  omitted_record_count: number;
+  row_digests: string[];
+  index_digest: string;
+  limitations: string[];
+}
+
 export interface DomainEvidenceProviderNormalizationArgs extends JsonObject {
   group_id: string;
   domains: string[];
@@ -5125,6 +5137,7 @@ export interface DomainEvidenceProviderNormalizationResult extends JsonObject {
   request_digest: string | null;
   response: JsonObject;
   shape_audit: DomainEvidenceProviderShapeAudit;
+  record_index: DomainEvidenceProviderRecordIndex;
   normalization: JsonObject;
   intake: JsonObject;
   artifact_registry: JsonObject;
@@ -5169,6 +5182,7 @@ export interface DomainEvidenceProviderReplayVerification extends JsonObject {
   matches: JsonObject;
   differences: string[];
   shape_audit: DomainEvidenceProviderShapeAudit;
+  record_index: DomainEvidenceProviderRecordIndex;
   replay_digest: string;
   guarantees: string[];
   limitations: string[];
