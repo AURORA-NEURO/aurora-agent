@@ -294,9 +294,10 @@ pub use delivery_receipt::{
     DELIVERY_RECEIPT_SCHEMA,
 };
 pub use mission::{
-    apply_binding, plan_mission, MissionBinding, MissionError, MissionPlan, MissionPolicy,
-    MissionReport, MissionRequest, MissionStep, MissionStepPlan, MissionStepResult,
-    MissionTraceEvent, MissionTraceObserver, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
+    apply_binding, mission_claim_lineage, plan_mission, MissionBinding, MissionClaimRequest,
+    MissionError, MissionPlan, MissionPolicy, MissionReport, MissionRequest, MissionStep,
+    MissionStepPlan, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
+    MAX_CLAIM_REFERENCES, MAX_CLAIM_REQUESTS, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
 };
 pub use operational_readiness::{
     DependencyCriticality, IncidentSeverity, IncidentState, IndicatorStatus,

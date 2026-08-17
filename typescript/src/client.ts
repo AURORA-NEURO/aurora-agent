@@ -259,6 +259,7 @@ import type {
   MetricsAnalyticsAuditArgs,
   MetricsProfileAuditArgs,
   MissionAssembly,
+  MissionClaimLineageResponse,
   MissionExecutionProvenanceResponse,
   MissionJob,
   MissionJobStatus,
@@ -1202,6 +1203,20 @@ export class ApiClient {
     return this.request<MissionExecutionProvenanceResponse>(
       "GET",
       `/v1/missions/${encodeURIComponent(id)}/provenance`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Read the bounded claim-to-step evidence projection for a terminal mission. */
+  async missionClaimLineage(
+    missionId: string,
+    options?: ClientRequestOptions,
+  ): Promise<MissionClaimLineageResponse> {
+    const id = pathSegment(missionId, "mission id");
+    return this.request<MissionClaimLineageResponse>(
+      "GET",
+      `/v1/missions/${encodeURIComponent(id)}/claims`,
       undefined,
       options,
     );

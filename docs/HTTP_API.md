@@ -31,6 +31,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/missions/persistence/flush` | Force a checkpoint and verify it can be written |
 | `GET /v1/missions/{mission_id}` | Poll job state and retrieve the authoritative mission report |
 | `GET /v1/missions/{mission_id}/provenance` | Retrieve retained gate, review, domain-evaluator, and accepted-dispatch evidence |
+| `GET /v1/missions/{mission_id}/claims` | Retrieve the bounded claim-to-step evidence-lineage projection |
 | `GET /v1/missions/{mission_id}/trace` | Page retained clock-free mission lifecycle events |
 | `POST /v1/missions/{mission_id}/cancel` | Request cooperative cancellation between nested calls/batches |
 | `DELETE /v1/missions/{mission_id}` | Remove a terminal job from the bounded in-process registry |
@@ -197,6 +198,24 @@ domain-evaluator rows, bounded preflight evidence, and the `mission.execution.ac
 When `mission_state_path` is configured, the bounded provenance survives restart with the mission
 checkpoint; otherwise it remains process-local. This is replay and accountability evidence, not a
 readiness or scientific-validity claim.
+
+### Claim-level evidence lineage
+
+Mission requests may include a bounded `claim_requests` array. Each row is caller-authored and
+contains an `id`, the statement text, one or more domain labels, and explicit `requires_steps`.
+`level` (`observation`, `evaluation`, `operational`, or `release`) and `evidence_mode`
+(`completed_step` or `successful_tool_result`) are routing/evidence posture labels, not semantic
+interpretations. Every referenced step must exist in the same mission; at most 64 claims and 32
+step references per claim are accepted.
+
+The terminal mission report includes `claim_lineage`, and
+`GET /v1/missions/{mission_id}/claims` returns the same projection in a small dedicated envelope.
+Each evidence row preserves step status, requiredness, post-binding argument digest, byte count,
+and a digest of the retained nested result when available. Missing results, refusals, cancellations,
+and output omission remain distinct. `claimable: true` means only that the requested transport
+evidence posture was retained; `claim_status` remains `unreviewed` and `readiness_claimed` remains
+false. The projection never establishes scientific, clinical, causal, operational, regulatory, or
+release truth, and a 409/410 response makes live-vs-omitted result state explicit.
 
 ## Asynchronous missions
 

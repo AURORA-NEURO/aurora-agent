@@ -6969,12 +6969,22 @@ export interface OperationsGateAcceptance extends JsonObject {
   accepted_gates: Record<string, string[]>;
 }
 
+export interface MissionClaimRequest extends JsonObject {
+  id: string;
+  claim: string;
+  domains: string[];
+  requires_steps: string[];
+  level?: "observation" | "evaluation" | "operational" | "release";
+  evidence_mode?: "completed_step" | "successful_tool_result";
+}
+
 export interface AgentMissionArgs extends JsonObject {
   mission_id: string;
   goal: string;
   steps: AgentMissionStep[];
   policy?: AgentMissionPolicy;
   operations_gate_acceptance?: OperationsGateAcceptance;
+  claim_requests?: MissionClaimRequest[];
 }
 
 export type MissionTraceEventName =
@@ -7014,6 +7024,8 @@ export interface AgentMissionReport extends JsonObject {
   returned_bytes: number;
   execution_trace_schema_version: string;
   execution_trace: MissionTraceEvent[];
+  claim_requests?: MissionClaimRequest[];
+  claim_lineage?: JsonObject;
   preflight?: boolean;
   dispatch?: "not_started";
   plan: JsonObject;
@@ -7052,6 +7064,13 @@ export interface MissionExecutionProvenanceResponse extends JsonObject {
   mission_id: string;
   provenance: JsonObject;
   readiness_claimed: false;
+}
+
+export interface MissionClaimLineageResponse extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mission-claim-lineage-response/0.1";
+  mission_id: string;
+  claim_lineage: JsonObject;
 }
 
 export interface MissionJob extends JsonObject {

@@ -137,7 +137,7 @@ use bioprism_devplat::{
     CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
     DeliveryReceiptRequest,
     DeliveryReceiptVerificationRequest,
-    DevPlatReport, ExecutionProvenanceRequest, MissionReport,
+    DevPlatReport, ExecutionProvenanceRequest, MissionReport, mission_claim_lineage,
     MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
     WorkbenchRequest,
     EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
@@ -439,6 +439,8 @@ struct ParallelCallOutcome {
 }
 
 fn encode_mission_report(report: MissionReport, context: &str) -> Result<Value, String> {
+    let mut report = report;
+    report.claim_lineage = mission_claim_lineage(&report.claim_requests, &report.results);
     let mut output = serde_json::to_value(report).map_err(|error| format!("{context}: {error}"))?;
     output["ok"] = json!(true);
     output["workflow"] = json!("agent_mission");
@@ -23258,6 +23260,8 @@ impl Server {
             results: Vec::new(),
             execution_trace_schema_version: MISSION_TRACE_SCHEMA_VERSION.into(),
             execution_trace: Vec::new(),
+            claim_requests: request.claim_requests.clone(),
+            claim_lineage: json!({}),
             trace_observer: self.mission_trace_observer.clone(),
             guarantees: vec![
             "the mission DAG was validated before any nested tool call".into(),
@@ -29632,12 +29636,29 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "agent_mission",
-            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
+            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. Optional caller-authored claim_requests produce a bounded claim-to-step evidence lineage projection with explicit omission and non-claim posture; they never become semantic truth assertions. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "mission_id": { "type": "string", "description": "Stable mission identity used in the content-addressed plan." },
                     "goal": { "type": "string", "description": "Human- and agent-readable mission objective; scientific meaning remains caller-owned." },
+                    "claim_requests": {
+                        "type": "array",
+                        "maxItems": 64,
+                        "description": "Optional caller-authored claims to correlate with explicit step results. Evidence lineage is non-semantic: retained output may be claimable as evidence, but never establishes that the claim is true.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "maxLength": 128 },
+                                "claim": { "type": "string", "maxLength": 4096 },
+                                "domains": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string", "maxLength": 256 } },
+                                "requires_steps": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string" } },
+                                "level": { "type": "string", "enum": ["observation", "evaluation", "operational", "release"], "default": "observation" },
+                                "evidence_mode": { "type": "string", "enum": ["completed_step", "successful_tool_result"], "default": "completed_step" }
+                            },
+                            "required": ["id", "claim", "domains", "requires_steps"]
+                        }
+                    },
                     "steps": {
                         "type": "array",
                         "minItems": 1,

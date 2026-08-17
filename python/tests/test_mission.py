@@ -5,6 +5,8 @@ import unittest
 from prism_sdk import (
     ArgumentError,
     MissionBinding,
+    MissionClaimLineage,
+    MissionClaimRequest,
     MissionExecutionReport,
     MissionExecutionProvenance,
     MissionProgress,
@@ -46,6 +48,45 @@ def catalogue() -> ToolCatalogue:
 
 
 class MissionPreflightTests(unittest.TestCase):
+    def test_claim_requests_are_bounded_and_lineage_is_non_semantic(self) -> None:
+        request = MissionRequest(
+            "mission-claims",
+            "retain evidence",
+            [MissionStep("observe", "metrics", "audit", "observe", "echo", {"value": 3})],
+            claim_requests=[
+                MissionClaimRequest(
+                    "observed",
+                    "The requested observation was returned by the named tool.",
+                    ["metrics"],
+                    ["observe"],
+                    evidence_mode="successful_tool_result",
+                )
+            ],
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["claim_requests"][0]["requires_steps"], ["observe"])
+        self.assertEqual(arguments["claim_requests"][0]["evidence_mode"], "successful_tool_result")
+        with self.assertRaises(ArgumentError):
+            MissionRequest(
+                "mission-claims",
+                "retain evidence",
+                [MissionStep("observe", "metrics", "audit", "observe", "echo", {"value": 3})],
+                claim_requests=[MissionClaimRequest("bad", "unknown", ["metrics"], ["missing"])],
+            )
+
+        lineage = MissionClaimLineage.from_wire(
+            {
+                "ok": True,
+                "schema": "bioprism-mission-claim-lineage-response/0.1",
+                "mission_id": "mission-claims",
+                "claim_lineage": {
+                    "claims": [{"id": "observed", "claimable": True}],
+                    "readiness_claimed": False,
+                },
+            }
+        )
+        self.assertTrue(lineage.claim_lineage["claims"][0]["claimable"])
+
     def test_execution_provenance_preserves_replay_correlation(self) -> None:
         provenance = MissionExecutionProvenance.from_wire(
             {

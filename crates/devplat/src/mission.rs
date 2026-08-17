@@ -13,7 +13,7 @@
 
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
@@ -27,6 +27,8 @@ const MAX_ALLOWED_TOOLS: usize = 512;
 const MAX_STEP_OUTPUT_BYTES: usize = 20_000_000;
 const MAX_TOTAL_OUTPUT_BYTES: usize = 20_000_000;
 pub const MAX_PARALLEL_WAVE_WIDTH: usize = 16;
+pub const MAX_CLAIM_REQUESTS: usize = 64;
+pub const MAX_CLAIM_REFERENCES: usize = 32;
 
 fn default_true() -> bool {
     true
@@ -50,6 +52,14 @@ fn default_execution_mode() -> String {
 
 fn default_max_parallelism() -> usize {
     MAX_PARALLEL_WAVE_WIDTH
+}
+
+fn default_claim_level() -> String {
+    "observation".into()
+}
+
+fn default_claim_evidence_mode() -> String {
+    "completed_step".into()
 }
 
 fn empty_object() -> Value {
@@ -341,6 +351,101 @@ impl MissionStep {
     }
 }
 
+/// One explicit, caller-owned claim request that a mission must preserve as evidence lineage.
+///
+/// The mission runtime never interprets the statement as true. It only correlates the requested
+/// claim to the exact step results named by `requires_steps` and reports transport/output posture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissionClaimRequest {
+    pub id: String,
+    pub claim: String,
+    pub domains: Vec<String>,
+    #[serde(default)]
+    pub requires_steps: Vec<String>,
+    #[serde(default = "default_claim_level")]
+    pub level: String,
+    #[serde(default = "default_claim_evidence_mode")]
+    pub evidence_mode: String,
+}
+
+impl MissionClaimRequest {
+    fn validate(&self, known_steps: &BTreeSet<String>) -> Result<(), MissionError> {
+        require_text("claim.id", &self.id)?;
+        require_text("claim.claim", &self.claim)?;
+        if self.id.len() > 128 {
+            return Err(MissionError::InvalidClaim {
+                claim: self.id.clone(),
+                reason: "id must be at most 128 bytes".into(),
+            });
+        }
+        if self.claim.len() > 4_096 {
+            return Err(MissionError::InvalidClaim {
+                claim: self.id.clone(),
+                reason: "claim must be at most 4096 bytes".into(),
+            });
+        }
+        if self.domains.is_empty() || self.domains.len() > 32 {
+            return Err(MissionError::InvalidClaim {
+                claim: self.id.clone(),
+                reason: "domains must contain between 1 and 32 entries".into(),
+            });
+        }
+        let mut domains = BTreeSet::new();
+        for domain in &self.domains {
+            require_text("claim.domain", domain)?;
+            if domain.len() > 256 || !domains.insert(domain) {
+                return Err(MissionError::InvalidClaim {
+                    claim: self.id.clone(),
+                    reason: "domains must contain unique entries of at most 256 bytes".into(),
+                });
+            }
+        }
+        if self.requires_steps.is_empty() || self.requires_steps.len() > MAX_CLAIM_REFERENCES {
+            return Err(MissionError::InvalidClaim {
+                claim: self.id.clone(),
+                reason: format!(
+                    "requires_steps must contain between 1 and {MAX_CLAIM_REFERENCES} entries"
+                ),
+            });
+        }
+        let mut steps = BTreeSet::new();
+        for step in &self.requires_steps {
+            require_text("claim.requires_steps", step)?;
+            if !known_steps.contains(step) {
+                return Err(MissionError::UnknownClaimStep {
+                    claim: self.id.clone(),
+                    step: step.clone(),
+                });
+            }
+            if !steps.insert(step) {
+                return Err(MissionError::InvalidClaim {
+                    claim: self.id.clone(),
+                    reason: "requires_steps must not contain duplicates".into(),
+                });
+            }
+        }
+        if !matches!(
+            self.level.as_str(),
+            "observation" | "evaluation" | "operational" | "release"
+        ) {
+            return Err(MissionError::InvalidClaim {
+                claim: self.id.clone(),
+                reason: "level must be observation, evaluation, operational, or release".into(),
+            });
+        }
+        if !matches!(
+            self.evidence_mode.as_str(),
+            "completed_step" | "successful_tool_result"
+        ) {
+            return Err(MissionError::InvalidClaim {
+                claim: self.id.clone(),
+                reason: "evidence_mode must be completed_step or successful_tool_result".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// A complete mission request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissionRequest {
@@ -349,6 +454,8 @@ pub struct MissionRequest {
     pub steps: Vec<MissionStep>,
     #[serde(default)]
     pub policy: MissionPolicy,
+    #[serde(default)]
+    pub claim_requests: Vec<MissionClaimRequest>,
 }
 
 impl MissionRequest {
@@ -389,6 +496,23 @@ impl MissionRequest {
                     });
                 }
             }
+        }
+        if self.claim_requests.len() > MAX_CLAIM_REQUESTS {
+            return Err(MissionError::TooMany {
+                kind: "claim requests",
+                count: self.claim_requests.len(),
+                maximum: MAX_CLAIM_REQUESTS,
+            });
+        }
+        let mut claim_ids = BTreeSet::new();
+        for claim in &self.claim_requests {
+            if !claim_ids.insert(claim.id.clone()) {
+                return Err(MissionError::Duplicate {
+                    kind: "mission claim",
+                    id: claim.id.clone(),
+                });
+            }
+            claim.validate(&ids)?;
         }
         for step in &self.steps {
             let mut dependencies = BTreeSet::new();
@@ -527,6 +651,121 @@ pub struct MissionStepResult {
     pub error: Option<String>,
 }
 
+/// Build a bounded lineage projection without interpreting the claim statement.
+pub fn mission_claim_lineage(
+    claims: &[MissionClaimRequest],
+    results: &[MissionStepResult],
+) -> Value {
+    let result_by_id = results
+        .iter()
+        .map(|result| (result.id.as_str(), result))
+        .collect::<BTreeMap<_, _>>();
+    let mut rows = Vec::with_capacity(claims.len());
+    for claim in claims.iter().take(MAX_CLAIM_REQUESTS) {
+        let evidence = claim
+            .requires_steps
+            .iter()
+            .take(MAX_CLAIM_REFERENCES)
+            .map(|step_id| {
+                let Some(result) = result_by_id.get(step_id.as_str()) else {
+                    return json!({
+                        "step_id": step_id,
+                        "found": false,
+                        "evidence_state": "missing_step_result"
+                    });
+                };
+                let result_digest = result
+                    .wire
+                    .as_ref()
+                    .and_then(|wire| ContentHash::of_value(wire).ok())
+                    .map(|digest| digest.to_string());
+                json!({
+                    "step_id": result.id,
+                    "tool": result.tool,
+                    "status": result.status,
+                    "required": result.required,
+                    "arguments_digest": result.arguments_digest,
+                    "bytes": result.bytes,
+                    "found": true,
+                    "result_retained": result.wire.is_some(),
+                    "result_digest": result_digest,
+                    "evidence_state": if result.status == "succeeded" {
+                        if result.wire.is_some() { "completed_output_retained" } else { "completed_output_omitted" }
+                    } else {
+                        "step_not_successful"
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let all_found = evidence
+            .iter()
+            .all(|row| row.get("found").and_then(Value::as_bool).unwrap_or(false));
+        let all_succeeded = evidence
+            .iter()
+            .all(|row| row.get("status").and_then(Value::as_str) == Some("succeeded"));
+        let all_outputs_retained = evidence.iter().all(|row| {
+            row.get("result_retained")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        });
+        let evidence_state = if !all_found {
+            "missing_step_result"
+        } else if !all_succeeded {
+            "step_not_successful"
+        } else if !all_outputs_retained {
+            "completed_output_omitted"
+        } else {
+            "completed_output_retained"
+        };
+        let claimable = all_found
+            && all_succeeded
+            && (claim.evidence_mode == "completed_step" || all_outputs_retained);
+        let mut row = json!({
+            "id": claim.id,
+            "claim": claim.claim,
+            "domains": claim.domains,
+            "level": claim.level,
+            "evidence_mode": claim.evidence_mode,
+            "requires_steps": claim.requires_steps,
+            "evidence_state": evidence_state,
+            "evidence": evidence,
+            "claim_status": "unreviewed",
+            "claimable": claimable,
+            "readiness_claimed": false,
+            "non_claims": [
+                "step completion does not establish the truth, calibration, causality, or clinical meaning of the statement",
+                "the lineage records caller-declared dependencies and retained transport outputs only"
+            ]
+        });
+        if let Ok(digest) = ContentHash::of_value(&row) {
+            row["lineage_digest"] = Value::String(digest.to_string());
+        }
+        rows.push(row);
+    }
+    let mut output = json!({
+        "schema": "bioprism-devplat-mission-claim-lineage/0.1",
+        "claims": rows,
+        "requested": claims.len(),
+        "returned": claims.len().min(MAX_CLAIM_REQUESTS),
+        "omitted": claims.len().saturating_sub(MAX_CLAIM_REQUESTS),
+        "claim_status": "unreviewed",
+        "readiness_claimed": false,
+        "guarantees": [
+            "each returned claim retains its caller-declared domain labels and required step IDs",
+            "each evidence row retains the exact step status, argument digest, byte count, and retained result digest when available",
+            "missing, refused, cancelled, and output-omitted steps remain distinct from completed retained outputs"
+        ],
+        "non_claims": [
+            "no scientific, clinical, causal, operational, or release truth is inferred",
+            "claim lineage is not evaluator validation, authority approval, or evidence completeness beyond retained mission results"
+        ]
+    });
+    if let Ok(digest) = ContentHash::of_value(&output) {
+        output["lineage_digest"] = Value::String(digest.to_string());
+    }
+    output
+}
+
 /// Deterministic, clock-free execution evidence for one mission transition.
 ///
 /// The sequence is assigned by the executor, not by a wall clock or thread completion order.
@@ -585,6 +824,8 @@ pub struct MissionReport {
     pub results: Vec<MissionStepResult>,
     pub execution_trace_schema_version: String,
     pub execution_trace: Vec<MissionTraceEvent>,
+    pub claim_requests: Vec<MissionClaimRequest>,
+    pub claim_lineage: Value,
     #[serde(skip)]
     pub trace_observer: Option<MissionTraceObserver>,
     pub guarantees: Vec<String>,
@@ -646,6 +887,10 @@ pub enum MissionError {
     DependencyCycle { steps: Vec<String> },
     #[error("cannot canonicalise mission: {0}")]
     Canonicalisation(String),
+    #[error("invalid mission claim `{claim}`: {reason}")]
+    InvalidClaim { claim: String, reason: String },
+    #[error("mission claim `{claim}` requires unknown step `{step}`")]
+    UnknownClaimStep { claim: String, step: String },
 }
 
 /// Build a deterministic plan from a mission request.
@@ -769,6 +1014,7 @@ mod tests {
             goal: "compose evidence".into(),
             steps,
             policy: MissionPolicy::default(),
+            claim_requests: Vec::new(),
         }
     }
 
@@ -927,5 +1173,78 @@ mod tests {
             plan_mission(&value),
             Err(MissionError::InvalidPointer { .. })
         ));
+    }
+
+    #[test]
+    fn claims_require_known_steps_and_lineage_stays_non_semantic() {
+        let mut value = request(vec![step("observe", "metrics_analytics_audit", &[])]);
+        value.claim_requests = vec![MissionClaimRequest {
+            id: "metric-observed".into(),
+            claim: "The requested metric was observed by the named evaluator.".into(),
+            domains: vec!["metrics".into(), "evaluation".into()],
+            requires_steps: vec!["observe".into()],
+            level: "observation".into(),
+            evidence_mode: "successful_tool_result".into(),
+        }];
+        assert!(plan_mission(&value).is_ok());
+
+        value.claim_requests[0].requires_steps = vec!["missing".into()];
+        assert!(matches!(
+            plan_mission(&value),
+            Err(MissionError::UnknownClaimStep { .. })
+        ));
+
+        let claim = MissionClaimRequest {
+            id: "metric-observed".into(),
+            claim: "The requested metric was observed by the named evaluator.".into(),
+            domains: vec!["metrics".into()],
+            requires_steps: vec!["observe".into()],
+            level: "observation".into(),
+            evidence_mode: "successful_tool_result".into(),
+        };
+        let retained = mission_claim_lineage(
+            &[claim.clone()],
+            &[MissionStepResult {
+                id: "observe".into(),
+                tool: "metrics_analytics_audit".into(),
+                status: "succeeded".into(),
+                required: true,
+                arguments_digest: Some("a".repeat(64)),
+                bytes: 12,
+                wire: Some(json!({"ok": true, "value": 3})),
+                error: None,
+            }],
+        );
+        assert_eq!(retained["claims"][0]["claim_status"], "unreviewed");
+        assert_eq!(retained["claims"][0]["claimable"], true);
+        assert_eq!(retained["claims"][0]["readiness_claimed"], false);
+        assert_eq!(
+            retained["claims"][0]["evidence"][0]["evidence_state"],
+            "completed_output_retained"
+        );
+        assert!(retained["claims"][0]["non_claims"][0]
+            .as_str()
+            .unwrap()
+            .contains("does not establish"));
+        assert_eq!(retained["lineage_digest"].as_str().unwrap().len(), 64);
+
+        let omitted = mission_claim_lineage(
+            &[claim],
+            &[MissionStepResult {
+                id: "observe".into(),
+                tool: "metrics_analytics_audit".into(),
+                status: "succeeded".into(),
+                required: true,
+                arguments_digest: None,
+                bytes: 20_000_001,
+                wire: None,
+                error: None,
+            }],
+        );
+        assert_eq!(omitted["claims"][0]["claimable"], false);
+        assert_eq!(
+            omitted["claims"][0]["evidence"][0]["evidence_state"],
+            "completed_output_omitted"
+        );
     }
 }

@@ -684,6 +684,10 @@ Accepted executable jobs expose `execution_provenance`, and `missionProvenance(m
 the same `bioprism-mission-execution-provenance/0.1` projection directly. It correlates the
 retained review and gate digest, domain-evaluator evidence, bounded preflight projection, and
 accepted-dispatch event; it is an audit/replay record rather than a readiness claim.
+`AgentMissionArgs.claim_requests` adds bounded caller-authored claims with explicit required step
+IDs and evidence mode. Reports expose `claim_lineage`, while `missionClaimLineage(missionId)` reads
+the dedicated response with retained-output digests, omission/refusal states, and explicit
+non-claims. `claimable` is evidence-retention posture only and never means the statement is true.
 
 ```typescript
 const page = await api.events(0, 100);

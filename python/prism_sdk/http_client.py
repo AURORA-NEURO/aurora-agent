@@ -111,6 +111,7 @@ from .oracle import (
 )
 from .mission import (
     MissionAssembly,
+    MissionClaimLineage,
     MAX_MISSION_LIST_LIMIT,
     MAX_MISSION_POLL_INTERVAL_SECONDS,
     MAX_MISSION_TRACE_PAGE,
@@ -619,6 +620,14 @@ class ApiClient:
         self._mission_id(mission_id)
         return MissionExecutionProvenance.from_wire(
             self.request("GET", f"/v1/missions/{mission_id}/provenance")
+        )
+
+    def mission_claim_lineage(self, mission_id: str) -> MissionClaimLineage:
+        """Read the bounded claim-to-step evidence projection for a terminal mission."""
+
+        self._mission_id(mission_id)
+        return MissionClaimLineage.from_wire(
+            self.request("GET", f"/v1/missions/{mission_id}/claims")
         )
 
     def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
@@ -3686,6 +3695,11 @@ class AsyncApiClient:
         """Async read of the retained gate/review/evaluator execution evidence."""
 
         return await asyncio.to_thread(self.client.mission_provenance, mission_id)
+
+    async def mission_claim_lineage(self, mission_id: str) -> MissionClaimLineage:
+        """Async read of the bounded claim-to-step evidence projection."""
+
+        return await asyncio.to_thread(self.client.mission_claim_lineage, mission_id)
 
     async def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Async bounded cursor page over the authoritative mission trace."""

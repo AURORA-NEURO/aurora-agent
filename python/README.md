@@ -99,6 +99,10 @@ truth for replay and domain interpretation.
 Executable jobs additionally expose `MissionJob.execution_provenance`; the sync and async
 `mission_provenance()` helpers read its retained review, gate digest, domain-evaluator evidence,
 and accepted-dispatch event correlation without converting it into a readiness claim.
+`MissionRequest.claim_requests` adds bounded caller-authored claim rows with explicit required
+steps and evidence mode. Terminal reports preserve the non-semantic `claim_lineage` projection,
+and `mission_claim_lineage()`/its async counterpart read the dedicated `/claims` route as a typed
+`MissionClaimLineage`; retained output is evidence posture only, never claim truth.
 `mission_trace(mission_id, after=..., limit=...)` pages the retained authoritative trace through a
 typed `MissionTracePage`; `gap` and `dropped_events` remain visible when a cursor falls behind the
 bounded retention window.

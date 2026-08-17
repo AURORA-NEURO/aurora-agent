@@ -280,6 +280,12 @@ called. The executor is serial by default; an explicit `execution_mode: "paralle
 dispatches independent wave members concurrently with bounded width and reserved output budget.
 Executed missions also return a deterministic clock-free trace of lifecycle, wave, step, refusal,
 block, digest, and byte-accounting transitions.
+Mission requests can additionally provide bounded caller-authored `claim_requests`; terminal reports
+then include a non-semantic `claim_lineage` projection that maps each claim to explicit step results,
+retained-output digests, omission states, and durable non-claims. The HTTP gateway exposes the same
+projection at `/v1/missions/{mission_id}/claims`, and the Python/TypeScript clients provide typed
+helpers for it. `claimable` describes retained evidence posture only: it never means the claim is true
+or release-ready.
 The Rust executor also performs bounded authoritative JSON Schema preflight against the live
 `tools/list` definitions: static arguments are checked before a mission is accepted or planned,
 and bound arguments are checked again after upstream payloads are materialized, before either

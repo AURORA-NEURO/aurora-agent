@@ -24,6 +24,8 @@ MAX_MISSION_LIST_LIMIT = 256
 MAX_MISSION_TRACE_PAGE = 1000
 MAX_MISSION_WAIT_SECONDS = 86_400.0
 MAX_MISSION_POLL_INTERVAL_SECONDS = 60.0
+MAX_MISSION_CLAIM_REQUESTS = 64
+MAX_MISSION_CLAIM_REFERENCES = 32
 OPERATIONS_REQUIRED_GATES = (
     "catalogue",
     "observed_activity",
@@ -261,6 +263,79 @@ def _step(value: MissionStep | Mapping[str, Any]) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class MissionClaimRequest:
+    """A bounded, caller-authored claim whose evidence must be traceable to mission steps."""
+
+    id: str
+    claim: str
+    domains: Sequence[str]
+    requires_steps: Sequence[str] = ()
+    level: str = "observation"
+    evidence_mode: str = "completed_step"
+
+    def __post_init__(self) -> None:
+        _text("claim id", self.id)
+        _text("claim text", self.claim)
+        if len(self.id.encode("utf-8")) > 128:
+            raise ArgumentError("claim id must be at most 128 UTF-8 bytes")
+        if len(self.claim.encode("utf-8")) > 4096:
+            raise ArgumentError("claim text must be at most 4096 UTF-8 bytes")
+        if not isinstance(self.domains, Sequence) or isinstance(self.domains, (str, bytes)):
+            raise ArgumentError("claim domains must be a sequence")
+        if not 1 <= len(self.domains) <= 32:
+            raise ArgumentError("claim domains must contain between 1 and 32 entries")
+        seen_domains: set[str] = set()
+        for domain in self.domains:
+            _text("claim domain", domain)
+            if len(domain.encode("utf-8")) > 256 or domain in seen_domains:
+                raise ArgumentError("claim domains must be unique entries of at most 256 UTF-8 bytes")
+            seen_domains.add(domain)
+        if not isinstance(self.requires_steps, Sequence) or isinstance(self.requires_steps, (str, bytes)):
+            raise ArgumentError("claim requires_steps must be a sequence")
+        if not 1 <= len(self.requires_steps) <= MAX_MISSION_CLAIM_REFERENCES:
+            raise ArgumentError(
+                f"claim requires_steps must contain between 1 and {MAX_MISSION_CLAIM_REFERENCES} entries"
+            )
+        seen_steps: set[str] = set()
+        for step_id in self.requires_steps:
+            _text("claim required step", step_id)
+            if step_id in seen_steps:
+                raise ArgumentError("claim requires_steps must contain unique entries")
+            seen_steps.add(step_id)
+        if self.level not in {"observation", "evaluation", "operational", "release"}:
+            raise ArgumentError("claim level must be observation, evaluation, operational, or release")
+        if self.evidence_mode not in {"completed_step", "successful_tool_result"}:
+            raise ArgumentError("claim evidence_mode must be completed_step or successful_tool_result")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "claim": self.claim,
+            "domains": list(self.domains),
+            "requires_steps": list(self.requires_steps),
+            "level": self.level,
+            "evidence_mode": self.evidence_mode,
+        }
+
+
+def _claim_request(value: MissionClaimRequest | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(value, MissionClaimRequest):
+        return value.to_dict()
+    raw = _mapping("mission claim request", value)
+    for name in ("id", "claim", "domains"):
+        if name not in raw:
+            raise ArgumentError(f"mission claim request requires {name}")
+    return MissionClaimRequest(
+        id=raw["id"],
+        claim=raw["claim"],
+        domains=raw["domains"],
+        requires_steps=raw.get("requires_steps", ()),
+        level=raw.get("level", "observation"),
+        evidence_mode=raw.get("evidence_mode", "completed_step"),
+    ).to_dict()
+
+
+@dataclass(frozen=True)
 class OperationsGateReviewRequest:
     """Request a durable operator review for the current operations gate digest."""
 
@@ -346,19 +421,37 @@ class MissionRequest:
     steps: Sequence[MissionStep | Mapping[str, Any]]
     policy: MissionPolicy | Mapping[str, Any] | None = None
     operations_gate_acceptance: OperationsGateAcceptance | Mapping[str, Any] | None = None
+    claim_requests: Sequence[MissionClaimRequest | Mapping[str, Any]] = ()
 
     def __post_init__(self) -> None:
         _text("mission_id", self.mission_id)
         _text("goal", self.goal)
         if not isinstance(self.steps, Sequence) or isinstance(self.steps, (str, bytes)) or not self.steps:
             raise ArgumentError("steps must be a non-empty sequence")
-        for value in self.steps:
-            _step(value)
+        normalized_steps = [_step(value) for value in self.steps]
+        known_step_ids = {value["id"] for value in normalized_steps}
+        if len(known_step_ids) != len(normalized_steps):
+            raise ArgumentError("steps must contain unique ids")
         if self.policy is not None and not isinstance(self.policy, (MissionPolicy, Mapping)):
             raise ArgumentError("policy must be a MissionPolicy or mapping")
         if self.operations_gate_acceptance is not None:
             if not isinstance(self.operations_gate_acceptance, (OperationsGateAcceptance, Mapping)):
                 raise ArgumentError("operations_gate_acceptance must be an OperationsGateAcceptance or mapping")
+        if not isinstance(self.claim_requests, Sequence) or isinstance(self.claim_requests, (str, bytes)):
+            raise ArgumentError("claim_requests must be a sequence")
+        if len(self.claim_requests) > MAX_MISSION_CLAIM_REQUESTS:
+            raise ArgumentError(f"claim_requests may contain at most {MAX_MISSION_CLAIM_REQUESTS} entries")
+        seen_claim_ids: set[str] = set()
+        for value in self.claim_requests:
+            claim = _claim_request(value)
+            if claim["id"] in seen_claim_ids:
+                raise ArgumentError("claim_requests must contain unique ids")
+            seen_claim_ids.add(claim["id"])
+            unknown_steps = set(claim["requires_steps"]) - known_step_ids
+            if unknown_steps:
+                raise ArgumentError(
+                    f"claim {claim['id']} requires unknown steps: {', '.join(sorted(unknown_steps))}"
+                )
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         arguments: dict[str, Any] = {
@@ -378,6 +471,8 @@ class MissionRequest:
                 if isinstance(self.operations_gate_acceptance, OperationsGateAcceptance)
                 else _mapping("operations_gate_acceptance", self.operations_gate_acceptance)
             )
+        if self.claim_requests:
+            arguments["claim_requests"] = [_claim_request(value) for value in self.claim_requests]
         return arguments
 
 
@@ -865,6 +960,15 @@ class MissionExecutionReport:
         return value
 
     @property
+    def claim_lineage(self) -> Mapping[str, Any]:
+        """Return the server's bounded claim-to-step evidence projection without interpreting it."""
+
+        value = self.raw.get("claim_lineage", {})
+        if not isinstance(value, Mapping):
+            raise ArgumentError("claim_lineage must be an object")
+        return value
+
+    @property
     def cancelled(self) -> int:
         value = self.raw.get("cancelled", 0)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -984,6 +1088,33 @@ class MissionExecutionProvenance:
         if not isinstance(readiness_claimed, bool):
             raise ArgumentError("mission execution provenance readiness_claimed must be a boolean")
         return cls(raw, mission_id, provenance, readiness_claimed)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionClaimLineage:
+    """Typed envelope for the server's non-semantic mission claim evidence projection."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    schema: str
+    claim_lineage: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionClaimLineage":
+        raw = _mapping("mission claim lineage", value)
+        mission_id = raw.get("mission_id")
+        _text("mission claim lineage mission_id", mission_id)
+        schema = raw.get("schema")
+        _text("mission claim lineage schema", schema)
+        if schema != "bioprism-mission-claim-lineage-response/0.1":
+            raise ArgumentError(f"unknown mission claim lineage schema: {schema}")
+        claim_lineage = raw.get("claim_lineage")
+        if not isinstance(claim_lineage, Mapping):
+            raise ArgumentError("mission claim lineage claim_lineage must be an object")
+        return cls(raw, mission_id, schema, claim_lineage)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -1531,6 +1662,8 @@ __all__ = [
     "MAX_MISSION_TRACE_PAGE",
     "MAX_MISSION_WAIT_SECONDS",
     "MAX_MISSION_POLL_INTERVAL_SECONDS",
+    "MAX_MISSION_CLAIM_REQUESTS",
+    "MAX_MISSION_CLAIM_REFERENCES",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
     "OPERATIONS_REQUIRED_GATES",
@@ -1539,6 +1672,7 @@ __all__ = [
     "MISSION_TRACE_SCHEMA_VERSION",
     "MISSION_TRACE_EVENTS",
     "MissionBinding",
+    "MissionClaimRequest",
     "MissionAssembly",
     "MissionPolicy",
     "OperationsGateReviewRequest",
@@ -1546,6 +1680,7 @@ __all__ = [
     "MissionPreflight",
     "MissionExecutionReport",
     "MissionExecutionProvenance",
+    "MissionClaimLineage",
     "MissionJob",
     "MissionResultOmission",
     "MissionInventoryItem",

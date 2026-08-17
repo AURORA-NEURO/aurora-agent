@@ -127,6 +127,9 @@ if (result.mcp.result?.isError) {
 - Executable jobs retain `execution_provenance`, and `missionProvenance(missionId)` reads the
   correlated review, gate digest, domain-evaluator evidence, and accepted-dispatch event as a
   bounded audit projection; it never claims readiness or scientific validity.
+- `AgentMissionArgs.claim_requests` carries bounded caller-authored claim rows. Terminal reports
+  expose their non-semantic `claim_lineage`, and `missionClaimLineage(missionId)` reads the
+  dedicated `/claims` projection with explicit retained-output and omission posture.
 - `missionFromRoute()` converts a completed `capabilityRoute()` response into a provenance-preserving
   mission assembly only after every need has one caller-selected candidate and explicit JSON
   arguments. It refuses unresolved or out-of-candidate tools, performs no network call, and is

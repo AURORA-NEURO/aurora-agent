@@ -531,6 +531,9 @@ impl ApiRouter {
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/provenance") => {
                 self.mission_provenance(&request, &request_id)
             }
+            ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/claims") => {
+                self.mission_claims(&request, &request_id)
+            }
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/trace") => {
                 self.mission_trace(&request, &request_id)
             }
@@ -973,6 +976,7 @@ impl ApiRouter {
                     "async_missions": true,
                     "mission_inventory": true,
                     "mission_execution_provenance": true,
+                    "mission_claim_lineage": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -1002,6 +1006,7 @@ impl ApiRouter {
                     "mission_persistence": "/v1/missions/persistence",
                     "event_persistence": "/v1/events/persistence",
                     "mission_provenance": "/v1/missions/{mission_id}/provenance",
+                    "mission_claims": "/v1/missions/{mission_id}/claims",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -2110,6 +2115,7 @@ impl ApiRouter {
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
                     "mission_provenance": "/v1/missions/{mission_id}/provenance",
+                    "mission_claims": "/v1/missions/{mission_id}/claims",
                     "mission_persistence": "/v1/missions/persistence",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
@@ -2142,6 +2148,7 @@ impl ApiRouter {
                     "mission_preflight": true,
                     "mission_inventory": true,
                     "mission_execution_provenance": true,
+                    "mission_claim_lineage": true,
                     "mission_trace": true,
                     "delivery_receipt_events": true,
                     "delivery_receipt_attempt_provenance": true,
@@ -3068,6 +3075,112 @@ impl ApiRouter {
         )
     }
 
+    fn mission_claims(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), Some("claims")) else {
+            return self.error(
+                404,
+                "not_found",
+                "mission claim lineage route does not exist",
+                request_id,
+            );
+        };
+        if request
+            .query()
+            .map(|query| !query.is_empty())
+            .unwrap_or(true)
+        {
+            return self.error(
+                400,
+                "invalid_query",
+                "mission claim lineage does not accept query parameters",
+                request_id,
+            );
+        }
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(result) = state.result else {
+            if let Some(omitted) = state.result_omitted {
+                return self.error(
+                    410,
+                    "mission_result_omitted",
+                    &format!(
+                        "mission result was omitted from the bounded registry snapshot ({} bytes, sha256 {})",
+                        omitted["bytes"], omitted["sha256"]
+                    ),
+                    request_id,
+                );
+            }
+            return self.error(
+                409,
+                "claim_lineage_unavailable",
+                "mission claim lineage is available after a terminal report is retained",
+                request_id,
+            );
+        };
+        let Some(claim_lineage) = result.get("claim_lineage") else {
+            return self.error(
+                404,
+                "claim_lineage_unavailable",
+                "mission report predates the claim lineage contract or did not request claims",
+                request_id,
+            );
+        };
+        if !claim_lineage.is_object() {
+            return self.error(
+                500,
+                "invalid_claim_lineage",
+                "mission report claim_lineage is not an object",
+                request_id,
+            );
+        }
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "schema": "bioprism-mission-claim-lineage-response/0.1",
+                "mission_id": mission_id,
+                "claim_lineage": claim_lineage,
+                "guarantees": [
+                    "claim rows are correlated only to the explicitly requested mission steps",
+                    "omitted outputs and non-successful steps remain visible as non-claimable evidence states",
+                    "the projection preserves non-claim posture and does not interpret claim truth"
+                ],
+                "non_claims": [
+                    "claimable means the requested evidence was retained, not that the claim is true",
+                    "this route is not scientific, clinical, regulatory, or deployment approval"
+                ],
+                "links": {
+                    "mission": format!("/v1/missions/{mission_id}"),
+                    "mission_trace": format!("/v1/missions/{mission_id}/trace"),
+                    "execution_provenance": format!("/v1/missions/{mission_id}/provenance")
+                }
+            }),
+        )
+    }
+
     fn mission_trace(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         let Some(mission_id) = mission_id(&request.path_segments(), Some("trace")) else {
             return self.error(
@@ -3857,6 +3970,7 @@ impl ApiRouter {
                     "/v1/missions/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded mission snapshot checkpoint" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
                     "/v1/missions/{mission_id}/provenance": { "get": { "responses": { "200": { "description": "retained execution gate, review, evaluator, and dispatch provenance" } } } },
+                    "/v1/missions/{mission_id}/claims": { "get": { "responses": { "200": { "description": "bounded claim-to-step evidence lineage projection" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "terminal report was omitted from the bounded registry" } } } },
                     "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
@@ -6582,7 +6696,8 @@ mod tests {
         let body = json!({
             "mission_id": "api-async-1",
             "goal": "plan an asynchronous cross-domain mission",
-            "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}]
+            "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}],
+            "claim_requests": [{"id": "catalog-observed", "claim": "The catalogue response was returned by the named tool.", "domains": ["workspace"], "requires_steps": ["catalog"], "evidence_mode": "successful_tool_result"}]
         });
         let submitted = router.handle(request("POST", "/v1/missions", body.clone()));
         assert_eq!(submitted.status, 202);
@@ -6605,6 +6720,22 @@ mod tests {
         assert_eq!(status["progress"]["total_steps"], 1);
         assert_eq!(status["progress"]["completed_steps"], 0);
         assert_eq!(status["progress"]["last_event"], "mission.completed");
+        assert_eq!(
+            status["result"]["claim_lineage"]["claims"][0]["id"],
+            "catalog-observed"
+        );
+        assert_eq!(
+            status["result"]["claim_lineage"]["claims"][0]["claimable"],
+            false
+        );
+        let claims = router.handle(request("GET", "/v1/missions/api-async-1/claims", json!({})));
+        assert_eq!(claims.status, 200);
+        let claims: Value = serde_json::from_slice(&claims.body).unwrap();
+        assert_eq!(
+            claims["schema"],
+            "bioprism-mission-claim-lineage-response/0.1"
+        );
+        assert_eq!(claims["claim_lineage"]["claims"][0]["claimable"], false);
         let trace = router.handle(request(
             "GET",
             "/v1/missions/api-async-1/trace?after=0&limit=64",

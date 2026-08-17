@@ -583,6 +583,8 @@ mod tests {
                     detail: None,
                 },
             ],
+            claim_requests: vec![],
+            claim_lineage: json!({}),
             trace_observer: None,
             guarantees: vec![],
             limitations: vec![],
