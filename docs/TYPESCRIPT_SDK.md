@@ -107,6 +107,10 @@ mode, expected digest, policy, parent links, and non-fetching posture; it does n
 path, or opaque reference into retrieved provenance.
 If the plan includes an expected content digest, the server compares it against the canonical
 response digest of a later bound intake before indexing.
+`domainEvidenceSourceExecute` and `domainEvidenceSourceExecuteTool` consume a retained plan through
+the bounded local-file/plain-HTTP connector kernel. The typed result preserves transport outcome,
+raw-content digest, canonical response digest, and the automatically indexed intake; traversal,
+HTTPS, redirects, unsupported connectors, and disallowed hosts remain explicit refusals.
 
 Convenience methods currently cover:
 
@@ -251,7 +255,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 197-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the 198-tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,

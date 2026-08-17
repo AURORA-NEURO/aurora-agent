@@ -21,6 +21,8 @@ pub const MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_PARENTS: usize = 128;
 pub const MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TEXT_BYTES: usize = 2048;
 pub const MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_NON_CLAIMS: usize = 64;
 pub const MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_BYTES_LIMIT: u64 = 64 * 1024 * 1024;
+pub const MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_ALLOWED_HOSTS: usize = 32;
+pub const MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TIMEOUT_MS: u64 = 30_000;
 
 const CONNECTOR_KINDS: &[&str] = &[
     "literature",
@@ -230,12 +232,67 @@ fn normalize_policy(value: Option<&Value>) -> Result<Value, DomainEvidenceSource
             allowed: CACHE_MODES.join(", "),
         });
     }
+    let timeout_ms = object
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(5_000);
+    if !(1..=MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TIMEOUT_MS).contains(&timeout_ms) {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(
+            "retrieval_policy.timeout_ms".into(),
+        ));
+    }
+    let allowed_hosts = text_set_value(
+        object.get("allowed_hosts"),
+        "retrieval_policy.allowed_hosts",
+        MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_ALLOWED_HOSTS,
+    )?;
+    if network == "enabled" && allowed_hosts.is_empty() {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(
+            "retrieval_policy.allowed_hosts is required when network is enabled".into(),
+        ));
+    }
     Ok(json!({
         "network": network,
         "max_bytes": max_bytes,
         "cache": cache,
+        "timeout_ms": timeout_ms,
+        "allowed_hosts": allowed_hosts,
         "credentials": "caller_managed_not_supplied"
     }))
+}
+
+fn text_set_value(
+    value: Option<&Value>,
+    field: &str,
+    maximum: usize,
+) -> Result<Vec<String>, DomainEvidenceSourcePlanError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| DomainEvidenceSourcePlanError::InvalidField(field.into()))?;
+    if values.len() > maximum {
+        return Err(DomainEvidenceSourcePlanError::TooManyItems {
+            field: field.into(),
+            maximum,
+        });
+    }
+    let mut result = BTreeSet::new();
+    for value in values {
+        let host = value
+            .as_str()
+            .map(str::trim)
+            .filter(|host| !host.is_empty())
+            .ok_or_else(|| DomainEvidenceSourcePlanError::InvalidField(field.into()))?;
+        if host.len() > MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TEXT_BYTES
+            || host.contains(['\r', '\n', '/', '?', '#', '@', ':', ' '])
+        {
+            return Err(DomainEvidenceSourcePlanError::InvalidField(field.into()));
+        }
+        result.insert(host.trim_end_matches('.').to_ascii_lowercase());
+    }
+    Ok(result.into_iter().collect())
 }
 
 fn required_text(

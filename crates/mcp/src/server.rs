@@ -126,7 +126,7 @@ use bioprism_dataops::{
 use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
     audit_execution_provenance, build_dashboard, build_delivery_receipt,
-    build_domain_workflow_catalogue, instantiate_domain_workflow,
+    build_domain_workflow_catalogue, execute_domain_evidence_source, instantiate_domain_workflow,
     mission_claim_lineage_with_review, normalize_ci_provider_payload, plan_domain_evidence_source,
     plan_mission, reconcile_domain_workflow, run_workbench, scaffold_domain_workflow,
     standard_walkthroughs, verify_delivery_receipt, verify_mission_evidence_bundle,
@@ -143,6 +143,7 @@ use bioprism_devplat::{
     DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
     DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
     DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
     DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW,
     DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION, DOMAIN_REPORT_COVERAGE_WORKFLOW,
     DOMAIN_REPORT_PROJECT_SCHEMA_VERSION, DOMAIN_REPORT_PROJECT_WORKFLOW,
@@ -1374,6 +1375,7 @@ impl Server {
             "domain_evidence_intake" => self.domain_evidence_intake(&arguments),
             "domain_evidence_coverage" => self.domain_evidence_coverage(&arguments),
             "domain_evidence_source_plan" => self.domain_evidence_source_plan(&arguments),
+            "domain_evidence_source_execute" => self.domain_evidence_source_execute(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -3244,12 +3246,167 @@ impl Server {
         }))
     }
 
+    /// Execute one retained source plan through the bounded in-process connector kernel.
+    ///
+    /// Execution is intentionally separate from planning and intake. The plan is looked up by
+    /// its declared digest, the current catalogue is checked again, the connector returns an
+    /// explicit observed/partial/refused/error outcome, and only then is that response passed
+    /// through the ordinary intake path. This keeps a successful file or HTTP read from becoming
+    /// a scientific or provenance claim merely because it was reachable.
+    fn domain_evidence_source_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let source_plan_digest = arguments
+            .get("source_plan_digest")
+            .and_then(Value::as_str)
+            .ok_or("source_plan_digest is required")?;
+        let plan_record = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit()
+            .into_iter()
+            .find(|record| {
+                record.kind == "domain_evidence_source_plan"
+                    && record.artifact.get("plan_digest").and_then(Value::as_str)
+                        == Some(source_plan_digest)
+            })
+            .ok_or_else(|| {
+                format!("source_plan_digest {source_plan_digest:?} is not a retained source plan")
+            })?;
+        let plan = plan_record.artifact;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group_id = plan
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("retained source plan omitted group_id")?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+        let domains = plan
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("retained source plan omitted domains")?;
+        for domain in domains.iter().filter_map(Value::as_str) {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "retained source plan domain {domain:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let source_tool = arguments
+            .get("source_tool")
+            .and_then(Value::as_str)
+            .or_else(|| plan.get("source_tool").and_then(Value::as_str))
+            .ok_or("source_tool is required when the retained source plan has no source_tool")?;
+        if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+            return Err(format!(
+                "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+            ));
+        }
+        if plan
+            .get("source_tool")
+            .and_then(Value::as_str)
+            .is_some_and(|planned| planned != source_tool)
+        {
+            return Err("execution source_tool does not match retained source plan".into());
+        }
+        let execution = execute_domain_evidence_source(self.root(), &plan)
+            .map_err(|error| format!("domain evidence source execution refused: {error}"))?;
+        let request = arguments.get("request").cloned().unwrap_or_else(|| {
+            json!({
+                "connector_kind": plan.get("connector_kind"),
+                "locator_kind": plan.get("locator_kind"),
+                "retrieval_mode": plan.get("retrieval_mode"),
+                "execution": DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW
+            })
+        });
+        let claim_posture = arguments.get("claim_posture").cloned().unwrap_or_else(|| {
+            json!({
+                "status": "review_required",
+                "does_not_claim": [
+                    "source authenticity or scientific truth",
+                    "clinical, regulatory, causal, or release validity",
+                    "provenance completeness or external authorization"
+                ],
+                "limitations": [
+                    "bounded connector output is retained as caller-declared evidence only"
+                ]
+            })
+        });
+        let mut parent_digests = arguments
+            .get("parent_digests")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let parents = parent_digests
+            .as_array_mut()
+            .ok_or("parent_digests must be an array when supplied")?;
+        if !parents
+            .iter()
+            .any(|value| value.as_str() == Some(plan_record.content_digest.as_str()))
+        {
+            parents.push(json!(plan_record.content_digest));
+        }
+        let intake_arguments = json!({
+            "group_id": plan.get("group_id"),
+            "domains": plan.get("domains"),
+            "subject_id": plan.get("subject_id"),
+            "source_tool": source_tool,
+            "request": request,
+            "response": execution.get("response"),
+            "outcome": execution.get("outcome"),
+            "claim_posture": claim_posture,
+            "source_plan_digest": source_plan_digest,
+            "parent_digests": parents
+        });
+        let intake = self.domain_evidence_intake(&intake_arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
+            "source_plan_digest": source_plan_digest,
+            "group_id": plan.get("group_id"),
+            "domains": plan.get("domains"),
+            "subject_id": plan.get("subject_id"),
+            "source_tool": source_tool,
+            "outcome": execution.get("outcome"),
+            "retrieval_status": execution.get("retrieval_status"),
+            "execution": execution.get("execution"),
+            "raw_content_digest": execution.get("raw_content_digest"),
+            "response_digest": execution.get("response_digest"),
+            "byte_length": execution.get("byte_length"),
+            "content_type": execution.get("content_type"),
+            "source_plan": plan,
+            "execution_result": execution,
+            "intake": intake,
+            "artifact_registry": intake.get("artifact_registry"),
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "guarantees": [
+                "the retained plan and current capability catalogue were checked before connector execution",
+                "the connector response carries separate raw-byte and canonical-JSON digests",
+                "the response is indexed through domain_evidence_intake with the source-plan digest and exact plan artifact as parents"
+            ],
+            "does_not_claim": [
+                "a successful read proves source authenticity, scientific validity, clinical validity, or provenance completeness",
+                "the named source_tool was executed or interpreted by this connector",
+                "a refused, error, or partial transport outcome is equivalent to an observed result"
+            ]
+        }))
+    }
+
     /// Intake one raw request/response envelope and bind it to the authoritative catalogue.
     /// Intake is deliberately separate from execution: callers may submit a retained tool
     /// response, a refusal, or an externally produced envelope, but this operation never calls
     /// the named source tool on their behalf.
     fn domain_evidence_intake(&self, arguments: &Value) -> Result<Value, String> {
         let mut expected_content_digest = None;
+        let mut source_plan_content_digest = None;
         if let Some(source_plan_digest) =
             arguments.get("source_plan_digest").and_then(Value::as_str)
         {
@@ -3320,12 +3477,32 @@ impl Server {
                 .get("expected_content_digest")
                 .and_then(Value::as_str)
                 .map(str::to_string);
+            source_plan_content_digest = Some(plan.content_digest.clone());
         }
-        let intake = bioprism_devplat::intake_domain_evidence(arguments)
+        let mut intake_arguments = arguments.clone();
+        if let Some(source_plan_content_digest) = source_plan_content_digest {
+            let parents = intake_arguments
+                .as_object_mut()
+                .ok_or("domain evidence intake arguments must be an object")?
+                .entry("parent_digests")
+                .or_insert_with(|| json!([]));
+            let parents = parents
+                .as_array_mut()
+                .ok_or("parent_digests must be an array")?;
+            if !parents
+                .iter()
+                .any(|value| value.as_str() == Some(source_plan_content_digest.as_str()))
+            {
+                parents.push(json!(source_plan_content_digest));
+            }
+        }
+        let intake = bioprism_devplat::intake_domain_evidence(&intake_arguments)
             .map_err(|error| format!("domain evidence intake refused: {error}"))?;
         if let Some(expected_content_digest) = expected_content_digest {
-            if intake.get("response_digest").and_then(Value::as_str)
-                != Some(expected_content_digest.as_str())
+            let outcome = intake.get("outcome").and_then(Value::as_str);
+            if matches!(outcome, Some("observed" | "partial"))
+                && intake.get("response_digest").and_then(Value::as_str)
+                    != Some(expected_content_digest.as_str())
             {
                 return Err(format!(
                     "source plan expected response digest {expected_content_digest}, but intake response digest differs"
@@ -29597,7 +29774,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -29953,6 +30130,21 @@ pub fn tool_definitions() -> Vec<Value> {
                     "does_not_claim": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Caller-owned non-claims that remain attached to the plan." }
                 },
                 "required": ["group_id", "domains", "subject_id", "connector_kind", "locator_kind", "locator", "retrieval_mode", "does_not_claim"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_source_execute",
+            "description": "Execute a retained domain_evidence_source_plan through the bounded connector kernel. Local files are confined to the server root; plain HTTP requires an enabled exact host allow-list; HTTPS, redirects, unsupported connector families, policy refusals, and transport failures remain explicit outcomes. Successful and partial reads produce raw-byte and canonical-JSON digests and are automatically retained through domain_evidence_intake; no scientific, clinical, provenance, or release claim is inferred.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_plan_digest": { "type": "string", "description": "Exact plan_digest from a retained domain_evidence_source_plan artifact." },
+                    "source_tool": { "type": "string", "description": "Optional declared capability-group MCP tool used as the intake source; required when the plan omitted source_tool." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Optional caller-owned request envelope retained alongside the connector response." },
+                    "claim_posture": { "type": "object", "description": "Optional explicit claim posture; defaults to review_required with connector non-claims." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional exact artifact parents; the retained plan artifact content digest is added automatically." }
+                },
+                "required": ["source_plan_digest"]
             }
         }),
         json!({

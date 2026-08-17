@@ -14,6 +14,8 @@ from prism_sdk import (
     DomainEvidenceIntakeRequest,
     DomainEvidenceSourcePlanReport,
     DomainEvidenceSourcePlanRequest,
+    DomainEvidenceSourceExecutionReport,
+    DomainEvidenceSourceExecutionRequest,
     Workspace,
 )
 
@@ -149,6 +151,41 @@ def source_request() -> DomainEvidenceSourcePlanRequest:
     )
 
 
+def source_execution_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-evidence-source-execution/0.1",
+        "workflow": "domain_evidence_source_execute",
+        "source_plan_digest": "b" * 64,
+        "group_id": "biological_domains",
+        "domains": ["modalities"],
+        "subject_id": "source-python",
+        "source_tool": "modality_catalog",
+        "outcome": "observed",
+        "retrieval_status": "observed",
+        "execution": "completed",
+        "raw_content_digest": "f" * 64,
+        "response_digest": "a" * 64,
+        "byte_length": 24,
+        "content_type": "application/json",
+        "execution_result": {"response": {"retrieval": {"body_encoding": "json"}}},
+        "intake": {"workflow": "domain_evidence_intake"},
+        "artifact_registry": {"indexed": True, "kind": "domain_evidence_intake", "content_digest": "d" * 64},
+        "catalogue_digest": "c" * 64,
+        "readiness_claimed": False,
+        "guarantees": [],
+        "does_not_claim": [],
+    }
+
+
+def source_execution_request() -> DomainEvidenceSourceExecutionRequest:
+    return DomainEvidenceSourceExecutionRequest(
+        source_plan_digest="b" * 64,
+        request={"method": "read"},
+        parent_digests=("e" * 64,),
+    )
+
+
 class DomainEvidenceIntakeModelTests(unittest.TestCase):
     def test_request_and_response_keep_request_presence_and_outcome(self) -> None:
         normalized = request()
@@ -246,6 +283,28 @@ class DomainEvidenceIntakeModelTests(unittest.TestCase):
         with patch.object(Workspace, "tool", return_value=source_plan_payload()):
             report = Workspace(None).domain_evidence_source_plan_report(source_request())
         self.assertEqual(report.artifact_registry["kind"], "domain_evidence_source_plan")
+
+    def test_source_execution_preserves_transport_outcome_and_digests_across_clients(self) -> None:
+        report = DomainEvidenceSourceExecutionReport.from_wire(source_execution_payload())
+        self.assertEqual(report.outcome, "observed")
+        self.assertEqual(report.raw_content_digest, "f" * 64)
+        self.assertEqual(report.byte_length, 24)
+        with patch.object(ApiClient, "request", return_value=source_execution_payload()) as rest:
+            report = ApiClient("http://127.0.0.1:8787").domain_evidence_source_execute(source_execution_request())
+        self.assertEqual(rest.call_args.args[:2], ("POST", "/v1/domain-evidence/sources/execute"))
+        with patch.object(ApiClient, "call_tool", return_value=source_execution_payload()) as tool:
+            report = ApiClient("http://127.0.0.1:8787").domain_evidence_source_execute_tool(source_execution_request())
+        self.assertEqual(tool.call_args.args[0], "domain_evidence_source_execute")
+        with patch.object(ApiClient, "request", return_value=source_execution_payload()):
+            report = asyncio.run(
+                AsyncApiClient(ApiClient("http://127.0.0.1:8787")).domain_evidence_source_execute(source_execution_request())
+            )
+        self.assertEqual(report.response_digest, "a" * 64)
+        with patch.object(Workspace, "tool", return_value=source_execution_payload()):
+            report = Workspace(None).domain_evidence_source_execute_report(source_execution_request())
+        self.assertEqual(report.artifact_registry["kind"], "domain_evidence_intake")
+        with self.assertRaises(ArgumentError):
+            DomainEvidenceSourceExecutionRequest(source_plan_digest="not-a-digest")
 
 
 if __name__ == "__main__":

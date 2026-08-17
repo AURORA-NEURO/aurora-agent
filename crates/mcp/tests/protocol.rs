@@ -323,7 +323,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 197);
+    assert_eq!(tools.len(), 198);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1212,6 +1212,93 @@ fn domain_evidence_source_plan_is_catalogue_bound_digest_addressed_and_non_execu
         }),
     );
     assert_eq!(credential_refused["__isError"], json!(true));
+}
+
+#[test]
+fn domain_evidence_source_execute_reads_confined_file_and_retains_raw_and_json_digests() {
+    let mut server = server();
+    let planned = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-execution-subject",
+            "source_tool": "modality_catalog",
+            "connector_kind": "file",
+            "locator_kind": "path",
+            "locator": "fixtures/fiber-v0.1/leakage_query.json",
+            "retrieval_mode": "content",
+            "retrieval_policy": {"network": "disabled", "max_bytes": 65536, "cache": "content_addressed"},
+            "does_not_claim": ["source truth", "scientific validity"]
+        }),
+    );
+    let executed = call(
+        &mut server,
+        "domain_evidence_source_execute",
+        json!({"source_plan_digest": planned["plan_digest"].clone()}),
+    );
+    assert_eq!(
+        executed["workflow"],
+        json!("domain_evidence_source_execute")
+    );
+    assert_eq!(executed["outcome"], json!("observed"));
+    assert_eq!(
+        executed["intake"]["workflow"],
+        json!("domain_evidence_intake")
+    );
+    assert_eq!(
+        executed["intake"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+    assert_eq!(executed["raw_content_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(executed["response_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        executed["execution_result"]["response"]["retrieval"]["body_encoding"],
+        json!("json")
+    );
+    assert!(executed["intake"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|digest| digest == &planned["artifact_registry"]["content_digest"]));
+    let repeated = call(
+        &mut server,
+        "domain_evidence_source_execute",
+        json!({"source_plan_digest": planned["plan_digest"].clone()}),
+    );
+    assert_eq!(repeated["outcome"], json!("observed"));
+    assert_eq!(
+        repeated["intake"]["artifact_registry"]["already_present"],
+        json!(true)
+    );
+
+    let traversal_plan = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-execution-refused",
+            "source_tool": "modality_catalog",
+            "connector_kind": "file",
+            "locator_kind": "path",
+            "locator": "../outside.json",
+            "retrieval_mode": "content",
+            "does_not_claim": ["source truth"]
+        }),
+    );
+    let refused = call(
+        &mut server,
+        "domain_evidence_source_execute",
+        json!({"source_plan_digest": traversal_plan["plan_digest"].clone()}),
+    );
+    assert_eq!(refused["outcome"], json!("refused"));
+    assert_eq!(refused["intake"]["outcome"], json!("refused"));
+    assert_eq!(
+        refused["intake"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
 }
 
 #[test]
@@ -6606,12 +6693,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(197));
-    assert_eq!(result["advertised_tool_count"], json!(197));
+    assert_eq!(result["unique_catalog_tools"], json!(198));
+    assert_eq!(result["advertised_tool_count"], json!(198));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(197));
-    assert_eq!(result["schema_quality"]["valid"], json!(197));
+    assert_eq!(result["schema_quality"]["checked"], json!(198));
+    assert_eq!(result["schema_quality"]["valid"], json!(198));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

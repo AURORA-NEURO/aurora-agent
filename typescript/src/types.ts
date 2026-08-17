@@ -5110,6 +5110,39 @@ export interface DomainEvidenceSourcePlanResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface DomainEvidenceSourceExecutionArgs extends JsonObject {
+  source_plan_digest: string;
+  source_tool?: string | null;
+  request?: JsonValue;
+  claim_posture?: JsonObject;
+  parent_digests?: string[];
+}
+
+export interface DomainEvidenceSourceExecutionResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-source-execution/0.1";
+  workflow: "domain_evidence_source_execute";
+  source_plan_digest: string;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  outcome: "observed" | "partial" | "refused" | "error" | "unknown";
+  retrieval_status: string;
+  execution: "completed" | "refused";
+  raw_content_digest: string | null;
+  response_digest: string;
+  byte_length: number | null;
+  content_type: string | null;
+  execution_result: JsonObject;
+  intake: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface AdapterPlanArgs extends JsonObject {
   source_id: string;
   declared_format?: string;
@@ -8007,6 +8040,7 @@ export type ArtifactKind =
   | "domain_report"
   | "domain_evidence_harmonization"
   | "domain_evidence_intake"
+  | "domain_evidence_source_plan"
   | "external_reference";
 
 export interface ArtifactRegistrationArgs extends JsonObject {

@@ -42,6 +42,8 @@ import type {
   DomainEvidenceIntakeCoverageResult,
   DomainEvidenceSourcePlanArgs,
   DomainEvidenceSourcePlanResult,
+  DomainEvidenceSourceExecutionArgs,
+  DomainEvidenceSourceExecutionResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -714,7 +716,21 @@ export class ApiClient {
     if (args.expected_content_digest !== undefined && args.expected_content_digest !== null && (typeof args.expected_content_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.expected_content_digest))) throw new ArgumentError("expected_content_digest must be a lowercase SHA-256 digest or null");
     if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
     if (!Array.isArray(args.does_not_claim) || args.does_not_claim.length < 1 || args.does_not_claim.length > 64 || args.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("does_not_claim must contain 1..=64 non-empty strings");
-    if (args.retrieval_policy !== undefined && !isObject(args.retrieval_policy)) throw new ArgumentError("retrieval_policy must be an object");
+    if (args.retrieval_policy !== undefined) {
+      if (!isObject(args.retrieval_policy)) throw new ArgumentError("retrieval_policy must be an object");
+      const policy = args.retrieval_policy;
+      const network = policy.network ?? "caller_managed";
+      if (!(network === "disabled" || network === "caller_managed" || network === "enabled")) throw new ArgumentError("retrieval_policy.network is invalid");
+      const maxBytes = policy.max_bytes ?? 2 * 1024 * 1024;
+      if (typeof maxBytes !== "number" || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 64 * 1024 * 1024) throw new ArgumentError("retrieval_policy.max_bytes is invalid");
+      const timeoutMs = policy.timeout_ms ?? 5_000;
+      if (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new ArgumentError("retrieval_policy.timeout_ms is invalid");
+      const cache = policy.cache ?? "content_addressed";
+      if (!(cache === "no_cache" || cache === "content_addressed")) throw new ArgumentError("retrieval_policy.cache is invalid");
+      const allowedHosts = policy.allowed_hosts ?? [];
+      if (!Array.isArray(allowedHosts) || allowedHosts.length > 32 || allowedHosts.some((host) => typeof host !== "string" || host.trim().length === 0 || /[\r\n\/?#@:\s]/.test(host))) throw new ArgumentError("retrieval_policy.allowed_hosts is invalid");
+      if (network === "enabled" && allowedHosts.length === 0) throw new ArgumentError("retrieval_policy.allowed_hosts is required when network is enabled");
+    }
     return this.request<DomainEvidenceSourcePlanResult>("POST", "/v1/domain-evidence/sources", args, options);
   }
 
@@ -724,6 +740,27 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceSourcePlanResult>> {
     return this.callTool<DomainEvidenceSourcePlanResult>("domain_evidence_source_plan", args, options);
+  }
+
+  /** Execute a retained source plan and retain its bounded response as domain evidence. */
+  async domainEvidenceSourceExecute(
+    args: DomainEvidenceSourceExecutionArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceSourceExecutionResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence source execution arguments must be an object");
+    if (typeof args.source_plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.source_plan_digest)) throw new ArgumentError("source_plan_digest must be a lowercase SHA-256 digest");
+    if (args.source_tool !== undefined && args.source_tool !== null && (typeof args.source_tool !== "string" || args.source_tool.trim().length === 0)) throw new ArgumentError("source_tool must be a non-empty string or null");
+    if (args.claim_posture !== undefined && !isObject(args.claim_posture)) throw new ArgumentError("claim_posture must be an object");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    return this.request<DomainEvidenceSourceExecutionResult>("POST", "/v1/domain-evidence/sources/execute", args, options);
+  }
+
+  /** Invoke retained source execution through the REST tool dispatcher. */
+  async domainEvidenceSourceExecuteTool(
+    args: DomainEvidenceSourceExecutionArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceSourceExecutionResult>> {
+    return this.callTool<DomainEvidenceSourceExecutionResult>("domain_evidence_source_execute", args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

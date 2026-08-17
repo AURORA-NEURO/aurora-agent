@@ -36,6 +36,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/domain-evidence/harmonize` | Join exact same-subject domain reports into an explicit, digest-addressed traceability artifact |
 | `POST /v1/domain-evidence/intake` | Normalize and index one supplied raw request/response envelope from any declared capability-group tool |
 | `POST /v1/domain-evidence/sources` | Build and index a non-fetching, digest-addressed external evidence source plan |
+| `POST /v1/domain-evidence/sources/execute` | Execute a retained source plan through bounded file/plain-HTTP connectors and retain the response intake |
 | `GET /v1/domain-evidence/coverage?group_id=&domain=&max_groups=&include_intake_digests=` | Count retained raw-intake envelopes by authoritative group, outcome, source tool, subject, domain, and exact digest |
 | `POST /v1/domain-workflows/reconciliations` | Verify and idempotently import one reconciliation report into the bounded audit registry |
 | `GET /v1/domain-workflows/reconciliations?mission_id=&workflow_id=&mission_plan_digest=&completion_status=&after=&limit=&include_records=` | Query digest-ordered reconciliation index rows |
@@ -219,6 +220,17 @@ the route does not fetch a URI/path, follow redirects, resolve a provider, or cl
 retrieval will be authentic, complete, or scientifically valid. If an expected content digest is
 declared, a later `source_plan_digest`-bound intake is refused unless its canonical response digest
 matches that expectation.
+`POST /v1/domain-evidence/sources/execute` is the controlled execution seam. It requires a retained
+plan, confines file reads to the configured server root, and permits plain HTTP only when the plan
+has `network: "enabled"` plus an exact `allowed_hosts` list. Reads enforce `max_bytes` and
+`timeout_ms`; redirects, HTTPS, credentials, unsupported connector families, traversal, and
+network-policy refusals remain explicit `refused` or `error` outcomes; the in-process kernel only
+executes `retrieval_mode: "content"`, leaving reference-only and metadata-only plans caller-managed.
+Successful reads expose an
+exact raw-byte digest and a separate canonical JSON response digest, then automatically retain the
+bounded response through `domain_evidence_intake` with both the plan identity and plan artifact
+content digest as parents. A read is still not source authenticity, scientific validity, or
+provenance completeness.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

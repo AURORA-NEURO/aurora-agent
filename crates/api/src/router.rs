@@ -1307,6 +1307,9 @@ impl ApiRouter {
             ("POST", "/v1/domain-evidence/sources") => {
                 self.domain_evidence_source_plan(&request, &request_id)
             }
+            ("POST", "/v1/domain-evidence/sources/execute") => {
+                self.domain_evidence_source_execute(&request, &request_id)
+            }
             ("GET", "/v1/domain-evidence/coverage") => {
                 self.domain_evidence_coverage(&request, &request_id)
             }
@@ -3282,6 +3285,7 @@ impl ApiRouter {
                     "domain_evidence_harmonize": "/v1/domain-evidence/harmonize",
                     "domain_evidence_intake": "/v1/domain-evidence/intake",
                     "domain_evidence_source_plan": "/v1/domain-evidence/sources",
+                    "domain_evidence_source_execute": "/v1/domain-evidence/sources/execute",
                     "domain_evidence_coverage": "/v1/domain-evidence/coverage",
                     "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
@@ -3356,6 +3360,7 @@ impl ApiRouter {
                     "domain_evidence_harmonization": true,
                     "domain_evidence_intake": true,
                     "domain_evidence_source_plan": true,
+                    "domain_evidence_source_execute": true,
                     "domain_evidence_coverage": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
@@ -3896,6 +3901,22 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_evidence_source_plan",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_source_execute(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_source_execute",
             Value::Object(arguments),
         )
     }
@@ -7154,6 +7175,7 @@ impl ApiRouter {
                     "/v1/domain-evidence/harmonize": { "post": { "responses": { "200": { "description": "digest-addressed domain evidence harmonization" }, "422": { "description": "report identity, catalogue, or traceability input was refused" } } } },
                     "/v1/domain-evidence/intake": { "post": { "responses": { "200": { "description": "exact-digest raw domain evidence intake" }, "422": { "description": "envelope, outcome, or catalogue input was refused" } } } },
                     "/v1/domain-evidence/sources": { "post": { "responses": { "200": { "description": "digest-addressed, non-fetching external evidence source plan" }, "422": { "description": "source locator, policy, or catalogue input was refused" } } } },
+                    "/v1/domain-evidence/sources/execute": { "post": { "responses": { "200": { "description": "bounded source execution with raw-byte and canonical-response digests plus retained intake" }, "422": { "description": "retained plan, connector policy, root confinement, or intake binding was refused" } } } },
                     "/v1/domain-evidence/coverage": { "get": { "responses": { "200": { "description": "catalogue-wide retained domain evidence intake coverage" }, "400": { "description": "coverage filter was invalid" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
@@ -11297,7 +11319,8 @@ mod tests {
             artifact_state_path: Some(artifact_path.clone()),
             ..ApiConfig::default()
         };
-        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let root: std::path::PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect();
+        let router = ApiRouter::new(root.clone(), config.clone()).unwrap();
         let projected = router.handle(request(
             "POST",
             "/v1/domain-reports",
@@ -11575,6 +11598,61 @@ mod tests {
             }),
         ));
         assert_eq!(refused.status, 422);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn domain_evidence_source_execute_route_reads_file_and_restores_intake() {
+        let artifact_path = test_state_path("domain-evidence-source-execute-route");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let root: std::path::PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect();
+        let router = ApiRouter::new(root.clone(), config.clone()).unwrap();
+        let source = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/sources",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-source-execute-subject",
+                "source_tool": "modality_catalog",
+                "connector_kind": "file",
+                "locator_kind": "path",
+                "locator": "fixtures/fiber-v0.1/leakage_query.json",
+                "retrieval_mode": "content",
+                "retrieval_policy": {"network": "disabled", "max_bytes": 65536},
+                "does_not_claim": ["source truth"]
+            }),
+        ));
+        assert_eq!(source.status, 200);
+        let source: Value = serde_json::from_slice(&source.body).unwrap();
+        let executed = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/sources/execute",
+            json!({"source_plan_digest": source["plan_digest"].clone()}),
+        ));
+        assert_eq!(
+            executed.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&executed.body)
+        );
+        let executed: Value = serde_json::from_slice(&executed.body).unwrap();
+        assert_eq!(executed["workflow"], "domain_evidence_source_execute");
+        assert_eq!(executed["outcome"], "observed");
+        assert_eq!(executed["intake"]["artifact_registry"]["indexed"], true);
+        assert_eq!(executed["raw_content_digest"].as_str().unwrap().len(), 64);
+        let restored = ApiRouter::new(root, config).unwrap();
+        let artifacts = restored.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_intake&subject_id=api-source-execute-subject",
+            json!({}),
+        ));
+        assert_eq!(artifacts.status, 200);
+        let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
+        assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_file(artifact_path);
     }
 
