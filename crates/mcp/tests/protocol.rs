@@ -1342,6 +1342,15 @@ fn domain_evidence_provider_normalize_retains_caller_managed_payload_with_explic
     assert_eq!(normalized["connector_kind"], json!("literature"));
     assert_eq!(normalized["provider"], json!("pubmed"));
     assert_eq!(normalized["payload_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(normalized["shape_audit"]["status"], json!("structured"));
+    assert_eq!(
+        normalized["shape_audit"]["recognized_container"],
+        json!("records")
+    );
+    assert_eq!(
+        normalized["shape_audit"]["identifier_coverage"]["present_record_count"],
+        json!(1)
+    );
     assert_eq!(normalized["intake"]["outcome"], json!("observed"));
     assert_eq!(
         normalized["intake"]["artifact_registry"]["indexed"],
@@ -1368,6 +1377,42 @@ fn domain_evidence_provider_normalize_retains_caller_managed_payload_with_explic
     );
     assert_eq!(unknown["outcome"], json!("unknown"));
     assert_eq!(unknown["intake"]["outcome"], json!("unknown"));
+    assert_eq!(unknown["shape_audit"]["status"], json!("structured"));
+
+    let fhir = call(
+        &mut server,
+        "domain_evidence_provider_normalize",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-fhir",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "fhir",
+            "provider": "caller",
+            "payload": {"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Patient", "id": "opaque"}}]}
+        }),
+    );
+    assert_eq!(fhir["shape_audit"]["recognized_container"], json!("entry"));
+    assert_eq!(fhir["shape_audit"]["status"], json!("structured"));
+
+    let object_store = call(
+        &mut server,
+        "domain_evidence_provider_normalize",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-object-store",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "object_store",
+            "provider": "caller",
+            "payload": {"objects": [{"key": "opaque", "content_digest": "opaque"}]}
+        }),
+    );
+    assert_eq!(object_store["shape_audit"]["status"], json!("structured"));
+    assert_eq!(
+        object_store["shape_audit"]["content_digest_coverage"]["present_record_count"],
+        json!(1)
+    );
 }
 
 #[test]

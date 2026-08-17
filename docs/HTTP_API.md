@@ -255,8 +255,12 @@ infrastructure domains.
 `POST /v1/tools/domain_evidence_provider_normalize` is the caller-managed counterpart: it accepts
 an opaque provider-shaped payload for literature, clinical-trial, FHIR, object-store, or generic
 provider-API connectors, derives separate payload/request identities, and indexes the normalized
-envelope through `domain_evidence_intake`. It does not contact, authenticate, or interpret the
-provider response, and defaults an omitted outcome to `unknown`.
+envelope through `domain_evidence_intake`. The response also returns a structural `shape_audit`:
+connector-specific container recognition, record and malformed-row counts, identifier
+field-presence coverage, object-store content-digest coverage, warnings, and a shape-only digest.
+`shape_audit` never includes provider identifiers or payload values and does not interpret them as
+scientific or clinical facts. It does not contact, authenticate, or interpret the provider response,
+and defaults an omitted outcome to `unknown`.
 An executable mission produced by instantiation is automatically reconciled at the authoritative
 MCP dispatch boundary. The response includes a compact `workflow_reconciliation` object with the
 record digest, completion/evidence/integrity posture, registry import result, and a REST lookup

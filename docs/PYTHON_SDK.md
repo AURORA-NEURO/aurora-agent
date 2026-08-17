@@ -92,8 +92,13 @@ scientific authorization decision.
 FHIR, object-store, and provider-API payloads. `ApiClient`, `AsyncApiClient`, `Workspace`, and
 `AsyncWorkspace` expose `domain_evidence_provider_normalize()`; the server preserves provider,
 connector, payload, and optional request digests and feeds the result through the same indexed
-intake/coverage path as bounded source reads. Provider authentication, signatures, retrieval,
-terminology expansion, and scientific/clinical interpretation remain explicit non-claims.
+intake/coverage path as bounded source reads. The typed `shape_audit` reports a structural status
+(`structured`, `partial`, `refused`, or `unclassified`), the recognized connector container,
+record/invalid-row counts, identifier field-presence coverage, and object-store content-digest
+coverage where applicable. Its `shape_digest` is computed from those shape facts rather than
+payload values; it never echoes identifiers or promotes field presence into evidence validity.
+Provider authentication, signatures, retrieval, terminology expansion, and scientific/clinical
+interpretation remain explicit non-claims.
 
 ## Lifecycle
 

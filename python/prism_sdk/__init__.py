@@ -44,8 +44,12 @@ from .domain_evidence_provider import (
     DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_OUTCOMES,
+    DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_SHAPE_STATUSES,
     DomainEvidenceProviderNormalizationReport,
     DomainEvidenceProviderNormalizationRequest,
+    DomainEvidenceProviderShapeAudit,
+    DomainEvidenceProviderShapeCoverage,
     domain_evidence_provider_normalization_report,
 )
 from .analytics import (
@@ -3704,6 +3708,10 @@ __all__ = [
     "execute_projection_batch",
     "project_domain_source_execution",
     "domain_evidence_provider_normalization_report",
+    "DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA",
+    "DOMAIN_EVIDENCE_PROVIDER_SHAPE_STATUSES",
+    "DomainEvidenceProviderShapeAudit",
+    "DomainEvidenceProviderShapeCoverage",
     "project_source_execution",
     "ProjectionBatchRequest",
     "ProjectionBatchResult",

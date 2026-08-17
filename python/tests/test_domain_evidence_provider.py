@@ -47,6 +47,26 @@ def payload() -> dict:
         "request_digest": "c" * 64,
         "response": {"provider": "pubmed", "payload_digest": "b" * 64},
         "normalization": {"payload_digest": "b" * 64},
+        "shape_audit": {
+            "schema": "bioprism-devplat-domain-evidence-provider-shape-audit/0.1",
+            "status": "structured",
+            "connector_kind": "literature",
+            "root_kind": "object",
+            "recognized_container": "records",
+            "record_count": 1,
+            "valid_record_count": 1,
+            "invalid_record_count": 0,
+            "identifier_coverage": {
+                "candidate_fields": ["id", "pmid", "doi", "source_id"],
+                "present_record_count": 1,
+                "missing_record_count": 0,
+            },
+            "content_digest_coverage": None,
+            "missing_fields": [],
+            "warnings": [],
+            "limitations": ["structural only"],
+            "shape_digest": "e" * 64,
+        },
         "intake": {"workflow": "domain_evidence_intake", "outcome": "observed"},
         "artifact_registry": {"indexed": True},
         "catalogue_digest": "d" * 64,
@@ -63,6 +83,8 @@ def test_request_is_explicit_and_provider_report_preserves_digests() -> None:
     assert report.payload_digest == "b" * 64
     assert report.request_digest == "c" * 64
     assert report.artifact_registry["indexed"] is True
+    assert report.shape_audit.status == "structured"
+    assert report.shape_audit.identifier_coverage.present_record_count == 1
 
 
 def test_request_rejects_non_provider_connectors_and_scalar_payloads() -> None:

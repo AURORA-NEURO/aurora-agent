@@ -15,6 +15,8 @@ pub const DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA: &str =
     "bioprism-devplat-domain-evidence-provider-normalization/0.1";
 pub const DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW: &str =
     "domain_evidence_provider_normalize";
+pub const DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA: &str =
+    "bioprism-devplat-domain-evidence-provider-shape-audit/0.1";
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_BYTES: usize = 20_000_000;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES: usize = 512;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS: usize = 64;
@@ -67,6 +69,40 @@ pub struct DomainEvidenceProviderNormalizationRequest {
     pub source_plan_digest: Option<String>,
 }
 
+/// Shape-only coverage for a bounded set of candidate fields. Values are deliberately never
+/// retained here: this is a structural index, not a second provider payload.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DomainEvidenceProviderShapeCoverage {
+    pub candidate_fields: Vec<String>,
+    pub present_record_count: usize,
+    pub missing_record_count: usize,
+}
+
+/// Deterministic structural audit of a caller-managed provider payload.
+///
+/// `structured` means the recognized container and all rows were structurally consumable;
+/// `partial` means rows or required shape fields were missing; `refused` means a recognized
+/// container had an incompatible shape; and `unclassified` means no connector-specific
+/// container was recognized. None of these statuses describe scientific, clinical, or provider
+/// validity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DomainEvidenceProviderShapeAudit {
+    pub schema: String,
+    pub status: String,
+    pub connector_kind: String,
+    pub root_kind: String,
+    pub recognized_container: Option<String>,
+    pub record_count: usize,
+    pub valid_record_count: usize,
+    pub invalid_record_count: usize,
+    pub identifier_coverage: DomainEvidenceProviderShapeCoverage,
+    pub content_digest_coverage: Option<DomainEvidenceProviderShapeCoverage>,
+    pub missing_fields: Vec<String>,
+    pub warnings: Vec<String>,
+    pub limitations: Vec<String>,
+    pub shape_digest: String,
+}
+
 /// Canonical provider envelope and the arguments ready for `domain_evidence_intake`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DomainEvidenceProviderNormalization {
@@ -82,6 +118,7 @@ pub struct DomainEvidenceProviderNormalization {
     pub payload_digest: String,
     pub request_digest: Option<String>,
     pub response: Value,
+    pub shape_audit: DomainEvidenceProviderShapeAudit,
     /// Internal composition input; never duplicate the full intake envelope in the public result.
     #[serde(skip)]
     pub intake_arguments: Value,
@@ -201,6 +238,332 @@ fn ensure_size(value: &Value) -> Result<(), DomainEvidenceProviderNormalizationE
     Ok(())
 }
 
+fn root_kind(value: &Value) -> &'static str {
+    if value.is_object() {
+        "object"
+    } else {
+        "array"
+    }
+}
+
+fn empty_coverage(fields: &[&str]) -> DomainEvidenceProviderShapeCoverage {
+    DomainEvidenceProviderShapeCoverage {
+        candidate_fields: fields.iter().map(|field| (*field).into()).collect(),
+        present_record_count: 0,
+        missing_record_count: 0,
+    }
+}
+
+fn add_missing_field(audit: &mut DomainEvidenceProviderShapeAudit, field: &str) {
+    if !audit
+        .missing_fields
+        .iter()
+        .any(|candidate| candidate == field)
+    {
+        audit.missing_fields.push(field.into());
+    }
+}
+
+fn add_warning(audit: &mut DomainEvidenceProviderShapeAudit, warning: impl Into<String>) {
+    let warning = warning.into();
+    if !audit.warnings.iter().any(|candidate| candidate == &warning) {
+        audit.warnings.push(warning);
+    }
+}
+
+fn record_has_any_field(record: &Map<String, Value>, fields: &[&str]) -> bool {
+    fields
+        .iter()
+        .any(|field| record.get(*field).is_some_and(|value| !value.is_null()))
+}
+
+fn audit_records(
+    audit: &mut DomainEvidenceProviderShapeAudit,
+    records: &[Value],
+    identifier_fields: &[&str],
+    digest_fields: Option<&[&str]>,
+) {
+    audit.record_count = records.len();
+    for record in records {
+        let Some(record) = record.as_object() else {
+            audit.invalid_record_count += 1;
+            add_missing_field(audit, "record.object");
+            continue;
+        };
+        audit.valid_record_count += 1;
+        if record_has_any_field(record, identifier_fields) {
+            audit.identifier_coverage.present_record_count += 1;
+        } else {
+            audit.identifier_coverage.missing_record_count += 1;
+            add_missing_field(audit, "record.identifier");
+        }
+        if let Some(digest_fields) = digest_fields {
+            let coverage = audit
+                .content_digest_coverage
+                .as_mut()
+                .expect("digest coverage is initialized with digest fields");
+            if record_has_any_field(record, digest_fields) {
+                coverage.present_record_count += 1;
+            } else {
+                coverage.missing_record_count += 1;
+            }
+        }
+    }
+    if audit.record_count == 0 {
+        add_warning(audit, "recognized container is empty");
+    }
+    if audit.invalid_record_count > 0 {
+        add_warning(audit, "one or more container entries are not objects");
+    }
+    if audit.identifier_coverage.missing_record_count > 0 {
+        add_warning(
+            audit,
+            "one or more object entries lack a recognized identifier field",
+        );
+    }
+}
+
+fn audit_array_container(
+    audit: &mut DomainEvidenceProviderShapeAudit,
+    container: &str,
+    value: Option<&Value>,
+    identifier_fields: &[&str],
+    digest_fields: Option<&[&str]>,
+) {
+    audit.recognized_container = Some(container.into());
+    match value {
+        Some(Value::Array(records)) => {
+            audit_records(audit, records, identifier_fields, digest_fields)
+        }
+        Some(_) => {
+            audit.invalid_record_count = 1;
+            add_missing_field(audit, &format!("{container}.array"));
+            add_warning(audit, "recognized container is not an array");
+        }
+        None => {
+            audit.invalid_record_count = 1;
+            add_missing_field(audit, container);
+            add_warning(audit, "recognized container is missing");
+        }
+    }
+}
+
+fn shape_audit_base(
+    connector_kind: &str,
+    payload: &Value,
+    identifier_fields: &[&str],
+    digest_fields: Option<&[&str]>,
+) -> DomainEvidenceProviderShapeAudit {
+    DomainEvidenceProviderShapeAudit {
+        schema: DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA.into(),
+        status: "unclassified".into(),
+        connector_kind: connector_kind.into(),
+        root_kind: root_kind(payload).into(),
+        recognized_container: None,
+        record_count: 0,
+        valid_record_count: 0,
+        invalid_record_count: 0,
+        identifier_coverage: empty_coverage(identifier_fields),
+        content_digest_coverage: digest_fields.map(empty_coverage),
+        missing_fields: Vec::new(),
+        warnings: Vec::new(),
+        limitations: vec![
+            "the audit checks container and field presence only; it does not validate field values".into(),
+            "the audit does not authenticate the provider or establish scientific, clinical, causal, regulatory, or provenance validity".into(),
+            "the audit never echoes identifiers, payload values, or record contents".into(),
+        ],
+        shape_digest: String::new(),
+    }
+}
+
+fn finish_shape_audit(
+    mut audit: DomainEvidenceProviderShapeAudit,
+) -> Result<DomainEvidenceProviderShapeAudit, DomainEvidenceProviderNormalizationError> {
+    if audit.recognized_container.is_some() {
+        audit.status = if audit.invalid_record_count > 0 && audit.valid_record_count == 0 {
+            "refused".into()
+        } else if audit.invalid_record_count > 0
+            || audit.identifier_coverage.missing_record_count > 0
+        {
+            "partial".into()
+        } else {
+            "structured".into()
+        };
+    }
+    let mut digest_input = serde_json::to_value(&audit)
+        .map_err(|error| DomainEvidenceProviderNormalizationError::Canonical(error.to_string()))?;
+    digest_input
+        .as_object_mut()
+        .expect("shape audit serializes as an object")
+        .remove("shape_digest");
+    audit.shape_digest = canonical_digest(&digest_input)?;
+    Ok(audit)
+}
+
+fn audit_fhir_payload(
+    payload: &Value,
+) -> Result<DomainEvidenceProviderShapeAudit, DomainEvidenceProviderNormalizationError> {
+    let mut audit = shape_audit_base("fhir", payload, &["id", "identifier"], None);
+    let Some(object) = payload.as_object() else {
+        add_warning(
+            &mut audit,
+            "FHIR payload must be an object with a resourceType field",
+        );
+        return finish_shape_audit(audit);
+    };
+    if !object
+        .get("resourceType")
+        .is_some_and(|value| value.as_str().is_some_and(|text| !text.trim().is_empty()))
+    {
+        add_missing_field(&mut audit, "resourceType");
+        add_warning(
+            &mut audit,
+            "FHIR payload lacks a non-empty resourceType field",
+        );
+        return finish_shape_audit(audit);
+    }
+    if object.get("resourceType").and_then(Value::as_str) == Some("Bundle") {
+        audit.recognized_container = Some("entry".into());
+        let Some(entries) = object.get("entry").and_then(Value::as_array) else {
+            audit.invalid_record_count = 1;
+            add_missing_field(&mut audit, "entry.array");
+            add_warning(
+                &mut audit,
+                "FHIR Bundle entry is missing or is not an array",
+            );
+            return finish_shape_audit(audit);
+        };
+        audit.record_count = entries.len();
+        for entry in entries {
+            let Some(entry) = entry.as_object() else {
+                audit.invalid_record_count += 1;
+                add_missing_field(&mut audit, "entry.object");
+                continue;
+            };
+            let Some(resource) = entry.get("resource").and_then(Value::as_object) else {
+                audit.invalid_record_count += 1;
+                add_missing_field(&mut audit, "entry.resource");
+                continue;
+            };
+            audit.valid_record_count += 1;
+            if record_has_any_field(resource, &["id", "identifier"]) {
+                audit.identifier_coverage.present_record_count += 1;
+            } else {
+                audit.identifier_coverage.missing_record_count += 1;
+                add_missing_field(&mut audit, "resource.identifier");
+            }
+        }
+        if entries.is_empty() {
+            add_warning(
+                &mut audit,
+                "recognized FHIR Bundle entry container is empty",
+            );
+        }
+        if audit.invalid_record_count > 0 {
+            add_warning(
+                &mut audit,
+                "one or more FHIR Bundle entries lack an object resource",
+            );
+        }
+        if audit.identifier_coverage.missing_record_count > 0 {
+            add_warning(
+                &mut audit,
+                "one or more FHIR resources lack a recognized identifier field",
+            );
+        }
+    } else {
+        audit.recognized_container = Some("resource".into());
+        audit.record_count = 1;
+        audit.valid_record_count = 1;
+        if record_has_any_field(object, &["id", "identifier"]) {
+            audit.identifier_coverage.present_record_count = 1;
+        } else {
+            audit.identifier_coverage.missing_record_count = 1;
+            add_missing_field(&mut audit, "resource.identifier");
+            add_warning(
+                &mut audit,
+                "FHIR resource lacks a recognized identifier field",
+            );
+        }
+    }
+    finish_shape_audit(audit)
+}
+
+fn audit_provider_payload(
+    connector_kind: &str,
+    payload: &Value,
+) -> Result<DomainEvidenceProviderShapeAudit, DomainEvidenceProviderNormalizationError> {
+    let (identifier_fields, containers, digest_fields): (&[&str], &[&str], Option<&[&str]>) =
+        match connector_kind {
+            "literature" => (
+                &["id", "pmid", "doi", "source_id"],
+                &["records", "results"],
+                None,
+            ),
+            "clinical_trial" => (
+                &["id", "nct_id", "trial_id", "source_id"],
+                &["studies", "trials"],
+                None,
+            ),
+            "object_store" => (
+                &["key", "path", "uri"],
+                &["objects", "files"],
+                Some(&["content_digest"]),
+            ),
+            "provider_api" => (
+                &["id", "key", "source_id", "external_id", "identifier"],
+                &["records", "results", "items", "data"],
+                None,
+            ),
+            "fhir" => return audit_fhir_payload(payload),
+            _ => unreachable!("connector kind was validated before shape auditing"),
+        };
+    let mut audit = shape_audit_base(connector_kind, payload, identifier_fields, digest_fields);
+    if connector_kind == "provider_api" && payload.is_array() {
+        audit_array_container(
+            &mut audit,
+            "$root",
+            Some(payload),
+            identifier_fields,
+            digest_fields,
+        );
+        return finish_shape_audit(audit);
+    }
+    let Some(object) = payload.as_object() else {
+        add_warning(
+            &mut audit,
+            "connector payload must be an object for its named container audit",
+        );
+        return finish_shape_audit(audit);
+    };
+    let Some(container) = containers
+        .iter()
+        .copied()
+        .find(|container| object.contains_key(*container))
+    else {
+        add_warning(
+            &mut audit,
+            "no connector-specific record container was recognized",
+        );
+        return finish_shape_audit(audit);
+    };
+    audit_array_container(
+        &mut audit,
+        container,
+        object.get(container),
+        identifier_fields,
+        digest_fields,
+    );
+    finish_shape_audit(audit)
+}
+
+fn audit_provider_shape(
+    connector_kind: &str,
+    payload: &Value,
+) -> Result<DomainEvidenceProviderShapeAudit, DomainEvidenceProviderNormalizationError> {
+    audit_provider_payload(connector_kind, payload)
+}
+
 /// Normalize one caller-owned provider response; no network or provider call occurs here.
 pub fn normalize_domain_evidence_provider(
     request: &DomainEvidenceProviderNormalizationRequest,
@@ -255,6 +618,7 @@ pub fn normalize_domain_evidence_provider(
 
     let payload_digest = canonical_digest(&request.payload)?;
     let request_digest = request.request.as_ref().map(canonical_digest).transpose()?;
+    let shape_audit = audit_provider_shape(&connector_kind, &request.payload)?;
     let mut response = Map::new();
     response.insert("provider".into(), json!(provider));
     response.insert("connector_kind".into(), json!(connector_kind));
@@ -293,10 +657,12 @@ pub fn normalize_domain_evidence_provider(
         payload_digest,
         request_digest,
         response,
+        shape_audit,
         intake_arguments,
         guarantees: vec![
             "provider metadata and payload receive separate explicit structural identities".into(),
             "caller-supplied status remains visible and is never inferred from payload shape".into(),
+            "connector-specific shape status and field-presence counts are deterministic and value-free".into(),
             "the normalized envelope can be passed to the existing digest-bound intake boundary".into(),
         ],
         limitations: vec![
@@ -334,11 +700,123 @@ mod tests {
         assert_eq!(normalized.connector_kind, "literature");
         assert_eq!(normalized.outcome, "observed");
         assert_eq!(normalized.response["authenticated"], json!(false));
+        assert_eq!(normalized.shape_audit.status, "structured");
+        assert_eq!(normalized.shape_audit.record_count, 1);
+        assert_eq!(
+            normalized
+                .shape_audit
+                .identifier_coverage
+                .present_record_count,
+            1
+        );
+        assert_eq!(
+            normalized
+                .shape_audit
+                .identifier_coverage
+                .missing_record_count,
+            0
+        );
+        assert!(!serde_json::to_string(&normalized.shape_audit)
+            .unwrap()
+            .contains("pmid:1"));
         assert_eq!(
             normalized.intake_arguments["source_plan_digest"],
             json!("b".repeat(64))
         );
         assert_eq!(normalized.payload_digest.len(), 64);
+    }
+
+    #[test]
+    fn audits_all_connector_families_without_echoing_payload_values() {
+        let cases = [
+            (
+                "literature",
+                json!({"results": [{"doi": "10.1000/opaque"}]}),
+                "structured",
+                "results",
+            ),
+            (
+                "clinical_trial",
+                json!({"studies": [{"nct_id": "NCT-opaque"}, "malformed"]}),
+                "partial",
+                "studies",
+            ),
+            (
+                "fhir",
+                json!({"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Patient", "id": "opaque"}}]}),
+                "structured",
+                "entry",
+            ),
+            (
+                "object_store",
+                json!({"objects": [{"key": "opaque/path", "content_digest": "opaque-digest"}]}),
+                "structured",
+                "objects",
+            ),
+            (
+                "provider_api",
+                json!([{"external_id": "opaque"}]),
+                "structured",
+                "$root",
+            ),
+        ];
+        for (connector_kind, payload, expected_status, expected_container) in cases {
+            let mut request = base_request();
+            request.connector_kind = connector_kind.into();
+            request.payload = payload.clone();
+            let normalized = normalize_domain_evidence_provider(&request).unwrap();
+            assert_eq!(
+                normalized.shape_audit.status, expected_status,
+                "{connector_kind}"
+            );
+            assert_eq!(
+                normalized.shape_audit.recognized_container.as_deref(),
+                Some(expected_container),
+                "{connector_kind}"
+            );
+            let serialized = serde_json::to_string(&normalized.shape_audit).unwrap();
+            assert!(!serialized.contains("opaque"), "{connector_kind}");
+            assert_eq!(normalized.shape_audit.shape_digest.len(), 64);
+        }
+    }
+
+    #[test]
+    fn distinguishes_unclassified_and_refused_shapes() {
+        let mut request = base_request();
+        request.payload = json!({"unexpected": {"value": "opaque"}});
+        let unclassified = normalize_domain_evidence_provider(&request).unwrap();
+        assert_eq!(unclassified.shape_audit.status, "unclassified");
+        assert!(unclassified.shape_audit.recognized_container.is_none());
+        assert!(unclassified
+            .shape_audit
+            .warnings
+            .iter()
+            .any(|warning| { warning.contains("no connector-specific record container") }));
+
+        request.payload = json!({"records": {"id": "opaque"}});
+        let refused = normalize_domain_evidence_provider(&request).unwrap();
+        assert_eq!(refused.shape_audit.status, "refused");
+        assert!(refused
+            .shape_audit
+            .missing_fields
+            .iter()
+            .any(|field| field == "records.array"));
+    }
+
+    #[test]
+    fn shape_digest_is_deterministic_and_payload_independent() {
+        let mut first = base_request();
+        first.payload = json!({"records": [{"id": "first", "title": "one"}]});
+        let mut second = first.clone();
+        second.payload = json!({"records": [{"id": "second", "title": "two"}]});
+        let first_audit = normalize_domain_evidence_provider(&first)
+            .unwrap()
+            .shape_audit;
+        let second_audit = normalize_domain_evidence_provider(&second)
+            .unwrap()
+            .shape_audit;
+        assert_eq!(first_audit.shape_digest, second_audit.shape_digest);
+        assert_eq!(first_audit, second_audit);
     }
 
     #[test]

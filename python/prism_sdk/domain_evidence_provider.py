@@ -15,6 +15,8 @@ DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA = "bioprism-devplat-domain-evidenc
 DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW = "domain_evidence_provider_normalize"
 DOMAIN_EVIDENCE_PROVIDER_CONNECTOR_KINDS = ("literature", "clinical_trial", "fhir", "object_store", "provider_api")
 DOMAIN_EVIDENCE_PROVIDER_OUTCOMES = ("observed", "partial", "refused", "error", "unknown")
+DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA = "bioprism-devplat-domain-evidence-provider-shape-audit/0.1"
+DOMAIN_EVIDENCE_PROVIDER_SHAPE_STATUSES = ("structured", "partial", "unclassified", "refused")
 _MISSING = object()
 
 
@@ -23,6 +25,98 @@ def _json_value(name: str, value: Any) -> None:
         json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     except (TypeError, ValueError) as error:
         raise ArgumentError(f"{name} must be JSON serializable") from error
+
+
+@dataclass(frozen=True)
+class DomainEvidenceProviderShapeCoverage:
+    """Field-presence counts without retaining any identifier or payload value."""
+
+    candidate_fields: tuple[str, ...]
+    present_record_count: int
+    missing_record_count: int
+
+    @classmethod
+    def from_wire(cls, name: str, value: Any) -> "DomainEvidenceProviderShapeCoverage":
+        raw = _mapping(name, value)
+        return cls(
+            candidate_fields=_route_strings(f"{name}.candidate_fields", raw.get("candidate_fields")),
+            present_record_count=_route_count(
+                f"{name}.present_record_count", raw.get("present_record_count")
+            ),
+            missing_record_count=_route_count(
+                f"{name}.missing_record_count", raw.get("missing_record_count")
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class DomainEvidenceProviderShapeAudit:
+    """Connector-specific container audit; it does not interpret domain values."""
+
+    schema: str
+    status: str
+    connector_kind: str
+    root_kind: str
+    recognized_container: str | None
+    record_count: int
+    valid_record_count: int
+    invalid_record_count: int
+    identifier_coverage: DomainEvidenceProviderShapeCoverage
+    content_digest_coverage: DomainEvidenceProviderShapeCoverage | None
+    missing_fields: tuple[str, ...]
+    warnings: tuple[str, ...]
+    limitations: tuple[str, ...]
+    shape_digest: str
+
+    @classmethod
+    def from_wire(cls, value: Any) -> "DomainEvidenceProviderShapeAudit":
+        raw = _mapping("domain evidence provider shape audit", value)
+        schema = _route_text("domain evidence provider shape audit schema", raw.get("schema"))
+        if schema != DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA:
+            raise ArgumentError("domain evidence provider shape audit schema is unsupported")
+        status = _route_text("domain evidence provider shape audit status", raw.get("status"))
+        if status not in DOMAIN_EVIDENCE_PROVIDER_SHAPE_STATUSES:
+            raise ArgumentError("domain evidence provider shape audit status is invalid")
+        recognized_container = raw.get("recognized_container")
+        if recognized_container is not None:
+            recognized_container = _route_text(
+                "domain evidence provider recognized container", recognized_container
+            )
+        digest_coverage = raw.get("content_digest_coverage")
+        return cls(
+            schema=schema,
+            status=status,
+            connector_kind=_route_text("domain evidence provider shape audit connector", raw.get("connector_kind")),
+            root_kind=_route_text("domain evidence provider shape audit root kind", raw.get("root_kind")),
+            recognized_container=recognized_container,
+            record_count=_route_count("domain evidence provider shape audit record count", raw.get("record_count")),
+            valid_record_count=_route_count(
+                "domain evidence provider shape audit valid record count", raw.get("valid_record_count")
+            ),
+            invalid_record_count=_route_count(
+                "domain evidence provider shape audit invalid record count", raw.get("invalid_record_count")
+            ),
+            identifier_coverage=DomainEvidenceProviderShapeCoverage.from_wire(
+                "domain evidence provider identifier coverage", raw.get("identifier_coverage")
+            ),
+            content_digest_coverage=(
+                None
+                if digest_coverage is None
+                else DomainEvidenceProviderShapeCoverage.from_wire(
+                    "domain evidence provider content digest coverage", digest_coverage
+                )
+            ),
+            missing_fields=_route_strings(
+                "domain evidence provider shape audit missing fields", raw.get("missing_fields", [])
+            ),
+            warnings=_route_strings(
+                "domain evidence provider shape audit warnings", raw.get("warnings", [])
+            ),
+            limitations=_route_strings(
+                "domain evidence provider shape audit limitations", raw.get("limitations", [])
+            ),
+            shape_digest=_digest("domain evidence provider shape digest", raw.get("shape_digest")),
+        )
 
 
 @dataclass(frozen=True)
@@ -112,6 +206,7 @@ class DomainEvidenceProviderNormalizationReport:
     payload_digest: str
     request_digest: str | None
     response: Mapping[str, Any]
+    shape_audit: DomainEvidenceProviderShapeAudit
     intake: Mapping[str, Any]
     artifact_registry: Mapping[str, Any]
     catalogue_digest: str
@@ -144,6 +239,7 @@ class DomainEvidenceProviderNormalizationReport:
                 else _digest("domain evidence provider request digest", request_digest)
             ),
             response=_mapping("domain evidence provider response", raw.get("response")),
+            shape_audit=DomainEvidenceProviderShapeAudit.from_wire(raw.get("shape_audit")),
             intake=_mapping("domain evidence provider intake", raw.get("intake")),
             artifact_registry=artifact_registry,
             catalogue_digest=_digest("domain evidence provider catalogue digest", raw.get("catalogue_digest")),
@@ -166,6 +262,10 @@ __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_OUTCOMES",
+    "DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA",
+    "DOMAIN_EVIDENCE_PROVIDER_SHAPE_STATUSES",
+    "DomainEvidenceProviderShapeAudit",
+    "DomainEvidenceProviderShapeCoverage",
     "DomainEvidenceProviderNormalizationRequest",
     "DomainEvidenceProviderNormalizationReport",
     "domain_evidence_provider_normalization_report",

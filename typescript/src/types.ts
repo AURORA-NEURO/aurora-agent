@@ -5070,6 +5070,30 @@ export type DomainEvidenceSourceLocatorKind = "uri" | "path" | "opaque";
 export type DomainEvidenceSourceRetrievalMode = "reference_only" | "metadata_only" | "content";
 
 export type DomainEvidenceProviderConnectorKind = "literature" | "clinical_trial" | "fhir" | "object_store" | "provider_api";
+export type DomainEvidenceProviderShapeStatus = "structured" | "partial" | "unclassified" | "refused";
+
+export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
+  candidate_fields: string[];
+  present_record_count: number;
+  missing_record_count: number;
+}
+
+export interface DomainEvidenceProviderShapeAudit extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-shape-audit/0.1";
+  status: DomainEvidenceProviderShapeStatus;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  root_kind: "object" | "array";
+  recognized_container: string | null;
+  record_count: number;
+  valid_record_count: number;
+  invalid_record_count: number;
+  identifier_coverage: DomainEvidenceProviderShapeCoverage;
+  content_digest_coverage: DomainEvidenceProviderShapeCoverage | null;
+  missing_fields: string[];
+  warnings: string[];
+  limitations: string[];
+  shape_digest: string;
+}
 
 export interface DomainEvidenceProviderNormalizationArgs extends JsonObject {
   group_id: string;
@@ -5100,6 +5124,7 @@ export interface DomainEvidenceProviderNormalizationResult extends JsonObject {
   payload_digest: string;
   request_digest: string | null;
   response: JsonObject;
+  shape_audit: DomainEvidenceProviderShapeAudit;
   normalization: JsonObject;
   intake: JsonObject;
   artifact_registry: JsonObject;

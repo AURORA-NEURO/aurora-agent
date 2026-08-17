@@ -115,8 +115,12 @@ HTTPS, redirects, unsupported connectors, and disallowed hosts remain explicit r
 managed literature, clinical-trial, FHIR, object-store, and provider-API boundary. They require
 an explicit provider-shaped object/array payload, preserve provider/payload/request identities,
 default an omitted outcome to `unknown`, and feed the same catalogue-bound intake path. The SDK
-does not contact providers or infer authenticity, terminology, scientific, clinical, or release
-validity from normalized fields.
+returns a typed structural `shape_audit` with `structured`, `partial`, `refused`, or
+`unclassified` status, recognized-container metadata, row/invalid-row counts, identifier
+field-presence coverage, and optional object-store content-digest coverage. The audit digest is
+based on shape facts and deliberately excludes payload values. The SDK does not contact providers
+or infer authenticity, terminology, scientific, clinical, or release validity from normalized
+fields.
 
 Convenience methods currently cover:
 

@@ -163,6 +163,22 @@ const providerNormalization = {
   payload_digest: "j".repeat(64),
   request_digest: null,
   response: { provider: "pubmed", authenticated: false, payload_digest: "j".repeat(64) },
+  shape_audit: {
+    schema: "bioprism-devplat-domain-evidence-provider-shape-audit/0.1",
+    status: "unclassified",
+    connector_kind: "literature",
+    root_kind: "object",
+    recognized_container: "records",
+    record_count: 0,
+    valid_record_count: 0,
+    invalid_record_count: 0,
+    identifier_coverage: { candidate_fields: ["id", "pmid", "doi", "source_id"], present_record_count: 0, missing_record_count: 0 },
+    content_digest_coverage: null,
+    missing_fields: [],
+    warnings: [],
+    limitations: ["structural only"],
+    shape_digest: "m".repeat(64),
+  },
   normalization: { payload_digest: "j".repeat(64) },
   intake: { workflow: "domain_evidence_intake", outcome: "unknown" },
   artifact_registry: { indexed: true, kind: "domain_evidence_intake", content_digest: "k".repeat(64) },
@@ -212,6 +228,7 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   assert.equal((await client.domainEvidenceSourceExecuteTool(sourceExecutionArgs)).mcp.result.structuredContent.raw_content_digest, "f".repeat(64));
   assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.provider, "pubmed");
   assert.equal((await client.domainEvidenceProviderNormalizeTool(providerNormalizationArgs)).mcp.result.structuredContent.outcome, "unknown");
+  assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.shape_audit.status, "unclassified");
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");
   assert.equal(seen[2].url.searchParams.get("include_intake_digests"), "true");
   assert.equal(seen[4].url.pathname, "/v1/domain-evidence/sources");
