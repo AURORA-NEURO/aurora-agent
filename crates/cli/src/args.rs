@@ -99,6 +99,9 @@ COMMANDS
                     [--policy <path>] [--dry-run]
                     Instantiate a group-scoped mission and attach authoritative no-dispatch
                     preflight. The steps file is a JSON array or an object containing `steps`.
+  workflow reconcile --instantiation <path> [--mission <path>] [--evidence-bundle <path>]
+                    Reconcile a retained agent_mission report or evidence bundle against the
+                    instantiated workflow. Exit 1 when completion evidence is not ready.
 
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
@@ -161,6 +164,11 @@ pub enum Command {
         steps: PathBuf,
         policy: Option<PathBuf>,
         dry_run: bool,
+    },
+    WorkflowReconcile {
+        instantiation: PathBuf,
+        mission: Option<PathBuf>,
+        evidence_bundle: Option<PathBuf>,
     },
 }
 
@@ -324,6 +332,11 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             steps: options.take_path("--steps")?,
             policy: options.take_optional_path("--policy"),
             dry_run: options.take_switch("--dry-run"),
+        },
+        ("workflow", "reconcile") => Command::WorkflowReconcile {
+            instantiation: options.take_path("--instantiation")?,
+            mission: options.take_optional_path("--mission"),
+            evidence_bundle: options.take_optional_path("--evidence-bundle"),
         },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
@@ -500,6 +513,34 @@ mod tests {
                     steps: PathBuf::from("steps.json"),
                     policy: Some(PathBuf::from("policy.json")),
                     dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn workflow_reconciliation_parses_retained_evidence_paths() {
+        let parsed = parse(
+            [
+                "workflow",
+                "reconcile",
+                "--instantiation",
+                "instantiation.json",
+                "--mission",
+                "mission.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse workflow reconcile");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorkflowReconcile {
+                    instantiation: PathBuf::from("instantiation.json"),
+                    mission: Some(PathBuf::from("mission.json")),
+                    evidence_bundle: None,
                 },
             })
         );

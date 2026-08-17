@@ -26,6 +26,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `POST /v1/operations/handoff` | Build a content-addressed, non-executing domain-to-`capability_route` handoff |
 | `GET /v1/domain-workflows` | Build one deterministic, digest-bound workflow template for every capability group |
 | `POST /v1/domain-workflows/instantiate` | Instantiate a group-scoped mission and attach authoritative no-dispatch preflight |
+| `POST /v1/domain-workflows/reconcile` | Reconcile retained mission results or evidence bundles against an instantiated workflow contract |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
@@ -100,6 +101,15 @@ ledger, workflow and catalogue digests, the selected `domain_contract`, an `evid
 every step, and the authoritative MCP `preflight_report`. `execution` and `dispatch` remain
 `not_started`; this route never invokes a domain tool. Domain-specific arguments still require the
 authoritative schema report, and a valid plan is not a readiness, truth, clinical, or release claim.
+
+`POST /v1/domain-workflows/reconcile` closes the execution handoff without becoming an executor.
+It accepts the exact accepted instantiation result plus either an `agent_mission` report or a
+portable mission evidence bundle. The response separately reports contract/integrity validity,
+per-step evidence rows, raw-output retention, trace lifecycle, refusal/block/cancellation state,
+summary-only omissions, and `completion.status`. `completion.ready` is true only when every
+required step succeeded with retained raw output and the correlated plan/evidence artifact is
+structurally valid. A verified summary-only bundle is intentionally `unverified`, not complete;
+all reports remain review-required and non-claiming.
 
 ## Restart-aware mission snapshots
 

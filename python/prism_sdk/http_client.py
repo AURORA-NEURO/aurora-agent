@@ -30,6 +30,8 @@ from .capability import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowReconcileRequest,
+    DomainWorkflowReconciliationReport,
     MissionEvaluatorQuery,
     MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayComparisonReport,
@@ -56,6 +58,7 @@ from .capability import (
     capability_route_review_report,
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
+    domain_workflow_reconciliation_report,
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
     mission_evaluator_replay_report,
@@ -663,6 +666,25 @@ class ApiClient:
     ) -> DomainWorkflowInstantiationReport:
         return domain_workflow_instantiation_report(self.domain_workflow_instantiate(request))
 
+    def domain_workflow_reconcile(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Reconcile retained mission evidence against a workflow contract without dispatch."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconcileRequest)
+            else DomainWorkflowReconcileRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/domain-workflows/reconcile", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(self.domain_workflow_reconcile(request))
+
     def domain_workflow_catalogue_tool(self) -> dict[str, Any]:
         return self.call_tool("domain_workflow_catalogue", {})
 
@@ -685,6 +707,23 @@ class ApiClient:
         request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
     ) -> DomainWorkflowInstantiationReport:
         return domain_workflow_instantiation_report(self.domain_workflow_instantiate_tool(request))
+
+    def domain_workflow_reconcile_tool(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconcileRequest)
+            else DomainWorkflowReconcileRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_reconcile", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_tool_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(self.domain_workflow_reconcile_tool(request))
 
     def submit_mission(self, request: MissionRequest | Mapping[str, Any]) -> MissionJob:
         """Submit a validated mission to the cooperative asynchronous HTTP executor."""
@@ -4112,6 +4151,18 @@ class AsyncApiClient:
     ) -> DomainWorkflowInstantiationReport:
         return domain_workflow_instantiation_report(await self.domain_workflow_instantiate(request))
 
+    async def domain_workflow_reconcile(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconcile, request)
+
+    async def domain_workflow_reconciliation_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(await self.domain_workflow_reconcile(request))
+
     async def domain_workflow_catalogue_tool(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue_tool)
 
@@ -4130,6 +4181,20 @@ class AsyncApiClient:
     ) -> DomainWorkflowInstantiationReport:
         return domain_workflow_instantiation_report(
             await self.domain_workflow_instantiate_tool(request)
+        )
+
+    async def domain_workflow_reconcile_tool(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconcile_tool, request)
+
+    async def domain_workflow_reconciliation_tool_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(
+            await self.domain_workflow_reconcile_tool(request)
         )
 
     async def submit_mission(self, request: MissionRequest | Mapping[str, Any]) -> MissionJob:

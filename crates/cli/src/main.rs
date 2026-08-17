@@ -15,7 +15,9 @@ mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
 use bioprism_devplat::{EvidenceBundleRegistry, verify_mission_evidence_bundle};
-use bioprism_devplat::{build_domain_workflow_catalogue, instantiate_domain_workflow};
+use bioprism_devplat::{
+    build_domain_workflow_catalogue, instantiate_domain_workflow, reconcile_domain_workflow,
+};
 use bioprism_fiber::compile;
 use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
 use bioprism_scope::DimensionRegistry;
@@ -150,6 +152,11 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             policy,
             dry_run,
         } => workflow_instantiate(workflow, mission_id, goal, steps, policy.as_deref(), *dry_run),
+        Command::WorkflowReconcile {
+            instantiation,
+            mission,
+            evidence_bundle,
+        } => workflow_reconcile(instantiation, mission.as_deref(), evidence_bundle.as_deref()),
     }
 }
 
@@ -226,6 +233,41 @@ fn workflow_instantiate(
         workflow,
     );
     Ok(Outcome::ok(report, human))
+}
+
+fn workflow_reconcile(
+    instantiation_path: &Path,
+    mission_path: Option<&Path>,
+    evidence_bundle_path: Option<&Path>,
+) -> CliResult<Outcome> {
+    if mission_path.is_none() && evidence_bundle_path.is_none() {
+        return Err(CliError::invalid(
+            "workflow reconcile requires --mission or --evidence-bundle",
+        ));
+    }
+    let mut request = json!({
+        "instantiation": io::read_json(instantiation_path)?,
+    });
+    if let Some(path) = mission_path {
+        request["mission_report"] = io::read_json(path)?;
+    }
+    if let Some(path) = evidence_bundle_path {
+        request["evidence_bundle"] = io::read_json(path)?;
+    }
+    let report = reconcile_domain_workflow(&request)
+        .map_err(|error| CliError::invalid(error.to_string()))?;
+    let status = report["completion"]["status"]
+        .as_str()
+        .unwrap_or("unverified");
+    let ready = report["completion"]["ready"].as_bool().unwrap_or(false);
+    let human = format!(
+        "domain workflow reconciliation\n  workflow: {}\n  mission: {}\n  completion: {}\n  evidence ready: {}\n  execution: not started\n",
+        report["workflow_id"].as_str().unwrap_or("unknown"),
+        report["mission_id"].as_str().unwrap_or("unknown"),
+        status,
+        ready,
+    );
+    Ok(Outcome::ok(report, human).failing_if(!ready))
 }
 
 fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {

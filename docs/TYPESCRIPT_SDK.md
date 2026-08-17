@@ -83,6 +83,9 @@ Convenience methods currently cover:
   instantiation with explicit bounded steps, selected-tool scope, typed step-level evidence plan,
   authoritative no-dispatch preflight, and `execution: "not_started"`. These methods do not infer
   domain arguments or authorize tool execution;
+- `domainWorkflowReconcileQuery` / `domainWorkflowReconcile`: correlate a retained mission report
+  or evidence bundle with an instantiation and return typed integrity, per-step evidence, trace,
+  completion, and omission posture. The result remains review-required and non-executing.
 
 - `traceOtelIngest`: bounded OTLP JSON import with typed normalized events, source-to-IR mapping,
   semantic-loss categories, and compilation-readiness reporting;

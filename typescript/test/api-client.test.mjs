@@ -4258,6 +4258,43 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   assert.equal((await rest.domainWorkflowCatalogueQuery()).workflow_count, 29);
   assert.equal((await rest.domainWorkflowInstantiateQuery(args)).preflight_report.workflow, "agent_mission");
 
+  const reconciliationArgs = {
+    instantiation: instantiated,
+    mission_report: { workflow: "agent_mission", mission_status: "succeeded" },
+  };
+  const reconciliation = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-reconcile/0.1",
+    workflow: "domain_workflow_reconcile",
+    workflow_id: "documentation_and_knowledge",
+    workflow_digest: "d".repeat(64),
+    catalog_digest: "c".repeat(64),
+    domain_contract_digest: "k".repeat(64),
+    mission_id: "ts-workflow",
+    mission_plan_digest: "p".repeat(64),
+    reconciliation_digest: "r".repeat(64),
+    source: "mission_report",
+    report: { present: true },
+    retention: {},
+    bundle_verification: {},
+    evidence: { evidence_valid: true },
+    completion: { status: "complete", ready: true },
+    integrity: { valid: true },
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const restReconcile = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/domain-workflows/reconcile");
+      assert.deepEqual(JSON.parse(init.body), reconciliationArgs);
+      return jsonResponse(reconciliation);
+    },
+  });
+  assert.equal((await restReconcile.domainWorkflowReconcileQuery(reconciliationArgs)).completion.status, "complete");
+
   const mcp = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",
     fetch: async (input, init) => {
@@ -4271,4 +4308,14 @@ test("client exposes scoped domain workflow catalogue and instantiation over RES
   });
   assert.equal((await mcp.domainWorkflowCatalogue()).mcp.result.structuredContent.workflow_count, 29);
   assert.equal((await mcp.domainWorkflowInstantiate(args)).mcp.result.structuredContent.execution, "not_started");
+  const mcpReconcile = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/tools/domain_workflow_reconcile");
+      assert.deepEqual(JSON.parse(init.body), reconciliationArgs);
+      return jsonResponse({ ok: true, tool: "domain_workflow_reconcile", mcp: { result: { structuredContent: reconciliation } } });
+    },
+  });
+  assert.equal((await mcpReconcile.domainWorkflowReconcile(reconciliationArgs)).mcp.result.structuredContent.completion.ready, true);
 });

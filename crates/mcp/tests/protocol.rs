@@ -320,7 +320,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 185);
+    assert_eq!(tools.len(), 186);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -1284,6 +1284,34 @@ fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
     );
     assert_eq!(refused["__isError"], json!(true));
     assert!(refused["error"].as_str().unwrap().contains("outside workflow"));
+}
+
+#[test]
+fn domain_workflow_reconciliation_binds_execution_results_to_the_instantiated_contract() {
+    let mut server = server();
+    let instantiation = call(
+        &mut server,
+        "domain_workflow_instantiate",
+        json!({
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "workflow-reconcile",
+            "goal": "reconcile repository capability evidence",
+            "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+            "policy": {"execute": true}
+        }),
+    );
+    let mission = call(&mut server, "agent_mission", instantiation["mission"].clone());
+    assert_eq!(mission["mission_status"], json!("succeeded"));
+    let reconciled = call(
+        &mut server,
+        "domain_workflow_reconcile",
+        json!({"instantiation": instantiation, "mission_report": mission}),
+    );
+    assert_eq!(reconciled["workflow"], json!("domain_workflow_reconcile"));
+    assert_eq!(reconciled["integrity"]["valid"], json!(true));
+    assert_eq!(reconciled["completion"]["status"], json!("complete"));
+    assert_eq!(reconciled["completion"]["ready"], json!(true));
+    assert_eq!(reconciled["evidence"]["rows"][0]["result_retained"], json!(true));
 }
 
 #[test]
@@ -5372,12 +5400,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(185));
-    assert_eq!(result["advertised_tool_count"], json!(185));
+    assert_eq!(result["unique_catalog_tools"], json!(186));
+    assert_eq!(result["advertised_tool_count"], json!(186));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(185));
-    assert_eq!(result["schema_quality"]["valid"], json!(185));
+    assert_eq!(result["schema_quality"]["checked"], json!(186));
+    assert_eq!(result["schema_quality"]["valid"], json!(186));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()

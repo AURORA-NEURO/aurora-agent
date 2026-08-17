@@ -28,6 +28,8 @@ from .capability import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowReconcileRequest,
+    DomainWorkflowReconciliationReport,
     MissionEvaluatorQuery,
     MissionEvaluatorReplayCompareRequest,
     MissionEvaluatorReplayComparisonReport,
@@ -50,6 +52,7 @@ from .capability import (
     capability_route_review_report,
     domain_workflow_catalogue_report,
     domain_workflow_instantiation_report,
+    domain_workflow_reconciliation_report,
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
     mission_evaluator_replay_report,
@@ -1859,6 +1862,23 @@ class Workspace:
         request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
     ) -> DomainWorkflowInstantiationReport:
         return domain_workflow_instantiation_report(self.domain_workflow_instantiate(request))
+
+    def domain_workflow_reconcile(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconcileRequest)
+            else DomainWorkflowReconcileRequest(**dict(request))
+        )
+        return self.tool("domain_workflow_reconcile", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(self.domain_workflow_reconcile(request))
 
     def adapter_plan(
         self,
@@ -4952,6 +4972,25 @@ class AsyncWorkspace:
     ) -> DomainWorkflowInstantiationReport:
         return domain_workflow_instantiation_report(
             await self.domain_workflow_instantiate(request)
+        )
+
+    async def domain_workflow_reconcile(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconcileRequest)
+            else DomainWorkflowReconcileRequest(**dict(request))
+        )
+        return await self.tool("domain_workflow_reconcile", normalized.to_arguments())
+
+    async def domain_workflow_reconciliation_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(
+            await self.domain_workflow_reconcile(request)
         )
 
     async def adapter_plan(

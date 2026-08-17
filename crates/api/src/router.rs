@@ -626,6 +626,9 @@ impl ApiRouter {
             ("GET", "/v1/domain-workflows") => {
                 self.domain_workflow_catalogue(&request_id)
             }
+            ("POST", "/v1/domain-workflows/reconcile") => {
+                self.domain_workflow_reconcile(&request, &request_id)
+            }
             ("POST", "/v1/domain-workflows/instantiate") => {
                 self.domain_workflow_instantiate(&request, &request_id)
             }
@@ -2325,6 +2328,7 @@ impl ApiRouter {
                     "operations_handoff": "/v1/operations/handoff",
                     "domain_workflows": "/v1/domain-workflows",
                     "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
+                    "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
                      "mission_provenance": "/v1/missions/{mission_id}/provenance",
@@ -2386,6 +2390,7 @@ impl ApiRouter {
                     "operations_handoff": true,
                     "domain_workflow_catalogue": true,
                     "domain_workflow_instantiate": true,
+                    "domain_workflow_reconcile": true,
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
@@ -2797,6 +2802,22 @@ impl ApiRouter {
         self.domain_workflow_tool(
             request_id,
             "domain_workflow_instantiate",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_workflow_reconcile(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_reconcile",
             Value::Object(arguments),
         )
     }
@@ -5053,6 +5074,7 @@ impl ApiRouter {
                     "/v1/evidence-bundles/verify": { "post": { "responses": { "200": { "description": "content-addressed mission evidence bundle verification report" }, "413": { "description": "bundle exceeds verification bound" }, "422": { "description": "bundle is malformed" } } } },
                     "/v1/domain-workflows": { "get": { "responses": { "200": { "description": "deterministic workflow template for every capability group" } } } },
                     "/v1/domain-workflows/instantiate": { "post": { "responses": { "200": { "description": "group-scoped, authoritative-preflighted, no-dispatch workflow mission" }, "422": { "description": "workflow selection or mission preflight was refused" } } } },
+                    "/v1/domain-workflows/reconcile": { "post": { "responses": { "200": { "description": "digest-bound workflow execution and evidence reconciliation" }, "422": { "description": "workflow evidence source or contract was refused" } } } },
                     "/v1/evidence-bundles": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_bundles", "in": "query" }], "responses": { "200": { "description": "bounded deterministic evidence registry index" } } }, "post": { "responses": { "201": { "description": "verified evidence bundle imported into the registry" }, "200": { "description": "idempotent re-import" }, "413": { "description": "registry capacity or snapshot bound exceeded" }, "422": { "description": "bundle verification failed" } } } },
                     "/v1/evidence-bundles/{bundle_digest}": { "get": { "parameters": [{ "name": "bundle_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one verified evidence bundle" }, "404": { "description": "bundle digest is not present" } } } },
                     "/v1/evidence-bundles/persistence": { "get": { "responses": { "200": { "description": "restart-aware evidence registry checkpoint status" } } } },
@@ -8328,7 +8350,8 @@ mod tests {
                 "workflow_id": "documentation_and_knowledge",
                 "mission_id": "api-workflow-1",
                 "goal": "discover repository capabilities",
-                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+                "policy": {"execute": true}
             }),
         ));
         assert_eq!(instantiated.status, 200);
@@ -8338,6 +8361,31 @@ mod tests {
         assert_eq!(instantiated["execution"], "not_started");
         assert_eq!(instantiated["selection"]["all_selected_tools_available"], true);
         assert_eq!(instantiated["evidence_plan"]["steps"][0]["step_id"], "catalog");
+
+        let executed = router.handle(request(
+            "POST",
+            "/v1/tools/agent_mission",
+            instantiated["mission"].clone(),
+        ));
+        assert_eq!(executed.status, 200);
+        let executed: Value = serde_json::from_slice(&executed.body).unwrap();
+        let mission_report: Value = serde_json::from_str(
+            executed["mcp"]["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(mission_report["mission_status"], "succeeded");
+        let reconciled = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/reconcile",
+            json!({"instantiation": instantiated, "mission_report": mission_report}),
+        ));
+        assert_eq!(reconciled.status, 200);
+        let reconciled: Value = serde_json::from_slice(&reconciled.body).unwrap();
+        assert_eq!(reconciled["workflow"], "domain_workflow_reconcile");
+        assert_eq!(reconciled["completion"]["status"], "complete");
+        assert_eq!(reconciled["completion"]["ready"], true);
 
         let refused = router.handle(request(
             "POST",

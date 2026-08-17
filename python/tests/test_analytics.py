@@ -59,6 +59,8 @@ from prism_sdk import (
     DomainWorkflowCatalogueReport,
     DomainWorkflowInstantiateRequest,
     DomainWorkflowInstantiationReport,
+    DomainWorkflowReconcileRequest,
+    DomainWorkflowReconciliationReport,
     ConformanceCaseReport,
     ConformancePyramidReport,
     ConformanceReleaseDecisionReport,
@@ -1664,6 +1666,30 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(instantiation.domain_contract["posture"], "advisory_review_gated")
         self.assertEqual(instantiation.evidence_plan["steps"][0]["step_id"], "catalog")
         self.assertEqual(instantiation.preflight_report["dispatch"], "not_started")
+
+        reconcile_request = DomainWorkflowReconcileRequest(
+            {"workflow": "domain_workflow_instantiate", "workflow_id": "documentation_and_knowledge"},
+            mission_report={"workflow": "agent_mission", "mission_status": "succeeded"},
+        )
+        self.assertEqual(reconcile_request.to_arguments()["mission_report"]["mission_status"], "succeeded")
+        reconciliation = DomainWorkflowReconciliationReport.from_wire({
+            "ok": True,
+            "workflow": "domain_workflow_reconcile",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "d" * 64,
+            "catalog_digest": "c" * 64,
+            "domain_contract_digest": "k" * 64,
+            "mission_id": "workflow-python",
+            "mission_plan_digest": "p" * 64,
+            "reconciliation_digest": "r" * 64,
+            "source": "mission_report",
+            "report": {"present": True},
+            "evidence": {"evidence_valid": True},
+            "completion": {"status": "complete", "ready": True},
+            "integrity": {"valid": True},
+        })
+        self.assertTrue(reconciliation.ready)
+        self.assertEqual(reconciliation.completion_status, "complete")
 
     def test_capability_discover_report_preserves_cross_domain_context(self) -> None:
         report = CapabilitySearchReport.from_wire(capability_discover_payload())

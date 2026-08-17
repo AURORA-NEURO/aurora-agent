@@ -4634,6 +4634,12 @@ export interface DomainWorkflowInstantiateArgs extends JsonObject {
   evaluator_review?: JsonObject;
 }
 
+export interface DomainWorkflowReconcileArgs extends JsonObject {
+  instantiation: JsonObject;
+  mission_report?: JsonObject;
+  evidence_bundle?: JsonObject;
+}
+
 export interface DomainWorkflowToolContract extends JsonObject {
   name: string;
   role: string;
@@ -4699,6 +4705,29 @@ export interface DomainWorkflowInstantiateResult extends JsonObject {
   evidence_plan: DomainWorkflowEvidencePlan;
   preflight: JsonObject;
   preflight_report?: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowReconcileResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconcile";
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  domain_contract_digest: string;
+  mission_id: string;
+  mission_plan_digest: string;
+  reconciliation_digest: string;
+  source: string;
+  report: JsonObject;
+  retention: JsonObject;
+  bundle_verification: JsonObject;
+  evidence: JsonObject;
+  completion: JsonObject;
+  integrity: JsonObject;
   execution: "not_started";
   guarantees: string[];
   limitations: string[];

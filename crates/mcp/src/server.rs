@@ -132,6 +132,7 @@ use bioprism_devplat::{
     audit_execution_provenance, build_dashboard,
     build_delivery_receipt, plan_mission, run_workbench, verify_delivery_receipt,
     build_domain_workflow_catalogue, instantiate_domain_workflow,
+    reconcile_domain_workflow,
     normalize_ci_provider_payload,
     standard_walkthroughs,
     CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
@@ -1527,6 +1528,7 @@ impl Server {
             "capability_route_review" => self.capability_route_review(&arguments),
             "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
             "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
+            "domain_workflow_reconcile" => self.domain_workflow_reconcile(&arguments),
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -22219,6 +22221,16 @@ impl Server {
         Ok(output)
     }
 
+    /// Reconcile a retained mission report or evidence bundle against an instantiated workflow.
+    ///
+    /// This is an audit projection only. It checks plan and tool identity, result counters,
+    /// trace lifecycle, output retention, refusal/omission posture, and completion readiness;
+    /// it never retries or dispatches a domain tool.
+    fn domain_workflow_reconcile(&self, arguments: &Value) -> Result<Value, String> {
+        reconcile_domain_workflow(arguments)
+            .map_err(|error| format!("domain workflow reconciliation refused: {error}"))
+    }
+
     /// Search the complete workspace capability catalogue and optionally attach authoritative MCP
     /// schemas for the matched tools.
     ///
@@ -27616,7 +27628,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "domain_workflow_catalogue", "domain_workflow_instantiate", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "domain_workflow_catalogue", "domain_workflow_instantiate", "domain_workflow_reconcile", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -30075,6 +30087,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "evaluator_review": { "type": "object" }
                 },
                 "required": ["workflow_id", "mission_id", "goal", "steps"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_reconcile",
+            "description": "Reconcile a retained agent_mission report or verified mission evidence bundle against an instantiated domain workflow. Checks workflow and mission-plan digests, planned step/tool identity, result counters, trace lifecycle, raw-output retention, refusals, blocks, cancellations, and summary-only omissions, then returns structural completion readiness. This never retries or dispatches a tool and never turns completion evidence into a scientific, clinical, operational, regulatory, or release claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "instantiation": { "type": "object", "description": "The complete accepted result returned by domain_workflow_instantiate." },
+                    "mission_report": { "type": "object", "description": "The exact agent_mission report, when retained. Provide this or evidence_bundle." },
+                    "evidence_bundle": { "type": "object", "description": "A verified mission_evidence_bundle_export, including result when full retention is available. Provide this or mission_report." }
+                },
+                "required": ["instantiation"]
             }
         }),
         json!({

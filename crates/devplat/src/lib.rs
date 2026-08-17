@@ -232,6 +232,7 @@ pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
 pub mod workflow;
+pub mod workflow_reconciliation;
 
 pub use audit::{
     catalogues_are_disjoint, findings, recipes_are_all_in_tree, unimplemented_titles,
@@ -403,4 +404,9 @@ pub use workflow::{
     DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION, DOMAIN_WORKFLOW_SCHEMA_VERSION,
     MAX_DOMAIN_WORKFLOW_BYTES, MAX_DOMAIN_WORKFLOW_GROUPS, MAX_DOMAIN_WORKFLOW_STEPS,
     MAX_DOMAIN_WORKFLOW_TOOLS,
+};
+pub use workflow_reconciliation::{
+    reconcile_domain_workflow, DomainWorkflowReconcileError,
+    DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_RECONCILE_BYTES,
+    MAX_DOMAIN_WORKFLOW_RECONCILE_FINDINGS, MAX_DOMAIN_WORKFLOW_RECONCILE_STEPS,
 };

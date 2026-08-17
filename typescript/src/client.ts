@@ -21,6 +21,8 @@ import type {
   DomainWorkflowCatalogueResult,
   DomainWorkflowInstantiateArgs,
   DomainWorkflowInstantiateResult,
+  DomainWorkflowReconcileArgs,
+  DomainWorkflowReconcileResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   TabularIngestArgs,
@@ -457,6 +459,20 @@ export class ApiClient {
     if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
     if (!Array.isArray(args.steps) || args.steps.length < 1 || args.steps.length > 128) throw new ArgumentError("steps must contain 1..=128 items");
     return this.request<DomainWorkflowInstantiateResult>("POST", "/v1/domain-workflows/instantiate", args, options);
+  }
+
+  /** Reconcile retained mission evidence against an instantiated workflow without dispatch. */
+  async domainWorkflowReconcileQuery(
+    args: DomainWorkflowReconcileArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowReconcileResult> {
+    if (!isObject(args) || !isObject(args.instantiation)) {
+      throw new ArgumentError("workflow reconciliation requires an instantiation object");
+    }
+    if (!isObject(args.mission_report) && !isObject(args.evidence_bundle)) {
+      throw new ArgumentError("workflow reconciliation requires mission_report or evidence_bundle");
+    }
+    return this.request<DomainWorkflowReconcileResult>("POST", "/v1/domain-workflows/reconcile", args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */
@@ -905,6 +921,19 @@ export class ApiClient {
       throw new ArgumentError("domain workflow instantiate requires 1..=128 step objects");
     }
     return this.callTool<DomainWorkflowInstantiateResult>("domain_workflow_instantiate", args, options);
+  }
+
+  async domainWorkflowReconcile(
+    args: DomainWorkflowReconcileArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowReconcileResult>> {
+    if (!isObject(args) || !isObject(args.instantiation)) {
+      throw new ArgumentError("workflow reconciliation requires an instantiation object");
+    }
+    if (!isObject(args.mission_report) && !isObject(args.evidence_bundle)) {
+      throw new ArgumentError("workflow reconciliation requires mission_report or evidence_bundle");
+    }
+    return this.callTool<DomainWorkflowReconcileResult>("domain_workflow_reconcile", args, options);
   }
 
   async missionEvaluatorDiscover(args: MissionEvaluatorDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvaluatorDiscoverResult>> {

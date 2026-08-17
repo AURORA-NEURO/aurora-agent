@@ -438,6 +438,32 @@ class DomainWorkflowInstantiateRequest:
 
 
 @dataclass(frozen=True)
+class DomainWorkflowReconcileRequest:
+    """Retained execution evidence to reconcile against one workflow instantiation."""
+
+    instantiation: Mapping[str, Any]
+    mission_report: Mapping[str, Any] | None = None
+    evidence_bundle: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _route_mapping("workflow instantiation", self.instantiation)
+        if self.mission_report is None and self.evidence_bundle is None:
+            raise ArgumentError("workflow reconciliation requires mission_report or evidence_bundle")
+        if self.mission_report is not None:
+            _route_mapping("workflow mission_report", self.mission_report)
+        if self.evidence_bundle is not None:
+            _route_mapping("workflow evidence_bundle", self.evidence_bundle)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"instantiation": dict(self.instantiation)}
+        if self.mission_report is not None:
+            result["mission_report"] = dict(self.mission_report)
+        if self.evidence_bundle is not None:
+            result["evidence_bundle"] = dict(self.evidence_bundle)
+        return result
+
+
+@dataclass(frozen=True)
 class DomainWorkflowCatalogueReport:
     """Typed deterministic catalogue of all capability-group workflow templates."""
 
@@ -531,6 +557,59 @@ def domain_workflow_instantiation_report(value: Mapping[str, Any]) -> DomainWork
     """Parse a direct REST/MCP workflow instantiation result."""
 
     return DomainWorkflowInstantiationReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationReport:
+    """Typed structural completion/evidence reconciliation for one domain workflow."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    workflow_digest: str
+    catalog_digest: str
+    mission_id: str
+    mission_plan_digest: str
+    reconciliation_digest: str
+    source: str
+    report: Mapping[str, Any]
+    evidence: Mapping[str, Any]
+    completion: Mapping[str, Any]
+    integrity: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationReport":
+        raw = _tool_payload(value, "domain_workflow_reconcile")
+        return cls(
+            raw=raw,
+            workflow_id=_route_text("workflow reconciliation id", raw.get("workflow_id")),
+            workflow_digest=_route_text("workflow reconciliation workflow digest", raw.get("workflow_digest")),
+            catalog_digest=_route_text("workflow reconciliation catalog digest", raw.get("catalog_digest")),
+            mission_id=_route_text("workflow reconciliation mission id", raw.get("mission_id")),
+            mission_plan_digest=_route_text("workflow reconciliation mission plan digest", raw.get("mission_plan_digest")),
+            reconciliation_digest=_route_text("workflow reconciliation digest", raw.get("reconciliation_digest")),
+            source=_route_text("workflow reconciliation source", raw.get("source")),
+            report=_route_mapping("workflow reconciliation report", raw.get("report", {})),
+            evidence=_route_mapping("workflow reconciliation evidence", raw.get("evidence", {})),
+            completion=_route_mapping("workflow reconciliation completion", raw.get("completion", {})),
+            integrity=_route_mapping("workflow reconciliation integrity", raw.get("integrity", {})),
+        )
+
+    @property
+    def ready(self) -> bool:
+        return self.completion.get("ready") is True
+
+    @property
+    def completion_status(self) -> str:
+        return _route_text("workflow reconciliation completion status", self.completion.get("status"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def domain_workflow_reconciliation_report(value: Mapping[str, Any]) -> DomainWorkflowReconciliationReport:
+    """Parse a direct REST/MCP workflow reconciliation result."""
+
+    return DomainWorkflowReconciliationReport.from_wire(value)
 
 
 @dataclass(frozen=True)
@@ -1915,8 +1994,10 @@ def mission_evaluator_discover_report(value: Mapping[str, Any]) -> MissionEvalua
 
 __all__ = [
     "DomainWorkflowInstantiateRequest",
+    "DomainWorkflowReconcileRequest",
     "DomainWorkflowCatalogueReport",
     "DomainWorkflowInstantiationReport",
+    "DomainWorkflowReconciliationReport",
     "CapabilityQuery",
     "CapabilityGroupReport",
     "CapabilityMatchReport",
@@ -1958,6 +2039,7 @@ __all__ = [
     "capability_route_report",
     "domain_workflow_catalogue_report",
     "domain_workflow_instantiation_report",
+    "domain_workflow_reconciliation_report",
     "capability_route_review_report",
     "capability_discover_report",
     "capability_audit_report",

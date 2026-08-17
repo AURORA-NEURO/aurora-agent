@@ -768,6 +768,11 @@ validates the mission DAG, derives a least-scope allow-list for requested execut
 step-level evidence plan, and attaches authoritative no-dispatch MCP schema preflight. MCP, REST,
 CLI, Python, and TypeScript all expose the same kernel. A valid workflow remains a plan, not
 permission, scientific evidence, clinical guidance, deployment readiness, or execution.
+`domain_workflow_reconcile` is the corresponding post-execution audit: it binds a retained
+`agent_mission` report or verified evidence bundle back to the instantiation, checks plan/result/
+trace consistency, preserves refusals and omissions, and makes structural completion readiness
+explicit without retrying or dispatching tools. Its `complete` status is evidence posture only and
+still requires review before any domain claim.
 `mission_evaluator_discover` complements tool routing with a digest-bound catalogue of explicit
 evaluator candidates for every workspace capability group. It filters by intent, group, domain,
 mission level, or adapter ID and returns purpose, candidate evidence tools, and RFC 6901 pointer
