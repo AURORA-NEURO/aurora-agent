@@ -351,4 +351,20 @@ mod tests {
         request.execution_status = "refused".into();
         assert!(record_adapter_execution_evidence(request).is_err());
     }
+
+    #[test]
+    fn provider_normalization_fixture_round_trips_the_shared_request_contract() {
+        let fixture: AdapterExecutionEvidenceRequest = serde_json::from_str(include_str!(
+            "../../../fixtures/adapter-execution-evidence/provider-normalization-request.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.adapter_id, "bioprism.python.fhir_manifest");
+        assert_eq!(fixture.parent_digests.len(), 6);
+        assert_eq!(fixture.parent_digests[5], "2".repeat(64));
+        assert_eq!(fixture.semantic_loss_status, "unknown");
+
+        let result = record_adapter_execution_evidence(fixture).unwrap();
+        assert_eq!(result["execution"], "not_started");
+        assert_eq!(result["readiness_claimed"], false);
+    }
 }

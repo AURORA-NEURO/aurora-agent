@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { ApiClient, ArgumentError } from "../dist/index.js";
 
@@ -67,4 +68,20 @@ test("client preserves adapter execution, conformance, semantic-loss, and artifa
   await assert.rejects(client.adapterExecutionEvidence({ ...args, semantic_loss_status: "lossy" }), ArgumentError);
   await assert.rejects(client.adapterExecutionEvidence({ ...args, credential_material: "never" }), ArgumentError);
   await assert.rejects(client.adapterExecutionEvidence({ ...args, execution_status: "failed", error_code: null }), ArgumentError);
+  await assert.rejects(client.adapterExecutionEvidence({ ...args, input_digest: undefined }), ArgumentError);
+  await assert.rejects(client.adapterExecutionEvidence({ ...args, input_digest: "A".repeat(64) }), ArgumentError);
+});
+
+test("provider normalization fixture preserves the shared request contract", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("../../fixtures/adapter-execution-evidence/provider-normalization-request.json", import.meta.url), "utf8"));
+  let sent;
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (_input, init) => {
+      sent = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true, tool: "adapter_execution_evidence", mcp: { result: { structuredContent: result } } }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  await client.adapterExecutionEvidence(fixture);
+  assert.deepEqual(sent, fixture);
 });

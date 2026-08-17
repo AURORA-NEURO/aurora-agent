@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -92,6 +94,15 @@ def test_adapter_execution_request_preserves_loss_and_digest_boundaries() -> Non
         AdapterExecutionEvidenceRequest(
             **{**lossy.__dict__, "execution_status": "refused", "error_code": None}
         )
+
+
+def test_provider_normalization_fixture_round_trips_the_shared_request_contract() -> None:
+    fixture_path = Path(__file__).parents[2] / "fixtures" / "adapter-execution-evidence" / "provider-normalization-request.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    normalized = AdapterExecutionEvidenceRequest.from_wire(fixture)
+    assert normalized.to_mcp_arguments() == fixture
+    assert normalized.parent_digests[-1] == "2" * 64
+    assert normalized.semantic_loss_status == "unknown"
 
 
 def test_loss_entries_are_typed_and_bounded() -> None:

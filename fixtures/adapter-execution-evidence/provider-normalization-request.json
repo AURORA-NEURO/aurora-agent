@@ -1,0 +1,25 @@
+{
+  "group_id": "biological_domains",
+  "domains": ["genomics", "oncology"],
+  "subject_id": "provider-subject",
+  "adapter_id": "bioprism.python.fhir_manifest",
+  "adapter_version": "0.1.0",
+  "source_id": "provider-source-1",
+  "input_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "output_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "execution_status": "succeeded",
+  "conformance_status": "verified",
+  "semantic_loss_status": "unknown",
+  "losses": [],
+  "item_count": 1,
+  "byte_length": 2048,
+  "parent_digests": [
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "1111111111111111111111111111111111111111111111111111111111111111",
+    "2222222222222222222222222222222222222222222222222222222222222222"
+  ],
+  "attempt_id": "provider-attempt-1"
+}

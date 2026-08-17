@@ -1759,9 +1759,8 @@ export class ApiClient {
       if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
     }
     if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
-    for (const [name, value] of [["input_digest", args.input_digest], ["output_digest", args.output_digest]] as const) {
-      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
-    }
+    if (typeof args.input_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.input_digest)) throw new ArgumentError("input_digest must be a lowercase SHA-256 digest");
+    if (args.output_digest !== undefined && args.output_digest !== null && (typeof args.output_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.output_digest))) throw new ArgumentError("output_digest must be a lowercase SHA-256 digest or null");
     const executionStatuses = ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown"];
     const conformanceStatuses = ["verified", "partial", "refused", "not_run", "unknown"];
     const lossStatuses = ["lossless", "lossy", "unknown", "not_applicable"];
