@@ -164,6 +164,8 @@ import type {
   BioCapabilityEvidenceAuditResult,
   CapabilitiesResponse,
   ClientRequestOptions,
+  DeliveryAttemptPage,
+  DeliveryAttemptsResponse,
   DeliveryMutationResponse,
   DeliveriesResponse,
   DeveloperDeliveryAuditArgs,
@@ -1281,6 +1283,24 @@ export class ApiClient {
     cursor(after, "after");
     pageLimit(limit);
     return this.request("GET", `/v1/webhooks/subscriptions/${encodeURIComponent(id)}/deliveries?after=${after}&limit=${limit}`, undefined, options);
+  }
+
+  /** Read bounded, durable send/retry/replay/acknowledgement provenance for a subscription. */
+  async deliveryAttempts(
+    subscriptionId: string,
+    after = 0,
+    limit = 100,
+    options?: ClientRequestOptions,
+  ): Promise<DeliveryAttemptsResponse> {
+    const id = pathSegment(subscriptionId, "subscription id");
+    cursor(after, "after");
+    pageLimit(limit);
+    return this.request(
+      "GET",
+      `/v1/webhooks/subscriptions/${encodeURIComponent(id)}/attempts?after=${after}&limit=${limit}`,
+      undefined,
+      options,
+    );
   }
 
   async acknowledge(subscriptionId: string, deliveryIds: readonly number[], options?: ClientRequestOptions): Promise<DeliveryMutationResponse> {

@@ -159,12 +159,12 @@ excludes webhook secrets: restored subscriptions pause with `secret_rebind_requi
 rows until an explicit in-memory rebind re-signs them. The API and both SDKs expose status/flush
 and rebind checks so operators can verify the recovery boundary instead of inferring it from a
 2xx response.
-Schema 3 adds a content SHA-256 digest over the unsigned checkpoint document; schema 1 and
-schema 2 are accepted as migration inputs, while tampered schema-3 files are rejected before
-any state is restored.
+Schema 4 adds a content SHA-256 digest over the unsigned checkpoint document plus a bounded,
+cursor-addressable delivery-attempt journal; schema 1, schema 2, and schema 3 are accepted as
+migration inputs, while tampered current/schema-3 files are rejected before any state is restored.
 The `/v1/recovery` matrix and SDK projections now join those surfaces into explicit rows for
-mission jobs, event rows, subscription metadata, pending outbox rows, secrets, and external
-effects without collapsing their guarantees.
+mission jobs, event rows, subscription metadata, pending outbox rows, delivery-attempt provenance,
+secrets, and external effects without collapsing their guarantees.
 The API crate also exposes a bounded `DeliverySender`/`ApiRouter::deliver_once` cycle for embedded
 workers: successful signed sends are acknowledged, retryable failures advance through the existing
 ten-attempt cap, and permanent or exhausted failures remain pending. Network/TLS and egress policy
@@ -175,8 +175,10 @@ pretending that the receiver accepted it.
 Python now exposes typed inventory pages plus bounded sync/async waits that retain the last live
 job on timeout; TypeScript exposes the same wait contract with abortable polling and a typed timeout
 error. These helpers coordinate every domain mission without claiming durable scheduling.
-The Python HTTP SDK also exposes typed event and signed-delivery pages with the same cursor ordering,
-retention-gap, retry-attempt, signature, and pending-count fields already present in TypeScript.
+The Python HTTP SDK also exposes typed event, signed-delivery, and durable delivery-attempt pages
+with the same cursor ordering, retention-gap, retry-attempt, signature, outcome, and pending-count
+fields already present in TypeScript. `delivery_attempts()` and its async counterpart preserve
+the gateway's distinction between local send observations and external receiver state.
 Its dependency-free `event_stream()` parser now mirrors the TypeScript SSE field rules and preserves
 the gateway's `x-next-after` cursor for resumable monitoring.
 The HTTP listener also serves through a shared immutable router with atomic request IDs and cloned

@@ -2382,6 +2382,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
       if (path.endsWith("/deliveries")) {
         return jsonResponse({ ok: true, page: { deliveries: [{ delivery_id: 1, subscription_id: "sub", attempt: 1, state: "failed", last_error: "blocked", last_error_retryable: false, event_id: 2, event_type: "tool.completed", signature: "sha256=x", envelope: { delivery_id: 1, subscription_id: "sub", attempt: 1, event: { id: 2, event_type: "tool.completed", subject: "tool", request_id: "req", payload: {} }, signature: "sha256=x" } }], after: 0, next_after: 1, pending_count: 1, dropped_deliveries: 0 } });
       }
+      if (path.endsWith("/attempts")) {
+        return jsonResponse({ ok: true, page: { attempts: [{ attempt_id: 1, delivery_id: 1, subscription_id: "sub", event_id: 2, event_type: "tool.completed", attempt: 1, action: "send", outcome: "accepted", receiver_accepted: true, retryable: null, error: null, signature: "sha256=x" }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_attempts: 0 } });
+      }
       if (path.endsWith("/replay") && init.method === "POST") {
         return jsonResponse({ ok: true, replayed: [{ delivery_id: 1, subscription_id: "sub", attempt: 1, state: "pending", last_error: null, last_error_retryable: null, event_id: 2, event_type: "tool.completed", signature: "sha256=x", envelope: {} }] });
       }
@@ -2427,6 +2430,8 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   assert.throws(() => parseSse("retry: nope\n\n"), /retry/);
   const deliveries = await client.deliveries("sub");
   assert.equal(deliveries.page.deliveries[0].state, "failed");
+  const attempts = await client.deliveryAttempts("sub");
+  assert.equal(attempts.page.attempts[0].outcome, "accepted");
   const replayed = await client.replay("sub", [1]);
   assert.equal(replayed.replayed[0].state, "pending");
   const rebound = await client.rebindSubscription("sub", "a-long-secret");

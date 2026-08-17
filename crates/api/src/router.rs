@@ -535,6 +535,9 @@ impl ApiRouter {
             ("GET", path) if path.ends_with("/deliveries") => {
                 self.list_deliveries(&request, &request_id)
             }
+            ("GET", path) if path.ends_with("/attempts") => {
+                self.list_delivery_attempts(&request, &request_id)
+            }
             ("POST", path) if path.ends_with("/ack") => self.ack_deliveries(&request, &request_id),
             ("POST", path) if path.ends_with("/retry") => {
                 self.retry_deliveries(&request, &request_id)
@@ -637,6 +640,9 @@ impl ApiRouter {
                 "retained_events": metrics.retained_events,
                 "next_event_id": metrics.next_event_id,
                 "dropped_events": metrics.dropped_events,
+                "retained_delivery_attempts": metrics.retained_delivery_attempts,
+                "dropped_delivery_attempts": metrics.dropped_delivery_attempts,
+                "next_attempt_id": metrics.next_attempt_id,
                 "subscriptions_durable": true,
                 "webhook_deliveries_durable": true,
                 "secrets_persisted": false,
@@ -748,6 +754,22 @@ impl ApiRouter {
                         "operator_action": "rebind secrets, poll the outbox through an egress-controlled worker, then acknowledge accepted ids"
                     },
                     {
+                        "id": "delivery_attempts",
+                        "configured": event_enabled,
+                        "checkpoint_present": event_checkpoint_present,
+                        "schema_version": EVENT_STATE_SCHEMA_VERSION,
+                        "state_digest": state_digest,
+                        "integrity_verified": event_integrity_verified,
+                        "restores": [
+                            "bounded send, retry, replay, acknowledgement, and secret-rebind provenance rows"
+                        ],
+                        "does_not_restore": [
+                            "receiver state beyond explicit worker acknowledgement",
+                            "network transport or external side effects"
+                        ],
+                        "operator_action": "query /v1/webhooks/subscriptions/{id}/attempts and correlate attempt_id with delivery_id"
+                    },
+                    {
                         "id": "webhook_signing_secrets",
                         "configured": event_enabled,
                         "checkpoint_present": false,
@@ -782,10 +804,13 @@ impl ApiRouter {
                     "subscriptions": metrics.subscriptions,
                     "pending_deliveries": metrics.pending_deliveries,
                     "dropped_events": metrics.dropped_events,
-                    "dropped_deliveries": metrics.dropped_deliveries
+                    "dropped_deliveries": metrics.dropped_deliveries,
+                    "retained_delivery_attempts": metrics.retained_delivery_attempts,
+                    "dropped_delivery_attempts": metrics.dropped_delivery_attempts,
+                    "next_attempt_id": metrics.next_attempt_id
                 },
                 "guarantees": [
-                    "restart boundaries are reported separately for missions, events, subscriptions, outbox rows, secrets, and external effects",
+                    "restart boundaries are reported separately for missions, events, subscriptions, outbox rows, delivery provenance, secrets, and external effects",
                     "absence of a checkpoint is visible and never presented as recovered state",
                     "a successful HTTP response does not claim receiver acceptance or effect completion"
                 ],
@@ -799,7 +824,8 @@ impl ApiRouter {
                     "mission_persistence": "/v1/missions/persistence",
                     "event_persistence": "/v1/events/persistence",
                     "event_flush": "/v1/events/persistence/flush",
-                    "mission_flush": "/v1/missions/persistence/flush"
+                    "mission_flush": "/v1/missions/persistence/flush",
+                    "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
             }),
         )
@@ -903,7 +929,8 @@ impl ApiRouter {
                     "delivery_receipt_events": "/v1/delivery-receipts/{receipt_id}/events",
                     "route_review_evidence": "/v1/route-reviews/{review_id}/evidence",
                     "event_persistence": "/v1/events/persistence",
-                    "webhooks": "/v1/webhooks/subscriptions"
+                    "webhooks": "/v1/webhooks/subscriptions",
+                    "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
             }),
         )
@@ -937,6 +964,7 @@ impl ApiRouter {
                     "signed_webhook_outbox": true,
                     "delivery_failure_inspection": true,
                     "bounded_delivery_replay": true,
+                    "delivery_attempt_provenance": true,
                     "restart_aware_webhook_metadata": true,
                     "explicit_secret_rebind": true,
                     "grpc": false,
@@ -2103,6 +2131,44 @@ impl ApiRouter {
         }
     }
 
+    fn list_delivery_attempts(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(id) = subscription_id(&request.path_segments(), Some("attempts")) else {
+            return self.error(
+                404,
+                "not_found",
+                "delivery attempt route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let after = match query_u64(&query, "after", 0) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let limit = match query_usize(&query, "limit", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let events = match self.events.lock() {
+            Ok(events) => events,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "event_log_unavailable",
+                    "event log is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match events.delivery_attempts(&id, after, limit) {
+            Ok(page) => HttpResponse::json(200, &json!({ "ok": true, "page": page })),
+            Err(error) => self.error(404, "not_found", &error, request_id),
+        }
+    }
+
     fn ack_deliveries(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
         self.delivery_mutation(request, request_id, false, false)
     }
@@ -2361,6 +2427,7 @@ impl ApiRouter {
                     "/v1/webhooks/subscriptions": { "get": { "responses": { "200": { "description": "subscriptions" } } }, "post": { "responses": { "201": { "description": "subscription" } } } },
                     "/v1/webhooks/subscriptions/{id}/rebind": { "post": { "parameters": [{ "name": "id", "in": "path", "required": true }], "responses": { "200": { "description": "in-memory secret rebind and pending-envelope re-sign" } } } },
                     "/v1/webhooks/subscriptions/{id}/deliveries": { "get": { "responses": { "200": { "description": "cursor page of inspectable pending deliveries and failure metadata" } } } },
+                    "/v1/webhooks/subscriptions/{id}/attempts": { "get": { "parameters": [{ "name": "id", "in": "path", "required": true }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "cursor page of durable delivery-attempt provenance" } } } },
                     "/v1/webhooks/subscriptions/{id}/ack": { "post": { "responses": { "200": { "description": "idempotent acknowledgement" } } } },
                     "/v1/webhooks/subscriptions/{id}/retry": { "post": { "responses": { "200": { "description": "advance selected deliveries by one retry attempt" } } } },
                     "/v1/webhooks/subscriptions/{id}/replay": { "post": { "responses": { "200": { "description": "reset selected deliveries for an explicit bounded replay" } } } }
@@ -2741,6 +2808,9 @@ fn unavailable_event_metrics() -> EventMetrics {
         dropped_deliveries: 0,
         next_event_id: 0,
         next_delivery_id: 0,
+        retained_delivery_attempts: 0,
+        dropped_delivery_attempts: 0,
+        next_attempt_id: 0,
     }
 }
 
@@ -3191,6 +3261,16 @@ mod tests {
         assert_eq!(event_rows["checkpoint_present"], true);
         assert_eq!(event_rows["state_digest"].as_str().unwrap().len(), 64);
         assert_eq!(event_rows["integrity_verified"], true);
+        let delivery_attempts = boundaries
+            .iter()
+            .find(|boundary| boundary["id"] == "delivery_attempts")
+            .unwrap();
+        assert_eq!(delivery_attempts["configured"], true);
+        assert_eq!(delivery_attempts["checkpoint_present"], true);
+        assert!(delivery_attempts["restores"][0]
+            .as_str()
+            .unwrap()
+            .contains("provenance"));
         let secrets = boundaries
             .iter()
             .find(|boundary| boundary["id"] == "webhook_signing_secrets")
@@ -3234,6 +3314,7 @@ mod tests {
         let checkpoint = std::fs::read_to_string(&path).unwrap();
         assert!(!checkpoint.contains("a-secret-key"));
         assert!(checkpoint.contains("secrets_persisted"));
+        assert!(checkpoint.contains("delivery_attempts_durable"));
         let persistence = router.handle(request("GET", "/v1/events/persistence", json!({})));
         let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
         assert_eq!(persistence["enabled"], true);
@@ -3245,6 +3326,7 @@ mod tests {
         assert_eq!(persistence["secrets_persisted"], false);
         assert_eq!(router.event_metrics().retained_events, 1);
         assert_eq!(router.event_metrics().pending_deliveries, 1);
+        assert_eq!(router.event_metrics().retained_delivery_attempts, 1);
 
         let restored = ApiRouter::new(
             std::env::current_dir().unwrap(),
@@ -3259,6 +3341,7 @@ mod tests {
         assert_eq!(restored.event_metrics().subscriptions, 1);
         assert_eq!(restored.event_metrics().active_subscriptions, 0);
         assert_eq!(restored.event_metrics().pending_deliveries, 1);
+        assert_eq!(restored.event_metrics().retained_delivery_attempts, 1);
         let listed = restored.handle(request("GET", "/v1/webhooks/subscriptions", json!({})));
         let listed: Value = serde_json::from_slice(&listed.body).unwrap();
         assert_eq!(listed["subscriptions"][0]["secret_bound"], false);
@@ -3273,6 +3356,15 @@ mod tests {
             pending["page"]["deliveries"][0]["state"],
             "secret_rebind_required"
         );
+        let attempts = restored.handle(request(
+            "GET",
+            "/v1/webhooks/subscriptions/local/attempts?after=0&limit=10",
+            json!({}),
+        ));
+        assert_eq!(attempts.status, 200);
+        let attempts: Value = serde_json::from_slice(&attempts.body).unwrap();
+        assert_eq!(attempts["page"]["attempts"][0]["action"], "enqueue");
+        assert_eq!(attempts["page"]["attempts"][0]["outcome"], "pending");
         let old_signature = pending["page"]["deliveries"][0]["signature"]
             .as_str()
             .unwrap()

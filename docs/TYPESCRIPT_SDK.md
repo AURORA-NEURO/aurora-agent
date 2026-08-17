@@ -651,7 +651,8 @@ metadata, not a replacement for `developer_delivery_receipt_verify`.
 `recoveryMatrix()` returns the typed `RecoveryMatrix` view before an operator performs restart
 recovery. Its boundary rows distinguish terminal mission restoration, retained event rows,
 subscription metadata, pending outbox evidence, process-local secrets, and external delivery
-effects; `automatic_resume` and `automatic_external_delivery` are explicit `false` values.
+effects; its delivery-attempt boundary is separately queryable; `automatic_resume` and
+`automatic_external_delivery` are explicit `false` values.
 `missionPersistence()` and `eventPersistence()` separately expose their checkpoint schema and
 optional content digests plus `integrity_verified`; a digest is an integrity correlation, not a
 claim of distributed consensus.
@@ -670,6 +671,8 @@ const subscription = await api.subscribe(
   { subscriptionId: "worker-a", events: ["tool.completed", "tool.refused"] },
 );
 const deliveries = await api.deliveries(subscription.subscription.id);
+const attempts = await api.deliveryAttempts(subscription.subscription.id, 0, 100);
+console.log(attempts.page.attempts.map((attempt) => [attempt.attempt_id, attempt.outcome]));
 // An operator-owned worker sends the signed envelope, then acknowledges only accepted ids.
 await api.acknowledge(subscription.subscription.id, deliveries.page.deliveries.map((d) => d.delivery_id));
 // After an event-state restart, restore the signing secret in memory before retry/replay.
@@ -682,9 +685,11 @@ The SSE route is a bounded snapshot, not a streaming connection. `eventStream` r
 text, parsed events, content type, and next cursor so an application can decide whether to poll,
 persist, or hand off to a real EventSource implementation. The webhook methods only manage the
 server-side outbox. They do not send to endpoint URLs, retry on their own, or expose subscription
-secrets. Event-state persistence status exposes the optional content `state_digest` for operator
-correlation. Event-state checkpoints can restore metadata and signed pending rows, but restored
-subscriptions remain paused until `rebindSubscription` supplies the secret again.
+secrets. Event-state persistence status exposes the optional content `state_digest` and bounded
+attempt metrics for operator correlation. Event-state checkpoints can restore metadata, signed
+pending rows, and delivery-attempt provenance, but restored subscriptions remain paused until
+`rebindSubscription` supplies the secret again. Attempt rows are local gateway/worker evidence;
+they do not prove an external effect beyond an explicit sender success result.
 
 ## Compatibility posture
 

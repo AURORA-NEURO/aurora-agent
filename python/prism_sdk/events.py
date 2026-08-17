@@ -219,6 +219,9 @@ class EventPersistenceStatus:
     subscriptions_durable: bool
     webhook_deliveries_durable: bool
     secrets_persisted: bool
+    retained_delivery_attempts: int
+    dropped_delivery_attempts: int
+    next_attempt_id: int
     recovery_policy: str
 
     @classmethod
@@ -272,6 +275,15 @@ class EventPersistenceStatus:
             subscriptions_durable,
             webhook_deliveries_durable,
             secrets_persisted,
+            _non_negative(
+                "event persistence retained_delivery_attempts",
+                raw.get("retained_delivery_attempts", 0),
+            ),
+            _non_negative(
+                "event persistence dropped_delivery_attempts",
+                raw.get("dropped_delivery_attempts", 0),
+            ),
+            _non_negative("event persistence next_attempt_id", raw.get("next_attempt_id", 0)),
             recovery_policy,
         )
 
@@ -467,6 +479,107 @@ class DeliveryPage:
 
 
 @dataclass(frozen=True)
+class DeliveryAttempt:
+    """One bounded, durable send/retry/replay/acknowledgement provenance row."""
+
+    raw: dict[str, Any]
+    attempt_id: int
+    delivery_id: int
+    subscription_id: str
+    event_id: int
+    event_type: str
+    attempt: int
+    action: str
+    outcome: str
+    receiver_accepted: bool | None
+    retryable: bool | None
+    error: str | None
+    signature: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DeliveryAttempt":
+        raw = _mapping("delivery attempt", value)
+        error = raw.get("error")
+        if error is not None:
+            error = _text("delivery attempt error", error)
+        return cls(
+            raw=raw,
+            attempt_id=_non_negative("delivery attempt attempt_id", raw.get("attempt_id")),
+            delivery_id=_non_negative("delivery attempt delivery_id", raw.get("delivery_id")),
+            subscription_id=_text(
+                "delivery attempt subscription_id", raw.get("subscription_id")
+            ),
+            event_id=_non_negative("delivery attempt event_id", raw.get("event_id")),
+            event_type=_text("delivery attempt event_type", raw.get("event_type")),
+            attempt=_non_negative("delivery attempt attempt", raw.get("attempt")),
+            action=_text("delivery attempt action", raw.get("action")),
+            outcome=_text("delivery attempt outcome", raw.get("outcome")),
+            receiver_accepted=_optional_bool(
+                "delivery attempt receiver_accepted", raw.get("receiver_accepted")
+            ),
+            retryable=_optional_bool("delivery attempt retryable", raw.get("retryable")),
+            error=error,
+            signature=_text("delivery attempt signature", raw.get("signature")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DeliveryAttemptPage:
+    """Cursor page over durable delivery-attempt provenance."""
+
+    raw: dict[str, Any]
+    attempts: tuple[DeliveryAttempt, ...]
+    after: int
+    next_after: int
+    oldest: int | None
+    newest: int | None
+    gap: bool
+    dropped_attempts: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DeliveryAttemptPage":
+        envelope = _mapping("delivery attempts response", value)
+        page_value = envelope.get("page", envelope)
+        raw = _mapping("delivery attempt page", page_value)
+        values = raw.get("attempts")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ArgumentError("delivery attempt page attempts must be an array")
+        attempts = tuple(DeliveryAttempt.from_wire(item) for item in values)
+        ids = tuple(attempt.attempt_id for attempt in attempts)
+        if ids != tuple(sorted(set(ids))):
+            raise ArgumentError("delivery attempt page ids must be sorted and unique")
+        gap = raw.get("gap")
+        if not isinstance(gap, bool):
+            raise ArgumentError("delivery attempt page gap must be a boolean")
+        oldest = raw.get("oldest")
+        newest = raw.get("newest")
+        if oldest is not None:
+            oldest = _non_negative("delivery attempt page oldest", oldest)
+        if newest is not None:
+            newest = _non_negative("delivery attempt page newest", newest)
+        return cls(
+            raw=raw,
+            attempts=attempts,
+            after=_non_negative("delivery attempt page after", raw.get("after")),
+            next_after=_non_negative(
+                "delivery attempt page next_after", raw.get("next_after")
+            ),
+            oldest=oldest,
+            newest=newest,
+            gap=gap,
+            dropped_attempts=_non_negative(
+                "delivery attempt page dropped_attempts", raw.get("dropped_attempts")
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class SseEvent:
     """One parsed Server-Sent Events record from a bounded gateway snapshot."""
 
@@ -545,6 +658,8 @@ __all__ = [
     "RecoveryMatrix",
     "DeliveryView",
     "DeliveryPage",
+    "DeliveryAttempt",
+    "DeliveryAttemptPage",
     "SseEvent",
     "SseSnapshot",
     "parse_sse",

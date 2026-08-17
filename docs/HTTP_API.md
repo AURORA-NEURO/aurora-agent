@@ -19,7 +19,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 |---|---|
 | `GET /healthz`, `GET /readyz` | Liveness/readiness and retention metrics |
 | `GET /v1/capabilities` | Tool/resource counts, transport support, limits, and workspace catalogue |
-| `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, and external-effect boundaries |
+| `GET /v1/recovery` | One operator-visible matrix of restart, secret, outbox, delivery-provenance, and external-effect boundaries |
 | `GET /v1/tools` | The exact MCP tool definitions |
 | `POST /v1/tools/{name}` | Call any tool with a JSON object body; delegates to the MCP dispatcher |
 | `POST /v1/missions` | Validate and submit an asynchronous `agent_mission` job |
@@ -38,6 +38,7 @@ OpenAPI document. The server inherits MCP root confinement for every tool that r
 | `GET /v1/webhooks/subscriptions` | Subscription catalogue with secrets omitted |
 | `POST /v1/webhooks/subscriptions` | Register an `http(s)` endpoint, event filters, and signing secret |
 | `GET .../{id}/deliveries` | Poll signed pending envelopes by delivery cursor |
+| `GET .../{id}/attempts` | Poll durable send/retry/replay/acknowledgement provenance by attempt cursor |
 | `POST .../{id}/retry` | Increment an attempt and recompute the signature, bounded at ten attempts |
 | `POST .../{id}/ack` | Idempotently remove acknowledged deliveries |
 | `POST .../{id}/replay` | Reset selected deliveries to attempt one after operator review |
@@ -94,16 +95,18 @@ expose the file bound, cursor metrics, durability fields, and explicit secret po
 Both persistence status responses include `integrity_verified`: `true` means the current-schema
 file digest matches at observation time, `false` means a present current-schema file is malformed
 or tampered, and `null` means no file or a legacy schema without a digest.
-The writer currently emits event-state schema 3, which binds every persisted field except the
+The writer currently emits event-state schema 4, which binds every persisted field except the
 digest itself to a lowercase SHA-256 `state_digest`; startup rejects a modified, truncated, or
-partially rewritten schema-3 document before restoring any rows. Schema 1 and schema 2 snapshots
-remain readable as bounded migrations without a digest, and the next successful flush upgrades
-them to schema 3. Event persistence and mission persistence are independent: an operator can
-enable either, both, or neither.
+partially rewritten current or schema-3 document before restoring any rows. Schema 1 and schema 2
+snapshots remain readable as bounded migrations without a digest, and the next successful flush
+upgrades them to schema 4. Schema 4 additionally persists a bounded delivery-attempt journal;
+each row records the signed envelope identity and local outcome classification, while
+`receiver_accepted` is only true when the operator-owned sender reports success. Event persistence
+and mission persistence are independent: an operator can enable either, both, or neither.
 
 `GET /v1/recovery` joins those independent statuses without joining their guarantees. Its
 `boundaries` rows separately identify mission jobs, event rows, subscription metadata, webhook
-outbox rows, signing secrets, and external delivery effects. Each row reports whether the
+outbox rows, delivery-attempt provenance, signing secrets, and external delivery effects. Each row reports whether the
 boundary is configured, whether a checkpoint is present, what is restored, what is explicitly not
 restored, whether the observed digest was verified, and the required operator action. `automatic_resume` and
 `automatic_external_delivery` are always false for this gateway. The matrix is an operational
@@ -192,6 +195,12 @@ Each delivery row also carries `state` (`pending`, `retryable`, `failed`, `exhau
 an explicit bounded reset that keeps the delivery ID stable for receiver idempotency, resets the
 attempt to one, re-signs the envelope, and clears the prior failure. It never creates an
 unbounded duplicate or treats operator intent as a successful send.
+`GET /v1/webhooks/subscriptions/{id}/attempts?after=N&limit=M` returns the bounded durable
+attempt journal. Each row identifies the delivery, event, signed-envelope identity, local action,
+outcome, retryability, bounded error, and whether the operator-owned sender explicitly reported
+receiver acceptance. `gap` and `dropped_attempts` make journal retention loss visible. The journal
+is evidence of gateway/worker observations, not a claim that an external receiver committed an
+effect beyond the sender's explicit success result.
 
 ## Explicit nonclaims
 

@@ -71,6 +71,7 @@ from .developer_platform import (
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
 from .events import (
     MAX_EVENT_PAGE,
+    DeliveryAttemptPage,
     DeliveryPage,
     DeliveryReceiptEvents,
     EventPage,
@@ -3418,6 +3419,23 @@ class ApiClient:
             )
         )
 
+    def delivery_attempts(
+        self, subscription_id: str, *, after: int = 0, limit: int = 100
+    ) -> DeliveryAttemptPage:
+        """Read durable send/retry/replay/acknowledgement provenance for a subscription."""
+
+        self._subscription_id(subscription_id)
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise ArgumentError("after must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_EVENT_PAGE:
+            raise ArgumentError(f"limit must be between 1 and {MAX_EVENT_PAGE}")
+        return DeliveryAttemptPage.from_wire(
+            self.request(
+                "GET",
+                f"/v1/webhooks/subscriptions/{subscription_id}/attempts?after={after}&limit={limit}",
+            )
+        )
+
     def acknowledge(self, subscription_id: str, delivery_ids: Sequence[int]) -> dict[str, Any]:
         self._subscription_id(subscription_id)
         return self.request("POST", f"/v1/webhooks/subscriptions/{subscription_id}/ack", {"delivery_ids": list(delivery_ids)})
@@ -3658,6 +3676,15 @@ class AsyncApiClient:
         """Async typed cursor page over pending signed deliveries."""
 
         return await asyncio.to_thread(self.client.delivery_page, subscription_id, after=after, limit=limit)
+
+    async def delivery_attempts(
+        self, subscription_id: str, *, after: int = 0, limit: int = 100
+    ) -> DeliveryAttemptPage:
+        """Async typed cursor page over durable delivery-attempt provenance."""
+
+        return await asyncio.to_thread(
+            self.client.delivery_attempts, subscription_id, after=after, limit=limit
+        )
 
     async def rebind_subscription(self, subscription_id: str, secret: str) -> dict[str, Any]:
         """Async in-memory webhook secret rebind and pending-envelope re-sign."""

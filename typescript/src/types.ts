@@ -246,6 +246,39 @@ export interface EventMetrics extends JsonObject {
   dropped_deliveries: number;
   next_event_id: number;
   next_delivery_id: number;
+  retained_delivery_attempts: number;
+  dropped_delivery_attempts: number;
+  next_attempt_id: number;
+}
+
+export interface DeliveryAttempt extends JsonObject {
+  attempt_id: number;
+  delivery_id: number;
+  subscription_id: string;
+  event_id: number;
+  event_type: string;
+  attempt: number;
+  action: string;
+  outcome: string;
+  receiver_accepted: boolean | null;
+  retryable: boolean | null;
+  error: string | null;
+  signature: string;
+}
+
+export interface DeliveryAttemptPage extends JsonObject {
+  attempts: DeliveryAttempt[];
+  after: number;
+  next_after: number;
+  oldest: number | null;
+  newest: number | null;
+  gap: boolean;
+  dropped_attempts: number;
+}
+
+export interface DeliveryAttemptsResponse extends JsonObject {
+  ok: boolean;
+  page: DeliveryAttemptPage;
 }
 
 export interface SubscribeOptions {
@@ -7094,6 +7127,9 @@ export interface EventPersistenceStatus extends JsonObject {
   subscriptions_durable: boolean;
   webhook_deliveries_durable: boolean;
   secrets_persisted: false;
+  retained_delivery_attempts: number;
+  dropped_delivery_attempts: number;
+  next_attempt_id: number;
   recovery_policy: string;
   flush: string;
 }

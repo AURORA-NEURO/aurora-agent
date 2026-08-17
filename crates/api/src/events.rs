@@ -17,9 +17,10 @@ pub const MAX_ENDPOINT_BYTES: usize = 2048;
 pub const MAX_SECRET_BYTES: usize = 4096;
 pub const MAX_FILTERS: usize = 32;
 pub const MAX_RETRY_ATTEMPTS: u32 = 10;
-pub const EVENT_STATE_SCHEMA_VERSION: u64 = 3;
+pub const EVENT_STATE_SCHEMA_VERSION: u64 = 4;
 const LEGACY_EVENT_STATE_SCHEMA_VERSION: u64 = 1;
-const PREVIOUS_EVENT_STATE_SCHEMA_VERSION: u64 = 2;
+const EARLIER_EVENT_STATE_SCHEMA_VERSION: u64 = 2;
+const PREVIOUS_EVENT_STATE_SCHEMA_VERSION: u64 = 3;
 pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_DELIVERY_WORKER_BATCH: usize = 100;
 pub const MAX_DELIVERY_ERROR_BYTES: usize = 8 * 1024;
@@ -97,6 +98,36 @@ pub struct EventMetrics {
     pub dropped_deliveries: u64,
     pub next_event_id: u64,
     pub next_delivery_id: u64,
+    pub retained_delivery_attempts: usize,
+    pub dropped_delivery_attempts: u64,
+    pub next_attempt_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeliveryAttempt {
+    pub attempt_id: u64,
+    pub delivery_id: u64,
+    pub subscription_id: String,
+    pub event_id: u64,
+    pub event_type: String,
+    pub attempt: u32,
+    pub action: String,
+    pub outcome: String,
+    pub receiver_accepted: Option<bool>,
+    pub retryable: Option<bool>,
+    pub error: Option<String>,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeliveryAttemptPage {
+    pub attempts: Vec<DeliveryAttempt>,
+    pub after: u64,
+    pub next_after: u64,
+    pub oldest: Option<u64>,
+    pub newest: Option<u64>,
+    pub gap: bool,
+    pub dropped_attempts: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -166,13 +197,17 @@ struct PendingDelivery {
 pub struct EventLog {
     capacity: usize,
     delivery_capacity: usize,
+    attempt_capacity: usize,
     next_event_id: u64,
     next_delivery_id: u64,
+    next_attempt_id: u64,
     events: VecDeque<ApiEvent>,
     subscriptions: BTreeMap<String, Subscription>,
     deliveries: BTreeMap<u64, PendingDelivery>,
+    attempts: VecDeque<DeliveryAttempt>,
     dropped_events: u64,
     dropped_deliveries: u64,
+    dropped_attempts: u64,
 }
 
 impl EventLog {
@@ -183,13 +218,17 @@ impl EventLog {
         Ok(Self {
             capacity,
             delivery_capacity: capacity.saturating_mul(8).clamp(1, 100_000),
+            attempt_capacity: capacity.saturating_mul(32).clamp(1, 100_000),
             next_event_id: 1,
             next_delivery_id: 1,
+            next_attempt_id: 1,
             events: VecDeque::with_capacity(capacity.min(1024)),
             subscriptions: BTreeMap::new(),
             deliveries: BTreeMap::new(),
+            attempts: VecDeque::new(),
             dropped_events: 0,
             dropped_deliveries: 0,
+            dropped_attempts: 0,
         })
     }
 
@@ -227,13 +266,16 @@ impl EventLog {
             .ok_or_else(|| "event state snapshot has no schema_version".to_string())?;
         if schema_version != EVENT_STATE_SCHEMA_VERSION
             && schema_version != PREVIOUS_EVENT_STATE_SCHEMA_VERSION
+            && schema_version != EARLIER_EVENT_STATE_SCHEMA_VERSION
             && schema_version != LEGACY_EVENT_STATE_SCHEMA_VERSION
         {
             return Err(format!(
-                "unsupported event state schema version {schema_version}; expected {LEGACY_EVENT_STATE_SCHEMA_VERSION}, {PREVIOUS_EVENT_STATE_SCHEMA_VERSION}, or {EVENT_STATE_SCHEMA_VERSION}"
+                "unsupported event state schema version {schema_version}; expected {LEGACY_EVENT_STATE_SCHEMA_VERSION}, {EARLIER_EVENT_STATE_SCHEMA_VERSION}, {PREVIOUS_EVENT_STATE_SCHEMA_VERSION}, or {EVENT_STATE_SCHEMA_VERSION}"
             ));
         }
-        if schema_version == EVENT_STATE_SCHEMA_VERSION {
+        if schema_version == EVENT_STATE_SCHEMA_VERSION
+            || schema_version == PREVIOUS_EVENT_STATE_SCHEMA_VERSION
+        {
             verify_checkpoint_digest(&document)?;
         }
         let mut log = Self::new(capacity)?;
@@ -283,7 +325,8 @@ impl EventLog {
         if log.next_event_id == 0 {
             return Err("event state snapshot next_event_id must not overflow".into());
         }
-        if schema_version == PREVIOUS_EVENT_STATE_SCHEMA_VERSION
+        if schema_version == EARLIER_EVENT_STATE_SCHEMA_VERSION
+            || schema_version == PREVIOUS_EVENT_STATE_SCHEMA_VERSION
             || schema_version == EVENT_STATE_SCHEMA_VERSION
         {
             if document
@@ -385,6 +428,67 @@ impl EventLog {
             if log.next_delivery_id == 0 {
                 return Err("event state snapshot next_delivery_id must not overflow".into());
             }
+            if schema_version == EVENT_STATE_SCHEMA_VERSION {
+                if document
+                    .get("delivery_attempts_durable")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                {
+                    return Err(
+                        "event state snapshot must explicitly declare durable delivery attempts"
+                            .into(),
+                    );
+                }
+                log.next_attempt_id = document
+                    .get("next_attempt_id")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| "event state snapshot has no next_attempt_id".to_string())?;
+                log.dropped_attempts = document
+                    .get("dropped_attempts")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                if log.next_attempt_id == 0 {
+                    return Err("event state snapshot next_attempt_id must not overflow".into());
+                }
+                let attempts = document
+                    .get("delivery_attempts")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        "event state snapshot has no delivery_attempts array".to_string()
+                    })?;
+                if attempts.len() > log.attempt_capacity {
+                    return Err(format!(
+                        "event state snapshot contains {} delivery attempts above the {}-row bound",
+                        attempts.len(),
+                        log.attempt_capacity
+                    ));
+                }
+                for value in attempts {
+                    let attempt: DeliveryAttempt =
+                        serde_json::from_value(value.clone()).map_err(|error| {
+                            format!(
+                                "event state snapshot contains an invalid delivery attempt: {error}"
+                            )
+                        })?;
+                    validate_delivery_attempt(&attempt)?;
+                    if log
+                        .attempts
+                        .iter()
+                        .any(|existing| existing.attempt_id == attempt.attempt_id)
+                    {
+                        return Err(
+                            "event state snapshot contains duplicate delivery attempt ids".into(),
+                        );
+                    }
+                    log.attempts.push_back(attempt);
+                }
+                if let Some(last_id) = log.attempts.back().map(|attempt| attempt.attempt_id) {
+                    log.next_attempt_id = log.next_attempt_id.max(last_id.saturating_add(1));
+                }
+                if log.next_attempt_id == 0 {
+                    return Err("event state snapshot next_attempt_id must not overflow".into());
+                }
+            }
         }
         Ok(log)
     }
@@ -395,24 +499,30 @@ impl EventLog {
     pub fn checkpoint_to_path(&self, path: &std::path::Path) -> Result<usize, String> {
         let mut events = self.events.iter().cloned().collect::<Vec<_>>();
         let mut dropped_events = self.dropped_events;
+        let mut dropped_attempts = self.dropped_attempts;
         let subscriptions = self
             .subscriptions
             .values()
             .map(|subscription| subscription.view.clone())
             .collect::<Vec<_>>();
         let deliveries = self.deliveries.values().cloned().collect::<Vec<_>>();
+        let mut attempts = self.attempts.iter().cloned().collect::<Vec<_>>();
         loop {
             let mut document = json!({
                 "schema_version": EVENT_STATE_SCHEMA_VERSION,
                 "next_event_id": self.next_event_id,
                 "next_delivery_id": self.next_delivery_id,
+                "next_attempt_id": self.next_attempt_id,
                 "dropped_events": dropped_events,
                 "dropped_deliveries": self.dropped_deliveries,
+                "dropped_attempts": dropped_attempts,
                 "events": events,
                 "subscriptions": subscriptions,
                 "deliveries": deliveries,
+                "delivery_attempts": attempts,
                 "subscriptions_durable": true,
                 "webhook_deliveries_durable": true,
+                "delivery_attempts_durable": true,
                 "secrets_persisted": false,
                 "recovery_policy": "restored subscriptions are paused until explicit secret rebind; signed outbox rows remain inspectable and are re-signed only after rebind",
             });
@@ -460,6 +570,11 @@ impl EventLog {
                 return Ok(bytes.len());
             }
             if events.is_empty() {
+                if !attempts.is_empty() {
+                    attempts.remove(0);
+                    dropped_attempts = dropped_attempts.saturating_add(1);
+                    continue;
+                }
                 return Err(format!(
                     "event state snapshot cannot fit within the {}-byte bound",
                     MAX_EVENT_STATE_FILE_BYTES
@@ -721,6 +836,40 @@ impl EventLog {
         })
     }
 
+    pub fn delivery_attempts(
+        &self,
+        subscription_id: &str,
+        after: u64,
+        limit: usize,
+    ) -> Result<DeliveryAttemptPage, String> {
+        self.require_subscription(subscription_id)?;
+        let limit = checked_limit(limit)?;
+        let matching = self
+            .attempts
+            .iter()
+            .filter(|attempt| attempt.subscription_id == subscription_id)
+            .collect::<Vec<_>>();
+        let oldest = matching.first().map(|attempt| attempt.attempt_id);
+        let newest = matching.last().map(|attempt| attempt.attempt_id);
+        let attempts = matching
+            .into_iter()
+            .filter(|attempt| attempt.attempt_id > after)
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_after = attempts.last().map_or(after, |attempt| attempt.attempt_id);
+        let gap = oldest.is_some_and(|oldest| after.saturating_add(1) < oldest);
+        Ok(DeliveryAttemptPage {
+            attempts,
+            after,
+            next_after,
+            oldest,
+            newest,
+            gap,
+            dropped_attempts: self.dropped_attempts,
+        })
+    }
+
     pub fn acknowledge(&mut self, subscription_id: &str, ids: &[u64]) -> Result<usize, String> {
         self.require_subscription(subscription_id)?;
         if ids.len() > 1000 {
@@ -728,11 +877,21 @@ impl EventLog {
         }
         let mut acknowledged = 0;
         for id in ids {
-            let belongs = self
-                .deliveries
-                .get(id)
-                .is_some_and(|delivery| delivery.envelope.subscription_id == subscription_id);
-            if belongs && self.deliveries.remove(id).is_some() {
+            let Some(delivery) = self.deliveries.get(id).cloned() else {
+                continue;
+            };
+            if delivery.envelope.subscription_id != subscription_id {
+                continue;
+            }
+            self.record_attempt(
+                &delivery.envelope,
+                "acknowledge",
+                "acknowledged",
+                None,
+                None,
+                None,
+            )?;
+            if self.deliveries.remove(id).is_some() {
                 acknowledged += 1;
             }
         }
@@ -761,7 +920,11 @@ impl EventLog {
             }
             delivery.envelope.attempt += 1;
             delivery.envelope.signature = sign_envelope(&secret, &delivery.envelope);
-            retried.push(delivery_view(delivery, true));
+            let envelope = delivery.envelope.clone();
+            let view = delivery_view(delivery, true);
+            let previous_error = delivery.last_error.clone();
+            self.record_attempt(&envelope, "retry", "scheduled", None, None, previous_error)?;
+            retried.push(view);
         }
         Ok(retried)
     }
@@ -793,7 +956,10 @@ impl EventLog {
             delivery.last_error = None;
             delivery.last_error_retryable = None;
             delivery.envelope.signature = sign_envelope(&secret, &delivery.envelope);
-            replayed.push(delivery_view(delivery, true));
+            let envelope = delivery.envelope.clone();
+            let view = delivery_view(delivery, true);
+            self.record_attempt(&envelope, "replay", "scheduled", None, None, None)?;
+            replayed.push(view);
         }
         Ok(replayed)
     }
@@ -812,6 +978,9 @@ impl EventLog {
             dropped_deliveries: self.dropped_deliveries,
             next_event_id: self.next_event_id,
             next_delivery_id: self.next_delivery_id,
+            retained_delivery_attempts: self.attempts.len(),
+            dropped_delivery_attempts: self.dropped_attempts,
+            next_attempt_id: self.next_attempt_id,
         }
     }
 
@@ -847,6 +1016,16 @@ impl EventLog {
             let page = self.deliveries(&subscription.id, 0, remaining)?;
             if !subscription.secret_bound {
                 report.blocked += page.deliveries.len();
+                for delivery in &page.deliveries {
+                    self.record_attempt_from_view(
+                        delivery,
+                        "send",
+                        "secret_rebind_required",
+                        None,
+                        None,
+                        Some("subscription requires an explicit secret rebind".into()),
+                    )?;
+                }
                 remaining = remaining.saturating_sub(page.deliveries.len());
                 continue;
             }
@@ -858,7 +1037,15 @@ impl EventLog {
                 report.attempted += 1;
                 match sender.send(&subscription.endpoint, &delivery.envelope) {
                     Ok(()) => {
-                        self.acknowledge(&subscription.id, &[delivery.delivery_id])?;
+                        self.record_attempt_from_view(
+                            &delivery,
+                            "send",
+                            "accepted",
+                            Some(true),
+                            None,
+                            None,
+                        )?;
+                        self.deliveries.remove(&delivery.delivery_id);
                         report.acknowledged += 1;
                     }
                     Err(error) => {
@@ -869,6 +1056,22 @@ impl EventLog {
                             retryable: error.retryable,
                             error: bounded_error(error.message),
                         };
+                        let outcome = if failure.retryable && delivery.attempt < MAX_RETRY_ATTEMPTS
+                        {
+                            "retryable_failure"
+                        } else if failure.retryable {
+                            "exhausted"
+                        } else {
+                            "permanent_failure"
+                        };
+                        self.record_attempt_from_view(
+                            &delivery,
+                            "send",
+                            outcome,
+                            Some(false),
+                            Some(failure.retryable),
+                            Some(failure.error.clone()),
+                        )?;
                         if let Some(pending) = self.deliveries.get_mut(&delivery.delivery_id) {
                             pending.last_error = Some(failure.error.clone());
                             pending.last_error_retryable = Some(failure.retryable);
@@ -938,11 +1141,82 @@ impl EventLog {
         self.deliveries.insert(
             delivery_id,
             PendingDelivery {
-                envelope,
+                envelope: envelope.clone(),
                 last_error: None,
                 last_error_retryable: None,
             },
         );
+        self.record_attempt(&envelope, "enqueue", "pending", None, None, None)?;
+        Ok(())
+    }
+
+    fn record_attempt_from_view(
+        &mut self,
+        delivery: &DeliveryView,
+        action: &str,
+        outcome: &str,
+        receiver_accepted: Option<bool>,
+        retryable: Option<bool>,
+        error: Option<String>,
+    ) -> Result<(), String> {
+        let envelope = WebhookEnvelope {
+            delivery_id: delivery.delivery_id,
+            subscription_id: delivery.subscription_id.clone(),
+            attempt: delivery.attempt,
+            event: ApiEvent {
+                id: delivery.event_id,
+                event_type: delivery.event_type.clone(),
+                subject: String::new(),
+                request_id: String::new(),
+                payload: Value::Null,
+            },
+            signature: delivery.signature.clone(),
+        };
+        self.record_attempt(
+            &envelope,
+            action,
+            outcome,
+            receiver_accepted,
+            retryable,
+            error,
+        )
+    }
+
+    fn record_attempt(
+        &mut self,
+        envelope: &WebhookEnvelope,
+        action: &str,
+        outcome: &str,
+        receiver_accepted: Option<bool>,
+        retryable: Option<bool>,
+        error: Option<String>,
+    ) -> Result<(), String> {
+        validate_token(action, 64, "delivery attempt action")?;
+        validate_token(outcome, 64, "delivery attempt outcome")?;
+        if envelope.delivery_id == 0 || envelope.event.id == 0 {
+            return Err("delivery attempt ids must be positive".into());
+        }
+        let bounded_error = error.map(bounded_error);
+        let attempt = DeliveryAttempt {
+            attempt_id: self.next_attempt_id,
+            delivery_id: envelope.delivery_id,
+            subscription_id: envelope.subscription_id.clone(),
+            event_id: envelope.event.id,
+            event_type: envelope.event.event_type.clone(),
+            attempt: envelope.attempt,
+            action: action.to_string(),
+            outcome: outcome.to_string(),
+            receiver_accepted,
+            retryable,
+            error: bounded_error,
+            signature: envelope.signature.clone(),
+        };
+        self.next_attempt_id = self.next_attempt_id.saturating_add(1);
+        if self.attempts.len() >= self.attempt_capacity {
+            self.attempts.pop_front();
+            self.dropped_attempts = self.dropped_attempts.saturating_add(1);
+        }
+        self.attempts.push_back(attempt);
         Ok(())
     }
 
@@ -996,12 +1270,22 @@ fn delivery_state(delivery: &PendingDelivery, secret_bound: bool) -> String {
 }
 
 fn bounded_error(message: String) -> String {
-    if message.len() <= MAX_DELIVERY_ERROR_BYTES {
-        return message;
+    let sanitized = message
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                '�'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    if sanitized.len() <= MAX_DELIVERY_ERROR_BYTES {
+        return sanitized;
     }
     let prefix_limit = MAX_DELIVERY_ERROR_BYTES.saturating_sub(16);
     let mut bounded = String::new();
-    for character in message.chars() {
+    for character in sanitized.chars() {
         if bounded.len().saturating_add(character.len_utf8()) > prefix_limit {
             break;
         }
@@ -1056,7 +1340,7 @@ fn verify_checkpoint_digest(document: &Value) -> Result<(), String> {
     let stored = document
         .get("state_digest")
         .and_then(Value::as_str)
-        .ok_or_else(|| "event state schema 3 requires state_digest".to_string())?;
+        .ok_or_else(|| "content-addressed event state schema requires state_digest".to_string())?;
     if stored.len() != 64
         || !stored
             .bytes()
@@ -1125,6 +1409,36 @@ fn validate_pending_delivery(delivery: &PendingDelivery) -> Result<(), String> {
     if let Some(error) = &delivery.last_error {
         if error.len() > MAX_DELIVERY_ERROR_BYTES || error.bytes().any(|byte| byte < 0x20) {
             return Err("delivery last_error is unbounded or contains control bytes".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_delivery_attempt(attempt: &DeliveryAttempt) -> Result<(), String> {
+    if attempt.attempt_id == 0 || attempt.delivery_id == 0 || attempt.event_id == 0 {
+        return Err("delivery attempt ids must be positive".into());
+    }
+    if !(1..=MAX_RETRY_ATTEMPTS).contains(&attempt.attempt) {
+        return Err(format!(
+            "delivery attempt number must be between 1 and {MAX_RETRY_ATTEMPTS}"
+        ));
+    }
+    validate_token(
+        &attempt.subscription_id,
+        MAX_SUBSCRIPTION_ID_BYTES,
+        "delivery attempt subscription id",
+    )?;
+    validate_token(
+        &attempt.event_type,
+        MAX_EVENT_TYPE_BYTES,
+        "delivery attempt event type",
+    )?;
+    validate_token(&attempt.action, 64, "delivery attempt action")?;
+    validate_token(&attempt.outcome, 64, "delivery attempt outcome")?;
+    validate_token(&attempt.signature, 256, "delivery attempt signature")?;
+    if let Some(error) = &attempt.error {
+        if error.len() > MAX_DELIVERY_ERROR_BYTES || error.bytes().any(|byte| byte < 0x20) {
+            return Err("delivery attempt error is unbounded or contains control bytes".into());
         }
     }
     Ok(())
@@ -1293,8 +1607,15 @@ mod tests {
         let deliveries = log.deliveries("research", 0, 10).unwrap();
         assert_eq!(deliveries.deliveries.len(), 2);
         assert!(deliveries.deliveries[0].signature.starts_with("sha256="));
+        let attempts = log.delivery_attempts("research", 0, 10).unwrap();
+        assert_eq!(attempts.attempts.len(), 2);
+        assert_eq!(attempts.attempts[0].action, "enqueue");
+        assert_eq!(attempts.attempts[0].outcome, "pending");
         assert_eq!(log.acknowledge("research", &[1]).unwrap(), 1);
         assert_eq!(log.retry("research", &[2]).unwrap()[0].attempt, 2);
+        let attempts = log.delivery_attempts("research", 0, 10).unwrap();
+        assert_eq!(attempts.attempts[2].outcome, "acknowledged");
+        assert_eq!(attempts.attempts[3].outcome, "scheduled");
     }
 
     #[test]
@@ -1397,6 +1718,27 @@ mod tests {
         assert_eq!(restored.metrics().subscriptions, 0);
         assert_eq!(restored.metrics().pending_deliveries, 0);
 
+        let mut schema_three =
+            serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap();
+        schema_three["schema_version"] = json!(3);
+        {
+            let object = schema_three.as_object_mut().unwrap();
+            object.remove("next_attempt_id");
+            object.remove("dropped_attempts");
+            object.remove("delivery_attempts");
+            object.remove("delivery_attempts_durable");
+            object.remove("state_digest");
+        }
+        let digest = checkpoint_digest(&schema_three).unwrap();
+        schema_three
+            .as_object_mut()
+            .unwrap()
+            .insert("state_digest".into(), Value::String(digest));
+        std::fs::write(&path, serde_json::to_vec_pretty(&schema_three).unwrap()).unwrap();
+        let migrated_three = EventLog::from_checkpoint_path(2, Some(&path)).unwrap();
+        assert_eq!(migrated_three.metrics().next_event_id, 4);
+        assert_eq!(migrated_three.metrics().retained_events, 2);
+
         let mut schema_two =
             serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap();
         schema_two["schema_version"] = json!(2);
@@ -1451,6 +1793,11 @@ mod tests {
         let second = log.deliver_once(&mut sender, 10).unwrap();
         assert_eq!(second.acknowledged, 1);
         assert_eq!(log.deliveries("worker", 0, 10).unwrap().deliveries.len(), 0);
+        let attempts = log.delivery_attempts("worker", 0, 10).unwrap();
+        assert_eq!(attempts.attempts.len(), 4);
+        assert_eq!(attempts.attempts[1].outcome, "retryable_failure");
+        assert_eq!(attempts.attempts[2].action, "retry");
+        assert_eq!(attempts.attempts[3].outcome, "accepted");
     }
 
     #[test]
