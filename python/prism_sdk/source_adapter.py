@@ -8,10 +8,11 @@ format, and never hides a truncated or binary-only response behind a parser refu
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
+from .adapter_execution_evidence import AdapterExecutionEvidenceRequest
 from .adapter_runtime import AdapterExecutionResult, AdapterRuntime, ProjectionRequest, RuntimeStatus
 from .authoring import content_digest
 from .errors import ArgumentError
@@ -238,6 +239,80 @@ class SourceAdapterProjectionResult:
             "adapter_result": self.adapter_result.to_wire() if self.adapter_result else None,
             "error": dict(self.error) if self.error else None,
         }
+
+    def to_adapter_execution_evidence_request(
+        self,
+        group_id: str,
+        domains: Sequence[str],
+        *,
+        subject_id: str,
+        input_digest: str,
+        adapter_version: str | None = None,
+        parent_digests: Sequence[str] = (),
+        attempt_id: str | None = None,
+    ) -> AdapterExecutionEvidenceRequest:
+        """Convert a source-bound projection into durable adapter evidence.
+
+        The source response already carries verified transport lineage, but the caller still
+        supplies the subject and the digest that identifies the parser input. When a complete
+        raw body digest is available, it must match that explicit input digest. The source plan
+        and response digests are retained as parents, so a parser result cannot be detached from
+        the retrieval envelope. A source-body refusal without an adapter result is retained as a
+        typed refused observation when the caller supplies the declared adapter version.
+        """
+
+        normalized_input_digest = _digest("source adapter evidence input digest", input_digest)
+        _text("source adapter evidence subject_id", subject_id, 512)
+        if self.raw_content_digest is not None and normalized_input_digest != self.raw_content_digest:
+            raise ArgumentError(
+                "source adapter evidence input_digest must match the verified raw_content_digest"
+            )
+        lineage: list[str] = []
+        for digest in (self.source_plan_digest, self.response_digest, *parent_digests):
+            normalized_digest = _digest("source adapter evidence parent digest", digest)
+            if normalized_digest not in lineage:
+                lineage.append(normalized_digest)
+
+        if self.adapter_result is not None:
+            declared_version = self.adapter_result.adapter.version if self.adapter_result.adapter is not None else None
+            if declared_version is None:
+                raise ArgumentError("source adapter evidence requires a declared adapter version")
+            if adapter_version is not None and adapter_version != declared_version:
+                raise ArgumentError("adapter_version does not match the executed adapter descriptor")
+            evidence = self.adapter_result.to_adapter_execution_evidence_request(
+                group_id,
+                domains,
+                subject_id=subject_id,
+                input_digest=normalized_input_digest,
+                parent_digests=tuple(lineage),
+                attempt_id=attempt_id,
+            )
+            if self.status is SourceAdapterProjectionStatus.SOURCE_PARTIAL and evidence.execution_status == "succeeded":
+                evidence = replace(evidence, execution_status="partial")
+            return evidence
+
+        if adapter_version is None:
+            raise ArgumentError(
+                "adapter_version is required when source projection stopped before adapter execution"
+            )
+        error_code = self.error.get("kind") if isinstance(self.error, Mapping) else None
+        if not isinstance(error_code, str) or not error_code.strip():
+            error_code = "source_projection_not_executed"
+        return AdapterExecutionEvidenceRequest(
+            group_id=group_id,
+            domains=tuple(domains),
+            subject_id=subject_id,
+            adapter_id=self.request.adapter_id,
+            adapter_version=adapter_version,
+            source_id=self.request.source_id,
+            input_digest=normalized_input_digest,
+            execution_status="refused",
+            conformance_status="refused",
+            semantic_loss_status="unknown",
+            error_code=error_code,
+            parent_digests=tuple(lineage),
+            attempt_id=attempt_id,
+        )
 
 
 def project_source_execution(

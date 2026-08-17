@@ -309,6 +309,11 @@ with explicit subject/source/input identity, output digest, conformance status, 
 entries, refusal code, and parent lineage. Batch conversion requires a source-digest map for every
 member, keeping concrete format execution and durable cross-domain evidence as separate but
 composable planes.
+Source-bound projections can now emit the same evidence contract: explicit parser-input identity
+is checked against retained raw-content digests, source-plan and response lineage are attached as
+parents, partial transport remains partial, and truncated/binary/omitted bodies become typed
+refused observations even when parsing never began. This keeps optional binary readers and
+clinical/provider retrieval boundaries observable without treating non-execution as success.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

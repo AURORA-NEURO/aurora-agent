@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from prism_sdk import (
     AsyncApiClient,
     AsyncWorkspace,
+    AdapterExecutionEvidenceRequest,
     ApiClient,
+    ArgumentError,
     SourceAdapterProjectionRequest,
     SourceAdapterProjectionStatus,
     Workspace,
@@ -61,6 +65,51 @@ def test_bridge_binds_transport_digests_into_a_real_adapter_projection() -> None
     assert result.adapter_result.document_digest is not None
     assert result.adapter_result.request.source_context["source_plan_digest"] == "a" * 64
     assert len(result.projection_digest) == 64
+
+
+def test_source_projection_bridges_parser_and_transport_lineage_into_evidence() -> None:
+    result = project_source_execution(execution(), request())
+    evidence = result.to_adapter_execution_evidence_request(
+        "biological_domains",
+        ("oncology",),
+        subject_id="source-subject",
+        input_digest="b" * 64,
+        parent_digests=("d" * 64, "a" * 64),
+        attempt_id="source-attempt-1",
+    )
+    assert isinstance(evidence, AdapterExecutionEvidenceRequest)
+    assert evidence.adapter_id == "bioprism.python.vcf_text"
+    assert evidence.execution_status == "partial"
+    assert evidence.input_digest == "b" * 64
+    assert evidence.parent_digests == ("a" * 64, "c" * 64, "d" * 64)
+    assert evidence.attempt_id == "source-attempt-1"
+
+
+def test_source_refusals_remain_evidence_bearing_without_parser_execution() -> None:
+    result = project_source_execution(execution(truncated=True), request())
+    evidence = result.to_adapter_execution_evidence_request(
+        "biological_domains",
+        ("oncology",),
+        subject_id="source-subject",
+        input_digest="b" * 64,
+        adapter_version="0.1.0",
+    )
+    assert evidence.execution_status == "refused"
+    assert evidence.conformance_status == "refused"
+    assert evidence.semantic_loss_status == "unknown"
+    assert evidence.error_code == "source_body_refused"
+    with pytest.raises(ArgumentError):
+        result.to_adapter_execution_evidence_request(
+            "biological_domains", ("oncology",), subject_id="source-subject", input_digest="b" * 64
+        )
+    with pytest.raises(ArgumentError):
+        result.to_adapter_execution_evidence_request(
+            "biological_domains",
+            ("oncology",),
+            subject_id="source-subject",
+            input_digest="d" * 64,
+            adapter_version="0.1.0",
+        )
 
 
 def test_partial_source_stays_partial_even_when_the_parser_succeeds() -> None:

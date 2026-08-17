@@ -157,6 +157,11 @@ bridge requires caller-supplied subject identity and source/input digests, retai
 semantic-loss evidence, and preserves rejected, blocked, and dependency-missing outcomes. Batch
 conversion requires a digest map for every source id, so evidence coverage cannot be inferred from
 successful members or from source/subject label overlap.
+Source-backed projections add `SourceAdapterProjectionResult.to_adapter_execution_evidence_request(...)`.
+It verifies the explicit parser-input digest against the retained raw-content digest, preserves
+source-plan and response parents, carries partial transport state into execution evidence, and
+retains truncated/binary/omitted-body refusals even when no parser ran. A declared adapter version
+is required for those pre-parser refusals; no source locator is reopened.
 When installed, `read_nifti_header()` and `read_anndata_projection()` provide verified raw-file
 bindings for nibabel and anndata-backed H5AD/Zarr metadata. They feed the same auditors without
 loading image arrays or matrix values; missing optional packages remain typed refusals.

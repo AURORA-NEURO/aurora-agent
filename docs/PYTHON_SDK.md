@@ -80,6 +80,13 @@ digest when supplied, and retains source-plan/response/raw digests in a separate
 context rather than mislabeling them as parser provenance. A partial transport outcome remains
 partial even when the nested format audit succeeds; invalid, lossy, blocked, and refused parser
 states remain distinct.
+`SourceAdapterProjectionResult.to_adapter_execution_evidence_request(...)` carries that seam into
+the shared evidence contract. It requires explicit subject and parser-input identity, verifies
+the input digest against the retained raw-content digest when present, attaches the source-plan
+and response digests as parent lineage, and upgrades a successful nested parse to `partial` when
+the source transport was partial. Truncated, binary, omitted, or otherwise pre-parser refusals
+remain typed refused evidence when the caller supplies the declared adapter version; no locator is
+reopened and no missing parser execution is fabricated.
 `DomainEvidencePipelineRequest`, `DomainEvidencePipelineResult`, and
 `project_domain_source_execution()` add the catalogue-bound variant. It requires the exact
 catalogue digest, source-plan digest, group, domain, and adapter id; refuses incomplete or
