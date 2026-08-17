@@ -199,6 +199,56 @@ const providerNormalizationArgs = {
   payload: { records: [{ id: "pmid:1" }] },
 };
 
+const providerReplay = {
+  ok: true,
+  schema: "bioprism-devplat-domain-evidence-provider-replay/0.1",
+  workflow: "domain_evidence_provider_replay_verify",
+  replay: {
+    schema: "bioprism-devplat-domain-evidence-provider-replay/0.1",
+    workflow: "domain_evidence_provider_replay_verify",
+    replay_status: "matched",
+    matched: true,
+    group_id: "biological_domains",
+    domains: ["oncology"],
+    subject_id: "provider-ts",
+    source_tool: "literature_bind_check",
+    connector_kind: "literature",
+    provider: "pubmed",
+    expected_payload_digest: "a".repeat(64),
+    observed_payload_digest: "a".repeat(64),
+    expected_request_digest: null,
+    observed_request_digest: null,
+    expected_shape_digest: "b".repeat(64),
+    observed_shape_digest: "b".repeat(64),
+    expected_normalization_digest: "c".repeat(64),
+    observed_normalization_digest: "c".repeat(64),
+    expected_intake_digest: "d".repeat(64),
+    observed_intake_digest: "d".repeat(64),
+    matches: { payload_digest: true, request_digest: true, shape_digest: true, normalization_digest: true, intake_digest: true },
+    differences: [],
+    shape_audit: providerNormalization.shape_audit,
+    replay_digest: "e".repeat(64),
+    guarantees: [],
+    limitations: [],
+  },
+  matched: true,
+  replay_status: "matched",
+  replay_digest: "e".repeat(64),
+  artifact_registry: { created: true, indexed: true },
+  execution: "not_started",
+  readiness_claimed: false,
+  guarantees: [],
+  does_not_claim: ["provider authenticity"],
+};
+
+const providerReplayArgs = {
+  ...providerNormalizationArgs,
+  expected_payload_digest: "a".repeat(64),
+  expected_shape_digest: "b".repeat(64),
+  expected_normalization_digest: "c".repeat(64),
+  expected_intake_digest: "d".repeat(64),
+};
+
 test("domain evidence intake REST and tool clients preserve exact envelope metadata", async () => {
   const seen = [];
   const client = new ApiClient({
@@ -215,6 +265,7 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
       if (url.pathname === "/v1/domain-evidence/sources/execute") return new Response(JSON.stringify(sourceExecution), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_source_execute") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_source_execute", mcp: { result: { structuredContent: sourceExecution } } }), { status: 200, headers: { "content-type": "application/json" } });
       if (url.pathname === "/v1/tools/domain_evidence_provider_normalize") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_normalize", mcp: { result: { structuredContent: providerNormalization } } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/v1/tools/domain_evidence_provider_replay_verify") return new Response(JSON.stringify({ ok: true, tool: "domain_evidence_provider_replay_verify", mcp: { result: { structuredContent: providerReplay } } }), { status: 200, headers: { "content-type": "application/json" } });
       throw new Error(`unexpected path ${url.pathname}`);
     },
   });
@@ -229,6 +280,8 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.provider, "pubmed");
   assert.equal((await client.domainEvidenceProviderNormalizeTool(providerNormalizationArgs)).mcp.result.structuredContent.outcome, "unknown");
   assert.equal((await client.domainEvidenceProviderNormalize(providerNormalizationArgs)).mcp.result.structuredContent.shape_audit.status, "unclassified");
+  assert.equal((await client.domainEvidenceProviderReplayVerify(providerReplayArgs)).mcp.result.structuredContent.replay_status, "matched");
+  assert.equal((await client.domainEvidenceProviderReplayVerifyTool(providerReplayArgs)).mcp.result.structuredContent.replay.matched, true);
   assert.equal(seen[0].url.pathname, "/v1/domain-evidence/intake");
   assert.equal(seen[2].url.searchParams.get("include_intake_digests"), "true");
   assert.equal(seen[4].url.pathname, "/v1/domain-evidence/sources");
@@ -243,6 +296,10 @@ test("domain evidence intake REST and tool clients preserve exact envelope metad
   );
   await assert.rejects(
     client.domainEvidenceProviderNormalize({ ...providerNormalizationArgs, connector_kind: "file" }),
+    ArgumentError,
+  );
+  await assert.rejects(
+    client.domainEvidenceProviderReplayVerify({ ...providerReplayArgs, expected_shape_digest: "not-a-digest" }),
     ArgumentError,
   );
 });

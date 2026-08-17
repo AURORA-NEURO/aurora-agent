@@ -5135,6 +5135,60 @@ export interface DomainEvidenceProviderNormalizationResult extends JsonObject {
   does_not_claim: string[];
 }
 
+export interface DomainEvidenceProviderReplayVerifyArgs extends DomainEvidenceProviderNormalizationArgs {
+  expected_payload_digest: string;
+  expected_request_digest?: string | null;
+  expected_shape_digest: string;
+  expected_normalization_digest: string;
+  expected_intake_digest: string;
+}
+
+export type DomainEvidenceProviderReplayStatus = "matched" | "mismatch";
+
+export interface DomainEvidenceProviderReplayVerification extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-replay/0.1";
+  workflow: "domain_evidence_provider_replay_verify";
+  replay_status: DomainEvidenceProviderReplayStatus;
+  matched: boolean;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  provider: string;
+  expected_payload_digest: string;
+  observed_payload_digest: string;
+  expected_request_digest: string | null;
+  observed_request_digest: string | null;
+  expected_shape_digest: string;
+  observed_shape_digest: string;
+  expected_normalization_digest: string;
+  observed_normalization_digest: string;
+  expected_intake_digest: string;
+  observed_intake_digest: string;
+  matches: JsonObject;
+  differences: string[];
+  shape_audit: DomainEvidenceProviderShapeAudit;
+  replay_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderReplayVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-replay/0.1";
+  workflow: "domain_evidence_provider_replay_verify";
+  replay: DomainEvidenceProviderReplayVerification;
+  matched: boolean;
+  replay_status: DomainEvidenceProviderReplayStatus;
+  replay_digest: string;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
 export interface DomainEvidenceSourcePlanArgs extends JsonObject {
   group_id: string;
   domains: string[];

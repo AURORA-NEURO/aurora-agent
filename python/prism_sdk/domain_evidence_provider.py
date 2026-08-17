@@ -7,12 +7,16 @@ import json
 from typing import Any, Mapping, Sequence
 
 from .artifacts import _digest, _mapping, _text
+from .authoring import content_digest
 from .capability import _route_count, _route_strings, _route_text, _tool_payload
 from .domain_reports import DOMAIN_REPORT_CLAIM_STATUSES, _bounded_text_list
 from .errors import ArgumentError
 
 DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA = "bioprism-devplat-domain-evidence-provider-normalization/0.1"
 DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW = "domain_evidence_provider_normalize"
+DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA = "bioprism-devplat-domain-evidence-provider-replay/0.1"
+DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW = "domain_evidence_provider_replay_verify"
+DOMAIN_EVIDENCE_PROVIDER_REPLAY_STATUSES = ("matched", "mismatch")
 DOMAIN_EVIDENCE_PROVIDER_CONNECTOR_KINDS = ("literature", "clinical_trial", "fhir", "object_store", "provider_api")
 DOMAIN_EVIDENCE_PROVIDER_OUTCOMES = ("observed", "partial", "refused", "error", "unknown")
 DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA = "bioprism-devplat-domain-evidence-provider-shape-audit/0.1"
@@ -194,6 +198,39 @@ class DomainEvidenceProviderNormalizationRequest:
 
 
 @dataclass(frozen=True)
+class DomainEvidenceProviderReplayRequest:
+    """Re-submit one provider envelope against retained canonical identities."""
+
+    observation: DomainEvidenceProviderNormalizationRequest
+    expected_payload_digest: str
+    expected_request_digest: str | None
+    expected_shape_digest: str
+    expected_normalization_digest: str
+    expected_intake_digest: str
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("expected provider payload digest", self.expected_payload_digest),
+            ("expected provider shape digest", self.expected_shape_digest),
+            ("expected provider normalization digest", self.expected_normalization_digest),
+            ("expected provider intake digest", self.expected_intake_digest),
+        ):
+            _digest(name, value)
+        if self.expected_request_digest is not None:
+            _digest("expected provider request digest", self.expected_request_digest)
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {
+            **self.observation.to_mcp_arguments(),
+            "expected_payload_digest": self.expected_payload_digest,
+            "expected_request_digest": self.expected_request_digest,
+            "expected_shape_digest": self.expected_shape_digest,
+            "expected_normalization_digest": self.expected_normalization_digest,
+            "expected_intake_digest": self.expected_intake_digest,
+        }
+
+
+@dataclass(frozen=True)
 class DomainEvidenceProviderNormalizationReport:
     raw: dict[str, Any]
     group_id: str
@@ -250,6 +287,16 @@ class DomainEvidenceProviderNormalizationReport:
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
 
+    @property
+    def normalization_digest(self) -> str:
+        """Digest the public normalization object in the same canonical form as Rust."""
+
+        return content_digest(self.raw["normalization"])
+
+    @property
+    def intake_digest(self) -> str:
+        return _digest("domain evidence provider intake digest", self.intake.get("intake_digest"))
+
 
 def domain_evidence_provider_normalization_report(
     value: Mapping[str, Any],
@@ -257,16 +304,112 @@ def domain_evidence_provider_normalization_report(
     return DomainEvidenceProviderNormalizationReport.from_wire(value)
 
 
+@dataclass(frozen=True)
+class DomainEvidenceProviderReplayVerificationReport:
+    """Value-free replay comparison and its indexed artifact registration."""
+
+    raw: dict[str, Any]
+    replay_status: str
+    matched: bool
+    group_id: str
+    domains: tuple[str, ...]
+    subject_id: str
+    source_tool: str
+    connector_kind: str
+    provider: str
+    expected_payload_digest: str
+    observed_payload_digest: str
+    expected_request_digest: str | None
+    observed_request_digest: str | None
+    expected_shape_digest: str
+    observed_shape_digest: str
+    expected_normalization_digest: str
+    observed_normalization_digest: str
+    expected_intake_digest: str
+    observed_intake_digest: str
+    matches: Mapping[str, Any]
+    differences: tuple[str, ...]
+    shape_audit: DomainEvidenceProviderShapeAudit
+    replay_digest: str
+    artifact_registry: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainEvidenceProviderReplayVerificationReport":
+        raw = _tool_payload(value, DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW)
+        if raw.get("ok") is not True:
+            raise ArgumentError("domain evidence provider replay report is not successful")
+        replay = _mapping("domain evidence provider replay", raw.get("replay"))
+        replay_status = _route_text("domain evidence provider replay status", replay.get("replay_status"))
+        if replay_status not in DOMAIN_EVIDENCE_PROVIDER_REPLAY_STATUSES:
+            raise ArgumentError("domain evidence provider replay status is invalid")
+        matched = replay.get("matched")
+        if not isinstance(matched, bool) or matched != (replay_status == "matched"):
+            raise ArgumentError("domain evidence provider replay matched/status fields disagree")
+        return cls(
+            raw=raw,
+            replay_status=replay_status,
+            matched=matched,
+            group_id=_route_text("domain evidence provider replay group_id", replay.get("group_id")),
+            domains=_bounded_text_list("domain evidence provider replay domains", replay.get("domains"), required=True),
+            subject_id=_route_text("domain evidence provider replay subject_id", replay.get("subject_id")),
+            source_tool=_route_text("domain evidence provider replay source_tool", replay.get("source_tool")),
+            connector_kind=_route_text("domain evidence provider replay connector_kind", replay.get("connector_kind")),
+            provider=_route_text("domain evidence provider replay provider", replay.get("provider")),
+            expected_payload_digest=_digest("expected provider payload digest", replay.get("expected_payload_digest")),
+            observed_payload_digest=_digest("observed provider payload digest", replay.get("observed_payload_digest")),
+            expected_request_digest=(
+                None
+                if replay.get("expected_request_digest") is None
+                else _digest("expected provider request digest", replay.get("expected_request_digest"))
+            ),
+            observed_request_digest=(
+                None
+                if replay.get("observed_request_digest") is None
+                else _digest("observed provider request digest", replay.get("observed_request_digest"))
+            ),
+            expected_shape_digest=_digest("expected provider shape digest", replay.get("expected_shape_digest")),
+            observed_shape_digest=_digest("observed provider shape digest", replay.get("observed_shape_digest")),
+            expected_normalization_digest=_digest(
+                "expected provider normalization digest", replay.get("expected_normalization_digest")
+            ),
+            observed_normalization_digest=_digest(
+                "observed provider normalization digest", replay.get("observed_normalization_digest")
+            ),
+            expected_intake_digest=_digest("expected provider intake digest", replay.get("expected_intake_digest")),
+            observed_intake_digest=_digest("observed provider intake digest", replay.get("observed_intake_digest")),
+            matches=_mapping("domain evidence provider replay matches", replay.get("matches")),
+            differences=_route_strings("domain evidence provider replay differences", replay.get("differences", [])),
+            shape_audit=DomainEvidenceProviderShapeAudit.from_wire(replay.get("shape_audit")),
+            replay_digest=_digest("domain evidence provider replay digest", replay.get("replay_digest")),
+            artifact_registry=_mapping("domain evidence provider replay artifact registry", raw.get("artifact_registry")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def domain_evidence_provider_replay_verification_report(
+    value: Mapping[str, Any],
+) -> DomainEvidenceProviderReplayVerificationReport:
+    return DomainEvidenceProviderReplayVerificationReport.from_wire(value)
+
+
 __all__ = [
     "DOMAIN_EVIDENCE_PROVIDER_CONNECTOR_KINDS",
     "DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_OUTCOMES",
+    "DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA",
+    "DOMAIN_EVIDENCE_PROVIDER_REPLAY_STATUSES",
+    "DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW",
     "DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA",
     "DOMAIN_EVIDENCE_PROVIDER_SHAPE_STATUSES",
     "DomainEvidenceProviderShapeAudit",
     "DomainEvidenceProviderShapeCoverage",
     "DomainEvidenceProviderNormalizationRequest",
     "DomainEvidenceProviderNormalizationReport",
+    "DomainEvidenceProviderReplayRequest",
+    "DomainEvidenceProviderReplayVerificationReport",
+    "domain_evidence_provider_replay_verification_report",
     "domain_evidence_provider_normalization_report",
 ]

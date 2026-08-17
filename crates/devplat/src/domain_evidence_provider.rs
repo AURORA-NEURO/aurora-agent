@@ -9,6 +9,7 @@
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 pub const DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA: &str =
@@ -17,6 +18,9 @@ pub const DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW: &str =
     "domain_evidence_provider_normalize";
 pub const DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA: &str =
     "bioprism-devplat-domain-evidence-provider-shape-audit/0.1";
+pub const DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA: &str =
+    "bioprism-devplat-domain-evidence-provider-replay/0.1";
+pub const DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW: &str = "domain_evidence_provider_replay_verify";
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_BYTES: usize = 20_000_000;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES: usize = 512;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS: usize = 64;
@@ -101,6 +105,52 @@ pub struct DomainEvidenceProviderShapeAudit {
     pub warnings: Vec<String>,
     pub limitations: Vec<String>,
     pub shape_digest: String,
+}
+
+/// Re-submit one caller-managed payload and compare it with a prior retained normalization
+/// without contacting the named provider. The expected digests make omissions and substitutions
+/// visible instead of treating a successful parse as a replay match.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DomainEvidenceProviderReplayRequest {
+    #[serde(flatten)]
+    pub observation: DomainEvidenceProviderNormalizationRequest,
+    pub expected_payload_digest: String,
+    #[serde(default)]
+    pub expected_request_digest: Option<String>,
+    pub expected_shape_digest: String,
+    pub expected_normalization_digest: String,
+    pub expected_intake_digest: String,
+}
+
+/// Value-free replay comparison over provider, shape, normalization, and intake identities.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DomainEvidenceProviderReplayVerification {
+    pub schema: String,
+    pub workflow: String,
+    pub replay_status: String,
+    pub matched: bool,
+    pub group_id: String,
+    pub domains: Vec<String>,
+    pub subject_id: String,
+    pub source_tool: String,
+    pub connector_kind: String,
+    pub provider: String,
+    pub expected_payload_digest: String,
+    pub observed_payload_digest: String,
+    pub expected_request_digest: Option<String>,
+    pub observed_request_digest: Option<String>,
+    pub expected_shape_digest: String,
+    pub observed_shape_digest: String,
+    pub expected_normalization_digest: String,
+    pub observed_normalization_digest: String,
+    pub expected_intake_digest: String,
+    pub observed_intake_digest: String,
+    pub matches: BTreeMap<String, bool>,
+    pub differences: Vec<String>,
+    pub shape_audit: DomainEvidenceProviderShapeAudit,
+    pub replay_digest: String,
+    pub guarantees: Vec<String>,
+    pub limitations: Vec<String>,
 }
 
 /// Canonical provider envelope and the arguments ready for `domain_evidence_intake`.
@@ -673,6 +723,129 @@ pub fn normalize_domain_evidence_provider(
     })
 }
 
+fn finish_replay_verification(
+    mut verification: DomainEvidenceProviderReplayVerification,
+) -> Result<DomainEvidenceProviderReplayVerification, DomainEvidenceProviderNormalizationError> {
+    let mut digest_input = serde_json::to_value(&verification)
+        .map_err(|error| DomainEvidenceProviderNormalizationError::Canonical(error.to_string()))?;
+    digest_input
+        .as_object_mut()
+        .expect("replay verification serializes as an object")
+        .remove("replay_digest");
+    verification.replay_digest = canonical_digest(&digest_input)?;
+    ensure_size(&serde_json::to_value(&verification).map_err(|error| {
+        DomainEvidenceProviderNormalizationError::Canonical(error.to_string())
+    })?)?;
+    Ok(verification)
+}
+
+/// Verify a caller-managed provider observation against retained content identities.
+///
+/// This is a comparison operation only. It re-normalizes the supplied payload and recomputes
+/// the ordinary intake digest in memory; it never fetches a provider, reads a filesystem path,
+/// or treats a match as proof of authenticity or domain validity.
+pub fn verify_domain_evidence_provider_replay(
+    request: &DomainEvidenceProviderReplayRequest,
+) -> Result<DomainEvidenceProviderReplayVerification, DomainEvidenceProviderNormalizationError> {
+    let expected_payload_digest =
+        digest("expected_payload_digest", &request.expected_payload_digest)?;
+    let expected_request_digest = request
+        .expected_request_digest
+        .as_deref()
+        .map(|value| digest("expected_request_digest", value))
+        .transpose()?;
+    let expected_shape_digest = digest("expected_shape_digest", &request.expected_shape_digest)?;
+    let expected_normalization_digest = digest(
+        "expected_normalization_digest",
+        &request.expected_normalization_digest,
+    )?;
+    let expected_intake_digest = digest("expected_intake_digest", &request.expected_intake_digest)?;
+    let normalized = normalize_domain_evidence_provider(&request.observation)?;
+    let normalization_value = serde_json::to_value(&normalized)
+        .map_err(|error| DomainEvidenceProviderNormalizationError::Canonical(error.to_string()))?;
+    let observed_normalization_digest = canonical_digest(&normalization_value)?;
+    let intake =
+        crate::domain_evidence_intake::intake_domain_evidence(&normalized.intake_arguments)
+            .map_err(|error| {
+                DomainEvidenceProviderNormalizationError::Canonical(error.to_string())
+            })?;
+    let observed_intake_digest = intake
+        .get("intake_digest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            DomainEvidenceProviderNormalizationError::Canonical(
+                "recomputed intake omitted intake_digest".into(),
+            )
+        })?
+        .to_string();
+    let mut matches: BTreeMap<String, bool> = BTreeMap::new();
+    matches.insert(
+        "payload_digest".into(),
+        expected_payload_digest == normalized.payload_digest,
+    );
+    matches.insert(
+        "request_digest".into(),
+        expected_request_digest == normalized.request_digest,
+    );
+    matches.insert(
+        "shape_digest".into(),
+        expected_shape_digest == normalized.shape_audit.shape_digest,
+    );
+    matches.insert(
+        "normalization_digest".into(),
+        expected_normalization_digest == observed_normalization_digest,
+    );
+    matches.insert(
+        "intake_digest".into(),
+        expected_intake_digest == observed_intake_digest,
+    );
+    let differences = matches
+        .iter()
+        .filter_map(|(name, matched)| (!matched).then_some(name.clone()))
+        .collect::<Vec<_>>();
+    let matched = differences.is_empty();
+    finish_replay_verification(DomainEvidenceProviderReplayVerification {
+        schema: DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA.into(),
+        workflow: DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW.into(),
+        replay_status: if matched {
+            "matched".into()
+        } else {
+            "mismatch".into()
+        },
+        matched,
+        group_id: normalized.group_id,
+        domains: normalized.domains,
+        subject_id: normalized.subject_id,
+        source_tool: normalized.source_tool,
+        connector_kind: normalized.connector_kind,
+        provider: normalized.provider,
+        expected_payload_digest,
+        observed_payload_digest: normalized.payload_digest,
+        expected_request_digest,
+        observed_request_digest: normalized.request_digest,
+        expected_shape_digest,
+        observed_shape_digest: normalized.shape_audit.shape_digest.clone(),
+        expected_normalization_digest,
+        observed_normalization_digest,
+        expected_intake_digest,
+        observed_intake_digest,
+        matches,
+        differences,
+        shape_audit: normalized.shape_audit,
+        replay_digest: String::new(),
+        guarantees: vec![
+            "replay compares independently recomputed payload, request, shape, normalization, and intake identities".into(),
+            "a mismatch remains a structured comparison result and never becomes an observed provider success".into(),
+            "the replay record is content-addressable and can be indexed idempotently by the artifact registry".into(),
+        ],
+        limitations: vec![
+            "the operation does not contact or authenticate the provider and does not re-execute a request".into(),
+            "a digest match proves identity of the supplied JSON under the canonicalization contract, not scientific, clinical, causal, regulatory, or provenance validity".into(),
+            "the caller must retain and supply the expected digests; omitted expectations are not inferred".into(),
+        ],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -817,6 +990,58 @@ mod tests {
             .shape_audit;
         assert_eq!(first_audit.shape_digest, second_audit.shape_digest);
         assert_eq!(first_audit, second_audit);
+    }
+
+    fn replay_request_for(
+        observation: DomainEvidenceProviderNormalizationRequest,
+    ) -> DomainEvidenceProviderReplayRequest {
+        let normalized = normalize_domain_evidence_provider(&observation).unwrap();
+        let normalization_value = serde_json::to_value(&normalized).unwrap();
+        let intake =
+            crate::domain_evidence_intake::intake_domain_evidence(&normalized.intake_arguments)
+                .unwrap();
+        DomainEvidenceProviderReplayRequest {
+            expected_payload_digest: normalized.payload_digest.clone(),
+            expected_request_digest: normalized.request_digest.clone(),
+            expected_shape_digest: normalized.shape_audit.shape_digest.clone(),
+            expected_normalization_digest: canonical_digest(&normalization_value).unwrap(),
+            expected_intake_digest: intake["intake_digest"].as_str().unwrap().into(),
+            observation,
+        }
+    }
+
+    #[test]
+    fn replay_verification_matches_and_is_value_free() {
+        let replay =
+            verify_domain_evidence_provider_replay(&replay_request_for(base_request())).unwrap();
+        assert!(replay.matched);
+        assert_eq!(replay.replay_status, "matched");
+        assert!(replay.differences.is_empty());
+        assert_eq!(replay.matches.len(), 5);
+        assert_eq!(replay.replay_digest.len(), 64);
+        assert!(!serde_json::to_string(&replay).unwrap().contains("opaque"));
+    }
+
+    #[test]
+    fn replay_verification_reports_payload_and_downstream_digest_drift() {
+        let mut expected = replay_request_for(base_request());
+        expected.observation.payload =
+            json!({"records": [{"id": "pmid:changed", "title": "changed"}]});
+        let replay = verify_domain_evidence_provider_replay(&expected).unwrap();
+        assert!(!replay.matched);
+        assert_eq!(replay.replay_status, "mismatch");
+        assert!(replay
+            .differences
+            .iter()
+            .any(|difference| difference == "payload_digest"));
+        assert!(replay
+            .differences
+            .iter()
+            .any(|difference| difference == "normalization_digest"));
+        assert!(replay
+            .differences
+            .iter()
+            .any(|difference| difference == "intake_digest"));
     }
 
     #[test]

@@ -99,6 +99,11 @@ coverage where applicable. Its `shape_digest` is computed from those shape facts
 payload values; it never echoes identifiers or promotes field presence into evidence validity.
 Provider authentication, signatures, retrieval, terminology expansion, and scientific/clinical
 interpretation remain explicit non-claims.
+`DomainEvidenceProviderReplayRequest` and
+`DomainEvidenceProviderReplayVerificationReport` add the replay seam. The sync/async HTTP and
+workspace facades recompute payload, request, shape, normalization-envelope, and intake digests,
+return each match dimension, and retain a value-free replay artifact idempotently. A mismatch is
+reported structurally; it is never converted into an observed provider result.
 
 ## Lifecycle
 

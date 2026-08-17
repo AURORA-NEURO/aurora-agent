@@ -313,9 +313,13 @@ pub use domain_evidence_intake::{
     MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS, MAX_DOMAIN_EVIDENCE_INTAKE_TEXT_BYTES,
 };
 pub use domain_evidence_provider::{
-    normalize_domain_evidence_provider, DomainEvidenceProviderNormalization,
-    DomainEvidenceProviderNormalizationError, DomainEvidenceProviderNormalizationRequest,
-    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
+    normalize_domain_evidence_provider, verify_domain_evidence_provider_replay,
+    DomainEvidenceProviderNormalization, DomainEvidenceProviderNormalizationError,
+    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
+    DomainEvidenceProviderReplayVerification, DomainEvidenceProviderShapeAudit,
+    DomainEvidenceProviderShapeCoverage, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA,
     MAX_DOMAIN_EVIDENCE_PROVIDER_BYTES, MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS,
     MAX_DOMAIN_EVIDENCE_PROVIDER_PARENTS, MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES,
 };

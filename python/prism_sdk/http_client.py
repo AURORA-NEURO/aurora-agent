@@ -64,7 +64,10 @@ from .domain_evidence_pipeline import (
 from .domain_evidence_provider import (
     DomainEvidenceProviderNormalizationReport,
     DomainEvidenceProviderNormalizationRequest,
+    DomainEvidenceProviderReplayRequest,
+    DomainEvidenceProviderReplayVerificationReport,
     domain_evidence_provider_normalization_report,
+    domain_evidence_provider_replay_verification_report,
 )
 from .domain_acquisition import (
     DOMAIN_ACQUISITION_WORKFLOW,
@@ -1059,6 +1062,40 @@ class ApiClient:
         )
         return domain_evidence_provider_normalization_report(
             self.call_tool("domain_evidence_provider_normalize", normalized.to_mcp_arguments())
+        )
+
+    def domain_evidence_provider_replay_verify(
+        self,
+        request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderReplayVerificationReport:
+        """Verify a caller-managed provider payload against retained identities through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderReplayRequest)
+            else DomainEvidenceProviderReplayRequest(**dict(request))
+        )
+        return domain_evidence_provider_replay_verification_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_replay_verify",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_replay_verify_tool(
+        self,
+        request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderReplayVerificationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderReplayRequest)
+            else DomainEvidenceProviderReplayRequest(**dict(request))
+        )
+        return domain_evidence_provider_replay_verification_report(
+            self.call_tool(
+                "domain_evidence_provider_replay_verify", normalized.to_mcp_arguments()
+            )
         )
 
     def domain_workflow_catalogue(self) -> dict[str, Any]:
@@ -4933,6 +4970,18 @@ class AsyncApiClient:
         request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
     ) -> DomainEvidenceProviderNormalizationReport:
         return await asyncio.to_thread(self.client.domain_evidence_provider_normalize_tool, request)
+
+    async def domain_evidence_provider_replay_verify(
+        self,
+        request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderReplayVerificationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_provider_replay_verify, request)
+
+    async def domain_evidence_provider_replay_verify_tool(
+        self,
+        request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderReplayVerificationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_provider_replay_verify_tool, request)
 
     async def domain_workflow_catalogue(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.domain_workflow_catalogue)

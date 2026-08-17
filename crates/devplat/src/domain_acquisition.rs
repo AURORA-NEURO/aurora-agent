@@ -31,7 +31,10 @@ const BOUNDED_TRANSPORT_TOOLS: &[&str] = &[
     "domain_evidence_source_execute",
     "domain_evidence_intake",
 ];
-const CALLER_MANAGED_EVIDENCE_TOOLS: &[&str] = &["domain_evidence_provider_normalize"];
+const CALLER_MANAGED_EVIDENCE_TOOLS: &[&str] = &[
+    "domain_evidence_provider_normalize",
+    "domain_evidence_provider_replay_verify",
+];
 const CALLER_MANAGED_CONNECTORS: &[&str] = &[
     "literature",
     "clinical_trial",

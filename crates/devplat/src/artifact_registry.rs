@@ -17,6 +17,7 @@ use crate::domain_evidence::{
 use crate::domain_evidence_intake::{
     validate_domain_evidence_intake, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
 };
+use crate::domain_evidence_provider::DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA;
 use crate::domain_evidence_source::{
     validate_domain_evidence_source_plan, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
 };
@@ -50,6 +51,7 @@ const ARTIFACT_KINDS: &[&str] = &[
     "domain_report",
     "domain_evidence_harmonization",
     "domain_evidence_intake",
+    "domain_evidence_provider_replay",
     "domain_evidence_source_plan",
     "external_reference",
 ];
@@ -664,6 +666,40 @@ fn verify_known_artifact(
                 }),
             ))
         }
+        "domain_evidence_provider_replay" => {
+            let object = artifact.as_object().ok_or_else(|| {
+                ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider replay must be an object".into(),
+                )
+            })?;
+            if object.get("schema").and_then(Value::as_str)
+                != Some(DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA)
+            {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "domain evidence provider replay schema is unsupported".into(),
+                ));
+            }
+            let declared = required_digest(object, "replay_digest")?;
+            let mut unsigned = artifact.clone();
+            unsigned
+                .as_object_mut()
+                .expect("replay object was checked above")
+                .remove("replay_digest");
+            let recomputed = content_digest(&unsigned)?;
+            if declared != recomputed {
+                return Err(ArtifactRegistryError::InvalidInput(
+                    "replay_digest does not match the record contents".into(),
+                ));
+            }
+            Ok((
+                Some(declared.clone()),
+                json!({
+                    "state": "verified_integrity",
+                    "method": "domain_evidence_provider_replay_digest",
+                    "replay_digest": declared
+                }),
+            ))
+        }
         "domain_evidence_source_plan"
             if artifact.get("schema").and_then(Value::as_str)
                 == Some(DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION) =>
@@ -930,5 +966,29 @@ mod tests {
             Err(ArtifactRegistryError::InvalidSnapshot(_))
                 | Err(ArtifactRegistryError::Canonicalisation(_))
         ));
+    }
+
+    #[test]
+    fn provider_replay_artifacts_reverify_their_declared_digest_on_restore() {
+        let mut replay = json!({
+            "schema": DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+            "workflow": "domain_evidence_provider_replay_verify",
+            "replay_status": "matched",
+            "matched": true,
+            "replay_digest": ""
+        });
+        let digest = {
+            let mut unsigned = replay.clone();
+            unsigned.as_object_mut().unwrap().remove("replay_digest");
+            ContentHash::of_value(&unsigned).unwrap().to_string()
+        };
+        replay["replay_digest"] = json!(digest.clone());
+        let mut request = artifact("domain_evidence_provider_replay", "provider-1", replay);
+        request["declared_digest"] = json!(digest);
+        let mut registry = ArtifactRegistry::new();
+        let first = registry.register(&request).unwrap();
+        assert_eq!(first["created"], true);
+        let restored = ArtifactRegistry::from_snapshot(&registry.snapshot().unwrap()).unwrap();
+        assert_eq!(restored.len(), 1);
     }
 }

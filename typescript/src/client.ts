@@ -46,6 +46,8 @@ import type {
   DomainEvidenceSourceExecutionResult,
   DomainEvidenceProviderNormalizationArgs,
   DomainEvidenceProviderNormalizationResult,
+  DomainEvidenceProviderReplayVerifyArgs,
+  DomainEvidenceProviderReplayVerifyResult,
   AdapterPlanArgs,
   AdapterPlanResult,
   DomainAcquisitionArgs,
@@ -796,6 +798,47 @@ export class ApiClient {
     options?: ClientRequestOptions,
   ): Promise<RestToolResponse<DomainEvidenceProviderNormalizationResult>> {
     return this.domainEvidenceProviderNormalize(args, options);
+  }
+
+  /** Verify a caller-managed provider payload against retained value-free digest identities. */
+  async domainEvidenceProviderReplayVerify(
+    args: DomainEvidenceProviderReplayVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderReplayVerifyResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence provider replay arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!(args.connector_kind === "literature" || args.connector_kind === "clinical_trial" || args.connector_kind === "fhir" || args.connector_kind === "object_store" || args.connector_kind === "provider_api")) throw new ArgumentError("connector_kind is invalid");
+    if (!isObject(args.payload) && !Array.isArray(args.payload)) throw new ArgumentError("payload must be an object or array");
+    const expectedDigests = [
+      ["expected_payload_digest", args.expected_payload_digest],
+      ["expected_shape_digest", args.expected_shape_digest],
+      ["expected_normalization_digest", args.expected_normalization_digest],
+      ["expected_intake_digest", args.expected_intake_digest],
+    ] as const;
+    for (const [name, value] of expectedDigests) {
+      if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+    }
+    if (args.expected_request_digest !== undefined && args.expected_request_digest !== null && (typeof args.expected_request_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.expected_request_digest))) throw new ArgumentError("expected_request_digest must be a lowercase SHA-256 digest or null");
+    if (args.outcome !== undefined && !(args.outcome === "observed" || args.outcome === "partial" || args.outcome === "refused" || args.outcome === "error" || args.outcome === "unknown")) throw new ArgumentError("outcome is invalid");
+    if (args.claim_posture !== undefined) {
+      if (!isObject(args.claim_posture)) throw new ArgumentError("claim_posture must be an object");
+      if (!(args.claim_posture.status === "observed" || args.claim_posture.status === "derived" || args.claim_posture.status === "review_required" || args.claim_posture.status === "refused" || args.claim_posture.status === "not_applicable")) throw new ArgumentError("claim_posture.status is invalid");
+      if (!Array.isArray(args.claim_posture.does_not_claim) || args.claim_posture.does_not_claim.length < 1 || args.claim_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("claim_posture.does_not_claim must be non-empty");
+    }
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.source_plan_digest !== undefined && args.source_plan_digest !== null && (typeof args.source_plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.source_plan_digest))) throw new ArgumentError("source_plan_digest must be a lowercase SHA-256 digest or null");
+    return this.callTool<DomainEvidenceProviderReplayVerifyResult>("domain_evidence_provider_replay_verify", { ...args, outcome: args.outcome ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the provider-replay verification MCP tool. */
+  async domainEvidenceProviderReplayVerifyTool(
+    args: DomainEvidenceProviderReplayVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderReplayVerifyResult>> {
+    return this.domainEvidenceProviderReplayVerify(args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */

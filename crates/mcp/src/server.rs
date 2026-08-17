@@ -130,11 +130,12 @@ use bioprism_devplat::{
     execute_domain_evidence_source, instantiate_domain_workflow, mission_claim_lineage_with_review,
     normalize_ci_provider_payload, normalize_domain_evidence_provider, plan_domain_evidence_source,
     plan_mission, reconcile_domain_workflow, run_workbench, scaffold_domain_workflow,
-    standard_walkthroughs, verify_delivery_receipt, verify_mission_evidence_bundle,
-    ArtifactRegistry, CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery,
-    CapabilityRouteRequest, CiExecutionEvidenceRequest, CiProviderEvidenceRequest,
-    CiProviderNormalizationRequest, DeliveryReceiptRequest, DeliveryReceiptVerificationRequest,
-    DevPlatReport, DomainAcquisitionQuery, DomainEvidenceProviderNormalizationRequest,
+    standard_walkthroughs, verify_delivery_receipt, verify_domain_evidence_provider_replay,
+    verify_mission_evidence_bundle, ArtifactRegistry, CapabilityCatalogue,
+    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
+    CiProviderEvidenceRequest, CiProviderNormalizationRequest, DeliveryReceiptRequest,
+    DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
+    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
     DomainWorkflowReconciliationRegistry, EngineeringManifest, EngineeringPlanRequest,
     EvidenceBundleRegistry, ExecutionProvenanceRequest, MissionEvaluatorCatalogue,
     MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
@@ -146,16 +147,16 @@ use bioprism_devplat::{
     DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
-    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
-    DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
-    DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW,
-    DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION, DOMAIN_REPORT_COVERAGE_WORKFLOW,
-    DOMAIN_REPORT_PROJECT_SCHEMA_VERSION, DOMAIN_REPORT_PROJECT_WORKFLOW,
-    DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA,
-    MAX_EVIDENCE_REGISTRY_QUERY_ITEMS, MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION,
-    OPERATIONAL_READINESS_AUDIT_SCHEMA, RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA,
-    SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
-    WORKBENCH_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
+    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
+    ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
+    SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
@@ -1382,6 +1383,9 @@ impl Server {
             "domain_evidence_source_execute" => self.domain_evidence_source_execute(&arguments),
             "domain_evidence_provider_normalize" => {
                 self.domain_evidence_provider_normalize(&arguments)
+            }
+            "domain_evidence_provider_replay_verify" => {
+                self.domain_evidence_provider_replay_verify(&arguments)
             }
             "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
@@ -3459,6 +3463,56 @@ impl Server {
                 "provider authenticity, signature validity, or remote execution",
                 "scientific, clinical, causal, provenance, regulatory, or release validity",
                 "retrieval completeness, terminology resolution, or external-effect completion"
+            ]
+        }))
+    }
+
+    /// Verify a caller-managed provider payload against retained digest identities and index the
+    /// value-free replay record idempotently. No connector, provider, or external effect runs.
+    fn domain_evidence_provider_replay_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode provider replay input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("provider replay input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: DomainEvidenceProviderReplayRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid provider replay input: {error}"))?;
+        let verification = verify_domain_evidence_provider_replay(&request)
+            .map_err(|error| format!("domain evidence provider replay refused: {error}"))?;
+        let artifact = serde_json::to_value(&verification)
+            .map_err(|error| format!("cannot encode provider replay verification: {error}"))?;
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_replay",
+                "subject_id": verification.subject_id,
+                "domains": verification.domains,
+                "parent_digests": [verification.expected_intake_digest, verification.expected_normalization_digest],
+                "declared_digest": verification.replay_digest,
+                "artifact": artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW,
+            "replay": verification,
+            "matched": artifact["matched"],
+            "replay_status": artifact["replay_status"],
+            "replay_digest": artifact["replay_digest"],
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "the supplied payload is compared to retained identities without provider contact",
+                "mismatch dimensions remain visible instead of being collapsed into a success flag",
+                "the value-free replay verification is retained through the idempotent artifact registry"
+            ],
+            "does_not_claim": [
+                "provider authenticity, request execution, or retrieval completeness",
+                "scientific, clinical, causal, regulatory, provenance, or release validity",
+                "that a matching JSON replay proves the provider returned the payload originally"
             ]
         }))
     }
@@ -29951,6 +30005,7 @@ pub fn workspace_capabilities() -> Value {
         "domain_evidence_source_plan",
         "domain_evidence_source_execute",
         "domain_evidence_provider_normalize",
+        "domain_evidence_provider_replay_verify",
         "domain_evidence_intake",
         "domain_evidence_coverage",
     ];
@@ -30294,6 +30349,33 @@ pub fn tool_definitions() -> Vec<Value> {
                     "source_plan_digest": { "type": ["string", "null"], "description": "Optional retained source-plan digest; when supplied, intake verifies group, subject, tool, and domain scope." }
                 },
                 "required": ["group_id", "domains", "subject_id", "source_tool", "connector_kind", "provider", "payload"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_replay_verify",
+            "description": "Recompute a caller-managed provider normalization, shape audit, and catalogue-independent intake identity against retained expected digests. The route never contacts a provider or re-executes a request; it returns matched/mismatch dimensions and indexes only the value-free replay verification artifact idempotently.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id used by the retained observation." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Domain labels used by the retained observation." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, study, run, or report identity." },
+                    "source_tool": { "type": "string", "description": "Exact declared source tool used by the retained observation." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "provider": { "type": "string", "description": "Caller-declared provider label; it is compared as metadata and not authenticated." },
+                    "payload": { "type": ["object", "array"], "description": "The caller-supplied payload to compare; its values are not returned in the replay verification." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"] },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"] },
+                    "claim_posture": { "type": "object" },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "source_plan_digest": { "type": ["string", "null"] },
+                    "expected_payload_digest": { "type": "string", "description": "Required retained canonical payload digest." },
+                    "expected_request_digest": { "type": ["string", "null"], "description": "Retained request digest, or null when the original request was omitted." },
+                    "expected_shape_digest": { "type": "string", "description": "Required value-free shape-audit digest." },
+                    "expected_normalization_digest": { "type": "string", "description": "Required digest of the public normalization envelope." },
+                    "expected_intake_digest": { "type": "string", "description": "Required digest of the recomputed domain-evidence intake envelope." }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "connector_kind", "provider", "payload", "expected_payload_digest", "expected_shape_digest", "expected_normalization_digest", "expected_intake_digest"]
             }
         }),
         json!({

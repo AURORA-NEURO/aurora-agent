@@ -121,6 +121,10 @@ field-presence coverage, and optional object-store content-digest coverage. The 
 based on shape facts and deliberately excludes payload values. The SDK does not contact providers
 or infer authenticity, terminology, scientific, clinical, or release validity from normalized
 fields.
+`domainEvidenceProviderReplayVerify` and its `Tool` alias re-submit a caller-managed payload
+against the retained payload, request, shape, normalization, and intake digests. The typed result
+keeps every match dimension and the idempotent value-free replay artifact visible; a mismatch is
+not promoted to a provider success or authenticity claim.
 
 Convenience methods currently cover:
 
