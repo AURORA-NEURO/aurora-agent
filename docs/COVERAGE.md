@@ -322,6 +322,10 @@ Family-specific adapter conformance profiles now cover all concrete runtime rout
 required structural checks. They distinguish a verified bounded parser surface from semantic-loss,
 missing-check, unsupported-dependency, and blocking clinical/provider outcomes; profile report
 digests can be attached as explicit lineage parents without becoming a composite readiness score.
+Provider normalization and receipt-verified external materialization now join that plane as
+caller-owned structural observations: payload/normalization, shape, row-index, intake, catalogue,
+receipt, and materialized-payload digests remain independently visible, and provider/clinical
+authenticity is never inferred from a successful shape audit.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

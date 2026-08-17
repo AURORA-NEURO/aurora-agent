@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 from typing import Any, Mapping, Sequence
 
+from .adapter_execution_evidence import AdapterExecutionEvidenceRequest
 from .artifacts import _digest, _mapping, _text
 from .authoring import content_digest
 from .capability import _route_count, _route_strings, _route_text, _tool_payload
@@ -351,6 +352,78 @@ class DomainEvidenceProviderNormalizationReport:
     @property
     def intake_digest(self) -> str:
         return _digest("domain evidence provider intake digest", self.intake.get("intake_digest"))
+
+    def to_adapter_execution_evidence_request(
+        self,
+        adapter_id: str,
+        adapter_version: str,
+        source_id: str,
+        *,
+        parent_digests: Sequence[str] = (),
+        attempt_id: str | None = None,
+    ) -> AdapterExecutionEvidenceRequest:
+        """Project structural provider normalization into shared caller-owned evidence.
+
+        Provider normalization is not adapter execution and does not establish provider
+        authenticity. The caller must therefore declare the adapter identity and source identity;
+        this bridge only maps the retained provider envelope, carries its known digest lineage, and
+        preserves observed/partial/refused/error outcomes.
+        """
+
+        execution_status = {
+            "observed": "succeeded",
+            "partial": "partial",
+            "refused": "refused",
+            "error": "failed",
+            "unknown": "unknown",
+        }[self.outcome]
+        conformance_status = {
+            "structured": "verified",
+            "partial": "partial",
+            "refused": "refused",
+            "unclassified": "unknown",
+        }[self.shape_audit.status]
+        output_digest = self.normalization_digest if execution_status in {"succeeded", "partial"} else None
+        error_code = None
+        if execution_status in {"refused", "failed"}:
+            error_code = f"provider_{self.outcome}"
+        lineage: list[str] = []
+        candidates: list[str | None] = [
+            self.request_digest,
+            self.shape_audit.shape_digest,
+            self.record_index.index_digest,
+            self.catalogue_digest,
+        ]
+        raw_source_plan_digest = self.raw.get("source_plan_digest")
+        if isinstance(raw_source_plan_digest, str):
+            candidates.append(raw_source_plan_digest)
+        raw_intake_digest = self.intake.get("intake_digest")
+        if isinstance(raw_intake_digest, str):
+            candidates.append(raw_intake_digest)
+        candidates.extend(parent_digests)
+        for digest in candidates:
+            if digest is None:
+                continue
+            normalized = _digest("domain evidence provider parent digest", digest)
+            if normalized not in lineage:
+                lineage.append(normalized)
+        return AdapterExecutionEvidenceRequest(
+            group_id=self.group_id,
+            domains=self.domains,
+            subject_id=self.subject_id,
+            adapter_id=adapter_id,
+            adapter_version=adapter_version,
+            source_id=source_id,
+            input_digest=self.payload_digest,
+            output_digest=output_digest,
+            execution_status=execution_status,
+            conformance_status=conformance_status,
+            semantic_loss_status="unknown",
+            item_count=self.record_index.record_count,
+            error_code=error_code,
+            parent_digests=tuple(lineage),
+            attempt_id=attempt_id,
+        )
 
 
 def domain_evidence_provider_normalization_report(

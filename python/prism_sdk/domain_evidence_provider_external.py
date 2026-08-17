@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from typing import Any, Mapping, Sequence
 
+from .adapter_execution_evidence import AdapterExecutionEvidenceRequest
 from .artifacts import _digest, _mapping, _text
 from .capability import _route_strings, _route_text, _tool_payload
 from .domain_evidence_provider import (
@@ -229,7 +230,6 @@ class DomainEvidenceProviderExternalPayloadReceiptReport:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
-
 
 @dataclass(frozen=True)
 class DomainEvidenceProviderExternalPayloadReplayRequest:
@@ -472,6 +472,34 @@ class DomainEvidenceProviderExternalPayloadNormalizationReport:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
+
+    def to_adapter_execution_evidence_request(
+        self,
+        adapter_id: str,
+        adapter_version: str,
+        source_id: str,
+        *,
+        parent_digests: Sequence[str] = (),
+        attempt_id: str | None = None,
+    ) -> AdapterExecutionEvidenceRequest:
+        """Project receipt-verified external normalization into shared adapter evidence."""
+
+        evidence = self.normalization.to_adapter_execution_evidence_request(
+            adapter_id,
+            adapter_version,
+            source_id,
+            parent_digests=parent_digests,
+            attempt_id=attempt_id,
+        )
+        lineage = list(evidence.parent_digests)
+        for digest in (self.receipt_digest, self.materialized_payload_digest, self.catalogue_digest):
+            if digest not in lineage:
+                lineage.append(digest)
+        byte_length = evidence.byte_length
+        raw_byte_length = self.receipt.get("byte_length")
+        if byte_length is None and isinstance(raw_byte_length, int) and not isinstance(raw_byte_length, bool):
+            byte_length = raw_byte_length
+        return replace(evidence, byte_length=byte_length, parent_digests=tuple(lineage))
 
 
 @dataclass(frozen=True)

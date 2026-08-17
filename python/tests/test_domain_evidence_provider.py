@@ -80,7 +80,7 @@ def payload() -> dict:
             "index_digest": "a" * 64,
             "limitations": ["digest-only"],
         },
-        "intake": {"workflow": "domain_evidence_intake", "outcome": "observed"},
+        "intake": {"workflow": "domain_evidence_intake", "outcome": "observed", "intake_digest": "1" * 64},
         "artifact_registry": {"indexed": True},
         "catalogue_digest": "d" * 64,
         "guarantees": ["structural"],
@@ -164,6 +164,44 @@ def test_request_is_explicit_and_provider_report_preserves_digests() -> None:
     assert replay_report.replay_status == "matched"
     assert replay_report.shape_audit.status == "structured"
     assert replay_report.record_index.row_digests == ("9" * 64,)
+
+
+def test_provider_normalization_bridges_structural_lineage_into_adapter_evidence() -> None:
+    report = domain_evidence_provider_normalization_report(payload())
+    evidence = report.to_adapter_execution_evidence_request(
+        "bioprism.python.fhir_manifest",
+        "0.1.0",
+        "provider-source-1",
+        parent_digests=("2" * 64,),
+        attempt_id="provider-attempt-1",
+    )
+    assert evidence.execution_status == "succeeded"
+    assert evidence.conformance_status == "verified"
+    assert evidence.semantic_loss_status == "unknown"
+    assert evidence.input_digest == "b" * 64
+    assert evidence.output_digest == report.normalization_digest
+    assert evidence.item_count == 1
+    assert evidence.parent_digests == ("c" * 64, "e" * 64, "a" * 64, "d" * 64, "1" * 64, "2" * 64)
+    assert evidence.attempt_id == "provider-attempt-1"
+
+
+def test_provider_partial_and_error_outcomes_remain_distinct() -> None:
+    partial_payload = payload()
+    partial_payload["outcome"] = "partial"
+    partial_payload["shape_audit"] = {**partial_payload["shape_audit"], "status": "partial"}
+    partial = domain_evidence_provider_normalization_report(partial_payload).to_adapter_execution_evidence_request(
+        "bioprism.python.fhir_manifest", "0.1.0", "provider-source-partial"
+    )
+    assert partial.execution_status == "partial"
+    assert partial.conformance_status == "partial"
+
+    error_payload = payload()
+    error_payload["outcome"] = "error"
+    error = domain_evidence_provider_normalization_report(error_payload).to_adapter_execution_evidence_request(
+        "bioprism.python.fhir_manifest", "0.1.0", "provider-source-error"
+    )
+    assert error.execution_status == "failed"
+    assert error.error_code == "provider_error"
 
 
 def test_request_rejects_non_provider_connectors_and_scalar_payloads() -> None:

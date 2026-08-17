@@ -108,6 +108,12 @@ The typed `record_index` adds at most 2,048 canonical row digests, reports omitt
 and supports digest-only deduplication without exposing record contents.
 Provider authentication, signatures, retrieval, terminology expansion, and scientific/clinical
 interpretation remain explicit non-claims.
+`DomainEvidenceProviderNormalizationReport.to_adapter_execution_evidence_request(...)` projects
+the retained provider payload digest, structural shape outcome, row count, normalization digest,
+intake digest, catalogue digest, and request lineage into the shared adapter evidence contract.
+The caller must declare adapter id/version and source id; provider authenticity remains outside the
+contract. Receipt-verified external normalization exposes the same method and additionally carries
+receipt, materialized-payload, byte-length, and catalogue lineage, without reopening the locator.
 `DomainEvidenceProviderReplayRequest` and
 `DomainEvidenceProviderReplayVerificationReport` add the replay seam. The sync/async HTTP and
 workspace facades recompute payload, request, shape, normalization-envelope, and intake digests,
@@ -132,6 +138,9 @@ remain explicit, and the helper never fetches or inspects caller-managed storage
 `DomainEvidenceProviderExternalPayloadNormalizationRequest` adds the explicit materialization
 bridge: the caller supplies bounded JSON, while the core verifies its canonical digest and byte
 length against the receipt before reusing the ordinary normalization and intake report helpers.
+Its resulting report can be projected into adapter evidence with the same explicit adapter/source
+identity requirement; a structural provider normalization is never silently presented as provider
+execution or clinical validity.
 `DomainEvidenceProviderExternalPayloadLineageAuditRequest` and
 `DomainEvidenceProviderExternalPayloadLineageAuditReport` join a receipt to the retained
 connector handoff and preserve matched/partial/mismatch/orphaned scope, payload-binding, and

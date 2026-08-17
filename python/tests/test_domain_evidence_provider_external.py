@@ -220,7 +220,7 @@ def normalization_payload() -> dict:
         "receipt_digest": "e" * 64,
         "materialized_payload_digest": normalized.receipt.payload_digest,
         "materialization": {"mode": "canonical_json", "matched": True, "materialized_payload_digest": normalized.receipt.payload_digest, "locator_opened": False},
-        "intake": {"intake_digest": "i" * 64},
+        "intake": {"intake_digest": "1" * 64},
         "artifact_registry": {"created": True, "indexed": True},
         "receipt_artifact_registry": {"ok": True, "created": True, "indexed": True},
         "catalogue_digest": "9" * 64,
@@ -427,6 +427,25 @@ def test_external_materialization_bridge_requires_explicit_digest_match() -> Non
         DomainEvidenceProviderExternalPayloadReplayRequest.from_wire(
             {**arguments, "expected_byte_length": 0}
         )
+
+
+def test_external_normalization_bridges_receipt_materialization_and_provider_lineage() -> None:
+    report = domain_evidence_provider_external_payload_normalization_report(normalization_payload())
+    evidence = report.to_adapter_execution_evidence_request(
+        "bioprism.python.fhir_manifest",
+        "0.1.0",
+        "external-provider-source-1",
+        parent_digests=("2" * 64,),
+        attempt_id="external-attempt-1",
+    )
+    assert evidence.execution_status == "succeeded"
+    assert evidence.conformance_status == "verified"
+    assert evidence.input_digest == report.normalization.payload_digest
+    assert evidence.output_digest == report.normalization.normalization_digest
+    assert evidence.byte_length == report.receipt["byte_length"]
+    assert report.receipt_digest in evidence.parent_digests
+    assert report.materialized_payload_digest in evidence.parent_digests
+    assert "2" * 64 in evidence.parent_digests
 
 
 def test_external_lineage_audit_is_registry_bound_and_preserves_orchestration_boundaries() -> None:
